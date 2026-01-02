@@ -1,0 +1,32 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "7b1f6278dc87bae5f334213333c48522"
+name = "b2b-portal-public"
+application_url = "https://b2b.dynamicdreamz.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2026-01"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_companies,read_customers,read_locations,read_orders,read_products,write_companies,write_customers,write_locations,write_orders,write_products"
+
+[auth]
+redirect_urls = [ "https://b2b.dynamicdreamz.com/api/auth" ]
+
+[app_proxy]
+url = "https://b2b.dynamicdreamz.com"
+subpath = "b2b-portal"
+prefix = "apps"

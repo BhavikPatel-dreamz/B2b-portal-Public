@@ -1,0 +1,200 @@
+{% comment %}
+  B2B Dashboard Embed Block
+
+  Embeds the entire B2B dashboard directly in the page using an iframe.
+  Can be added to any section in the theme editor.
+{% endcomment %}
+
+{% if customer and customer.tags contains 'b2b' %}
+  <div class="b2b-dashboard-embed-block" style="margin: 20px 0;">
+    {% if block.settings.show_header %}
+      <div style="
+        background: {{ block.settings.header_bg_color }};
+        padding: 24px;
+        border-radius: 12px 12px 0 0;
+      ">
+        <h2 style="
+          margin: 0 0 8px 0;
+          color: {{ block.settings.header_text_color }};
+          font-size: 28px;
+          font-weight: 700;
+        ">
+          {{ block.settings.header_title }}
+        </h2>
+        {% if block.settings.header_description != blank %}
+          <p style="
+            margin: 0;
+            color: {{ block.settings.header_text_color }};
+            opacity: 0.9;
+            font-size: 14px;
+          ">
+            {{ block.settings.header_description }}
+          </p>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <div
+      id="b2b-dashboard-container-{{ block.id }}"
+      style="
+        position: relative;
+        width: 100%;
+        {% if block.settings.show_header %}
+          border-radius: 0 0 12px 12px;
+        {% else %}
+          border-radius: 12px;
+        {% endif %}
+        overflow: hidden;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        background: #f9fafb;
+      "
+    >
+      <!-- Loading State -->
+      <div id="loading-{{ block.id }}" style="
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: {{ block.settings.min_height }}px;
+        flex-direction: column;
+        gap: 16px;
+      ">
+        <div style="
+          width: 48px;
+          height: 48px;
+          border: 4px solid #e5e7eb;
+          border-top-color: #667eea;
+          border-radius: 50%;
+          animation: spin-{{ block.id }} 1s linear infinite;
+        "></div>
+        <p style="color: #6b7280; font-size: 16px; margin: 0;">
+          Loading your dashboard...
+        </p>
+      </div>
+
+      <!-- Dashboard iframe (loaded on page load) -->
+    </div>
+  </div>
+
+  <style>
+    @keyframes spin-{{ block.id }} {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+
+  <script>
+    (function() {
+      const container = document.getElementById('b2b-dashboard-container-{{ block.id }}');
+      const loading = document.getElementById('loading-{{ block.id }}');
+
+      // Create iframe
+      const iframe = document.createElement('iframe');
+      iframe.src = '/apps/b2b-portal/dashboard';
+      iframe.title = 'B2B Dashboard';
+      iframe.style.cssText = `
+        width: 100%;
+        min-height: {{ block.settings.min_height }}px;
+        border: none;
+        display: none;
+      `;
+
+      // Show iframe when loaded, hide loading
+      iframe.onload = function() {
+        loading.style.display = 'none';
+        iframe.style.display = 'block';
+      };
+
+      // Handle load errors
+      iframe.onerror = function() {
+        loading.innerHTML = `
+          <div style="color: #dc2626; text-align: center;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="margin-bottom: 12px;">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            <p style="margin: 0; font-size: 16px; font-weight: 600;">Failed to load dashboard</p>
+            <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.8;">Please refresh the page or contact support.</p>
+          </div>
+        `;
+      };
+
+      container.appendChild(iframe);
+    })();
+  </script>
+
+{% else %}
+  <!-- Not a B2B customer -->
+  <div style="
+    padding: 48px 24px;
+    text-align: center;
+    background: #fef2f2;
+    border-radius: {{ block.settings.border_radius }}px;
+    margin: {{ block.settings.margin_top }}px 0 {{ block.settings.margin_bottom }}px 0;
+  ">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="#dc2626" style="margin-bottom: 16px;">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+    </svg>
+    <h3 style="margin: 0 0 8px 0; color: #991b1b; font-size: 20px;">Access Restricted</h3>
+    <p style="margin: 0 0 20px 0; color: #7f1d1d;">
+      This dashboard is only available to B2B customers.
+    </p>
+    <a href="/account/login" style="
+      display: inline-block;
+      background: #dc2626;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+    ">
+      Login to Continue
+    </a>
+  </div>
+{% endif %}
+
+{% schema %}
+{
+  "name": "B2B Dashboard Embed",
+  "target": "section",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "show_header",
+      "label": "Show Header",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "header_title",
+      "label": "Header Title",
+      "default": "Your B2B Dashboard"
+    },
+    {
+      "type": "textarea",
+      "id": "header_description",
+      "label": "Description",
+      "default": "Manage your orders, locations, and company information"
+    },
+    {
+      "type": "color",
+      "id": "header_bg_color",
+      "label": "Header Background",
+      "default": "#667eea"
+    },
+    {
+      "type": "color",
+      "id": "header_text_color",
+      "label": "Header Text Color",
+      "default": "#ffffff"
+    },
+    {
+      "type": "range",
+      "id": "min_height",
+      "label": "Dashboard Height",
+      "min": 400,
+      "max": 1200,
+      "step": 50,
+      "default": 800,
+      "unit": "px"
+    }
+  ]
+}
+{% endschema %}
