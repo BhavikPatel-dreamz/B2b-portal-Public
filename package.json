@@ -2,7 +2,7 @@
   "name": "b2b-portal-public",
   "private": true,
   "scripts": {
-    "build": "react-router build",
+    "build": "npx prisma generate & react-router build",
     "dev": " cloudflared tunnel run shopify & shopify app dev --tunnel-url=https://b2b.dynamicdreamz.com:3000",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
