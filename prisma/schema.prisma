@@ -5,14 +5,26 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("DBURL")
 }
 
+// Enums
+enum UserRole {
+  SUPER_ADMIN  // App owner, full access to everything
+  STORE_ADMIN  // Store owner/admin, manages their store
+  STORE_USER   // Regular user within a store
+}
+
+enum UserStatus {
+  PENDING   // Awaiting approval
+  APPROVED  // Approved and can login
+  REJECTED  // Rejected
+}
+
+// Shopify OAuth Session (for app installation)
+// These fields are required by @shopify/shopify-app-session-storage-prisma package
 model Session {
   id            String    @id
   shop          String
@@ -27,8 +39,161 @@ model Session {
   email         String?
   accountOwner  Boolean   @default(false)
   locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
-  refreshToken        String?
-  refreshTokenExpires DateTime?
+  collaborator  Boolean   @default(false)
+  emailVerified Boolean   @default(false)
+
+  @@index([shop])
+}
+
+// Store/Shop data
+model Store {
+  id            String    @id @default(cuid())
+  shopDomain    String    @unique
+  shopName      String?
+  contactEmail   String?
+  themeColor    String?
+  accessToken   String?
+  scope         String?
+  logo          String?
+  isActive      Boolean   @default(true)
+  installedAt   DateTime  @default(now())
+  uninstalledAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  users                  User[]
+  registrationSubmissions RegistrationSubmission[]
+
+  @@index([shopDomain])
+}
+
+// User accounts (for your B2B portal)
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  firstName    String?
+  lastName     String?
+  password     String        // Password hash
+  role         UserRole      @default(STORE_USER)
+  status       UserStatus    @default(PENDING)
+  isActive     Boolean       @default(true)
+
+  // Store relationship (null for super admins)
+  shopId       String?
+  shop         Store?        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  // Relations
+  sessions     UserSession[]
+
+  // Metadata
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([email])
+  @@index([shopId])
+  @@index([role])
+}
+
+// User sessions (for login/logout)
+model UserSession {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+}
+
+// B2B Registration Submissions
+model RegistrationSubmission {
+  id              String    @id @default(cuid())
+  companyName     String
+  contactName     String
+  email           String
+  phone           String
+  businessType    String
+  website         String?
+  additionalInfo  String?
+
+  // Store relationship
+  shopId          String
+  shop            Store     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  // Status tracking
+  status          UserStatus @default(PENDING)
+  reviewedAt      DateTime?
+  reviewedBy      String?   // User ID who reviewed
+  reviewNotes     String?   // Admin notes on the review
+
+  // Shopify workflow tracking
+  shopifyCustomerId  String?  // Shopify customer GID
+  workflowCompleted  Boolean  @default(false)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([shopId])
+  @@index([email])
+  @@index([status])
+}
+
+// Wishlist Models
+model Wishlist {
+  id          String   @id @default(cuid())
+  name        String
+
+  customerId  String   // Shopify Customer ID
+  shop        String   // Shop domain
+
+  // Optional: Link to a specific location if needed.
+  locationId  String?
+
+  items       WishlistItem[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerId, shop])
+}
+
+model WishlistItem {
+  id          String   @id @default(cuid())
+  wishlistId  String
+  wishlist    Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+
+  productId   String   // Shopify Product GID
+  variantId   String   // Shopify Variant GID
+  productTitle String?
+  variantTitle String?
+  image       String?  // URL of the product image
+  price       Float    @default(0) // Unit price
+  quantity    Int      @default(1)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([wishlistId])
+}
+
+model Notification {
+  id                 String   @id @default(cuid())
+  receiverId         String?
+  adminReceiverId    String?
+  senderId           String?
+  message            String
+  activityType       String?
+  activeAction       String?  // URL for the action/product
+  isRead             Boolean   @default(false)
+  // Shop relation
+  shopId        String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([receiverId])
+  @@index([senderId])
+  @@index([shopId])
 }
