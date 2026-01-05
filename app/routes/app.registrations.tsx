@@ -7,6 +7,7 @@ import type {
 import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import {
@@ -49,6 +50,16 @@ interface ActionJson {
     locationId?: string;
     locationName?: string;
   } | null;
+}
+
+interface CompanyAccount {
+  id: string;
+  name: string;
+  shopifyCompanyId: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  creditLimit: string;
+  updatedAt: string;
 }
 
 const normalizeCustomerId = (id?: string | null) => {
@@ -104,6 +115,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { createdAt: "desc" },
   });
 
+  const companies = await prisma.companyAccount.findMany({
+    where: { shopId: store.id },
+    orderBy: { name: "asc" },
+  });
+
   return Response.json({
     submissions: submissions.map((submission) => ({
       ...submission,
@@ -111,6 +127,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       reviewedAt: submission.reviewedAt
         ? submission.reviewedAt.toISOString()
         : null,
+    })),
+    companies: companies.map((company) => ({
+      ...company,
+      creditLimit: company.creditLimit.toString(),
+      updatedAt: company.updatedAt.toISOString(),
     })),
     storeMissing: false,
   });
@@ -258,7 +279,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-     
+
         const createCompanyResponse = await admin.graphql(
           `#graphql
  mutation CompanyCreate($input: CompanyCreateInput!) {
@@ -431,6 +452,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const customerId = normalizeCustomerId(
           (form.customerId as string) || "",
         );
+        const companyId = (form.companyId as string)?.trim();
+        const companyName = (form.companyName as string)?.trim();
+        const contactName = (form.contactName as string)?.trim() || null;
+        const contactEmail = (form.contactEmail as string)?.trim() || null;
         const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!registrationId || !customerId) {
@@ -452,6 +477,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             workflowCompleted: true,
           },
         });
+
+        if (companyId || companyName) {
+          await prisma.companyAccount.upsert({
+            where: {
+              shopId_shopifyCompanyId: {
+                shopId: store.id,
+                shopifyCompanyId: companyId || null,
+              },
+            },
+            update: {
+              name: companyName || undefined,
+              contactName,
+              contactEmail,
+            },
+            create: {
+              shopId: store.id,
+              shopifyCompanyId: companyId || null,
+              name: companyName || "Company",
+              contactName,
+              contactEmail,
+              creditLimit: new Prisma.Decimal(0),
+            },
+          });
+        }
 
         return Response.json({
           intent,
@@ -514,6 +563,17 @@ const formatDate = (value?: string | null) => {
   return date.toLocaleString();
 };
 
+const formatCredit = (value?: string | null) => {
+  if (!value) return "$0.00";
+  const num = Number(value);
+  if (Number.isNaN(num)) return value;
+  return num.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  });
+};
+
 const StepBadge = ({ label, active }: { label: string; active: boolean }) => (
   <span
     style={{
@@ -531,7 +591,7 @@ const StepBadge = ({ label, active }: { label: string; active: boolean }) => (
 );
 
 export default function RegistrationApprovals() {
-  const { submissions, storeMissing } = useLoaderData<typeof loader>();
+  const { submissions, companies, storeMissing } = useLoaderData<typeof loader>();
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [step, setStep] = useState<
     | "check"
@@ -645,6 +705,10 @@ export default function RegistrationApprovals() {
         intent: "completeApproval",
         registrationId: selected.id,
         customerId: customer.id,
+        companyId: company?.id || "",
+        companyName: company?.name || selected.companyName,
+        contactName: selected.contactName,
+        contactEmail: selected.email,
         reviewNotes,
       },
       { method: "post" },
@@ -767,6 +831,67 @@ export default function RegistrationApprovals() {
                         </span>
                       )}
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </s-section>
+
+      <s-section heading="Companies">
+        {companies.length === 0 ? (
+          <s-empty-state heading="No companies yet" />
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 900,
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Company
+                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Shopify company ID
+                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Contact
+                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Credit
+                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Updated
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {companies.map((company) => (
+                  <tr
+                    key={company.id}
+                    style={{ borderTop: "1px solid #e3e3e3" }}
+                  >
+                    <td style={{ padding: "8px" }}>{company.name}</td>
+                    <td style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}>
+                      {company.shopifyCompanyId || "–"}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {company.contactName ? (
+                        <span>
+                          {company.contactName}
+                          {company.contactEmail ? ` • ${company.contactEmail}` : ""}
+                        </span>
+                      ) : (
+                        <span style={{ color: "#5c5f62" }}>Not set</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px" }}>{formatCredit(company.creditLimit)}</td>
+                    <td style={{ padding: "8px" }}>{formatDate(company.updatedAt)}</td>
                   </tr>
                 ))}
               </tbody>

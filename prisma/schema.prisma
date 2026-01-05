@@ -143,6 +143,26 @@ model RegistrationSubmission {
   @@index([status])
 }
 
+// Store-level company records for credit management
+model CompanyAccount {
+  id               String   @id @default(cuid())
+  shopId           String
+  shop             Store    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  shopifyCompanyId String?  // Shopify company GID
+  name             String
+  contactName      String?
+  contactEmail     String?
+
+  creditLimit      Decimal  @default(0) @db.Decimal(14, 2)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([shopId])
+  @@unique([shopId, shopifyCompanyId])
+}
+
 // Wishlist Models
 model Wishlist {
   id          String   @id @default(cuid())
