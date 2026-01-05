@@ -5,7 +5,31 @@ import {
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+import type { Session } from "@shopify/shopify-api";
 import prisma from "./db.server";
+import { upsertStore } from "./services/store.server";
+
+class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> {
+  // Upsert store record whenever Shopify saves a session (install or token refresh)
+  async storeSession(session: Session) {
+    const saved = await super.storeSession(session);
+    if (!saved) return saved;
+
+    if (!session.accessToken) return saved;
+
+    try {
+      await upsertStore({
+        shopDomain: session.shop,
+        accessToken: session.accessToken,
+        scope: session.scope,
+      });
+    } catch (error) {
+      console.error("Failed to upsert store during session save", error);
+    }
+
+    return saved;
+  }
+}
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -14,7 +38,7 @@ const shopify = shopifyApp({
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: new PrismaSessionStorage(prisma),
+  sessionStorage: new PrismaSessionStorageWithStore(prisma),
   distribution: AppDistribution.AppStore,
   future: {
     expiringOfflineAccessTokens: true,
