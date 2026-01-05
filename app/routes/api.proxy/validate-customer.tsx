@@ -1,6 +1,6 @@
 import { LoaderFunctionArgs } from "react-router";
-import { getProxyParams } from "app/utils/proxy.server";
-import { getStoreByDomain } from "app/services/store.server";
+import { getProxyParams } from "../../utils/proxy.server";
+import { getStoreByDomain } from "../../services/store.server";
 import {
   getCustomerCompanyInfo,
   checkCustomerIsB2BInShopifyByREST,
@@ -102,7 +102,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       loggedInCustomerId,
       store.accessToken,
     );
-  
+
     if (
       b2bCheck.success && b2bCheck.hasAccess) {
       console.log("✅ Customer has B2B access via Tags/Metafields");
