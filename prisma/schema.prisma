@@ -67,6 +67,7 @@ model Store {
   users                  User[]
   registrationSubmissions RegistrationSubmission[]
   companyAccounts        CompanyAccount[]
+  b2bOrders              B2BOrder[]    @relation("StoreOrders")
 
   @@index([shopDomain])
 }
@@ -86,8 +87,14 @@ model User {
   shopId       String?
   shop         Store?        @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
+  // Company relationship (for B2B users)
+  companyId    String?
+  company      CompanyAccount? @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: Cascade)
+  companyRole  String?       // member, approver, admin
+
   // Relations
   sessions     UserSession[]
+  ordersCreated B2BOrder[]   @relation("UserCreatedOrders")
 
   // Metadata
   createdAt    DateTime      @default(now())
@@ -96,6 +103,7 @@ model User {
   @@index([email])
   @@index([shopId])
   @@index([role])
+  @@index([companyId])
 }
 
 // User sessions (for login/logout)
@@ -156,6 +164,10 @@ model CompanyAccount {
   contactEmail     String?
 
   creditLimit      Decimal  @default(0) @db.Decimal(14, 2)
+
+  users            User[]               @relation("CompanyUsers")
+  orders           B2BOrder[]           @relation("CompanyAccountOrders")
+  creditTransactions CreditTransaction[]
 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -219,4 +231,81 @@ model Notification {
   @@index([receiverId])
   @@index([senderId])
   @@index([shopId])
+}
+
+model OrderPayment {
+  id           String   @id @default(cuid())
+
+  orderId      String
+  order        B2BOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  amount       Decimal  @db.Decimal(14, 2)
+  method       String?  // credit, card, bank_transfer
+  status       String   @default("pending")  // pending, received, failed, refunded
+  receivedAt   DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model B2BOrder {
+  id               String   @id @default(cuid())
+
+  companyId        String
+  company          CompanyAccount @relation("CompanyAccountOrders", fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdByUserId  String
+  createdByUser    User @relation("UserCreatedOrders", fields: [createdByUserId], references: [id])
+
+  shopId           String
+  shop             Store     @relation("StoreOrders", fields: [shopId], references: [id], onDelete: Cascade)
+
+  shopifyOrderId   String?   // Synced with Shopify
+
+  orderTotal       Decimal   @db.Decimal(14, 2)
+  creditUsed       Decimal   @db.Decimal(14, 2)  // How much credit was used for this order
+
+  // Payment tracking
+  paymentStatus    String    @default("pending")   // pending, partial, paid, cancelled
+  orderStatus      String    @default("draft")     // draft, submitted, processing, shipped, delivered, cancelled
+  paidAmount       Decimal   @default(0) @db.Decimal(14, 2)
+  remainingBalance Decimal   @db.Decimal(14, 2)
+
+  // Relations
+  payments         OrderPayment[]
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  paidAt           DateTime?
+
+  @@index([companyId])
+  @@index([shopId])
+  @@index([paymentStatus])
+  @@index([createdByUserId])
+}
+
+
+model CreditTransaction {
+  id               String   @id @default(cuid())
+
+  companyId        String
+  company          CompanyAccount @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  orderId          String?     // Nullable if not order-related
+
+  transactionType  String      // order_created, order_paid, order_cancelled, credit_adjustment, payment_received
+  creditAmount     Decimal   @db.Decimal(14, 2)  // Amount changed (can be negative)
+  previousBalance  Decimal   @db.Decimal(14, 2)
+  newBalance       Decimal   @db.Decimal(14, 2)
+
+  notes            String?
+  createdBy        String      // User ID or "system"
+
+  createdAt        DateTime  @default(now())
+
+  @@index([companyId])
+  @@index([transactionType])
 }
