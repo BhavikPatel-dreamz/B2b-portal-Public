@@ -1,5 +1,4 @@
 import { reactRouter } from "@react-router/dev/vite";
-import path from "path";
 import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
@@ -53,14 +52,6 @@ export default defineConfig({
     reactRouter(),
     tsconfigPaths(),
   ],
-  resolve: {
-    alias: {
-      "@react-router/node": path.resolve(
-        __dirname,
-        "app/shims/react-router-node.ts",
-      ),
-    },
-  },
   build: {
     assetsInlineLimit: 0,
   },
