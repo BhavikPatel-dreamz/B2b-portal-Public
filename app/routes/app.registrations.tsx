@@ -9,6 +9,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import {
+  sendCompanyAssignmentEmail
+} from "app/utils/email";
 
 interface RegistrationSubmission {
   id: string;
@@ -255,73 +258,116 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        const response = await admin.graphql(
+     
+        const createCompanyResponse = await admin.graphql(
           `#graphql
-          mutation CreateCompany(
-            $company: CompanyCreateInput!
-            $locations: [CompanyLocationCreateInput!]
-          ) {
-            companyCreate(company: $company, companyLocations: $locations) {
-              company {
-                id
-                name
-                mainLocation { id name }
-              }
-              userErrors { field message }
-            }
-          }
-        `,
+ mutation CompanyCreate($input: CompanyCreateInput!) {
+    companyCreate(input: $input) {
+      company {
+        id
+        name
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+  `,
           {
             variables: {
-              company: { name: companyName },
-              locations: [
-                {
-                  name: locationName,
-                  billingSameAsShipping: true,
-                  shippingAddress: {
-                    address1,
-                    city,
-                    countryCode,
-                    provinceCode: provinceCode || undefined,
-                    zip,
-                    phone: phone || undefined,
-                  },
+              input: {
+                company: {
+                  name: companyName, // ✅ REQUIRED
                 },
-              ],
+              },
             },
           },
         );
 
-        const payload = await response.json();
-        const errors = buildUserErrorList(payload);
-        if (errors.length) {
-          return Response.json({ intent, success: false, errors });
+        const companyPayload = await createCompanyResponse.json();
+        const companyErrors = buildUserErrorList(companyPayload);
+
+        if (companyErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: companyErrors,
+          });
         }
 
-        const company = payload?.data?.companyCreate?.company;
+        const companyId = companyPayload.data.companyCreate.company.id;
+        console.log(companyId, "454445454");
+
+        const createLocationResponse = await admin.graphql(
+          `#graphql
+  mutation CompanyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
+    companyLocationCreate(companyId: $companyId, input: $input) {
+      companyLocation {
+        id
+        name
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+  `,
+          {
+            variables: {
+              companyId,
+              input: {
+                name: locationName,
+                shippingAddress: {
+                  address1,
+                  city,
+                  countryCode,
+                  zip,
+                  phone: phone || undefined,
+                },
+              },
+            },
+          },
+        );
+
+        const locationPayload = await createLocationResponse.json();
+        const locationErrors = buildUserErrorList(locationPayload);
+
+        if (locationErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: locationErrors,
+          });
+        }
+
+        const location =
+          locationPayload.data.companyLocationCreate.companyLocation;
+
         return Response.json({
           intent,
           success: true,
           company: {
-            id: company?.id,
-            name: company?.name,
-            locationId: company?.mainLocation?.id,
-            locationName: company?.mainLocation?.name,
+            id: companyId,
+            name: companyName,
+            locationId: location.id,
+            locationName: location.name,
           },
-          message: "Company created",
+          message: "Company and location created",
         });
       }
+
 
       case "assignMainContact": {
         const companyId = (form.companyId as string)?.trim();
         const customerIdRaw = (form.customerId as string)?.trim();
-        const locationId = (form.locationId as string)?.trim();
 
-        if (!companyId || !customerIdRaw || !locationId) {
+        if (!companyId || !customerIdRaw) {
           return Response.json({
             intent,
             success: false,
-            errors: ["Company, customer, and location are required"],
+            errors: ["Company and customer are required"],
           });
         }
 
@@ -329,35 +375,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const response = await admin.graphql(
           `#graphql
-          mutation AssignMainContact(
-            $companyId: ID!
-            $customerId: ID!
-            $locationId: ID!
-          ) {
-            companyContactCreate(
-              companyId: $companyId,
-              customerId: $customerId,
-              companyContact: { title: "Main contact" },
-              companyContactRoleAssignments: [
-                { companyLocationId: $locationId, roleKey: "MAIN_CONTACT" }
-              ]
-            ) {
-              companyContact { id }
-              userErrors { field message }
-            }
-          }
-        `,
-          {
-            variables: {
-              companyId,
-              customerId,
-              locationId,
-            },
-          },
+    mutation AssignMainContact($companyId: ID!, $customerId: ID!) {
+      companyAssignCustomerAsContact(companyId: $companyId, customerId: $customerId) {
+        companyContact {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }`,
+          { variables: { companyId, customerId } },
         );
 
         const payload = await response.json();
         const errors = buildUserErrorList(payload);
+
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
         }
@@ -365,22 +399,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return Response.json({
           intent,
           success: true,
-          message: "Main contact assigned",
+          message: "Main contact assigned successfully",
         });
       }
 
       case "sendWelcomeEmail": {
         const email = (form.email as string)?.trim();
-        const contactName = (form.contactName as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
+        const contactName = (form.contactName as string)?.trim();
 
         if (!email) {
-          return Response.json({ intent, success: false, errors: ["Email required"] });
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Email required"],
+          });
         }
 
-        console.log(
-          `Welcome email queued for ${email} (${contactName || ""}) at ${companyName || "company"}`,
-        );
+        // Call the function with separate arguments, not an object
+        await sendCompanyAssignmentEmail(email, companyName, contactName);
 
         return Response.json({
           intent,
@@ -391,7 +428,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       case "completeApproval": {
         const registrationId = (form.registrationId as string)?.trim();
-        const customerId = normalizeCustomerId((form.customerId as string) || "");
+        const customerId = normalizeCustomerId(
+          (form.customerId as string) || "",
+        );
         const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!registrationId || !customerId) {
@@ -451,7 +490,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       default:
-        return  Response.json({
+        return Response.json({
           intent,
           success: false,
           errors: ["Unknown intent"],
@@ -495,7 +534,7 @@ export default function RegistrationApprovals() {
   const { submissions, storeMissing } = useLoaderData<typeof loader>();
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [step, setStep] = useState<
-    "check"
+    | "check"
     | "createCustomer"
     | "createCompany"
     | "assign"
@@ -516,39 +555,57 @@ export default function RegistrationApprovals() {
   useEffect(() => {
     if (!flowFetcher.data) return;
 
-    if (flowFetcher.data.intent === "checkCustomer" && flowFetcher.data.customer) {
+    if (
+      flowFetcher.data.intent === "checkCustomer" &&
+      flowFetcher.data.customer
+    ) {
       setCustomer(flowFetcher.data.customer);
       setStep("createCompany");
       return;
     }
 
-    if (flowFetcher.data.intent === "createCustomer" && flowFetcher.data.success) {
+    if (
+      flowFetcher.data.intent === "createCustomer" &&
+      flowFetcher.data.success
+    ) {
       setCustomer(flowFetcher.data.customer || null);
       setStep("createCompany");
       shopify.toast.show?.("Customer created");
       return;
     }
 
-    if (flowFetcher.data.intent === "createCompany" && flowFetcher.data.success) {
+    if (
+      flowFetcher.data.intent === "createCompany" &&
+      flowFetcher.data.success
+    ) {
       setCompany(flowFetcher.data.company || null);
       setStep("assign");
       shopify.toast.show?.("Company created");
       return;
     }
 
-    if (flowFetcher.data.intent === "assignMainContact" && flowFetcher.data.success) {
+    if (
+      flowFetcher.data.intent === "assignMainContact" &&
+      flowFetcher.data.success
+    ) {
       setStep("email");
       shopify.toast.show?.("Main contact assigned");
       return;
     }
 
-    if (flowFetcher.data.intent === "sendWelcomeEmail" && flowFetcher.data.success) {
+    if (
+      flowFetcher.data.intent === "sendWelcomeEmail" &&
+      flowFetcher.data.success
+    ) {
       setStep("complete");
       shopify.toast.show?.("Welcome email sent");
       return;
     }
 
-    if (flowFetcher.data.intent === "completeApproval" && flowFetcher.data.success) {
+    if (
+      flowFetcher.data.intent === "completeApproval" &&
+      flowFetcher.data.success
+    ) {
       setSelected(null);
       setCustomer(null);
       setCompany(null);
@@ -635,7 +692,11 @@ export default function RegistrationApprovals() {
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table
-              style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 900,
+              }}
             >
               <thead>
                 <tr>
@@ -659,39 +720,52 @@ export default function RegistrationApprovals() {
                     <td style={{ padding: "8px" }}>{submission.email}</td>
                     <td style={{ padding: "8px" }}>{submission.phone}</td>
                     <td style={{ padding: "8px" }}>
-                      <s-badge tone={
-                        submission.status === "APPROVED"
-                          ? "success"
-                          : submission.status === "REJECTED"
-                            ? "critical"
-                            : "attention"
-                      }>
+                      <s-badge
+                        tone={
+                          submission.status === "APPROVED"
+                            ? "success"
+                            : submission.status === "REJECTED"
+                              ? "critical"
+                              : "attention"
+                        }
+                      >
                         {submission.status}
                       </s-badge>
                     </td>
-                    <td style={{ padding: "8px" }}>{formatDate(submission.createdAt)}</td>
+                    <td style={{ padding: "8px" }}>
+                      {formatDate(submission.createdAt)}
+                    </td>
                     <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                      <s-button
-                        size="slim"
-                        onClick={() => startApproval(submission)}
-                        {...(isFlowLoading && selected?.id === submission.id
-                          ? { loading: true }
-                          : {})}
-                      >
-                        Approve
-                      </s-button>
-                      <s-button
-                        tone="critical"
-                        variant="tertiary"
-                        size="slim"
-                        onClick={() => rejectSubmission(submission)}
-                        style={{ marginLeft: 8 }}
-                        {...(isRejecting && selected?.id === submission.id
-                          ? { loading: true }
-                          : {})}
-                      >
-                        Reject
-                      </s-button>
+                      {/* Only show buttons if status is PENDING */}
+                      {submission.status === "PENDING" ? (
+                        <>
+                          <s-button
+                            size="slim"
+                            onClick={() => startApproval(submission)}
+                            {...(isFlowLoading && selected?.id === submission.id
+                              ? { loading: true }
+                              : {})}
+                          >
+                            Approve
+                          </s-button>
+                          <s-button
+                            tone="critical"
+                            variant="tertiary"
+                            size="slim"
+                            onClick={() => rejectSubmission(submission)}
+                            style={{ marginLeft: 8 }}
+                            {...(isRejecting && selected?.id === submission.id
+                              ? { loading: true }
+                              : {})}
+                          >
+                            Reject
+                          </s-button>
+                        </>
+                      ) : (
+                        <span style={{ color: "#5c5f62", fontSize: 14 }}>
+                          {submission.status === "APPROVED" ? "Approved" : "Rejected"}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -744,8 +818,18 @@ export default function RegistrationApprovals() {
             </div>
 
             <div style={{ padding: "18px 24px" }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                <StepBadge label="1. Check customer" active={step === "check"} />
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginBottom: 16,
+                  flexWrap: "wrap",
+                }}
+              >
+                <StepBadge
+                  label="1. Check customer"
+                  active={step === "check"}
+                />
                 <StepBadge
                   label="2. Create customer"
                   active={step === "createCustomer"}
@@ -754,7 +838,10 @@ export default function RegistrationApprovals() {
                   label="3. Create company"
                   active={step === "createCompany"}
                 />
-                <StepBadge label="4. Assign contact" active={step === "assign"} />
+                <StepBadge
+                  label="4. Assign contact"
+                  active={step === "assign"}
+                />
                 <StepBadge label="5. Welcome email" active={step === "email"} />
                 <StepBadge label="6. Complete" active={step === "complete"} />
               </div>
@@ -766,7 +853,13 @@ export default function RegistrationApprovals() {
                   gap: 18,
                 }}
               >
-                <div style={{ border: "1px solid #e3e3e3", borderRadius: 12, padding: 16 }}>
+                <div
+                  style={{
+                    border: "1px solid #e3e3e3",
+                    borderRadius: 12,
+                    padding: 16,
+                  }}
+                >
                   <h4 style={{ marginTop: 0 }}>Customer</h4>
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Check if a customer already exists with this email. If not,
@@ -780,7 +873,8 @@ export default function RegistrationApprovals() {
                         { method: "post" },
                       )
                     }
-                    {...(isFlowLoading && flowFetcher.data?.intent === "checkCustomer"
+                    {...(isFlowLoading &&
+                    flowFetcher.data?.intent === "checkCustomer"
                       ? { loading: true }
                       : {})}
                   >
@@ -791,7 +885,8 @@ export default function RegistrationApprovals() {
                     {customer ? (
                       <s-banner tone="success" title="Customer found">
                         <s-text>
-                          {customer.firstName || ""} {customer.lastName || ""} · {customer.email}
+                          {customer.firstName || ""} {customer.lastName || ""} ·{" "}
+                          {customer.email}
                         </s-text>
                       </s-banner>
                     ) : (
@@ -812,44 +907,98 @@ export default function RegistrationApprovals() {
                         flowFetcher.submit(data, { method: "post" });
                       }}
                     >
-                      <input name="intent" value="createCustomer" hidden readOnly />
-                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>Email</span>
+                      <input
+                        name="intent"
+                        value="createCustomer"
+                        hidden
+                        readOnly
+                      />
+                      <label
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                          Email
+                        </span>
                         <input
                           name="email"
                           defaultValue={selected.email}
                           required
-                          style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            border: "1px solid #c9ccd0",
+                          }}
                         />
                       </label>
-                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>First name</span>
+                      <label
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                          First name
+                        </span>
                         <input
                           name="firstName"
                           defaultValue={contactNameParts.firstName}
                           required
-                          style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            border: "1px solid #c9ccd0",
+                          }}
                         />
                       </label>
-                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>Last name</span>
+                      <label
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                          Last name
+                        </span>
                         <input
                           name="lastName"
                           defaultValue={contactNameParts.lastName}
-                          style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            border: "1px solid #c9ccd0",
+                          }}
                         />
                       </label>
-                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>Phone</span>
+                      <label
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                          Phone
+                        </span>
                         <input
                           name="phone"
                           defaultValue={selected.phone}
-                          style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            border: "1px solid #c9ccd0",
+                          }}
                         />
                       </label>
                       <s-button
                         type="submit"
-                        {...(isFlowLoading && flowFetcher.data?.intent === "createCustomer"
+                        {...(isFlowLoading &&
+                        flowFetcher.data?.intent === "createCustomer"
                           ? { loading: true }
                           : {})}
                       >
@@ -859,10 +1008,17 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
 
-                <div style={{ border: "1px solid #e3e3e3", borderRadius: 12, padding: 16 }}>
+                <div
+                  style={{
+                    border: "1px solid #e3e3e3",
+                    borderRadius: 12,
+                    padding: 16,
+                  }}
+                >
                   <h4 style={{ marginTop: 0 }}>Company & location</h4>
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Create the company record and main location for this registration.
+                    Create the company record and main location for this
+                    registration.
                   </p>
 
                   <form
@@ -875,77 +1031,179 @@ export default function RegistrationApprovals() {
                       flowFetcher.submit(data, { method: "post" });
                     }}
                   >
-                    <input name="intent" value="createCompany" hidden readOnly />
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>Company name</span>
+                    <input
+                      name="intent"
+                      value="createCompany"
+                      hidden
+                      readOnly
+                    />
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        Company name
+                      </span>
                       <input
                         name="companyName"
                         defaultValue={selected.companyName}
                         required
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>Location name</span>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        Location name
+                      </span>
                       <input
                         name="locationName"
                         defaultValue={`${selected.companyName} HQ`}
                         required
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>Address 1</span>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        Address 1
+                      </span>
                       <input
                         name="address1"
                         required
                         placeholder="123 Example St"
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>City</span>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        City
+                      </span>
                       <input
                         name="city"
                         required
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>Province/State code</span>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        Province/State code
+                      </span>
                       <input
                         name="provinceCode"
                         placeholder="CA"
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>Country code</span>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        Country code
+                      </span>
                       <input
                         name="countryCode"
                         placeholder="US"
                         required
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>Postal code</span>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        Postal code
+                      </span>
                       <input
                         name="zip"
                         required
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <span style={{ fontSize: 12, color: "#5c5f62" }}>Phone</span>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        Phone
+                      </span>
                       <input
                         name="locationPhone"
-                        style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
                     </label>
                     <s-button
                       type="submit"
-                      {...(isFlowLoading && flowFetcher.data?.intent === "createCompany"
+                      {...(isFlowLoading &&
+                      flowFetcher.data?.intent === "createCompany"
                         ? { loading: true }
                         : {})}
                     >
@@ -954,19 +1212,32 @@ export default function RegistrationApprovals() {
                   </form>
 
                   {company && (
-                    <s-banner tone="success" title="Company ready" style={{ marginTop: 12 }}>
+                    <s-banner
+                      tone="success"
+                      title="Company ready"
+                      style={{ marginTop: 12 }}
+                    >
                       <s-text>
-                        {company.name} · {company.locationName || "Main location"}
+                        {company.name} ·{" "}
+                        {company.locationName || "Main location"}
                       </s-text>
                     </s-banner>
                   )}
                 </div>
               </div>
 
-              <div style={{ marginTop: 18, border: "1px solid #e3e3e3", borderRadius: 12, padding: 16 }}>
+              <div
+                style={{
+                  marginTop: 18,
+                  border: "1px solid #e3e3e3",
+                  borderRadius: 12,
+                  padding: 16,
+                }}
+              >
                 <h4 style={{ marginTop: 0 }}>Assign contact & notify</h4>
                 <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                  Assign the customer as the main contact for this company, then send a welcome email.
+                  Assign the customer as the main contact for this company, then
+                  send a welcome email.
                 </p>
 
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -983,7 +1254,8 @@ export default function RegistrationApprovals() {
                         { method: "post" },
                       )
                     }
-                    {...(isFlowLoading && flowFetcher.data?.intent === "assignMainContact"
+                    {...(isFlowLoading &&
+                    flowFetcher.data?.intent === "assignMainContact"
                       ? { loading: true }
                       : {})}
                   >
@@ -1003,7 +1275,8 @@ export default function RegistrationApprovals() {
                         { method: "post" },
                       )
                     }
-                    {...(isFlowLoading && flowFetcher.data?.intent === "sendWelcomeEmail"
+                    {...(isFlowLoading &&
+                    flowFetcher.data?.intent === "sendWelcomeEmail"
                       ? { loading: true }
                       : {})}
                   >
@@ -1012,8 +1285,12 @@ export default function RegistrationApprovals() {
                 </div>
 
                 <div style={{ marginTop: 12 }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <span style={{ fontSize: 12, color: "#5c5f62" }}>Review notes</span>
+                  <label
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                  >
+                    <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                      Review notes
+                    </span>
                     <textarea
                       value={reviewNotes}
                       onChange={(e) => setReviewNotes(e.target.value)}
@@ -1028,31 +1305,47 @@ export default function RegistrationApprovals() {
                   </label>
                 </div>
 
-                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <s-button
                     variant="primary"
                     disabled={!customer}
                     onClick={completeApproval}
-                    {...(isFlowLoading && flowFetcher.data?.intent === "completeApproval"
+                    {...(isFlowLoading &&
+                    flowFetcher.data?.intent === "completeApproval"
                       ? { loading: true }
                       : {})}
                   >
                     Mark as approved
                   </s-button>
-                  <s-button variant="tertiary" onClick={() => setSelected(null)}>
+                  <s-button
+                    variant="tertiary"
+                    onClick={() => setSelected(null)}
+                  >
                     Cancel
                   </s-button>
                 </div>
 
-                {flowFetcher.data?.errors && flowFetcher.data.errors.length > 0 && (
-                  <s-banner tone="critical" title="Something went wrong" style={{ marginTop: 12 }}>
-                    <s-unordered-list>
-                      {flowFetcher.data.errors.map((err) => (
-                        <s-list-item key={err}>{err}</s-list-item>
-                      ))}
-                    </s-unordered-list>
-                  </s-banner>
-                )}
+                {flowFetcher.data?.errors &&
+                  flowFetcher.data.errors.length > 0 && (
+                    <s-banner
+                      tone="critical"
+                      title="Something went wrong"
+                      style={{ marginTop: 12 }}
+                    >
+                      <s-unordered-list>
+                        {flowFetcher.data.errors.map((err) => (
+                          <s-list-item key={err}>{err}</s-list-item>
+                        ))}
+                      </s-unordered-list>
+                    </s-banner>
+                  )}
               </div>
             </div>
           </div>
