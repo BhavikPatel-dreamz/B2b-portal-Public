@@ -2,7 +2,7 @@ import { type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import prisma from "../../db.server";
 import { validateB2BCustomerAccess } from "../../utils/proxy.server";
 import { apiVersion } from "../../shopify.server";
-import { getStoreByDomain } from "app/services/store.server";
+import { getStoreByDomain } from "../../services/store.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { customerId, shop } = await validateB2BCustomerAccess(request);
@@ -105,7 +105,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 if (!wishlist || wishlist.customerId !== customerId) {
                     return { error: "Wishlist not found or access denied" };
                 }
-                
+
 
                 const items = JSON.parse(itemsJson);
                const store = await getStoreByDomain(shop);
@@ -158,7 +158,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
              const product = productData?.data?.product;
              const variant = product?.variants?.edges?.find((v: { node: { id: any; }; }) => v.node.id === item.variantId)?.node;
 
-                 
+
                     // Check if item already exists
                     const existingItem = await prisma.wishlistItem.findFirst({
                         where: {
