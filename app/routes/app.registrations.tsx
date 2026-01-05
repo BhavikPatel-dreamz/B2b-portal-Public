@@ -130,7 +130,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   if (!store) {
-    return json(
+    return Response.json(
       { intent: "unknown", success: false, errors: ["Store not found"] },
       { status: 404 },
     );
@@ -144,7 +144,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "checkCustomer": {
         const email = (form.email as string)?.trim();
         if (!email) {
-          return json({
+          return Response.json({
             intent,
             success: false,
             errors: ["Email is required"],
@@ -175,7 +175,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const payload = await response.json();
         const customer = payload?.data?.customers?.nodes?.[0] || null;
 
-        return json({
+        return Response.json({
           intent,
           success: true,
           customer,
@@ -190,7 +190,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const phone = (form.phone as string)?.trim() || undefined;
 
         if (!email || !firstName) {
-          return json({
+          return Response.json({
             intent,
             success: false,
             errors: ["First name and email are required"],
@@ -227,11 +227,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const payload = await response.json();
         const errors = buildUserErrorList(payload);
         if (errors.length) {
-          return json({ intent, success: false, errors });
+          return Response.json({ intent, success: false, errors });
         }
 
         const customer = payload?.data?.customerCreate?.customer;
-        return json({
+        return Response.json({
           intent,
           success: true,
           customer,
@@ -251,7 +251,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const phone = (form.locationPhone as string)?.trim();
 
         if (!companyName || !address1 || !city || !countryCode || !zip) {
-          return json({
+          return Response.json({
             intent,
             success: false,
             errors: [
@@ -300,11 +300,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const payload = await response.json();
         const errors = buildUserErrorList(payload);
         if (errors.length) {
-          return json({ intent, success: false, errors });
+          return Response.json({ intent, success: false, errors });
         }
 
         const company = payload?.data?.companyCreate?.company;
-        return json({
+        return Response.json({
           intent,
           success: true,
           company: {
@@ -323,7 +323,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const locationId = (form.locationId as string)?.trim();
 
         if (!companyId || !customerIdRaw || !locationId) {
-          return json({
+          return Response.json({
             intent,
             success: false,
             errors: ["Company, customer, and location are required"],
@@ -364,10 +364,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const payload = await response.json();
         const errors = buildUserErrorList(payload);
         if (errors.length) {
-          return json({ intent, success: false, errors });
+          return Response.json({ intent, success: false, errors });
         }
 
-        return json({
+        return Response.json({
           intent,
           success: true,
           message: "Main contact assigned",
@@ -380,14 +380,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyName = (form.companyName as string)?.trim();
 
         if (!email) {
-          return json({ intent, success: false, errors: ["Email required"] });
+          return Response.json({ intent, success: false, errors: ["Email required"] });
         }
 
         console.log(
           `Welcome email queued for ${email} (${contactName || ""}) at ${companyName || "company"}`,
         );
 
-        return json({
+        return Response.json({
           intent,
           success: true,
           message: "Welcome email sent",
@@ -400,7 +400,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!registrationId || !customerId) {
-          return json({
+          return Response.json({
             intent,
             success: false,
             errors: ["Registration and customer are required"],
@@ -419,7 +419,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        return json({
+        return Response.json({
           intent,
           success: true,
           message: "Registration approved",
@@ -431,7 +431,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!registrationId) {
-          return json({
+          return Response.json({
             intent,
             success: false,
             errors: ["Registration is required"],
@@ -448,7 +448,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        return json({
+        return Response.json({
           intent,
           success: true,
           message: "Registration rejected",
@@ -456,7 +456,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       default:
-        return json({
+        return  Response.json({
           intent,
           success: false,
           errors: ["Unknown intent"],
@@ -464,7 +464,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   } catch (error) {
     console.error("Registration workflow error", error);
-    return json({
+    return Response.json({
       intent,
       success: false,
       errors: [
