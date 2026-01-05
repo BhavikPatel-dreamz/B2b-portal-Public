@@ -4,12 +4,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import {
-  json,
-  useFetcher,
-  useLoaderData,
-  useRevalidator,
-} from "react-router";
+import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
@@ -95,7 +90,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!store) {
-    return json(
+    return Response.json(
       { submissions: [], storeMissing: true },
       { status: 404 },
     );
@@ -106,7 +101,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { createdAt: "desc" },
   });
 
-  return json({
+  return Response.json({
     submissions: submissions.map((submission) => ({
       ...submission,
       createdAt: submission.createdAt.toISOString(),
