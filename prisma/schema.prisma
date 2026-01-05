@@ -66,6 +66,7 @@ model Store {
   // Relations
   users                  User[]
   registrationSubmissions RegistrationSubmission[]
+  companyAccounts        CompanyAccount[]
 
   @@index([shopDomain])
 }
