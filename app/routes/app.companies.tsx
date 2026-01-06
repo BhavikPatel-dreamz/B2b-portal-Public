@@ -50,7 +50,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const page = parseInt(url.searchParams.get("page") || "1", 10);
   const searchQuery = url.searchParams.get("search") || "";
-  const limit = 20;
+  const limit = 10;
   const skip = (page - 1) * limit;
 
   // Build where clause with search
