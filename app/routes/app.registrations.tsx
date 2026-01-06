@@ -910,7 +910,11 @@ const StepBadge = ({ label, active }: { label: string; active: boolean }) => (
 
 export default function RegistrationApprovals() {
   const { submissions, companies, storeMissing } =
-    useLoaderData<typeof loader>();
+    useLoaderData<{
+      submissions: RegistrationSubmission[];
+      companies: CompanyAccount[];
+      storeMissing: boolean;
+    }>();
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [step, setStep] = useState<
     | "check"
@@ -1117,7 +1121,9 @@ export default function RegistrationApprovals() {
                 </tr>
               </thead>
               <tbody>
-                {submissions.map((submission) => (
+                {submissions
+                 .filter((submission) => submission.status === "PENDING")
+                 .map((submission) => (
                   <tr
                     key={submission.id}
                     style={{ borderTop: "1px solid #e3e3e3" }}

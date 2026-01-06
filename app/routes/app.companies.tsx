@@ -253,147 +253,131 @@ export default function CompaniesPage() {
       </s-page>
     );
   }
+  
+return (
+  <s-page heading="Companies">
+    <s-section>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 24,
+        }}
+      >
+        <h4 style={{ margin: 0 }}>Company list</h4>
 
-  return (
-    <s-page heading="Companies">
-     <s-section>
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 12,
-    }}
-  >
-    <h4 style={{ margin: 0 }}>Company list</h4>
+        <s-button
+          type="submit"
+          variant="secondary"
+          loading={isCreating}
+        >
+          Company Sync
+        </s-button>
+      </div>
 
-    <s-button
-      type="submit"
-      variant="secondary"
-      loading={isCreating}
-    >
-      Company Sync
-    </s-button>
-  </div>
-
-
-        {companies.length === 0 ? (
-          <s-empty-state heading="No companies yet" />
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: 900,
-              }}
-            >
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Company</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>
-                    Shopify company ID
-                  </th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Credit</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {companies.map((company) => (
-                  <tr
-                    key={company.id}
-                    style={{ borderTop: "1px solid #e3e3e3" }}
+      {companies.length === 0 ? (
+        <s-empty-state heading="No companies yet" />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              minWidth: 900,
+            }}
+          >
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", padding: "12px 16px" }}>Company</th>
+                <th style={{ textAlign: "left", padding: "12px 16px" }}>
+                  Shopify company ID
+                </th>
+                <th style={{ textAlign: "left", padding: "12px 16px" }}>Contact</th>
+                <th style={{ textAlign: "left", padding: "12px 16px" }}>Credit</th>
+                <th style={{ textAlign: "left", padding: "12px 16px" }}>Updated</th>
+                {/* <th style={{ textAlign: "left", padding: "12px 16px" }}>Actions</th> */}
+              </tr>
+            </thead>
+            <tbody>
+              {companies.map((company) => (
+                <tr
+                  key={company.id}
+                  style={{ borderTop: "1px solid #e3e3e3" }}
+                >
+                  <td style={{ padding: "12px 16px" }}>{company.name}</td>
+                  <td
+                    style={{ padding: "12px 16px", fontSize: 12, color: "#5c5f62" }}
                   >
-                    <td style={{ padding: "8px" }}>{company.name}</td>
-                    <td
-                      style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
+                    {company.shopifyCompanyId
+                      ? company.shopifyCompanyId.replace(
+                          "gid://shopify/Company/",
+                          "",
+                        )
+                      : "–"}
+                  </td>
+
+                  <td style={{ padding: "12px 16px" }}>
+                    {company.contactName ? (
+                      <span>
+                        {company.contactName}
+                        {company.contactEmail
+                          ? ` • ${company.contactEmail}`
+                          : ""}
+                      </span>
+                    ) : (
+                      <span style={{ color: "#5c5f62" }}>Not set</span>
+                    )}
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    {formatCredit(company.creditLimit)}
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    {new Date(company.updatedAt).toLocaleString()}
+                  </td>
+                  <td style={{ padding: "12px 16px", minWidth: 180 }}>
+                    <updateFetcher.Form
+                      method="post"
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        alignItems: "center",
+                      }}
                     >
-                      {company.shopifyCompanyId
-                        ? company.shopifyCompanyId.replace(
-                            "gid://shopify/Company/",
-                            "",
-                          )
-                        : "–"}
-                    </td>
+                      <input
+                        name="intent"
+                        value="updateCredit"
+                        hidden
+                        readOnly
+                      />
+                      <input name="id" value={company.id} hidden readOnly />
 
-                    <td style={{ padding: "8px" }}>
-                      {company.contactName ? (
-                        <span>
-                          {company.contactName}
-                          {company.contactEmail
-                            ? ` • ${company.contactEmail}`
-                            : ""}
-                        </span>
-                      ) : (
-                        <span style={{ color: "#5c5f62" }}>Not set</span>
-                      )}
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      {formatCredit(company.creditLimit)}
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      {new Date(company.updatedAt).toLocaleString()}
-                    </td>
-                    <td style={{ padding: "8px", minWidth: 180 }}>
-                      <updateFetcher.Form
-                        method="post"
-                        style={{
-                          display: "flex",
-                          gap: 6,
-                          alignItems: "center",
-                        }}
-                      >
-                        <input
-                          name="intent"
-                          value="updateCredit"
-                          hidden
-                          readOnly
-                        />
-                        <input name="id" value={company.id} hidden readOnly />
-                        <input
-                          name="creditLimit"
-                          defaultValue={company.creditLimit}
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          style={{
-                            padding: 8,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                            width: 120,
-                          }}
-                        />
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <s-button
-                            size="slim"
-                            type="submit"
-                            variant="primary"
-                            loading={isUpdating}
-                          >
-                            Save
-                          </s-button>
-
-                          <s-button
-                            size="slim"
-                            variant="secondary"
-                            url={`/app/companies/${company.id}`}
-                          >
-                            View
-                          </s-button>
-                        </div>
-                      </updateFetcher.Form>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </s-section>
-    </s-page>
-  );
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <s-button
+                          size="slim"
+                          variant="secondary"
+                          loading={
+                            navigation.state === "loading" &&
+                            navigation.location?.pathname.includes(company.id)
+                          }
+                          onClick={() =>
+                            navigate(`/app/companies/${company.id}`)
+                          }
+                        >
+                          Company Details
+                        </s-button>
+                      </div>
+                    </updateFetcher.Form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </s-section>
+  </s-page>
+);
 }
 
 export const headers: HeadersFunction = (headersArgs) => {
