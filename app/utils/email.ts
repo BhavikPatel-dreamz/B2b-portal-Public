@@ -9,10 +9,16 @@ interface EmailParams {
 
 async function sendEmail({ to, subject, html, text }: EmailParams) {
   try {
+    // Check if environment variables are configured
+    if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
+      console.warn('⚠️ Email service not configured - missing BREVO_API_KEY or BREVO_FROM_EMAIL');
+      return { success: false, error: 'Email service not configured' };
+    }
+
     const response = await axios.post(
       'https://api.brevo.com/v3/smtp/email',
       {
-        sender: { 
+        sender: {
           email: process.env.BREVO_FROM_EMAIL,
           name: 'B2B Portal'
         },
@@ -29,15 +35,19 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
         },
       }
     );
-    
+
     console.log('✅ Email sent successfully:', response.data);
     return { success: true, messageId: response.data.messageId };
   } catch (error) {
     if (axios.isAxiosError(error)) {
       console.error('❌ Brevo API Error:', error.response?.data);
-      throw new Error(error.response?.data?.message || 'Failed to send email');
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to send email'
+      };
     }
-    throw error;
+    console.error('❌ Email send error:', error);
+    return { success: false, error: 'Failed to send email' };
   }
 }
 
@@ -48,11 +58,11 @@ export async function sendRegistrationEmail(
   contactName: string
 ) {
   const { html, text } = generateRegistrationTemplate(
-    companyName, 
-    contactName, 
+    companyName,
+    contactName,
     email
   );
-  
+
   return sendEmail({
     to: contactEmail,
     subject: `Company Inquiry: ${companyName}`,
@@ -151,7 +161,7 @@ export async function sendCompanyAssignmentEmail(
   contactName: string
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(companyName, contactName);
-  
+
   return sendEmail({
     to: email,
     subject: "You've been assigned to a company on our platform",

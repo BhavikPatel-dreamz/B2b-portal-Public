@@ -96,17 +96,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Try to send email notification (optional - don't fail if email not configured)
     if (store.submissionEmail) {
-      try {
-        await sendRegistrationEmail(
-          store.submissionEmail,
-          email,
-          companyName,
-          contactName,
-        );
+      const emailResult = await sendRegistrationEmail(
+        store.submissionEmail,
+        email,
+        companyName,
+        contactName,
+      );
+
+      if (emailResult.success) {
         console.log("✅ Registration email sent successfully");
-      } catch (emailError) {
-        console.warn("⚠️ Failed to send registration email:", emailError);
-        // Continue anyway - registration was saved successfully
+      } else {
+        console.warn("⚠️ Failed to send registration email:", emailResult.error);
       }
     } else {
       console.warn("⚠️ Store submission email not configured - skipping email notification");
