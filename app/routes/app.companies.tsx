@@ -6,8 +6,6 @@ import type {
 import {
   useFetcher,
   useLoaderData,
-  useNavigation,
-  useNavigate,
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
@@ -195,9 +193,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function CompaniesPage() {
-  const navigate = useNavigate();
-  const navigation = useNavigation();
-
   const { companies, storeMissing } = useLoaderData<typeof loader>();
 
   const updateFetcher = useFetcher<ActionResponse>();
