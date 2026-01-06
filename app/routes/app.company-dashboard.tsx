@@ -52,8 +52,8 @@ type LoaderData = {
     firstName: string | null;
     lastName: string | null;
     role: string;
-    shopifyCustomerId: string | null;
-    isActive: boolean;
+    companyRole: string | null;
+    status: string;
     createdAt: string;
   }>;
   totalUsers: number;
@@ -142,8 +142,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
-      shopifyCustomerId: user.shopifyCustomerId,
-      isActive: user.isActive,
+      companyRole: user.companyRole,
+      status: user.status,
       createdAt: user.createdAt.toISOString(),
     })),
     totalUsers: dashboardData.totalUsers,
@@ -518,7 +518,7 @@ export default function CompanyDashboard() {
                       user.email}
                   </div>
                   <div style={{ fontSize: 11, color: "#5c5f62" }}>
-                    {user.role}
+                    {user.companyRole || user.role}
                   </div>
                 </div>
                 <span
@@ -526,11 +526,11 @@ export default function CompanyDashboard() {
                     padding: "2px 6px",
                     borderRadius: 4,
                     fontSize: 11,
-                    backgroundColor: user.isActive ? "#d4f3e6" : "#e0e0e0",
-                    color: user.isActive ? "#008060" : "#5c5f62",
+                    backgroundColor: user.status === "ACTIVE" ? "#d4f3e6" : "#e0e0e0",
+                    color: user.status === "ACTIVE" ? "#008060" : "#5c5f62",
                   }}
                 >
-                  {user.isActive ? "Active" : "Inactive"}
+                  {user.status}
                 </span>
               </div>
             ))}

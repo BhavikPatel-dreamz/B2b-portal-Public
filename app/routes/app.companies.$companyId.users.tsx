@@ -15,8 +15,8 @@ type LoaderData = {
     firstName: string | null;
     lastName: string | null;
     role: string;
-    shopifyCustomerId: string | null;
-    isActive: boolean;
+    companyRole: string | null;
+    status: string;
     createdAt: string;
     updatedAt: string;
   }>;
@@ -55,8 +55,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
-      shopifyCustomerId: user.shopifyCustomerId,
-      isActive: user.isActive,
+      companyRole: user.companyRole,
+      status: user.status,
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
     })),
@@ -73,7 +73,8 @@ function formatDate(dateString: string): string {
   });
 }
 
-function getStatusBadge(isActive: boolean) {
+function getStatusBadge(status: string) {
+  const isActive = status === "ACTIVE";
   return (
     <span
       style={{
@@ -85,7 +86,7 @@ function getStatusBadge(isActive: boolean) {
         color: isActive ? "#008060" : "#5c5f62",
       }}
     >
-      {isActive ? "ACTIVE" : "INACTIVE"}
+      {status}
     </span>
   );
 }
@@ -217,7 +218,7 @@ export default function CompanyUsersPage() {
                       fontWeight: 600,
                     }}
                   >
-                    Shopify Customer ID
+                    Company Role
                   </th>
                   <th
                     style={{
@@ -264,18 +265,11 @@ export default function CompanyUsersPage() {
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>{user.email}</td>
                     <td style={{ padding: 12 }}>{getRoleBadge(user.role)}</td>
-                    <td
-                      style={{ padding: 12, fontSize: 12, color: "#5c5f62" }}
-                    >
-                      {user.shopifyCustomerId
-                        ? user.shopifyCustomerId.replace(
-                            "gid://shopify/Customer/",
-                            "",
-                          )
-                        : "—"}
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {user.companyRole || "—"}
                     </td>
                     <td style={{ padding: 12 }}>
-                      {getStatusBadge(user.isActive)}
+                      {getStatusBadge(user.status)}
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
                       {formatDate(user.createdAt)}
