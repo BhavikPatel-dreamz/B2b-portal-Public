@@ -12,7 +12,8 @@ import {
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { syncShopifyCompanies, parseForm, parseCredit, formatCredit } from "../utils/company.utils";
+import { syncShopifyCompanies, parseForm, parseCredit } from "../utils/company.server";
+import { formatCredit } from "../utils/company.utils";
 
 type LoaderCompany = {
   id: string;
