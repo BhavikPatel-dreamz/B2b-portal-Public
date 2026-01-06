@@ -1,7 +1,11 @@
 import { ActionFunctionArgs } from "react-router";
 import { getProxyParams } from "app/utils/proxy.server";
-import prisma from "app/db.server";
 import { sendRegistrationEmail } from "app/utils/email";
+import { getStoreByDomain } from "app/services/store.server";
+import {
+  createRegistration,
+  getRegistrationByEmail,
+} from "app/services/registration.server";
 
 /**
  * API endpoint for B2B registration form submission
@@ -24,9 +28,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Find the store in the database
-    const store = await prisma.store.findUnique({
-      where: { shopDomain: shop }
-    });
+    const store = await getStoreByDomain(shop);
 
     if (!store) {
       return Response.json({
@@ -66,12 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Check if registration already exists
-    const existingRegistration = await prisma.registrationSubmission.findFirst({
-      where: {
-        email,
-        shopId: store.id
-      }
-    });
+    const existingRegistration = await getRegistrationByEmail(email, store.id);
 
     if (existingRegistration) {
       return Response.json({
@@ -81,47 +78,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Save the registration submission to the database
-    const registration = await prisma.registrationSubmission.create({
-      data: {
-        companyName,
-        contactName,
-        email,
-        phone,
-        businessType,
-        website,
-        additionalInfo,
-        shopId: store.id,
-        status:'PENDING',
-        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
-
-      }
-    });
-         console.log("✅ Registration created:", registration.id);
-    if (!store.submissionEmail) {
-      return Response.json(
-        {
-          success: false,
-          error: "Store contact email not configured, cannot send email.",
-        },
-        { status: 500 },
-      );
-    }
-
-    const sendEmail = await sendRegistrationEmail(
-      store.submissionEmail,
-      email,
+    const registration = await createRegistration({
       companyName,
       contactName,
-    );
-
-     if (!sendEmail.success) {
-      return Response.json({
-        success: false,
-        error: 'Failed to send registration email. Please try again.'
-      }, { status: 500 });
-    }
+      email,
+      phone,
+      businessType,
+      website,
+      additionalInfo,
+      shopId: store.id,
+      shopifyCustomerId: customerId
+        ? `gid://shopify/Customer/${customerId}`
+        : null,
+    });
 
     console.log("✅ Registration created:", registration.id);
+
+    // Try to send email notification (optional - don't fail if email not configured)
+    if (store.submissionEmail) {
+      try {
+        await sendRegistrationEmail(
+          store.submissionEmail,
+          email,
+          companyName,
+          contactName,
+        );
+        console.log("✅ Registration email sent successfully");
+      } catch (emailError) {
+        console.warn("⚠️ Failed to send registration email:", emailError);
+        // Continue anyway - registration was saved successfully
+      }
+    } else {
+      console.warn("⚠️ Store submission email not configured - skipping email notification");
+    }
 
     return Response.json({
       success: true,
