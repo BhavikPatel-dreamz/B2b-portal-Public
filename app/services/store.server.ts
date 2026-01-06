@@ -12,6 +12,8 @@ export interface UpdateStoreInput {
   accessToken?: string;
   scope?: string;
   isActive?: boolean;
+  logo?: string | null;
+  submissionEmail?: string | null;
 }
 
 /**

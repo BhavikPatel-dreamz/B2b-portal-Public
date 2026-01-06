@@ -57,6 +57,7 @@ model Store {
   accessToken   String?
   scope         String?
   logo          String?
+  submissionEmail String?
   isActive      Boolean   @default(true)
   installedAt   DateTime  @default(now())
   uninstalledAt DateTime?

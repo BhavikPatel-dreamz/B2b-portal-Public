@@ -30,6 +30,7 @@ export default [
     index("routes/app._index.tsx"),
     route("companies", "routes/app.companies.tsx"),
     route("registrations", "routes/app.registrations.tsx"),
+    route("settings", "routes/app.settings.tsx"),
     route("companies/:companyId", "routes/app.company-dashboard.tsx"),
   ]),
 
