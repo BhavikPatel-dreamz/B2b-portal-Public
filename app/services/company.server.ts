@@ -361,7 +361,7 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
   ]);
 
   // Get users (first 10)
-  const users = await prisma.b2BUser.findMany({
+  const users = await prisma.user.findMany({
     where: { companyId },
     orderBy: { createdAt: "desc" },
     take: 10,
@@ -378,7 +378,7 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
   });
 
   // Get total user count
-  const totalUsers = await prisma.b2BUser.count({
+  const totalUsers = await prisma.user.count({
     where: { companyId },
   });
 
@@ -410,7 +410,7 @@ export async function getCompanyUsers(companyId: string, shopId: string) {
     return null;
   }
 
-  const users = await prisma.b2BUser.findMany({
+  const users = await prisma.user.findMany({
     where: { companyId },
     orderBy: { createdAt: "desc" },
     select: {
