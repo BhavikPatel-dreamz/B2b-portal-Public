@@ -948,8 +948,8 @@ export default function RegistrationApprovals() {
           </div>
         )}
       </s-section>
-
-      {/* <s-section heading="Companies">
+{/* 
+      <s-section heading="Companies">
         {companies.length === 0 ? (
           <s-empty-state heading="No companies yet" />
         ) : (
@@ -1008,7 +1008,7 @@ export default function RegistrationApprovals() {
             </table>
           </div>
         )}
-      </s-section>
+      </s-section> */}
 
       {selected && (
         <div
@@ -1585,7 +1585,7 @@ export default function RegistrationApprovals() {
             </div>
           </div>
         </div>
-      )} */}
+      )}
     </s-page>
   );
 }
