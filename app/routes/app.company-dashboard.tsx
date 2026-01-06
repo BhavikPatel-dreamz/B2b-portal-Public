@@ -318,206 +318,222 @@ export default function CompanyDashboard() {
       </div>
 
       {/* Company Information Section */}
+
       <s-section heading="Company Information">
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-            gap: 24,
-            padding: 8,
+            border: "1px solid #e0e0e0",
+            borderRadius: 8,
+            padding: 16,
+            backgroundColor: "#ffffff",
           }}
         >
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                color: "#5c5f62",
-                marginBottom: 6,
-                fontWeight: 500,
-              }}
-            >
-              Company Name
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 24,
+            }}
+          >
+            {/* Company Name */}
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  marginBottom: 6,
+                  fontWeight: 500,
+                }}
+              >
+                Company Name
+              </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#202223",
+                }}
+              >
+                {data.company.name}
+              </div>
             </div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#202223" }}>
-              {data.company.name}
-            </div>
-          </div>
 
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                color: "#5c5f62",
-                marginBottom: 6,
-                fontWeight: 500,
-              }}
-            >
-              Contact Person
+            {/* Contact Person */}
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  marginBottom: 6,
+                  fontWeight: 500,
+                }}
+              >
+                Contact Person
+              </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#202223",
+                }}
+              >
+                {data.company.contactName || "—"}
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: "#202223", fontWeight: 600 }}>
-              {data.company.contactName || "—"}
-            </div>
-          </div>
 
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                color: "#5c5f62",
-                marginBottom: 6,
-                fontWeight: 500,
-              }}
-            >
-              Contact Email
-            </div>
-            <div style={{ fontSize: 12, color: "#202223", fontWeight: 600 }}>
-              {data.company.contactEmail}
-            </div>
-          </div>
-
-          <div>
-            <div
-              style={{
-                fontSize: 12,
-                color: "#5c5f62",
-                marginBottom: 6,
-                fontWeight: 500,
-              }}
-            >
-              Company ID
-            </div>
-            <div
-              style={{
-                fontSize: 12,
-                color: "#202223",
-                marginBottom: 6,
-                fontWeight: 600,
-              }}
-            >
-              {data.company.id}
+            {/* Contact Email */}
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  marginBottom: 6,
+                  fontWeight: 500,
+                }}
+              >
+                Contact Email
+              </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#202223",
+                  wordBreak: "break-word",
+                }}
+              >
+                {data.company.contactEmail || "—"}
+              </div>
             </div>
           </div>
         </div>
       </s-section>
-
-      {/* Credit Overview */}
-      <s-section heading="Credit Status">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 16,
-            marginBottom: 16,
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-              Credit Limit
+      {/* Top Row: Company Info, Credit Status, Order Summary */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, 1fr)",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
+        {/* Company Information Section */}
+        {/* Credit Overview */}
+        <s-section heading="Credit Status">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: 12,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Credit Limit
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {formatCurrency(data.creditLimit)}
+              </div>
             </div>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>
-              {formatCurrency(data.creditLimit)}
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Available Credit
+              </div>
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 600,
+                  color: creditStatusColor,
+                }}
+              >
+                {formatCurrency(data.availableCredit)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Used Credit
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {formatCurrency(data.usedCredit)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Pending Credit
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {formatCurrency(data.pendingCredit)}
+              </div>
+              <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 2 }}>
+                {data.pendingOrderCount} pending orders
+              </div>
             </div>
           </div>
-          <div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-              Available Credit
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              Credit Usage: {data.creditPercentageUsed.toFixed(1)}%
             </div>
             <div
               style={{
-                fontSize: 24,
-                fontWeight: 600,
-                color: creditStatusColor,
+                width: "100%",
+                height: 8,
+                backgroundColor: "#e0e0e0",
+                borderRadius: 4,
+                overflow: "hidden",
               }}
             >
-              {formatCurrency(data.availableCredit)}
+              <div
+                style={{
+                  width: `${Math.min(data.creditPercentageUsed, 100)}%`,
+                  height: "100%",
+                  backgroundColor: creditStatusColor,
+                  transition: "width 0.3s ease",
+                }}
+              />
             </div>
           </div>
-          <div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-              Used Credit
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>
-              {formatCurrency(data.usedCredit)}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-              Pending Credit
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>
-              {formatCurrency(data.pendingCredit)}
-            </div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginTop: 4 }}>
-              {data.pendingOrderCount} pending orders
-            </div>
-          </div>
-        </div>
+        </s-section>
 
-        <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 12, marginBottom: 8 }}>
-            Credit Usage: {data.creditPercentageUsed.toFixed(1)}%
-          </div>
-          <div
-            style={{
-              width: "100%",
-              height: 8,
-              backgroundColor: "#e0e0e0",
-              borderRadius: 4,
-              overflow: "hidden",
-            }}
-          >
+        {/* Order Statistics */}
+        <s-section heading="Order Summary">
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Total Orders:</span>
+              <strong>{data.orderStats.total}</strong>
+            </div>
+            <div style={{ borderTop: "1px solid #e0e0e0" }} />
             <div
               style={{
-                width: `${Math.min(data.creditPercentageUsed, 100)}%`,
-                height: "100%",
-                backgroundColor: creditStatusColor,
-                transition: "width 0.3s ease",
+                display: "flex",
+                justifyContent: "space-between",
+                color: "#008060",
               }}
-            />
+            >
+              <span>Paid:</span>
+              <span>{data.orderStats.paid}</span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                color: "#d72c0d",
+              }}
+            >
+              <span>Unpaid:</span>
+              <span>{data.orderStats.unpaid}</span>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                color: "#b98900",
+              }}
+            >
+              <span>Pending:</span>
+              <span>{data.orderStats.pending}</span>
+            </div>
           </div>
-        </div>
-      </s-section>
-
-      {/* Order Statistics */}
-      <s-section heading="Order Summary">
-        <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Total Orders:</span>
-            <strong>{data.orderStats.total}</strong>
-          </div>
-          <div style={{ borderTop: "1px solid #e0e0e0" }} />
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              color: "#008060",
-            }}
-          >
-            <span>Paid:</span>
-            <span>{data.orderStats.paid}</span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              color: "#d72c0d",
-            }}
-          >
-            <span>Unpaid:</span>
-            <span>{data.orderStats.unpaid}</span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              color: "#b98900",
-            }}
-          >
-            <span>Pending:</span>
-            <span>{data.orderStats.pending}</span>
-          </div>
-        </div>
-      </s-section>
+        </s-section>
+      </div>
 
       {/* Recent Orders */}
       <s-section heading="Recent Orders">

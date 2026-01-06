@@ -4,7 +4,12 @@ import type {
   LoaderFunctionArgs,
   HeadersFunction,
 } from "react-router";
-import { Link, useFetcher, useLoaderData } from "react-router";
+import {
+  useFetcher,
+  useLoaderData,
+  useNavigation,
+  useNavigate,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
@@ -203,7 +208,11 @@ const formatCredit = (value?: string | null) => {
 };
 
 export default function CompaniesPage() {
+  const navigate = useNavigate();
+  const navigation = useNavigation();
+
   const { companies, storeMissing } = useLoaderData<typeof loader>();
+
   const updateFetcher = useFetcher<ActionResponse>();
   const createFetcher = useFetcher<ActionResponse>();
 
@@ -247,221 +256,145 @@ export default function CompaniesPage() {
 
   return (
     <s-page heading="Companies">
-      <s-section heading="Company list">
-        {feedback && (
-          <s-banner
-            tone={feedback.tone}
-            title={feedback.title}
-            style={{ marginBottom: 15 }}
-          >
-            {feedback.messages.length > 0 && (
-              <s-unordered-list>
-                {feedback.messages.map((msg) => (
-                  <s-list-item key={msg}>{msg}</s-list-item>
-                ))}
-              </s-unordered-list>
-            )}
-          </s-banner>
-        )}
+     <s-section>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+    }}
+  >
+    <h4 style={{ margin: 0 }}>Company list</h4>
+
+    <s-button
+      type="submit"
+      variant="secondary"
+      loading={isCreating}
+    >
+      Company Sync
+    </s-button>
+  </div>
+
 
         {companies.length === 0 ? (
           <s-empty-state heading="No companies yet" />
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {companies.map((company) => (
-              <div
-                key={company.id}
-                style={{
-                  border: "1px solid #e3e3e3",
-                  borderRadius: 12,
-                  padding: 16,
-                  backgroundColor: "#ffffff",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-                }}
-              >
-                {/* Header Row */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    marginBottom: 12,
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <h3
-                      style={{
-                        margin: "0 0 4px 0",
-                        fontSize: 16,
-                        fontWeight: 600,
-                      }}
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 900,
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Company</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Shopify company ID
+                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Credit</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {companies.map((company) => (
+                  <tr
+                    key={company.id}
+                    style={{ borderTop: "1px solid #e3e3e3" }}
+                  >
+                    <td style={{ padding: "8px" }}>{company.name}</td>
+                    <td
+                      style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
                     >
-                      {company.name}
-                    </h3>
-                    {company.shopifyCompanyId && (
-                      <p
+                      {company.shopifyCompanyId
+                        ? company.shopifyCompanyId.replace(
+                            "gid://shopify/Company/",
+                            "",
+                          )
+                        : "–"}
+                    </td>
+
+                    <td style={{ padding: "8px" }}>
+                      {company.contactName ? (
+                        <span>
+                          {company.contactName}
+                          {company.contactEmail
+                            ? ` • ${company.contactEmail}`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span style={{ color: "#5c5f62" }}>Not set</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {formatCredit(company.creditLimit)}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {new Date(company.updatedAt).toLocaleString()}
+                    </td>
+                    <td style={{ padding: "8px", minWidth: 180 }}>
+                      <updateFetcher.Form
+                        method="post"
                         style={{
-                          margin: 0,
-                          fontSize: 12,
-                          color: "#6d7175",
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
                         }}
                       >
-                        ID:{" "}
-                        {company.shopifyCompanyId.replace(
-                          "gid://shopify/Company/",
-                          "",
-                        )}
-                      </p>
-                    )}
-                  </div>
-
-                  <Link
-                    to={`/app/companies/${company.id}`}
-                    style={{ textDecoration: "none" }}
-                  >
-                    <s-button size="slim">Company Details</s-button>
-                  </Link>
-                </div>
-
-                {/* Details Grid */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                    gap: 16,
-                    marginBottom: 16,
-                    paddingTop: 12,
-                    borderTop: "1px solid #f1f2f4",
-                  }}
-                >
-                  <div>
-                    <p
-                      style={{
-                        margin: "0 0 4px 0",
-                        fontSize: 12,
-                        color: "#6d7175",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Contact
-                    </p>
-                    {company.contactName ? (
-                      <div>
-                        <p style={{ margin: 0, fontSize: 14 }}>
-                          {company.contactName}
-                        </p>
-                        {company.contactEmail && (
-                          <p
-                            style={{
-                              margin: "2px 0 0 0",
-                              fontSize: 13,
-                              color: "#6d7175",
-                            }}
+                        <input
+                          name="intent"
+                          value="updateCredit"
+                          hidden
+                          readOnly
+                        />
+                        <input name="id" value={company.id} hidden readOnly />
+                        <input
+                          name="creditLimit"
+                          defaultValue={company.creditLimit}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          style={{
+                            padding: 8,
+                            borderRadius: 8,
+                            border: "1px solid #c9ccd0",
+                            width: 120,
+                          }}
+                        />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <s-button
+                            size="slim"
+                            type="submit"
+                            variant="primary"
+                            loading={isUpdating}
                           >
-                            {company.contactEmail}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <p style={{ margin: 0, fontSize: 14, color: "#8c9196" }}>
-                        Not set
-                      </p>
-                    )}
-                  </div>
+                            Save
+                          </s-button>
 
-                  <div>
-                    <p
-                      style={{
-                        margin: "0 0 4px 0",
-                        fontSize: 12,
-                        color: "#6d7175",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Credit Limit
-                    </p>
-                    <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
-                      {formatCredit(company.creditLimit)}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p
-                      style={{
-                        margin: "0 0 4px 0",
-                        fontSize: 12,
-                        color: "#6d7175",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Last Updated
-                    </p>
-                    <p style={{ margin: 0, fontSize: 14 }}>
-                      {new Date(company.updatedAt).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Credit Update Form */}
-                <updateFetcher.Form
-                  method="post"
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    paddingTop: 12,
-                    borderTop: "1px solid #f1f2f4",
-                  }}
-                >
-                  <input name="intent" value="updateCredit" hidden readOnly />
-                  <input name="id" value={company.id} hidden readOnly />
-
-                  <label
-                    htmlFor={`credit-${company.id}`}
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 500,
-                      color: "#202223",
-                    }}
-                  >
-                    Update Credit Limit:
-                  </label>
-
-                  <input
-                    id={`credit-${company.id}`}
-                    name="creditLimit"
-                    defaultValue={company.creditLimit}
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #c9cccf",
-                      fontSize: 14,
-                      width: 140,
-                      outline: "none",
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = "#005bd3";
-                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = "#c9cccf";
-                      e.target.style.boxShadow = "none";
-                    }}
-                  />
-
-                  <s-button
-                    type="submit"
-                    variant="primary"
-                    {...(isUpdating ? { loading: true } : {})}
-                  >
-                    Save Credit
-                  </s-button>
-                </updateFetcher.Form>
-              </div>
-            ))}
+                          <s-button
+                            size="slim"
+                            variant="secondary"
+                            loading={
+                              navigation.state === "loading" &&
+                              navigation.location?.pathname.includes(company.id)
+                            }
+                            onClick={() =>
+                              navigate(`/app/companies/${company.id}`)
+                            }
+                          >
+                            View
+                          </s-button>
+                        </div>
+                      </updateFetcher.Form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </s-section>
