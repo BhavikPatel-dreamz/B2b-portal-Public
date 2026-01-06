@@ -97,7 +97,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     });
          console.log("✅ Registration created:", registration.id);
-    if (!store.contactEmail) {
+    if (!store.submissionEmail) {
       return Response.json(
         {
           success: false,
@@ -108,19 +108,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const sendEmail = await sendRegistrationEmail(
-      store.contactEmail,
+      store.submissionEmail,
       email,
       companyName,
       contactName,
     );
-     
+
      if (!sendEmail.success) {
       return Response.json({
         success: false,
         error: 'Failed to send registration email. Please try again.'
       }, { status: 500 });
     }
-    
+
     console.log("✅ Registration created:", registration.id);
 
     return Response.json({
