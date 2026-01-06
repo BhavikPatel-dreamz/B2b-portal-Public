@@ -3,6 +3,7 @@ import { Link, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
+import { getCompanyDashboardData } from "../services/company.server";
 
 type LoaderData = {
   company: {
@@ -10,6 +11,7 @@ type LoaderData = {
     name: string;
     contactName: string | null;
     contactEmail: string | null;
+    shopifyCompanyId: string | null;
   };
   creditLimit: number;
   availableCredit: number;
@@ -44,12 +46,22 @@ type LoaderData = {
     unpaid: number;
     pending: number;
   };
+  users: Array<{
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    role: string;
+    shopifyCustomerId: string | null;
+    isActive: boolean;
+    createdAt: string;
+  }>;
+  totalUsers: number;
 };
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
-  const url = new URL(request.url);
   const companyId = params.companyId;
   if (!companyId) {
     throw new Response("Company ID is required", { status: 400 });
@@ -63,19 +75,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Store not found", { status: 404 });
   }
 
-  // Get company
-  const company = await prisma.companyAccount.findUnique({
-    where: { id: companyId },
-    select: {
-      id: true,
-      name: true,
-      contactName: true,
-      contactEmail: true,
-      shopId: true,
-    },
-  });
+  // Get company dashboard data from service
+  const dashboardData = await getCompanyDashboardData(companyId, store.id);
 
-  if (!company || company.shopId !== store.id) {
+  if (!dashboardData) {
     throw new Response("Company not found", { status: 404 });
   }
 
@@ -85,55 +88,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!creditSummary) {
     throw new Response("Unable to fetch credit summary", { status: 500 });
   }
-
-  // Get recent orders
-  const recentOrders = await prisma.b2BOrder.findMany({
-    where: {
-      companyId,
-      orderStatus: { not: "cancelled" },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-    take: 10,
-    include: {
-      createdByUser: {
-        select: {
-          email: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-  });
-
-  // Get order statistics
-  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
-    await Promise.all([
-      prisma.b2BOrder.count({
-        where: { companyId, orderStatus: { not: "cancelled" } },
-      }),
-      prisma.b2BOrder.count({
-        where: {
-          companyId,
-          paymentStatus: "paid",
-          orderStatus: { not: "cancelled" },
-        },
-      }),
-      prisma.b2BOrder.count({
-        where: {
-          companyId,
-          paymentStatus: { in: ["pending", "partial"] },
-          orderStatus: { not: "cancelled" },
-        },
-      }),
-      prisma.b2BOrder.count({
-        where: {
-          companyId,
-          orderStatus: { in: ["draft", "submitted", "processing"] },
-        },
-      }),
-    ]);
 
   const creditPercentageUsed =
     creditSummary.creditLimit.toNumber() > 0
@@ -145,10 +99,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   return Response.json({
     company: {
-      id: company.id,
-      name: company.name,
-      contactName: company.contactName,
-      contactEmail: company.contactEmail,
+      id: dashboardData.company.id,
+      name: dashboardData.company.name,
+      contactName: dashboardData.company.contactName,
+      contactEmail: dashboardData.company.contactEmail,
+      shopifyCompanyId: dashboardData.company.shopifyCompanyId,
     },
     creditLimit: creditSummary.creditLimit.toNumber(),
     availableCredit: creditSummary.availableCredit.toNumber(),
@@ -166,7 +121,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       createdAt: tx.createdAt.toISOString(),
       orderId: tx.orderId,
     })),
-    recentOrders: recentOrders.map((order) => ({
+    recentOrders: dashboardData.recentOrders.map((order) => ({
       id: order.id,
       shopifyOrderId: order.shopifyOrderId,
       orderTotal: order.orderTotal.toNumber(),
@@ -180,12 +135,18 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           .filter(Boolean)
           .join(" ") || order.createdByUser.email,
     })),
-    orderStats: {
-      total: totalOrders,
-      paid: paidOrders,
-      unpaid: unpaidOrders,
-      pending: pendingOrders,
-    },
+    orderStats: dashboardData.orderStats,
+    users: dashboardData.users.map((user) => ({
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      shopifyCustomerId: user.shopifyCustomerId,
+      isActive: user.isActive,
+      createdAt: user.createdAt.toISOString(),
+    })),
+    totalUsers: dashboardData.totalUsers,
   } satisfies LoaderData);
 };
 
@@ -463,6 +424,57 @@ export default function CompanyDashboard() {
               <div style={{ fontSize: 20, fontWeight: 600 }}>
                 {formatCurrency(data.pendingCredit)}
               </div>
+              <div style={{ fontSize: 13, 1fr)",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
+        {/* Credit Overview */}
+        <s-section heading="Credit Status">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: 12,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Credit Limit
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {formatCurrency(data.creditLimit)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Available Credit
+              </div>
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 600,
+                  color: creditStatusColor,
+                }}
+              >
+                {formatCurrency(data.availableCredit)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Used Credit
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {formatCurrency(data.usedCredit)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+                Pending Credit
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 600 }}>
+                {formatCurrency(data.pendingCredit)}
+              </div>
               <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 2 }}>
                 {data.pendingOrderCount} pending orders
               </div>
@@ -533,10 +545,121 @@ export default function CompanyDashboard() {
             </div>
           </div>
         </s-section>
+
+        {/* User Statistics */}
+        <s-section heading="Users">
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Total Users:</span>
+              <strong>{data.totalUsers}</strong>
+            </div>
+            <div style={{ borderTop: "1px solid #e0e0e0" }} />
+            {data.users.slice(0, 3).map((user) => (
+              <div
+                key={user.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: 13,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 500 }}>
+                    {[user.firstName, user.lastName].filter(Boolean).join(" ") ||
+                      user.email}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#5c5f62" }}>
+                    {user.role}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    fontSize: 11,
+                    backgroundColor: user.isActive ? "#d4f3e6" : "#e0e0e0",
+                    color: user.isActive ? "#008060" : "#5c5f62",
+                  }}
+                >
+                  {user.isActive ? "Active" : "Inactive"}
+                </span>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              {data.company.shopifyCompanyId && (
+                <a
+                  href={`https://admin.shopify.com/store/${data.company.shopifyCompanyId.replace("gid://shopify/Company/", "")}/customers`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    flex: 1,
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #c9ccd0",
+                    textDecoration: "none",
+                    color: "#202223",
+                    fontSize: 12,
+                    fontWeight: 500,
+                    backgroundColor: "white",
+                    cursor: "pointer",
+                    textAlign: "center",
+                  }}
+                >
+                  Shopify
+                </a>
+              )}
+              <Link
+                to={`/app/companies/${data.company.id}/users`}
+                style={{
+                  flex: 1,
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #c9ccd0",
+                  textDecoration: "none",
+                  color: "#202223",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  backgroundColor: "white",
+                  cursor: "pointer",
+                  textAlign: "center",
+                }}
+              >
+                View All
+              </Link>
+            </div>
+          </div>
+        </s-section>
       </div>
 
       {/* Recent Orders */}
       <s-section heading="Recent Orders">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <h4 style={{ margin: 0 }}>Latest 10 Orders</h4>
+          <Link
+            to={`/app/companies/${data.company.id}/orders`}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #c9ccd0",
+              textDecoration: "none",
+              color: "#202223",
+              fontSize: 12,
+              fontWeight: 500,
+              backgroundColor: "white",
+              cursor: "pointer",
+            }}
+          >
+            View All Orders
+          </Link>
+        </div>
         {data.recentOrders.length > 0 ? (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -581,123 +704,6 @@ export default function CompanyDashboard() {
                     }}
                   >
                     Paid
-                  </th>
-                  <th
-                    style={{
-                      padding: 12,
-                      textAlign: "right",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Balance
-                  </th>
-                  <th
-                    style={{
-                      padding: 12,
-                      textAlign: "left",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Payment
-                  </th>
-                  <th
-                    style={{
-                      padding: 12,
-                      textAlign: "left",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Status
-                  </th>
-                  <th
-                    style={{
-                      padding: 12,
-                      textAlign: "left",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Created By
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recentOrders.map((order) => (
-                  <tr
-                    key={order.id}
-                    style={{ borderBottom: "1px solid #e0e0e0" }}
-                  >
-                    <td style={{ padding: 12, fontSize: 13 }}>
-                      {order.id.substring(0, 8)}
-                    </td>
-                    <td style={{ padding: 12, fontSize: 13 }}>
-                      {formatDate(order.createdAt)}
-                    </td>
-                    <td
-                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
-                    >
-                      {formatCurrency(order.orderTotal)}
-                    </td>
-                    <td
-                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
-                    >
-                      {formatCurrency(order.paidAmount)}
-                    </td>
-                    <td
-                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
-                    >
-                      {formatCurrency(order.remainingBalance)}
-                    </td>
-                    <td style={{ padding: 12 }}>
-                      {getPaymentStatusBadge(order.paymentStatus)}
-                    </td>
-                    <td style={{ padding: 12 }}>
-                      {getOrderStatusBadge(order.orderStatus)}
-                    </td>
-                    <td style={{ padding: 12, fontSize: 13 }}>
-                      {order.createdBy}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div style={{ padding: 40, textAlign: "center", color: "#5c5f62" }}>
-            <p>No orders yet. Orders will appear here when created.</p>
-          </div>
-        )}
-      </s-section>
-
-      {/* Recent Transactions */}
-      <s-section heading="Recent Credit Transactions">
-        {data.recentTransactions.length > 0 ? (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
-                  <th
-                    style={{
-                      padding: 12,
-                      textAlign: "left",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Date
-                  </th>
-                  <th
-                    style={{
-                      padding: 12,
-                      textAlign: "left",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Type
                   </th>
                   <th
                     style={{

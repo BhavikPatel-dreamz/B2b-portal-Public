@@ -290,3 +290,183 @@ export async function getCompanyWithCreditSummary(companyId: string) {
     pendingOrderCount: pendingOrders._count,
   };
 }
+
+/**
+ * Get company dashboard data
+ */
+export async function getCompanyDashboardData(companyId: string, shopId: string) {
+  // Get company
+  const company = await prisma.companyAccount.findUnique({
+    where: { id: companyId },
+    select: {
+      id: true,
+      name: true,
+      contactName: true,
+      contactEmail: true,
+      shopId: true,
+      shopifyCompanyId: true,
+    },
+  });
+
+  if (!company || company.shopId !== shopId) {
+    return null;
+  }
+
+  // Get recent orders
+  const recentOrders = await prisma.b2BOrder.findMany({
+    where: {
+      companyId,
+      orderStatus: { not: "cancelled" },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: 10,
+    include: {
+      createdByUser: {
+        select: {
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+  });
+
+  // Get order statistics
+  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] = await Promise.all([
+    prisma.b2BOrder.count({
+      where: { companyId, orderStatus: { not: "cancelled" } },
+    }),
+    prisma.b2BOrder.count({
+      where: {
+        companyId,
+        paymentStatus: "paid",
+        orderStatus: { not: "cancelled" },
+      },
+    }),
+    prisma.b2BOrder.count({
+      where: {
+        companyId,
+        paymentStatus: { in: ["pending", "partial"] },
+        orderStatus: { not: "cancelled" },
+      },
+    }),
+    prisma.b2BOrder.count({
+      where: {
+        companyId,
+        orderStatus: { in: ["draft", "submitted", "processing"] },
+      },
+    }),
+  ]);
+
+  // Get users (first 10)
+  const users = await prisma.b2BUser.findMany({
+    where: { companyId },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      role: true,
+      shopifyCustomerId: true,
+      isActive: true,
+      createdAt: true,
+    },
+  });
+
+  // Get total user count
+  const totalUsers = await prisma.b2BUser.count({
+    where: { companyId },
+  });
+
+  return {
+    company,
+    recentOrders,
+    orderStats: {
+      total: totalOrders,
+      paid: paidOrders,
+      unpaid: unpaidOrders,
+      pending: pendingOrders,
+    },
+    users,
+    totalUsers,
+  };
+}
+
+/**
+ * Get all users for a company
+ */
+export async function getCompanyUsers(companyId: string, shopId: string) {
+  // Verify company belongs to shop
+  const company = await prisma.companyAccount.findUnique({
+    where: { id: companyId },
+    select: { shopId: true, name: true, shopifyCompanyId: true },
+  });
+
+  if (!company || company.shopId !== shopId) {
+    return null;
+  }
+
+  const users = await prisma.b2BUser.findMany({
+    where: { companyId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      role: true,
+      shopifyCustomerId: true,
+      isActive: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return {
+    company,
+    users,
+  };
+}
+
+/**
+ * Get all orders for a company
+ */
+export async function getCompanyOrders(companyId: string, shopId: string) {
+  // Verify company belongs to shop
+  const company = await prisma.companyAccount.findUnique({
+    where: { id: companyId },
+    select: { shopId: true, name: true, shopifyCompanyId: true },
+  });
+
+  if (!company || company.shopId !== shopId) {
+    return null;
+  }
+
+  const orders = await prisma.b2BOrder.findMany({
+    where: {
+      companyId,
+      orderStatus: { not: "cancelled" },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    include: {
+      createdByUser: {
+        select: {
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+  });
+
+  return {
+    company,
+    orders,
+  };
+}
