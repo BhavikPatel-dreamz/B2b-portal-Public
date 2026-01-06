@@ -13,48 +13,63 @@ export const syncShopifyCompanies = async (
   submissionEmail: string | null,
 ) => {
   try {
-    // Step 1: Fetch all Shopify B2B companies
-    const companiesQuery = `
-      query GetAllCompanies {
-        companies(first: 100) {
-          nodes {
-            id
-            name
-            externalId
-            mainContact {
+    // Step 1: Fetch all Shopify B2B companies with pagination
+    let allCompanies: any[] = [];
+    let hasNextPage = true;
+    let cursor: string | null = null;
+
+    while (hasNextPage) {
+      const companiesQuery = `
+        query GetAllCompanies($cursor: String) {
+          companies(first: 100, after: $cursor) {
+            nodes {
               id
-              customer {
+              name
+              externalId
+              mainContact {
                 id
-                email
-                firstName
-                lastName
-                phone
+                customer {
+                  id
+                  email
+                  firstName
+                  lastName
+                  phone
+                }
+              }
+              locations(first: 1) {
+                nodes {
+                  id
+                  name
+                }
               }
             }
-            locations(first: 1) {
-              nodes {
-                id
-                name
-              }
+            pageInfo {
+              hasNextPage
+              endCursor
             }
-          }
-          pageInfo {
-            hasNextPage
-            endCursor
           }
         }
-      }
-    `;
+      `;
 
-    const response = await admin.graphql(companiesQuery);
-    const result = await response.json();
-    const companies = result?.data?.companies?.nodes || [];
+      const response = await admin.graphql(companiesQuery, {
+        variables: { cursor },
+      });
+      const result = await response.json();
+      const data = result?.data?.companies;
+
+      if (data?.nodes) {
+        allCompanies = [...allCompanies, ...data.nodes];
+      }
+
+      hasNextPage = data?.pageInfo?.hasNextPage || false;
+      cursor = data?.pageInfo?.endCursor || null;
+    }
 
     let syncedCount = 0;
     const errors: string[] = [];
 
     // Step 2-5: Process each company
-    for (const company of companies) {
+    for (const company of allCompanies) {
       try {
         const companyName = company.name;
         const mainContact = company.mainContact?.customer;
