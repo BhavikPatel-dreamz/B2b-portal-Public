@@ -301,7 +301,7 @@ return (
                       {new Date(company.updatedAt).toLocaleString()}
                     </td>
                     <td style={{ padding: "8px", minWidth: 180 }}>
-                      <updateFetcher.Form
+                      {/* <updateFetcher.Form
                         method="post"
                         style={{
                           display: "flex",
@@ -337,7 +337,7 @@ return (
                             loading={isUpdating}
                           >
                             Save
-                          </s-button>
+                          </s-button> */}
 
                           <s-button
                             size="slim"
@@ -346,8 +346,8 @@ return (
                           >
                             View
                           </s-button>
-                        </div>
-                      </updateFetcher.Form>
+                        {/* </div> */}
+                      {/* </updateFetcher.Form> */}
                     </td>
                   </tr>
                 ))}
