@@ -24,7 +24,46 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     console.log("🔍 Validating customer:=", { shop, loggedInCustomerId });
 
-    const registrations = await prisma.registrationSubmission.findFirst({
+    // STEP 1: Check if customer is logged in
+    if (!loggedInCustomerId) {
+      return Response.json({
+        isLoggedIn: false,
+        hasB2BAccess: false,
+        customerStatus: null,
+        customerId: null,
+        redirectTo: "/account/login",
+        message: "Please log in to access the B2B portal",
+      });
+    }
+
+    // STEP 2: Check if shop parameter exists
+    if (!shop) {
+      return Response.json({
+        isLoggedIn: true,
+        hasB2BAccess: false,
+        customerId: loggedInCustomerId,
+        customerStatus: null,
+        redirectTo: "/apps/b2b-portal/registration",
+        message: "Shop parameter missing",
+      });
+    }
+
+    // STEP 3: Get store from database
+    const store = await getStoreByDomain(shop);
+
+    if (!store || !store.accessToken) {
+      return Response.json({
+        isLoggedIn: true,
+        hasB2BAccess: false,
+        customerId: loggedInCustomerId,
+        customerStatus: null,
+        redirectTo: "/apps/b2b-portal/registration",
+        message: "Store not found or not configured",
+      });
+    }
+
+    // STEP 4: Check registration status in our database
+    const registration = await prisma.registrationSubmission.findFirst({
       where: {
         OR: [
           { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
@@ -33,117 +72,118 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
     });
 
-    // Check if customer is logged in
-    if (!loggedInCustomerId) {
-      return Response.json({
-        isLoggedIn: false,
-        hasB2BAccess: false,
-        customerStatus: registrations?.status,
-        customerId: null,
-        redirectTo: "/account/login",
-        message: "Please log in to access the B2B portal",
-      });
-    }
-
-    // Check if shop parameter exists
-    if (!shop) {
-      return Response.json({
-        isLoggedIn: true,
-        hasB2BAccess: false,
-        customerId: loggedInCustomerId,
-        customerStatus: registrations?.status,
-        redirectTo: "/apps/b2b-portal/registration",
-        message: "Shop parameter missing",
-      });
-    }
-
-    // Get store from database
-    const store = await getStoreByDomain(shop);
-
-    if (!store || !store.accessToken) {
-      return Response.json({
-        isLoggedIn: true,
-        hasB2BAccess: false,
-        customerId: loggedInCustomerId,
-        customerStatus: registrations?.status || "PENDING",
-        redirectTo: "/apps/b2b-portal/registration",
-        message: "Store not found or not configured",
-      });
-    }
-
-    // Check if customer has B2B access
-    // 1. First check via CompanyContact (primary method for B2B customers)
+    // STEP 5: Check if customer has B2B access in Shopify
+    // 5a. First check via CompanyContact (primary method for B2B customers)
     const customerCompanyInfo = await getCustomerCompanyInfo(
       loggedInCustomerId,
       shop,
       store.accessToken,
     );
 
-    if (
-      customerCompanyInfo.hasCompany) {
+    let hasB2BInShopify = false;
+    let accessMethod = "";
+    let additionalInfo: any = {};
+
+    if (customerCompanyInfo.hasCompany) {
       console.log("✅ Customer has B2B access via CompanyContact");
-      return Response.json({
-        isLoggedIn: true,
-        hasB2BAccess:true,
-        //  registrations?.status === "APPROVED" ? true : false,
-        logo: store.logo,
-        email: store.contactEmail,
-        customerId: loggedInCustomerId,
-        customerName: registrations?.contactName || "",
-        customerStatus: registrations?.status || "PENDING",
-        accessMethod: "company_contact",
-        companyInfo: customerCompanyInfo,
-        message: "Access granted",
-      });
-    }
-
-    // 2. Fallback: Check via tags or metafields (legacy B2B setups)
-    const b2bCheck = await checkCustomerIsB2BInShopifyByREST(
-      shop,
-      loggedInCustomerId,
-      store.accessToken,
-    );
-
-    if (
-      b2bCheck.success && b2bCheck.hasAccess) {
-      console.log("✅ Customer has B2B access via Tags/Metafields");
-      return Response.json({
-        isLoggedIn: true,
-        hasB2BAccess: true,
-        //  registrations?.status === "APPROVED" ? true : false,
-        customerId: loggedInCustomerId,
-        customerStatus: registrations?.status || "PENDING",
-        customerName: registrations?.contactName || "",
-        logo: store.logo,
-        accessMethod: "tags_metafields",
-        hasTags: b2bCheck.hasTags,
-        hasCompanyMetafield: b2bCheck.hasCompanyMetafield,
-        tags: b2bCheck.tags,
-        company: b2bCheck.company,
-        message: "Access granted",
-      });
-    }
-
-    // No B2B access found
-    console.log("⚠️ Customer does not have B2B access");
-    if (registrations?.shopifyCustomerId === loggedInCustomerId) {
-      return Response.json({
-        isLoggedIn: true,
-        hasB2BAccess: false,
-        customerStatus: registrations?.status || "PENDING",
-        customerId: loggedInCustomerId,
-        redirectTo: "/apps/b2b-portal/registration",
-        message: "No B2B access. Please register for B2B account.",
-      });
+      hasB2BInShopify = true;
+      accessMethod = "company_contact";
+      additionalInfo = { companyInfo: customerCompanyInfo };
     } else {
-      return Response.json({
-        isLoggedIn: true,
-        hasB2BAccess: false,
-        customerStatus: registrations?.status,
-        customerId: loggedInCustomerId,
-        redirectTo: "/apps/b2b-portal/registration",
-        message: "No B2B access. Please register for B2B account.",
-      });
+      // 5b. Fallback: Check via tags or metafields (legacy B2B setups)
+      const b2bCheck = await checkCustomerIsB2BInShopifyByREST(
+        shop,
+        loggedInCustomerId,
+        store.accessToken,
+      );
+
+      if (b2bCheck.success && b2bCheck.hasAccess) {
+        console.log("✅ Customer has B2B access via Tags/Metafields");
+        hasB2BInShopify = true;
+        accessMethod = "tags_metafields";
+        additionalInfo = {
+          hasTags: b2bCheck.hasTags,
+          hasCompanyMetafield: b2bCheck.hasCompanyMetafield,
+          tags: b2bCheck.tags,
+          company: b2bCheck.company,
+        };
+      }
+    }
+
+    // STEP 6: Determine access based on B2B status and registration
+    if (hasB2BInShopify) {
+      // User is part of a company in Shopify
+
+      if (!registration) {
+        // Has B2B access but not in our database - redirect to register
+        console.log("⚠️ Customer has B2B in Shopify but not registered in our database");
+        return Response.json({
+          isLoggedIn: true,
+          hasB2BAccess: false,
+          customerId: loggedInCustomerId,
+          customerStatus: null,
+          redirectTo: "/apps/b2b-portal/registration",
+          message: "Please complete registration to access the B2B portal",
+        });
+      }
+
+      if (registration.status === "APPROVED") {
+        // Registration approved - grant access
+        console.log("✅ Customer approved - granting access");
+        return Response.json({
+          isLoggedIn: true,
+          hasB2BAccess: true,
+          logo: store.logo,
+          email: store.contactEmail,
+          customerId: loggedInCustomerId,
+          customerName: registration.contactName || "",
+          customerStatus: registration.status,
+          accessMethod,
+          ...additionalInfo,
+          message: "Access granted",
+        });
+      } else {
+        // Registration exists but not approved
+        console.log("⏳ Customer registration pending/rejected");
+        return Response.json({
+          isLoggedIn: true,
+          hasB2BAccess: false,
+          customerId: loggedInCustomerId,
+          customerName: registration.contactName || "",
+          customerStatus: registration.status,
+          redirectTo: "/apps/b2b-portal/registration",
+          message: "Your registration has already been submitted and is under review",
+          alreadySubmitted: true,
+        });
+      }
+    } else {
+      // No B2B access in Shopify
+      console.log("⚠️ Customer does not have B2B access in Shopify");
+
+      if (registration) {
+        // Has registration but no B2B access in Shopify
+        return Response.json({
+          isLoggedIn: true,
+          hasB2BAccess: false,
+          customerStatus: registration.status,
+          customerId: loggedInCustomerId,
+          redirectTo: "/apps/b2b-portal/registration",
+          message: registration.status === "APPROVED"
+            ? "Your registration is approved but B2B access not configured in Shopify"
+            : "Your registration has already been submitted and is under review",
+          alreadySubmitted: true,
+        });
+      } else {
+        // No registration and no B2B access - redirect to register
+        return Response.json({
+          isLoggedIn: true,
+          hasB2BAccess: false,
+          customerStatus: null,
+          customerId: loggedInCustomerId,
+          redirectTo: "/apps/b2b-portal/registration",
+          message: "No B2B access. Please register for B2B account.",
+        });
+      }
     }
   } catch (error) {
     console.error("❌ Error validating customer:", error);
