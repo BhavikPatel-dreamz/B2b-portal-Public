@@ -6,6 +6,8 @@ import type {
 import {
   useFetcher,
   useLoaderData,
+  Link,
+  useSearchParams,
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
@@ -39,14 +41,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!store) {
     return Response.json(
-      { companies: [], storeMissing: true },
+      { companies: [], storeMissing: true, totalCount: 0, currentPage: 1, totalPages: 0 },
       { status: 404 },
     );
   }
 
+  // Get page from URL search params
+  const url = new URL(request.url);
+  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const searchQuery = url.searchParams.get("search") || "";
+  const limit = 20;
+  const skip = (page - 1) * limit;
+
+  // Build where clause with search
+  const whereClause = {
+    shopId: store.id,
+    ...(searchQuery && {
+      OR: [
+        { name: { contains: searchQuery, mode: "insensitive" as const } },
+        { shopifyCompanyId: { contains: searchQuery, mode: "insensitive" as const } },
+        { contactName: { contains: searchQuery, mode: "insensitive" as const } },
+        { contactEmail: { contains: searchQuery, mode: "insensitive" as const } },
+      ],
+    }),
+  };
+
+  // Get total count
+  const totalCount = await prisma.companyAccount.count({
+    where: whereClause,
+  });
+
+  const totalPages = Math.ceil(totalCount / limit);
+
   const companies = await prisma.companyAccount.findMany({
-    where: { shopId: store.id },
+    where: whereClause,
     orderBy: { updatedAt: "desc" },
+    skip,
+    take: limit,
   });
 
   return Response.json({
@@ -59,6 +90,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }) satisfies LoaderCompany,
     ),
     storeMissing: false,
+    totalCount,
+    currentPage: page,
+    totalPages,
+    searchQuery,
   });
 };
 
@@ -193,7 +228,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function CompaniesPage() {
-  const { companies, storeMissing } = useLoaderData<typeof loader>();
+  const { companies, storeMissing, totalCount, currentPage, totalPages, searchQuery } = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
@@ -241,8 +277,38 @@ return (
           </syncFetcher.Form>
         </div>
 
+        {/* Search Input */}
+        <div style={{ marginBottom: 16 }}>
+          <input
+            type="text"
+            placeholder="Search by company name, Shopify ID, or contact..."
+            defaultValue={searchQuery}
+            onChange={(e) => {
+              const value = e.target.value;
+              setSearchParams((prev) => {
+                const newParams = new URLSearchParams(prev);
+                if (value) {
+                  newParams.set("search", value);
+                  newParams.set("page", "1"); // Reset to page 1 on search
+                } else {
+                  newParams.delete("search");
+                }
+                return newParams;
+              });
+            }}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+              fontSize: 14,
+              outline: "none",
+            }}
+          />
+        </div>
+
         {companies.length === 0 ? (
-          <s-empty-state heading="No companies yet" />
+          <s-empty-state heading={searchQuery ? "No companies found" : "No companies yet"} />
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table
@@ -301,58 +367,125 @@ return (
                       {new Date(company.updatedAt).toLocaleString()}
                     </td>
                     <td style={{ padding: "8px", minWidth: 180 }}>
-                      {/* <updateFetcher.Form
-                        method="post"
+                      <Link
+                        to={`/app/companies/${company.id}`}
                         style={{
-                          display: "flex",
-                          gap: 6,
-                          alignItems: "center",
+                          display: "inline-block",
+                          padding: "6px 12px",
+                          borderRadius: 6,
+                          border: "1px solid #c9ccd0",
+                          textDecoration: "none",
+                          color: "#202223",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          backgroundColor: "white",
+                          cursor: "pointer",
                         }}
                       >
-                        <input
-                          name="intent"
-                          value="updateCredit"
-                          hidden
-                          readOnly
-                        />
-                        <input name="id" value={company.id} hidden readOnly />
-                        <input
-                          name="creditLimit"
-                          defaultValue={company.creditLimit}
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          style={{
-                            padding: 8,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                            width: 120,
-                          }}
-                        />
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <s-button
-                            size="slim"
-                            type="submit"
-                            variant="primary"
-                            loading={isUpdating}
-                          >
-                            Save
-                          </s-button> */}
-
-                          <s-button
-                            size="slim"
-                            variant="secondary"
-                            url={`/app/companies/${company.id}`}
-                          >
-                            View
-                          </s-button>
-                        {/* </div> */}
-                      {/* </updateFetcher.Form> */}
+                        View
+                      </Link>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 24,
+              paddingTop: 24,
+              borderTop: "1px solid #e3e3e3",
+            }}
+          >
+            <Link
+              to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(currentPage - 1) })}`}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                border: "1px solid #c9ccd0",
+                textDecoration: "none",
+                color: currentPage === 1 ? "#999" : "#202223",
+                pointerEvents: currentPage === 1 ? "none" : "auto",
+                opacity: currentPage === 1 ? 0.5 : 1,
+              }}
+            >
+              Previous
+            </Link>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                // Show first page, last page, current page, and pages around current
+                const showPage =
+                  pageNum === 1 ||
+                  pageNum === totalPages ||
+                  Math.abs(pageNum - currentPage) <= 1;
+
+                const showEllipsis =
+                  (pageNum === 2 && currentPage > 3) ||
+                  (pageNum === totalPages - 1 && currentPage < totalPages - 2);
+
+                if (showEllipsis) {
+                  return (
+                    <span
+                      key={pageNum}
+                      style={{
+                        padding: "8px 12px",
+                        color: "#999",
+                      }}
+                    >
+                      ...
+                    </span>
+                  );
+                }
+
+                if (!showPage) return null;
+
+                return (
+                  <Link
+                    key={pageNum}
+                    to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(pageNum) })}`}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                      textDecoration: "none",
+                      color: pageNum === currentPage ? "white" : "#202223",
+                      background: pageNum === currentPage ? "#005bd3" : "white",
+                      fontWeight: pageNum === currentPage ? 600 : 400,
+                    }}
+                  >
+                    {pageNum}
+                  </Link>
+                );
+              })}
+            </div>
+
+            <Link
+              to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(currentPage + 1) })}`}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                border: "1px solid #c9ccd0",
+                textDecoration: "none",
+                color: currentPage === totalPages ? "#999" : "#202223",
+                pointerEvents: currentPage === totalPages ? "none" : "auto",
+                opacity: currentPage === totalPages ? 0.5 : 1,
+              }}
+            >
+              Next
+            </Link>
+
+            <span style={{ marginLeft: 16, color: "#5c5f62", fontSize: 14 }}>
+              Page {currentPage} of {totalPages} ({totalCount} companies)
+            </span>
           </div>
         )}
       </s-section>
