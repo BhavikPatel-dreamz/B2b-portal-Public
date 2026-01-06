@@ -10,9 +10,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import {
-  sendCompanyAssignmentEmail
-} from "app/utils/email";
+import { sendCompanyAssignmentEmail } from "app/utils/email";
 
 interface RegistrationSubmission {
   id: string;
@@ -67,6 +65,36 @@ const normalizeCustomerId = (id?: string | null) => {
   return id.startsWith("gid://") ? id : `gid://shopify/Customer/${id}`;
 };
 
+// const buildUserErrorList = (payload: any) => {
+//   const errors: string[] = [];
+//   if (payload?.errors?.length) {
+//     errors.push(
+//       ...payload.errors.map((err: any) =>
+//         typeof err === "string" ? err : err.message || "Unknown error",
+//       ),
+//     );
+//   }
+
+//   const userErrors =
+//     payload?.data?.customerCreate?.userErrors ||
+//     payload?.data?.companyCreate?.userErrors ||
+//     payload?.data?.companyContactCreate?.userErrors ||
+//     payload?.data?.companyAssignMainContact?.userErrors ||
+//     payload?.data?.companyContactAssign?.userErrors ||
+//     [];
+
+//   if (userErrors.length) {
+//     errors.push(
+//       ...userErrors.map(
+//         (err: any) => err?.message || (err?.field || []).join(".") || "Error",
+//       ),
+//     );
+//   }
+
+//   return errors;
+// };
+
+
 const buildUserErrorList = (payload: any) => {
   const errors: string[] = [];
   if (payload?.errors?.length) {
@@ -82,7 +110,7 @@ const buildUserErrorList = (payload: any) => {
     payload?.data?.companyCreate?.userErrors ||
     payload?.data?.companyContactCreate?.userErrors ||
     payload?.data?.companyAssignMainContact?.userErrors ||
-    payload?.data?.companyContactAssign?.userErrors ||
+    payload?.data?.companyAssignCustomerAsContact?.userErrors ||
     [];
 
   if (userErrors.length) {
@@ -279,7 +307,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-
         const createCompanyResponse = await admin.graphql(
           `#graphql
  mutation CompanyCreate($input: CompanyCreateInput!) {
@@ -379,24 +406,68 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
+      //   case "assignMainContact": {
+      //     const companyId = (form.companyId as string)?.trim();
+      //     const customerIdRaw = (form.customerId as string)?.trim();
 
-      case "assignMainContact": {
-        const companyId = (form.companyId as string)?.trim();
-        const customerIdRaw = (form.customerId as string)?.trim();
+      //     if (!companyId || !customerIdRaw) {
+      //       return Response.json({
+      //         intent,
+      //         success: false,
+      //         errors: ["Company and customer are required"],
+      //       });
+      //     }
 
-        if (!companyId || !customerIdRaw) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company and customer are required"],
-          });
-        }
+      //     const customerId = normalizeCustomerId(customerIdRaw);
 
-        const customerId = normalizeCustomerId(customerIdRaw);
+      //     const response = await admin.graphql(
+      //       `#graphql
+      // mutation AssignMainContact($companyId: ID!, $customerId: ID!) {
+      //   companyAssignCustomerAsContact(companyId: $companyId, customerId: $customerId) {
+      //     companyContact {
+      //       id
+      //     }
+      //     userErrors {
+      //       field
+      //       message
+      //     }
+      //   }
+      // }`,
+      //       { variables: { companyId, customerId } },
+      //     );
 
-        const response = await admin.graphql(
-          `#graphql
-    mutation AssignMainContact($companyId: ID!, $customerId: ID!) {
+      //     const payload = await response.json();
+      //     const errors = buildUserErrorList(payload);
+
+      //     if (errors.length) {
+      //       return Response.json({ intent, success: false, errors });
+      //     }
+
+      //     return Response.json({
+      //       intent,
+      //       success: true,
+      //       message: "Main contact assigned successfully",
+      //     });
+      //   }
+
+case "assignMainContact": {
+  const companyId = (form.companyId as string)?.trim();
+  const customerIdRaw = (form.customerId as string)?.trim();
+
+  if (!companyId || !customerIdRaw) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Company and customer are required"],
+    });
+  }
+
+  const customerId = normalizeCustomerId(customerIdRaw);
+
+  // Step 1: Assign customer as a company contact (if not already)
+  const assignResponse = await admin.graphql(
+    `#graphql
+    mutation CompanyAssignCustomerAsContact($companyId: ID!, $customerId: ID!) {
       companyAssignCustomerAsContact(companyId: $companyId, customerId: $customerId) {
         companyContact {
           id
@@ -407,23 +478,59 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
     }`,
-          { variables: { companyId, customerId } },
-        );
+    { variables: { companyId, customerId } },
+  );
 
-        const payload = await response.json();
-        const errors = buildUserErrorList(payload);
+  const assignPayload = await assignResponse.json();
+  let assignErrors = buildUserErrorList(assignPayload);
 
-        if (errors.length) {
-          return Response.json({ intent, success: false, errors });
+  if (assignErrors.length) {
+    return Response.json({ intent, success: false, errors: assignErrors });
+  }
+
+  const companyContactId = assignPayload?.data?.companyAssignCustomerAsContact?.companyContact?.id;
+
+  if (!companyContactId) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Failed to get company contact ID"],
+    });
+  }
+
+  // Step 2: Assign as main contact
+  const mainContactResponse = await admin.graphql(
+    `#graphql
+    mutation AssignMainContact($companyContactId: ID!, $companyId: ID!) {
+      companyAssignMainContact(companyContactId: $companyContactId, companyId: $companyId) {
+        company {
+          id
+          mainContact {
+            id
+          }
         }
-
-        return Response.json({
-          intent,
-          success: true,
-          message: "Main contact assigned successfully",
-        });
+        userErrors {
+          field
+          message
+        }
       }
+    }`,
+    { variables: { companyContactId, companyId } },
+  );
 
+  const mainContactPayload = await mainContactResponse.json();
+  const mainContactErrors = buildUserErrorList(mainContactPayload);
+
+  if (mainContactErrors.length) {
+    return Response.json({ intent, success: false, errors: mainContactErrors });
+  }
+
+  return Response.json({
+    intent,
+    success: true,
+    message: "Main contact assigned successfully",
+  });
+}
       case "sendWelcomeEmail": {
         const email = (form.email as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
@@ -591,7 +698,8 @@ const StepBadge = ({ label, active }: { label: string; active: boolean }) => (
 );
 
 export default function RegistrationApprovals() {
-  const { submissions, companies, storeMissing } = useLoaderData<typeof loader>();
+  const { submissions, companies, storeMissing } =
+    useLoaderData<typeof loader>();
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [step, setStep] = useState<
     | "check"
@@ -750,7 +858,7 @@ export default function RegistrationApprovals() {
 
   return (
     <s-page heading="Registration submissions">
-      <s-section heading="Pending requests">
+      <s-section heading="">
         {submissions.length === 0 ? (
           <s-empty-state heading="No submissions yet" />
         ) : (
@@ -827,7 +935,9 @@ export default function RegistrationApprovals() {
                         </>
                       ) : (
                         <span style={{ color: "#5c5f62", fontSize: 14 }}>
-                          {submission.status === "APPROVED" ? "Approved" : "Rejected"}
+                          {submission.status === "APPROVED"
+                            ? "Approved"
+                            : "Rejected"}
                         </span>
                       )}
                     </td>
@@ -839,7 +949,7 @@ export default function RegistrationApprovals() {
         )}
       </s-section>
 
-      <s-section heading="Companies">
+      {/* <s-section heading="Companies">
         {companies.length === 0 ? (
           <s-empty-state heading="No companies yet" />
         ) : (
@@ -853,21 +963,13 @@ export default function RegistrationApprovals() {
             >
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: "8px" }}>
-                    Company
-                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Company</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>
                     Shopify company ID
                   </th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>
-                    Contact
-                  </th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>
-                    Credit
-                  </th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>
-                    Updated
-                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Credit</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
                 </tr>
               </thead>
               <tbody>
@@ -877,21 +979,29 @@ export default function RegistrationApprovals() {
                     style={{ borderTop: "1px solid #e3e3e3" }}
                   >
                     <td style={{ padding: "8px" }}>{company.name}</td>
-                    <td style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}>
+                    <td
+                      style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
+                    >
                       {company.shopifyCompanyId || "–"}
                     </td>
                     <td style={{ padding: "8px" }}>
                       {company.contactName ? (
                         <span>
                           {company.contactName}
-                          {company.contactEmail ? ` • ${company.contactEmail}` : ""}
+                          {company.contactEmail
+                            ? ` • ${company.contactEmail}`
+                            : ""}
                         </span>
                       ) : (
                         <span style={{ color: "#5c5f62" }}>Not set</span>
                       )}
                     </td>
-                    <td style={{ padding: "8px" }}>{formatCredit(company.creditLimit)}</td>
-                    <td style={{ padding: "8px" }}>{formatDate(company.updatedAt)}</td>
+                    <td style={{ padding: "8px" }}>
+                      {formatCredit(company.creditLimit)}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {formatDate(company.updatedAt)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1475,7 +1585,7 @@ export default function RegistrationApprovals() {
             </div>
           </div>
         </div>
-      )}
+      )} */}
     </s-page>
   );
 }

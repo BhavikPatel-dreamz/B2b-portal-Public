@@ -35,7 +35,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!store) {
-    return Response.json({ companies: [], storeMissing: true }, { status: 404 });
+    return Response.json(
+      { companies: [], storeMissing: true },
+      { status: 404 },
+    );
   }
 
   const companies = await prisma.companyAccount.findMany({
@@ -44,11 +47,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   return Response.json({
-    companies: companies.map((company) => ({
-      ...company,
-      creditLimit: company.creditLimit.toString(),
-      updatedAt: company.updatedAt.toISOString(),
-    } satisfies LoaderCompany)),
+    companies: companies.map(
+      (company) =>
+        ({
+          ...company,
+          creditLimit: company.creditLimit.toString(),
+          updatedAt: company.updatedAt.toISOString(),
+        }) satisfies LoaderCompany,
+    ),
     storeMissing: false,
   });
 };
@@ -67,10 +73,15 @@ const parseCredit = (value?: string) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const store = await prisma.store.findUnique({ where: { shopDomain: session.shop } });
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: session.shop },
+  });
 
   if (!store) {
-    return Response.json({ intent: "unknown", success: false, errors: ["Store not found"] }, { status: 404 });
+    return Response.json(
+      { intent: "unknown", success: false, errors: ["Store not found"] },
+      { status: 404 },
+    );
   }
 
   const form = await parseForm(request);
@@ -83,10 +94,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const credit = parseCredit(creditRaw);
 
       if (!id) {
-        return Response.json({ intent, success: false, errors: ["Company id is required"] });
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company id is required"],
+        });
       }
       if (!credit) {
-        return Response.json({ intent, success: false, errors: ["Credit must be a number"] });
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit must be a number"],
+        });
       }
 
       await prisma.companyAccount.update({
@@ -94,21 +113,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         data: { creditLimit: credit },
       });
 
-      return Response.json({ intent, success: true, message: "Credit updated" });
+      return Response.json({
+        intent,
+        success: true,
+        message: "Credit updated",
+      });
     }
 
     case "createCompany": {
       const name = (form.name as string)?.trim();
-      const shopifyCompanyId = (form.shopifyCompanyId as string)?.trim() || null;
+      const shopifyCompanyId =
+        (form.shopifyCompanyId as string)?.trim() || null;
       const contactName = (form.contactName as string)?.trim() || null;
       const contactEmail = (form.contactEmail as string)?.trim() || null;
       const credit = parseCredit((form.creditLimit as string) || undefined);
 
       if (!name) {
-        return Response.json({ intent, success: false, errors: ["Company name is required"] });
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company name is required"],
+        });
       }
       if (!credit) {
-        return Response.json({ intent, success: false, errors: ["Credit must be a number"] });
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit must be a number"],
+        });
       }
 
       if (shopifyCompanyId) {
@@ -151,7 +183,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     default:
-      return Response.json({ intent, success: false, errors: ["Unknown intent"] });
+      return Response.json({
+        intent,
+        success: false,
+        errors: ["Unknown intent"],
+      });
   }
 };
 
@@ -200,7 +236,8 @@ export default function CompaniesPage() {
         <s-section>
           <s-banner tone="critical" title="Store not found">
             <s-paragraph>
-              The current shop does not exist in the database. Please reinstall the app.
+              The current shop does not exist in the database. Please reinstall
+              the app.
             </s-paragraph>
           </s-banner>
         </s-section>
@@ -210,45 +247,13 @@ export default function CompaniesPage() {
 
   return (
     <s-page heading="Companies">
-      <s-section heading="Add company">
-        <createFetcher.Form method="post" style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-          <input name="intent" value="createCompany" hidden readOnly />
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "#5c5f62" }}>Company name</span>
-            <input name="name" required style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "#5c5f62" }}>Shopify company ID (optional)</span>
-            <input name="shopifyCompanyId" style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "#5c5f62" }}>Contact name</span>
-            <input name="contactName" style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "#5c5f62" }}>Contact email</span>
-            <input name="contactEmail" type="email" style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }} />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "#5c5f62" }}>Credit</span>
-            <input
-              name="creditLimit"
-              defaultValue="0"
-              type="number"
-              step="0.01"
-              min="0"
-              style={{ padding: 10, borderRadius: 8, border: "1px solid #c9ccd0" }}
-            />
-          </label>
-          <s-button type="submit" {...(isCreating ? { loading: true } : {})}>
-            Save company
-          </s-button>
-        </createFetcher.Form>
-      </s-section>
-
       <s-section heading="Company list">
         {feedback && (
-          <s-banner tone={feedback.tone} title={feedback.title} style={{ marginBottom: 12 }}>
+          <s-banner
+            tone={feedback.tone}
+            title={feedback.title}
+            style={{ marginBottom: 12 }}
+          >
             {feedback.messages.length > 0 && (
               <s-unordered-list>
                 {feedback.messages.map((msg) => (
@@ -273,7 +278,9 @@ export default function CompaniesPage() {
               <thead>
                 <tr>
                   <th style={{ textAlign: "left", padding: "8px" }}>Company</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Shopify company ID</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Shopify company ID
+                  </th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Credit</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
@@ -282,26 +289,55 @@ export default function CompaniesPage() {
               </thead>
               <tbody>
                 {companies.map((company) => (
-                  <tr key={company.id} style={{ borderTop: "1px solid #e3e3e3" }}>
+                  <tr
+                    key={company.id}
+                    style={{ borderTop: "1px solid #e3e3e3" }}
+                  >
                     <td style={{ padding: "8px" }}>{company.name}</td>
-                    <td style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}>
-                      {company.shopifyCompanyId || "–"}
+                    <td
+                      style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
+                    >
+                      {company.shopifyCompanyId
+                        ? company.shopifyCompanyId.replace(
+                            "gid://shopify/Company/",
+                            "",
+                          )
+                        : "–"}
                     </td>
+
                     <td style={{ padding: "8px" }}>
                       {company.contactName ? (
                         <span>
                           {company.contactName}
-                          {company.contactEmail ? ` • ${company.contactEmail}` : ""}
+                          {company.contactEmail
+                            ? ` • ${company.contactEmail}`
+                            : ""}
                         </span>
                       ) : (
                         <span style={{ color: "#5c5f62" }}>Not set</span>
                       )}
                     </td>
-                    <td style={{ padding: "8px" }}>{formatCredit(company.creditLimit)}</td>
-                    <td style={{ padding: "8px" }}>{new Date(company.updatedAt).toLocaleString()}</td>
+                    <td style={{ padding: "8px" }}>
+                      {formatCredit(company.creditLimit)}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {new Date(company.updatedAt).toLocaleString()}
+                    </td>
                     <td style={{ padding: "8px", minWidth: 180 }}>
-                      <updateFetcher.Form method="post" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <input name="intent" value="updateCredit" hidden readOnly />
+                      <updateFetcher.Form
+                        method="post"
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          name="intent"
+                          value="updateCredit"
+                          hidden
+                          readOnly
+                        />
                         <input name="id" value={company.id} hidden readOnly />
                         <input
                           name="creditLimit"
@@ -316,7 +352,11 @@ export default function CompaniesPage() {
                             width: 120,
                           }}
                         />
-                        <s-button size="slim" type="submit" {...(isUpdating ? { loading: true } : {})}>
+                        <s-button
+                          size="slim"
+                          type="submit"
+                          {...(isUpdating ? { loading: true } : {})}
+                        >
                           Save
                         </s-button>
                       </updateFetcher.Form>
