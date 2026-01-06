@@ -372,59 +372,7 @@ export default function CompanyDashboard() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(2, 1fr)",
-          gap: 10,
-          marginBottom: 10,
-        }}
-      >
-        {/* Company Information Section */}
-        {/* Credit Overview */}
-        <s-section heading="Credit Status">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, 1fr)",
-              gap: 12,
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-                Credit Limit
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>
-                {formatCurrency(data.creditLimit)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-                Available Credit
-              </div>
-              <div
-                style={{
-                  fontSize: 20,
-                  fontWeight: 600,
-                  color: creditStatusColor,
-                }}
-              >
-                {formatCurrency(data.availableCredit)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-                Used Credit
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>
-                {formatCurrency(data.usedCredit)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
-                Pending Credit
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>
-                {formatCurrency(data.pendingCredit)}
-              </div>
-              <div style={{ fontSize: 13, 1fr)",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: 10,
           marginBottom: 10,
         }}
