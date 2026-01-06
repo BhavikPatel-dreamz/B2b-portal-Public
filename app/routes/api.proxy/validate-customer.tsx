@@ -84,7 +84,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.log("✅ Customer has B2B access via CompanyContact");
       return Response.json({
         isLoggedIn: true,
-        hasB2BAccess: registrations?.status === "APPROVED" ? true : false,
+        hasB2BAccess:true,
+        //  registrations?.status === "APPROVED" ? true : false,
         logo: store.logo,
         email: store.contactEmail,
         customerId: loggedInCustomerId,
@@ -108,7 +109,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.log("✅ Customer has B2B access via Tags/Metafields");
       return Response.json({
         isLoggedIn: true,
-        hasB2BAccess: registrations?.status === "APPROVED" ? true : false,
+        hasB2BAccess: true,
+        //  registrations?.status === "APPROVED" ? true : false,
         customerId: loggedInCustomerId,
         customerStatus: registrations?.status || "PENDING",
         customerName: registrations?.contactName || "",
