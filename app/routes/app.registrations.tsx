@@ -112,7 +112,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const submissions = await prisma.registrationSubmission.findMany({
-    where: { shopId: store.id },
+    where: {
+      shopId: store.id,
+      status: "PENDING"
+    },
     orderBy: { createdAt: "desc" },
   });
 
