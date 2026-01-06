@@ -58,6 +58,8 @@ model Store {
   scope         String?
   logo          String?
   submissionEmail String?
+  companyWelcomeEmailTemplate String?  // Custom template for company sync emails
+  companyWelcomeEmailEnabled Boolean   @default(true)  // Enable/disable company sync notifications
   isActive      Boolean   @default(true)
   installedAt   DateTime  @default(now())
   uninstalledAt DateTime?

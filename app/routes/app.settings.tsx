@@ -17,6 +17,8 @@ interface LoaderData {
     shopName: string;
     logo: string;
     submissionEmail: string;
+    companyWelcomeEmailTemplate?: string;
+    companyWelcomeEmailEnabled?: boolean;
   };
 }
 
@@ -47,6 +49,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         shopName: store.shopName || "",
         logo: store.logo || "",
         submissionEmail: store.submissionEmail || "",
+        companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
+        companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
       },
     } satisfies LoaderData,
     { status: 200 },
@@ -70,6 +74,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const logoRaw = (formData.get("logo") as string | null)?.trim() || "";
   const submissionEmailRaw =
     (formData.get("submissionEmail") as string | null)?.trim() || "";
+  const companyWelcomeEmailTemplate =
+    (formData.get("companyWelcomeEmailTemplate") as string | null)?.trim() || "";
+  const companyWelcomeEmailEnabled =
+    (formData.get("companyWelcomeEmailEnabled") as string | null) === "on";
 
   const submissionEmail = submissionEmailRaw || null;
   if (
@@ -84,7 +92,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const logo = logoRaw || null;
 
-  await updateStore(store.id, { logo, submissionEmail });
+  await updateStore(store.id, {
+    logo,
+    submissionEmail,
+    companyWelcomeEmailTemplate: companyWelcomeEmailTemplate || null,
+    companyWelcomeEmailEnabled,
+  });
 
   return Response.json(
     { success: true, message: "Settings saved" } satisfies ActionResponse,
@@ -249,6 +262,69 @@ export default function SettingsPage() {
               />
               <s-text tone="subdued" variant="bodySm">
                 Email address that receives new B2B registration submissions.
+              </s-text>
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label
+                htmlFor="companyWelcomeEmailEnabled"
+                style={{ fontWeight: 600, fontSize: 14 }}
+              >
+                Company sync notifications
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  id="companyWelcomeEmailEnabled"
+                  name="companyWelcomeEmailEnabled"
+                  type="checkbox"
+                  defaultChecked={store?.companyWelcomeEmailEnabled}
+                  style={{ width: 18, height: 18, cursor: "pointer" }}
+                />
+                <label
+                  htmlFor="companyWelcomeEmailEnabled"
+                  style={{ cursor: "pointer" }}
+                >
+                  Send email notifications when companies are synced
+                </label>
+              </div>
+              <s-text tone="subdued" variant="bodySm">
+                Enable to receive email notifications whenever companies are synced from Shopify B2B.
+              </s-text>
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label
+                htmlFor="companyWelcomeEmailTemplate"
+                style={{ fontWeight: 600, fontSize: 14 }}
+              >
+                Company welcome email notes
+              </label>
+              <textarea
+                id="companyWelcomeEmailTemplate"
+                name="companyWelcomeEmailTemplate"
+                defaultValue={store?.companyWelcomeEmailTemplate || ""}
+                placeholder="Add any custom notes or instructions for company welcome emails..."
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9cccf",
+                  fontSize: 14,
+                  outline: "none",
+                  fontFamily: "monospace",
+                  minHeight: 120,
+                  resize: "vertical",
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "#005bd3";
+                  e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "#c9cccf";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              />
+              <s-text tone="subdued" variant="bodySm">
+                Optional custom message to include in company welcome emails. Supports plain text.
               </s-text>
             </div>
 

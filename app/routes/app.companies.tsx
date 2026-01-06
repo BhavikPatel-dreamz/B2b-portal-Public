@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -11,9 +10,9 @@ import {
   useNavigate,
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { syncShopifyCompanies, parseForm, parseCredit, formatCredit } from "../utils/company.utils";
 
 type LoaderCompany = {
   id: string;
@@ -64,20 +63,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 };
 
-const parseForm = async (request: Request) => {
-  const formData = await request.formData();
-  return Object.fromEntries(formData);
-};
-
-const parseCredit = (value?: string) => {
-  if (!value) return new Prisma.Decimal(0);
-  const numeric = Number(value);
-  if (Number.isNaN(numeric)) return null;
-  return new Prisma.Decimal(numeric);
-};
-
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
   });
@@ -93,6 +80,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = (form.intent as string) || "";
 
   switch (intent) {
+    case "syncCompanies": {
+      const result = await syncShopifyCompanies(admin, store, store.submissionEmail);
+      return Response.json({
+        intent,
+        success: result.success,
+        message: result.message,
+        syncedCount: result.syncedCount,
+        errors: result.errors,
+      });
+    }
     case "updateCredit": {
       const id = (form.id as string)?.trim();
       const creditRaw = (form.creditLimit as string) || "0";
@@ -196,17 +193,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
-const formatCredit = (value?: string | null) => {
-  if (!value) return "$0.00";
-  const num = Number(value);
-  if (Number.isNaN(num)) return value;
-  return num.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  });
-};
-
 export default function CompaniesPage() {
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -214,30 +200,10 @@ export default function CompaniesPage() {
   const { companies, storeMissing } = useLoaderData<typeof loader>();
 
   const updateFetcher = useFetcher<ActionResponse>();
-  const createFetcher = useFetcher<ActionResponse>();
+  const syncFetcher = useFetcher<ActionResponse>();
 
   const isUpdating = updateFetcher.state !== "idle";
-  const isCreating = createFetcher.state !== "idle";
-
-  const feedback = useMemo(() => {
-    const latest = updateFetcher.data || createFetcher.data;
-    if (!latest) return null;
-    if (!latest.success && latest.errors?.length) {
-      return {
-        tone: "critical" as const,
-        title: "Something went wrong",
-        messages: latest.errors,
-      };
-    }
-    if (latest.success && latest.message) {
-      return {
-        tone: "success" as const,
-        title: latest.message,
-        messages: [],
-      };
-    }
-    return null;
-  }, [updateFetcher.data, createFetcher.data]);
+  const isSyncing = syncFetcher.state !== "idle";
 
   if (storeMissing) {
     return (
@@ -253,131 +219,155 @@ export default function CompaniesPage() {
       </s-page>
     );
   }
-  
+
 return (
-  <s-page heading="Companies">
-    <s-section>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 24,
-        }}
-      >
-        <h4 style={{ margin: 0 }}>Company list</h4>
-
-        <s-button
-          type="submit"
-          variant="secondary"
-          loading={isCreating}
+    <s-page heading="Companies">
+      <s-section>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
         >
-          Company Sync
-        </s-button>
-      </div>
+          <h4 style={{ margin: 0 }}>Company list</h4>
 
-      {companies.length === 0 ? (
-        <s-empty-state heading="No companies yet" />
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              minWidth: 900,
-            }}
-          >
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left", padding: "12px 16px" }}>Company</th>
-                <th style={{ textAlign: "left", padding: "12px 16px" }}>
-                  Shopify company ID
-                </th>
-                <th style={{ textAlign: "left", padding: "12px 16px" }}>Contact</th>
-                <th style={{ textAlign: "left", padding: "12px 16px" }}>Credit</th>
-                <th style={{ textAlign: "left", padding: "12px 16px" }}>Updated</th>
-                {/* <th style={{ textAlign: "left", padding: "12px 16px" }}>Actions</th> */}
-              </tr>
-            </thead>
-            <tbody>
-              {companies.map((company) => (
-                <tr
-                  key={company.id}
-                  style={{ borderTop: "1px solid #e3e3e3" }}
-                >
-                  <td style={{ padding: "12px 16px" }}>{company.name}</td>
-                  <td
-                    style={{ padding: "12px 16px", fontSize: 12, color: "#5c5f62" }}
-                  >
-                    {company.shopifyCompanyId
-                      ? company.shopifyCompanyId.replace(
-                          "gid://shopify/Company/",
-                          "",
-                        )
-                      : "–"}
-                  </td>
-
-                  <td style={{ padding: "12px 16px" }}>
-                    {company.contactName ? (
-                      <span>
-                        {company.contactName}
-                        {company.contactEmail
-                          ? ` • ${company.contactEmail}`
-                          : ""}
-                      </span>
-                    ) : (
-                      <span style={{ color: "#5c5f62" }}>Not set</span>
-                    )}
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    {formatCredit(company.creditLimit)}
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    {new Date(company.updatedAt).toLocaleString()}
-                  </td>
-                  <td style={{ padding: "12px 16px", minWidth: 180 }}>
-                    <updateFetcher.Form
-                      method="post"
-                      style={{
-                        display: "flex",
-                        gap: 6,
-                        alignItems: "center",
-                      }}
-                    >
-                      <input
-                        name="intent"
-                        value="updateCredit"
-                        hidden
-                        readOnly
-                      />
-                      <input name="id" value={company.id} hidden readOnly />
-
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <s-button
-                          size="slim"
-                          variant="secondary"
-                          loading={
-                            navigation.state === "loading" &&
-                            navigation.location?.pathname.includes(company.id)
-                          }
-                          onClick={() =>
-                            navigate(`/app/companies/${company.id}`)
-                          }
-                        >
-                          Company Details
-                        </s-button>
-                      </div>
-                    </updateFetcher.Form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <syncFetcher.Form method="post">
+            <input name="intent" value="syncCompanies" hidden readOnly />
+            <s-button
+              type="submit"
+              variant="secondary"
+              loading={isSyncing}
+            >
+              Company Sync
+            </s-button>
+          </syncFetcher.Form>
         </div>
-      )}
-    </s-section>
-  </s-page>
-);
+
+        {companies.length === 0 ? (
+          <s-empty-state heading="No companies yet" />
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 900,
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Company</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>
+                    Shopify company ID
+                  </th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Credit</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {companies.map((company) => (
+                  <tr
+                    key={company.id}
+                    style={{ borderTop: "1px solid #e3e3e3" }}
+                  >
+                    <td style={{ padding: "8px" }}>{company.name}</td>
+                    <td
+                      style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
+                    >
+                      {company.shopifyCompanyId
+                        ? company.shopifyCompanyId.replace(
+                            "gid://shopify/Company/",
+                            "",
+                          )
+                        : "–"}
+                    </td>
+
+                    <td style={{ padding: "8px" }}>
+                      {company.contactName ? (
+                        <span>
+                          {company.contactName}
+                          {company.contactEmail
+                            ? ` • ${company.contactEmail}`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span style={{ color: "#5c5f62" }}>Not set</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {formatCredit(company.creditLimit)}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {new Date(company.updatedAt).toLocaleString()}
+                    </td>
+                    <td style={{ padding: "8px", minWidth: 180 }}>
+                      <updateFetcher.Form
+                        method="post"
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          name="intent"
+                          value="updateCredit"
+                          hidden
+                          readOnly
+                        />
+                        <input name="id" value={company.id} hidden readOnly />
+                        <input
+                          name="creditLimit"
+                          defaultValue={company.creditLimit}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          style={{
+                            padding: 8,
+                            borderRadius: 8,
+                            border: "1px solid #c9ccd0",
+                            width: 120,
+                          }}
+                        />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <s-button
+                            size="slim"
+                            type="submit"
+                            variant="primary"
+                            loading={isUpdating}
+                          >
+                            Save
+                          </s-button>
+
+                          <s-button
+                            size="slim"
+                            variant="secondary"
+                            loading={
+                              navigation.state === "loading" &&
+                              navigation.location?.pathname.includes(company.id)
+                            }
+                            onClick={() =>
+                              navigate(`/app/companies/${company.id}`)
+                            }
+                          >
+                            View
+                          </s-button>
+                        </div>
+                      </updateFetcher.Form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </s-section>
+    </s-page>
+  );
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

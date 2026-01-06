@@ -185,3 +185,64 @@ export async function countReadNotifications(
     isRead: true,
   });
 }
+
+/**
+ * Send company welcome email
+ */
+export async function sendCompanyWelcomeEmail(
+  submissionEmail: string,
+  companyName: string,
+  contactName: string,
+): Promise<void> {
+  try {
+    // Format email
+    const to = submissionEmail;
+    const subject = `New Company Sync: ${companyName}`;
+    const htmlContent = `
+      <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2>Company Sync Complete</h2>
+            <p>Hello,</p>
+            <p>A new company has been synced from your Shopify B2B network:</p>
+            <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <p><strong>Company:</strong> ${companyName}</p>
+              <p><strong>Primary Contact:</strong> ${contactName}</p>
+            </div>
+            <p>The company has been added to your B2B portal system and is ready for use.</p>
+            <p>Best regards,<br/>B2B Portal System</p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const textContent = `
+      Company Sync Complete
+
+      Hello,
+
+      A new company has been synced from your Shopify B2B network:
+
+      Company: ${companyName}
+      Primary Contact: ${contactName}
+
+      The company has been added to your B2B portal system and is ready for use.
+
+      Best regards,
+      B2B Portal System
+    `;
+
+    // TODO: Implement actual email sending via your email service
+    // For now, this is a placeholder that logs the email
+    console.log("Email sent:", {
+      to,
+      subject,
+      htmlContent,
+      textContent,
+    });
+
+  } catch (error) {
+    console.error("Error sending company welcome email:", error);
+    throw error;
+  }
+}

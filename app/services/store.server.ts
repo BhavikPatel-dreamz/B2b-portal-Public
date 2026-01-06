@@ -14,6 +14,8 @@ export interface UpdateStoreInput {
   isActive?: boolean;
   logo?: string | null;
   submissionEmail?: string | null;
+  companyWelcomeEmailTemplate?: string | null;
+  companyWelcomeEmailEnabled?: boolean;
 }
 
 /**
