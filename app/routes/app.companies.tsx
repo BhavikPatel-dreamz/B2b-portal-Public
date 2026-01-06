@@ -347,13 +347,7 @@ return (
                           <s-button
                             size="slim"
                             variant="secondary"
-                            loading={
-                              navigation.state === "loading" &&
-                              navigation.location?.pathname.includes(company.id)
-                            }
-                            onClick={() =>
-                              navigate(`/app/companies/${company.id}`)
-                            }
+                            url={`/app/companies/${company.id}`}
                           >
                             View
                           </s-button>
