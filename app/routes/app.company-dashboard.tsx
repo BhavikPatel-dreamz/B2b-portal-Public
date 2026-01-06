@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
@@ -50,8 +50,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
   const url = new URL(request.url);
-  const companyId = url.searchParams.get("companyId");
-
+  const companyId = params.companyId;
   if (!companyId) {
     throw new Response("Company ID is required", { status: 400 });
   }
@@ -109,24 +108,37 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 
   // Get order statistics
-  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] = await Promise.all([
-    prisma.b2BOrder.count({
-      where: { companyId, orderStatus: { not: "cancelled" } },
-    }),
-    prisma.b2BOrder.count({
-      where: { companyId, paymentStatus: "paid", orderStatus: { not: "cancelled" } },
-    }),
-    prisma.b2BOrder.count({
-      where: { companyId, paymentStatus: { in: ["pending", "partial"] }, orderStatus: { not: "cancelled" } },
-    }),
-    prisma.b2BOrder.count({
-      where: { companyId, orderStatus: { in: ["draft", "submitted", "processing"] } },
-    }),
-  ]);
+  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
+    await Promise.all([
+      prisma.b2BOrder.count({
+        where: { companyId, orderStatus: { not: "cancelled" } },
+      }),
+      prisma.b2BOrder.count({
+        where: {
+          companyId,
+          paymentStatus: "paid",
+          orderStatus: { not: "cancelled" },
+        },
+      }),
+      prisma.b2BOrder.count({
+        where: {
+          companyId,
+          paymentStatus: { in: ["pending", "partial"] },
+          orderStatus: { not: "cancelled" },
+        },
+      }),
+      prisma.b2BOrder.count({
+        where: {
+          companyId,
+          orderStatus: { in: ["draft", "submitted", "processing"] },
+        },
+      }),
+    ]);
 
   const creditPercentageUsed =
     creditSummary.creditLimit.toNumber() > 0
-      ? ((creditSummary.usedCredit.toNumber() + creditSummary.pendingCredit.toNumber()) /
+      ? ((creditSummary.usedCredit.toNumber() +
+          creditSummary.pendingCredit.toNumber()) /
           creditSummary.creditLimit.toNumber()) *
         100
       : 0;
@@ -163,9 +175,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       paymentStatus: order.paymentStatus,
       orderStatus: order.orderStatus,
       createdAt: order.createdAt.toISOString(),
-      createdBy: [order.createdByUser.firstName, order.createdByUser.lastName]
-        .filter(Boolean)
-        .join(" ") || order.createdByUser.email,
+      createdBy:
+        [order.createdByUser.firstName, order.createdByUser.lastName]
+          .filter(Boolean)
+          .join(" ") || order.createdByUser.email,
     })),
     orderStats: {
       total: totalOrders,
@@ -176,7 +189,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   } satisfies LoaderData);
 };
 
-function getCreditStatusColor(percentageUsed: number): "success" | "warning" | "critical" {
+function getCreditStatusColor(
+  percentageUsed: number,
+): "success" | "warning" | "critical" {
   if (percentageUsed < 70) return "success";
   if (percentageUsed < 90) return "warning";
   return "critical";
@@ -280,15 +295,110 @@ export default function CompanyDashboard() {
 
   const creditStatus = getCreditStatusColor(data.creditPercentageUsed);
   const creditStatusColor =
-    creditStatus === "success" ? "#008060" : creditStatus === "warning" ? "#b98900" : "#d72c0d";
+    creditStatus === "success"
+      ? "#008060"
+      : creditStatus === "warning"
+        ? "#b98900"
+        : "#d72c0d";
 
   return (
     <s-page heading={`${data.company.name} - Credit Dashboard`}>
       <div style={{ marginBottom: 16 }}>
-        <a href="/app/companies" style={{ color: "#005bd3", textDecoration: "none" }}>
+        <Link
+          to="/app/companies"
+          style={{
+            color: "#005bd3",
+            textDecoration: "none",
+            fontSize: 14,
+            fontWeight: 500,
+          }}
+        >
           ← Back to Companies
-        </a>
+        </Link>
       </div>
+
+      {/* Company Information Section */}
+      <s-section heading="Company Information">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+            gap: 24,
+            padding: 8,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#5c5f62",
+                marginBottom: 6,
+                fontWeight: 500,
+              }}
+            >
+              Company Name
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#202223" }}>
+              {data.company.name}
+            </div>
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#5c5f62",
+                marginBottom: 6,
+                fontWeight: 500,
+              }}
+            >
+              Contact Person
+            </div>
+            <div style={{ fontSize: 12, color: "#202223", fontWeight: 600 }}>
+              {data.company.contactName || "—"}
+            </div>
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#5c5f62",
+                marginBottom: 6,
+                fontWeight: 500,
+              }}
+            >
+              Contact Email
+            </div>
+            <div style={{ fontSize: 12, color: "#202223", fontWeight: 600 }}>
+              {data.company.contactEmail}
+            </div>
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#5c5f62",
+                marginBottom: 6,
+                fontWeight: 500,
+              }}
+            >
+              Company ID
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#202223",
+                marginBottom: 6,
+                fontWeight: 600,
+              }}
+            >
+              {data.company.id}
+            </div>
+          </div>
+        </div>
+      </s-section>
 
       {/* Credit Overview */}
       <s-section heading="Credit Status">
@@ -301,23 +411,39 @@ export default function CompanyDashboard() {
           }}
         >
           <div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>Credit Limit</div>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>{formatCurrency(data.creditLimit)}</div>
+            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+              Credit Limit
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>
+              {formatCurrency(data.creditLimit)}
+            </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
               Available Credit
             </div>
-            <div style={{ fontSize: 24, fontWeight: 600, color: creditStatusColor }}>
+            <div
+              style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: creditStatusColor,
+              }}
+            >
               {formatCurrency(data.availableCredit)}
             </div>
           </div>
           <div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>Used Credit</div>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>{formatCurrency(data.usedCredit)}</div>
+            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+              Used Credit
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>
+              {formatCurrency(data.usedCredit)}
+            </div>
           </div>
           <div>
-            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>Pending Credit</div>
+            <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 4 }}>
+              Pending Credit
+            </div>
             <div style={{ fontSize: 24, fontWeight: 600 }}>
               {formatCurrency(data.pendingCredit)}
             </div>
@@ -360,15 +486,33 @@ export default function CompanyDashboard() {
             <strong>{data.orderStats.total}</strong>
           </div>
           <div style={{ borderTop: "1px solid #e0e0e0" }} />
-          <div style={{ display: "flex", justifyContent: "space-between", color: "#008060" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              color: "#008060",
+            }}
+          >
             <span>Paid:</span>
             <span>{data.orderStats.paid}</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", color: "#d72c0d" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              color: "#d72c0d",
+            }}
+          >
             <span>Unpaid:</span>
             <span>{data.orderStats.unpaid}</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", color: "#b98900" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              color: "#b98900",
+            }}
+          >
             <span>Pending:</span>
             <span>{data.orderStats.pending}</span>
           </div>
@@ -382,49 +526,124 @@ export default function CompanyDashboard() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Order ID
                   </th>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Date
                   </th>
-                  <th style={{ padding: 12, textAlign: "right", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "right",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Total
                   </th>
-                  <th style={{ padding: 12, textAlign: "right", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "right",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Paid
                   </th>
-                  <th style={{ padding: 12, textAlign: "right", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "right",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Balance
                   </th>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Payment
                   </th>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Status
                   </th>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Created By
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {data.recentOrders.map((order) => (
-                  <tr key={order.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
-                    <td style={{ padding: 12, fontSize: 13 }}>{order.id.substring(0, 8)}</td>
-                    <td style={{ padding: 12, fontSize: 13 }}>{formatDate(order.createdAt)}</td>
-                    <td style={{ padding: 12, textAlign: "right", fontSize: 13 }}>
+                  <tr
+                    key={order.id}
+                    style={{ borderBottom: "1px solid #e0e0e0" }}
+                  >
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {order.id.substring(0, 8)}
+                    </td>
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {formatDate(order.createdAt)}
+                    </td>
+                    <td
+                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
+                    >
                       {formatCurrency(order.orderTotal)}
                     </td>
-                    <td style={{ padding: 12, textAlign: "right", fontSize: 13 }}>
+                    <td
+                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
+                    >
                       {formatCurrency(order.paidAmount)}
                     </td>
-                    <td style={{ padding: 12, textAlign: "right", fontSize: 13 }}>
+                    <td
+                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
+                    >
                       {formatCurrency(order.remainingBalance)}
                     </td>
-                    <td style={{ padding: 12 }}>{getPaymentStatusBadge(order.paymentStatus)}</td>
-                    <td style={{ padding: 12 }}>{getOrderStatusBadge(order.orderStatus)}</td>
-                    <td style={{ padding: 12, fontSize: 13 }}>{order.createdBy}</td>
+                    <td style={{ padding: 12 }}>
+                      {getPaymentStatusBadge(order.paymentStatus)}
+                    </td>
+                    <td style={{ padding: 12 }}>
+                      {getOrderStatusBadge(order.orderStatus)}
+                    </td>
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {order.createdBy}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -444,19 +663,54 @@ export default function CompanyDashboard() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Date
                   </th>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Type
                   </th>
-                  <th style={{ padding: 12, textAlign: "right", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "right",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Amount
                   </th>
-                  <th style={{ padding: 12, textAlign: "right", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "right",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     New Balance
                   </th>
-                  <th style={{ padding: 12, textAlign: "left", fontSize: 12, fontWeight: 600 }}>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
                     Notes
                   </th>
                 </tr>
@@ -464,7 +718,9 @@ export default function CompanyDashboard() {
               <tbody>
                 {data.recentTransactions.map((tx) => (
                   <tr key={tx.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
-                    <td style={{ padding: 12, fontSize: 13 }}>{formatDate(tx.createdAt)}</td>
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {formatDate(tx.createdAt)}
+                    </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
                       {tx.transactionType.replace(/_/g, " ").toUpperCase()}
                     </td>
@@ -480,10 +736,14 @@ export default function CompanyDashboard() {
                       {tx.creditAmount >= 0 ? "+" : ""}
                       {formatCurrency(tx.creditAmount)}
                     </td>
-                    <td style={{ padding: 12, textAlign: "right", fontSize: 13 }}>
+                    <td
+                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
+                    >
                       {formatCurrency(tx.newBalance)}
                     </td>
-                    <td style={{ padding: 12, fontSize: 13 }}>{tx.notes || "—"}</td>
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {tx.notes || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -496,3 +756,5 @@ export default function CompanyDashboard() {
         )}
       </s-section>
     </s-page>
+  );
+}
