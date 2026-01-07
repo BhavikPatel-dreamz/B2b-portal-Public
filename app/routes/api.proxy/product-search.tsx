@@ -28,7 +28,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       body: JSON.stringify({
         query: `
           query searchProducts($query: String!) {
-            products(first: 10, query: $query) {
+            products(first: 30, query: $query) {
               edges {
                 node {
                   id
@@ -51,7 +51,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         `,
         variables: {
-          query: `title:*${query}*`,
+          // Only active (not draft/archived) and published products
+          query: `status:active published_status:published title:*${query}*`,
         },
       }),
     }
