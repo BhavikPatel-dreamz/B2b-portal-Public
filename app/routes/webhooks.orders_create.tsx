@@ -1,13 +1,38 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
 import { Prisma } from "@prisma/client";
 
 // Handle Shopify ORDERS_CREATE webhook
+async function verifyHmac(request: Request) {
+  const secret = process.env.SHOPIFY_API_SECRET || "";
+  const received = request.headers.get("x-shopify-hmac-sha256") || "";
+  if (!secret || !received) return { ok: false as const, reason: "missing-secret-or-hmac" };
+
+  const clone = request.clone();
+  const bodyBuf = Buffer.from(await clone.arrayBuffer());
+  const digest = createHmac("sha256", secret).update(bodyBuf).digest();
+  const receivedBuf = Buffer.from(received, "base64");
+
+  const ok = receivedBuf.length === digest.length && timingSafeEqual(receivedBuf, digest);
+  if (!ok) {
+    return { ok: false as const, reason: "hmac-mismatch", computed: digest.toString("base64"), received };
+  }
+  return { ok: true as const };
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
+    const pre = await verifyHmac(request);
+    if (!pre.ok) {
+      const headers = Object.fromEntries(request.headers.entries());
+      console.error("Pre-HMAC check failed for orders/create", { ...pre, headers });
+      return new Response("Unauthorized", { status: 401 });
+    }
+
     const { payload, shop, topic } = await authenticate.webhook(request);
     console.log(`Received ${topic} webhook for ${shop}`);
 
