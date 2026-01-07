@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from "axios";
 
 interface EmailParams {
   to: string;
@@ -11,16 +11,18 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
   try {
     // Check if environment variables are configured
     if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
-      console.warn('⚠️ Email service not configured - missing BREVO_API_KEY or BREVO_FROM_EMAIL');
-      return { success: false, error: 'Email service not configured' };
+      console.warn(
+        "⚠️ Email service not configured - missing BREVO_API_KEY or BREVO_FROM_EMAIL",
+      );
+      return { success: false, error: "Email service not configured" };
     }
 
     const response = await axios.post(
-      'https://api.brevo.com/v3/smtp/email',
+      "https://api.brevo.com/v3/smtp/email",
       {
         sender: {
           email: process.env.BREVO_FROM_EMAIL,
-          name: 'B2B Portal'
+          name: "B2B Portal",
         },
         to: [{ email: to }],
         subject: subject,
@@ -29,25 +31,25 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
       },
       {
         headers: {
-          'accept': 'application/json',
-          'api-key': process.env.BREVO_API_KEY,
-          'content-type': 'application/json',
+          accept: "application/json",
+          "api-key": process.env.BREVO_API_KEY,
+          "content-type": "application/json",
         },
-      }
+      },
     );
 
-    console.log('✅ Email sent successfully:', response.data);
+    console.log("✅ Email sent successfully:", response.data);
     return { success: true, messageId: response.data.messageId };
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      console.error('❌ Brevo API Error:', error.response?.data);
+      console.error("❌ Brevo API Error:", error.response?.data);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to send email'
+        error: error.response?.data?.message || "Failed to send email",
       };
     }
-    console.error('❌ Email send error:', error);
-    return { success: false, error: 'Failed to send email' };
+    console.error("❌ Email send error:", error);
+    return { success: false, error: "Failed to send email" };
   }
 }
 
@@ -57,7 +59,7 @@ export async function sendRegistrationEmail(
   storeOwnerName: string,
   email: string,
   companyName: string,
-  contactName: string
+  contactName: string,
 ) {
   const { html, text } = generateRegistrationTemplate(
     companyId,
@@ -75,7 +77,13 @@ export async function sendRegistrationEmail(
   });
 }
 
-function generateRegistrationTemplate(companyId:string,companyName: string, contactName: string, email: string, storeOwnerName: string) {
+function generateRegistrationTemplate(
+  companyId: string,
+  companyName: string,
+  contactName: string,
+  email: string,
+  storeOwnerName: string,
+) {
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -101,7 +109,7 @@ function generateRegistrationTemplate(companyId:string,companyName: string, cont
     </div>
 
     <div class="content">
-      <p>Hello <strong>Store Owner ${storeOwnerName}</strong>,</p>
+      <p>Hello <strong>${storeOwnerName}</strong>,</p>
 
       <p>
         We are pleased to inform you that a new company inquiry has been successfully
@@ -119,11 +127,16 @@ function generateRegistrationTemplate(companyId:string,companyName: string, cont
         manage access, and monitor analytics.
       </p>
 
+      <p style="text-align: center;">
+        <a href="https://findash-shipping-1.myshopify.com/pages/b2b-page" class="btn">
+          View B2B Page
+        </a>
+      </p>
+
       <p>
         If you have any questions or need assistance, please feel free to
         contact our support team.
       </p>
-      link: <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/companies/${companyId}">Company Details</a>
 
       <p>
         Best regards,<br />
@@ -138,7 +151,7 @@ function generateRegistrationTemplate(companyId:string,companyName: string, cont
   const text = `
  Company Inquiry: ${companyName}
 
-Hello Store Owner ${storeOwnerName},
+Hello ${storeOwnerName},
 
 A new company inquiry has been received on the platform.
 
@@ -149,7 +162,7 @@ Contact Email: ${email}
 You can now log in to your dashboard to review company details and manage access.
 
 If you have any questions or need assistance, please contact our support team.
- link: <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/companies/${companyId}">Company Details</a>
+
 
 Best regards,
 ${contactName}
@@ -163,10 +176,13 @@ This email was sent to notify you about a new company inquiry.
 
 export async function sendCompanyAssignmentEmail(
   email: string,
-  companyName: string ,
-  contactName: string
+  companyName: string,
+  contactName: string,
 ) {
-  const { html, text } = generateCompanyAssignmentTemplate(companyName, contactName);
+  const { html, text } = generateCompanyAssignmentTemplate(
+    companyName,
+    contactName,
+  );
 
   return sendEmail({
     to: email,
@@ -176,7 +192,10 @@ export async function sendCompanyAssignmentEmail(
   });
 }
 
-function generateCompanyAssignmentTemplate(companyName: string, contactName: string) {
+function generateCompanyAssignmentTemplate(
+  companyName: string,
+  contactName: string,
+) {
   const html = `
 <!DOCTYPE html>
 <html lang="en">
