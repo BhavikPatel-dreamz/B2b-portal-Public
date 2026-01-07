@@ -616,7 +616,7 @@ export default function CompanyDashboard() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
+          gridTemplateColumns: "repeat(2, 1fr)",
           gap: 10,
           marginBottom: 10,
         }}
@@ -737,9 +737,28 @@ export default function CompanyDashboard() {
             </div>
           </div>
         </s-section>
-
-        {/* User Statistics */}
-        <s-section heading="Users">
+      </div>
+        <s-section>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Users</h3>
+            <Link
+              to={`/app/companies/${data.company.id}/users`}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid #c9ccd0",
+                textDecoration: "none",
+                color: "#202223",
+                fontSize: 12,
+                fontWeight: 500,
+                backgroundColor: "white",
+                cursor: "pointer",
+                textAlign: "center",
+              }}
+            >
+              View All User
+            </Link>
+          </div>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span>Total Users:</span>
@@ -778,54 +797,11 @@ export default function CompanyDashboard() {
                 </span>
               </div>
             ))}
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              {data.company.shopifyCompanyId && (
-                <a
-                  href={`https://admin.shopify.com/store/${data.company.shopifyCompanyId.replace("gid://shopify/Company/", "")}/customers`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    flex: 1,
-                    padding: "6px 12px",
-                    borderRadius: 6,
-                    border: "1px solid #c9ccd0",
-                    textDecoration: "none",
-                    color: "#202223",
-                    fontSize: 12,
-                    fontWeight: 500,
-                    backgroundColor: "white",
-                    cursor: "pointer",
-                    textAlign: "center",
-                  }}
-                >
-                  Shopify
-                </a>
-              )}
-              <Link
-                to={`/app/companies/${data.company.id}/users`}
-                style={{
-                  flex: 1,
-                  padding: "6px 12px",
-                  borderRadius: 6,
-                  border: "1px solid #c9ccd0",
-                  textDecoration: "none",
-                  color: "#202223",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  backgroundColor: "white",
-                  cursor: "pointer",
-                  textAlign: "center",
-                }}
-              >
-                View All
-              </Link>
-            </div>
           </div>
         </s-section>
-      </div>
 
       {/* Recent Orders */}
-      <s-section heading="Recent Orders">
+     <s-section>
         <div
           style={{
             display: "flex",
@@ -834,7 +810,7 @@ export default function CompanyDashboard() {
             marginBottom: 12,
           }}
         >
-          <h4 style={{ margin: 0 }}>Latest 10 Orders</h4>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Recent Orders</h3>
           <Link
             to={`/app/companies/${data.company.id}/orders`}
             style={{
