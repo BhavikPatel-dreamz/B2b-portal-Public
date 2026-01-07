@@ -943,22 +943,12 @@ export default function RegistrationApprovals() {
       flowFetcher.data.customer
     ) {
       setCustomer(flowFetcher.data.customer);
-
       flowFetcher.submit(
         { intent: "checkCompany", companyName: selected?.companyName || "" },
         { method: "post" },
       );
       return;
     }
-
-    // if (
-    //   flowFetcher.data.intent === "checkCustomer" &&
-    //   flowFetcher.data.customer
-    // ) {
-    //   setCustomer(flowFetcher.data.customer);
-    //   setStep("checkCompany");
-    //   return;
-    // }
 
     if (
       flowFetcher.data.intent === "createCustomer" &&
@@ -1149,7 +1139,6 @@ export default function RegistrationApprovals() {
                       {formatDate(submission.createdAt)}
                     </td>
                     <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                      {/* Only show buttons if status is PENDING */}
                       {submission.status === "PENDING" ? (
                         <>
                           <s-button
@@ -1204,7 +1193,7 @@ export default function RegistrationApprovals() {
         >
           <div
             style={{
-              width: "min(1100px, 90vw)",
+              width: "min(800px, 90vw)",
               background: "white",
               borderRadius: 12,
               boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
@@ -1233,11 +1222,12 @@ export default function RegistrationApprovals() {
             </div>
 
             <div style={{ padding: "18px 24px" }}>
+              {/* Step Progress Indicator */}
               <div
                 style={{
                   display: "flex",
                   gap: 8,
-                  marginBottom: 16,
+                  marginBottom: 24,
                   flexWrap: "wrap",
                 }}
               >
@@ -1261,14 +1251,8 @@ export default function RegistrationApprovals() {
                 <StepBadge label="6. Complete" active={step === "complete"} />
               </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 18,
-                }}
-              >
-                {/* Customer Section */}
+              {/* Step: Check Customer */}
+              {step === "check" && (
                 <div
                   style={{
                     border: "1px solid #e3e3e3",
@@ -1276,141 +1260,150 @@ export default function RegistrationApprovals() {
                     padding: 16,
                   }}
                 >
-                  <h4 style={{ marginTop: 0 }}>Customer</h4>
+                  <h4 style={{ marginTop: 0 }}>Check Customer</h4>
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Check if a customer already exists with this email. If not,
-                    create a customer profile.
+                    Checking if a customer already exists with email: {selected.email}
                   </p>
 
-                  <s-button
-                    onClick={() =>
-                      flowFetcher.submit(
-                        { intent: "checkCustomer", email: selected.email },
-                        { method: "post" },
-                      )
-                    }
-                    {...(isFlowLoading &&
-                    flowFetcher.data?.intent === "checkCustomer"
-                      ? { loading: true }
-                      : {})}
-                  >
-                    Re-check customer
-                  </s-button>
-
-                  <div style={{ marginTop: 12 }}>
-                    {customer ? (
+                  {isFlowLoading && flowFetcher.data?.intent === "checkCustomer" ? (
+                    <s-banner tone="info" title="Checking...">
+                      <s-text>Please wait while we search for existing customer.</s-text>
+                    </s-banner>
+                  ) : customer ? (
+                    <>
                       <s-banner tone="success" title="Customer found">
                         <s-text>
-                          {customer.firstName || ""} {customer.lastName || ""} ·{" "}
-                          {customer.email}
+                          {customer.firstName || ""} {customer.lastName || ""} · {customer.email}
                         </s-text>
                       </s-banner>
-                    ) : (
+                      <div style={{ marginTop: 12 }}>
+                        <s-button onClick={() => setStep("createCompany")}>
+                          Continue to Company Setup
+                        </s-button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
                       <s-banner tone="attention" title="No customer found">
-                        <s-text>Create a new customer below.</s-text>
+                        <s-text>No existing customer found. You'll need to create one.</s-text>
                       </s-banner>
-                    )}
-                  </div>
+                      <div style={{ marginTop: 12 }}>
+                        <s-button onClick={() => setStep("createCustomer")}>
+                          Create New Customer
+                        </s-button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
-                  {!customer && (
-                    <form
-                      style={{ display: "grid", gap: 8, marginTop: 12 }}
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const form = e.currentTarget;
-                        const data = new FormData(form);
-                        data.append("intent", "createCustomer");
-                        flowFetcher.submit(data, { method: "post" });
+              {/* Step: Create Customer */}
+              {step === "createCustomer" && (
+                <div
+                  style={{
+                    border: "1px solid #e3e3e3",
+                    borderRadius: 12,
+                    padding: 16,
+                  }}
+                >
+                  <h4 style={{ marginTop: 0 }}>Create Customer</h4>
+                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
+                    Fill in the customer details below.
+                  </p>
+
+                  <form
+                    style={{ display: "grid", gap: 12, marginTop: 12 }}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const form = e.currentTarget;
+                      const data = new FormData(form);
+                      data.append("intent", "createCustomer");
+                      flowFetcher.submit(data, { method: "post" });
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
                       }}
                     >
+                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        Email
+                      </span>
                       <input
-                        name="intent"
-                        value="createCustomer"
-                        hidden
-                        readOnly
+                        name="email"
+                        defaultValue={selected.email}
+                        required
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
                       />
-                      <label
+                    </label>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        First name
+                      </span>
+                      <input
+                        name="firstName"
+                        defaultValue={contactNameParts.firstName}
+                        required
                         style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
                         }}
-                      >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
-                          Email
-                        </span>
-                        <input
-                          name="email"
-                          defaultValue={selected.email}
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
+                      />
+                    </label>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        Last name
+                      </span>
+                      <input
+                        name="lastName"
+                        defaultValue={contactNameParts.lastName}
                         style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
                         }}
-                      >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
-                          First name
-                        </span>
-                        <input
-                          name="firstName"
-                          defaultValue={contactNameParts.firstName}
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
+                      />
+                    </label>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        Phone
+                      </span>
+                      <input
+                        name="phone"
+                        defaultValue={selected.phone}
                         style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
                         }}
-                      >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
-                          Last name
-                        </span>
-                        <input
-                          name="lastName"
-                          defaultValue={contactNameParts.lastName}
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
-                          Phone
-                        </span>
-                        <input
-                          name="phone"
-                          defaultValue={selected.phone}
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
+                      />
+                    </label>
+                    <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                       <s-button
                         type="submit"
                         {...(isFlowLoading &&
@@ -1418,14 +1411,21 @@ export default function RegistrationApprovals() {
                           ? { loading: true }
                           : {})}
                       >
-                        Create customer
+                        Create Customer
                       </s-button>
-                    </form>
-                  )}
+                      <s-button
+                        variant="tertiary"
+                        onClick={() => setStep("check")}
+                      >
+                        Back
+                      </s-button>
+                    </div>
+                  </form>
                 </div>
+              )}
 
-                {/* Company Section */}
-
+              {/* Step: Create Company */}
+              {step === "createCompany" && (
                 <div
                   style={{
                     border: "1px solid #e3e3e3",
@@ -1433,48 +1433,27 @@ export default function RegistrationApprovals() {
                     padding: 16,
                   }}
                 >
-                  <h4 style={{ marginTop: 0 }}>Company & location</h4>
+                  <h4 style={{ marginTop: 0 }}>Create Company & Location</h4>
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Create the company record and main location for this
-                    registration.
+                    Create the company record and main location.
                   </p>
 
-                  <s-button
-                    onClick={() =>
-                      flowFetcher.submit(
-                        {
-                          intent: "checkCompany",
-                          companyName: selected.companyName,
-                        },
-                        { method: "post" },
-                      )
-                    }
-                    {...(isFlowLoading &&
-                    flowFetcher.data?.intent === "checkCompany"
-                      ? { loading: true }
-                      : {})}
-                  >
-                    Re-check company
-                  </s-button>
-
-                  {/* Company Status Banner */}
-                  <div style={{ marginTop: 12 }}>
-                    {company ? (
-                      <s-banner tone="success" title="Company found">
+                  {company ? (
+                    <>
+                      <s-banner tone="success" title="Company exists">
                         <s-text>
-                          {company.name} ·{" "}
-                          {company.locationName || "Main location"}
+                          {company.name} · {company.locationName || "Main location"}
                         </s-text>
                       </s-banner>
-                    ) : (
-                      <s-banner tone="attention" title="No company found">
-                        <s-text>Create a new company below.</s-text>
-                      </s-banner>
-                    )}
-                  </div>
-                  {!company && (
+                      <div style={{ marginTop: 12 }}>
+                        <s-button onClick={() => setStep("assign")}>
+                          Continue to Assign Contact
+                        </s-button>
+                      </div>
+                    </>
+                  ) : (
                     <form
-                      style={{ display: "grid", gap: 8 }}
+                      style={{ display: "grid", gap: 12, marginTop: 12 }}
                       onSubmit={(e) => {
                         e.preventDefault();
                         const form = e.currentTarget;
@@ -1483,12 +1462,6 @@ export default function RegistrationApprovals() {
                         flowFetcher.submit(data, { method: "post" });
                       }}
                     >
-                      <input
-                        name="intent"
-                        value="createCompany"
-                        hidden
-                        readOnly
-                      />
                       <label
                         style={{
                           display: "flex",
@@ -1496,7 +1469,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           Company name
                         </span>
                         <input
@@ -1517,7 +1490,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           Location name
                         </span>
                         <input
@@ -1538,7 +1511,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           Address 1
                         </span>
                         <input
@@ -1559,7 +1532,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           City
                         </span>
                         <input
@@ -1579,7 +1552,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           Province/State code
                         </span>
                         <input
@@ -1599,7 +1572,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           Country code
                         </span>
                         <input
@@ -1620,7 +1593,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           Postal code
                         </span>
                         <input
@@ -1640,7 +1613,7 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62" }}>
+                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
                           Phone
                         </span>
                         <input
@@ -1652,141 +1625,212 @@ export default function RegistrationApprovals() {
                           }}
                         />
                       </label>
-                      <s-button
-                        type="submit"
-                        {...(isFlowLoading &&
-                        flowFetcher.data?.intent === "createCompany"
-                          ? { loading: true }
-                          : {})}
-                      >
-                        Create company
-                      </s-button>
+                      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                        <s-button
+                          type="submit"
+                          {...(isFlowLoading &&
+                          flowFetcher.data?.intent === "createCompany"
+                            ? { loading: true }
+                            : {})}
+                        >
+                          Create Company
+                        </s-button>
+                        <s-button
+                          variant="tertiary"
+                          onClick={() => setStep(customer ? "check" : "createCustomer")}
+                        >
+                          Back
+                        </s-button>
+                      </div>
                     </form>
                   )}
                 </div>
-              </div>
+              )}
 
-              <div
-                style={{
-                  marginTop: 18,
-                  border: "1px solid #e3e3e3",
-                  borderRadius: 12,
-                  padding: 16,
-                }}
-              >
-                <h4 style={{ marginTop: 0 }}>Assign contact & notify</h4>
-                <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                  Assign the customer as the main contact for this company, then
-                  send a welcome email.
-                </p>
-
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <s-button
-                    disabled={!company || !customer}
-                    onClick={() =>
-                      flowFetcher.submit(
-                        {
-                          intent: "assignMainContact",
-                          companyId: company?.id || "",
-                          customerId: customer?.id || "",
-                          locationId: company?.locationId || "",
-                        },
-                        { method: "post" },
-                      )
-                    }
-                    {...(isFlowLoading &&
-                    flowFetcher.data?.intent === "assignMainContact"
-                      ? { loading: true }
-                      : {})}
-                  >
-                    Assign main contact
-                  </s-button>
-
-                  <s-button
-                    disabled={!customer}
-                    onClick={() =>
-                      flowFetcher.submit(
-                        {
-                          intent: "sendWelcomeEmail",
-                          email: selected.email,
-                          contactName: selected.contactName,
-                          companyName: selected.companyName,
-                        },
-                        { method: "post" },
-                      )
-                    }
-                    {...(isFlowLoading &&
-                    flowFetcher.data?.intent === "sendWelcomeEmail"
-                      ? { loading: true }
-                      : {})}
-                  >
-                    Send welcome email
-                  </s-button>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <label
-                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                  >
-                    <span style={{ fontSize: 12, color: "#5c5f62" }}>
-                      Review notes
-                    </span>
-                    <textarea
-                      value={reviewNotes}
-                      onChange={(e) => setReviewNotes(e.target.value)}
-                      placeholder="Optional notes for this decision"
-                      style={{
-                        minHeight: 80,
-                        padding: 10,
-                        borderRadius: 8,
-                        border: "1px solid #c9ccd0",
-                      }}
-                    />
-                  </label>
-                </div>
-
+              {/* Step: Assign Contact */}
+              {step === "assign" && (
                 <div
                   style={{
-                    marginTop: 12,
-                    display: "flex",
-                    gap: 10,
-                    flexWrap: "wrap",
+                    border: "1px solid #e3e3e3",
+                    borderRadius: 12,
+                    padding: 16,
                   }}
                 >
-                  <s-button
-                    variant="primary"
-                    disabled={!customer}
-                    onClick={completeApproval}
-                    {...(isFlowLoading &&
-                    flowFetcher.data?.intent === "completeApproval"
-                      ? { loading: true }
-                      : {})}
-                  >
-                    Mark as approved
-                  </s-button>
-                  <s-button
-                    variant="tertiary"
-                    onClick={() => setSelected(null)}
-                  >
-                    Cancel
-                  </s-button>
-                </div>
+                  <h4 style={{ marginTop: 0 }}>Assign Main Contact</h4>
+                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
+                    Assign the customer as the main contact for this company.
+                  </p>
 
-                {flowFetcher.data?.errors &&
-                  flowFetcher.data.errors.length > 0 && (
-                    <s-banner
-                      tone="critical"
-                      title="Something went wrong"
-                      style={{ marginTop: 12 }}
-                    >
-                      <s-unordered-list>
-                        {flowFetcher.data.errors.map((err) => (
-                          <s-list-item key={err}>{err}</s-list-item>
-                        ))}
-                      </s-unordered-list>
+                  <div style={{ marginTop: 12 }}>
+                    <s-banner tone="info" title="Ready to assign">
+                      <s-text>
+                        Customer: {customer?.firstName} {customer?.lastName}<br />
+                        Company: {company?.name}
+                      </s-text>
                     </s-banner>
-                  )}
-              </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                    <s-button
+                      onClick={() =>
+                        flowFetcher.submit(
+                          {
+                            intent: "assignMainContact",
+                            companyId: company?.id || "",
+                            customerId: customer?.id || "",
+                            locationId: company?.locationId || "",
+                          },
+                          { method: "post" },
+                        )
+                      }
+                      {...(isFlowLoading &&
+                      flowFetcher.data?.intent === "assignMainContact"
+                        ? { loading: true }
+                        : {})}
+                    >
+                      Assign Main Contact
+                    </s-button>
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => setStep("createCompany")}
+                    >
+                      Back
+                    </s-button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step: Send Welcome Email */}
+              {step === "email" && (
+                <div
+                  style={{
+                    border: "1px solid #e3e3e3",
+                    borderRadius: 12,
+                    padding: 16,
+                  }}
+                >
+                  <h4 style={{ marginTop: 0 }}>Send Welcome Email</h4>
+                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
+                    Send a welcome email to notify the customer.
+                  </p>
+
+                  <div style={{ marginTop: 12 }}>
+                    <s-banner tone="info" title="Email details">
+                      <s-text>
+                        To: {selected.email}<br />
+                        Contact: {selected.contactName}<br />
+                        Company: {selected.companyName}
+                      </s-text>
+                    </s-banner>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                    <s-button
+                      onClick={() =>
+                        flowFetcher.submit(
+                          {
+                            intent: "sendWelcomeEmail",
+                            email: selected.email,
+                            contactName: selected.contactName,
+                            companyName: selected.companyName,
+                          },
+                          { method: "post" },
+                        )
+                      }
+                      {...(isFlowLoading &&
+                      flowFetcher.data?.intent === "sendWelcomeEmail"
+                        ? { loading: true }
+                        : {})}
+                    >
+                      Send Welcome Email
+                    </s-button>
+                    <s-button variant="tertiary" onClick={() => setStep("assign")}>
+                      Back
+                    </s-button>
+                    <s-button variant="tertiary" onClick={() => setStep("complete")}>
+                      Skip Email
+                    </s-button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step: Complete */}
+              {step === "complete" && (
+                <div
+                  style={{
+                    border: "1px solid #e3e3e3",
+                    borderRadius: 12,
+                    padding: 16,
+                  }}
+                >
+                  <h4 style={{ marginTop: 0 }}>Complete Approval</h4>
+                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
+                    Review and add any notes before completing the approval.
+                  </p>
+
+                  <div style={{ marginTop: 12 }}>
+                    <label
+                      style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                    >
+                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        Review notes (optional)
+                      </span>
+                      <textarea
+                        value={reviewNotes}
+                        onChange={(e) => setReviewNotes(e.target.value)}
+                        placeholder="Add any notes about this approval"
+                        style={{
+                          minHeight: 80,
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                    <s-button
+                      variant="primary"
+                      onClick={completeApproval}
+                      {...(isFlowLoading &&
+                      flowFetcher.data?.intent === "completeApproval"
+                        ? { loading: true }
+                        : {})}
+                    >
+                      Mark as Approved
+                    </s-button>
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => setStep("email")}
+                    >
+                      Back
+                    </s-button>
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => setSelected(null)}
+                    >
+                      Cancel
+                    </s-button>
+                  </div>
+                </div>
+              )}
+
+              {/* Error Display */}
+              {flowFetcher.data?.errors &&
+                flowFetcher.data.errors.length > 0 && (
+                  <s-banner
+                    tone="critical"
+                    title="Something went wrong"
+                    style={{ marginTop: 16 }}
+                  >
+                    <s-unordered-list>
+                      {flowFetcher.data.errors.map((err) => (
+                        <s-list-item key={err}>{err}</s-list-item>
+                      ))}
+                    </s-unordered-list>
+                  </s-banner>
+                )}
             </div>
           </div>
         </div>
@@ -1795,6 +1839,31 @@ export default function RegistrationApprovals() {
   );
 }
 
+// function StepBadge({ label, active }: { label: string; active: boolean }) {
+//   return (
+//     <span
+//       style={{
+//         padding: "6px 12px",
+//         borderRadius: 6,
+//         fontSize: 13,
+//         fontWeight: 500,
+//         background: active ? "#008060" : "#f1f2f4",
+//         color: active ? "white" : "#5c5f62",
+//       }}
+//     >
+//       {label}
+//     </span>
+//   );
+// }
+
+// function formatDate(dateString: string) {
+//   const date = new Date(dateString);
+//   return date.toLocaleDateString("en-US", {
+//     month: "short",
+//     day: "numeric",
+//     year: "numeric",
+//   });
+// }
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
