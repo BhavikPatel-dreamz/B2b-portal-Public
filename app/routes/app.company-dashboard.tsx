@@ -9,6 +9,7 @@ import { useState } from "react";
 
 type LoaderData = {
   company: {
+    paymentTermsTemplateId: string;
     id: string;
     name: string;
     contactName: string | null;
@@ -107,6 +108,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         intent,
         success: true,
         message: "Credit updated",
+      });
+    }
+    case "updatePaymentTeam": {
+      const id = (form.id as string)?.trim();
+      const paymentTermsTemplateId = (form.paymentTermsTemplateId as string)?.trim() || null;
+
+      if (!id) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company id is required"],
+        });
+      }
+      if (!paymentTermsTemplateId) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Payment team is required"],
+        });
+      }
+      console.log(paymentTermsTemplateId,"565656");
+      await prisma.companyAccount.update({
+        where: { id },
+        data: { paymentTeam: paymentTermsTemplateId },
+      });
+
+      return Response.json({
+        intent,
+        success: true,
+        message: "Payment team updated",
       });
     }
 
@@ -246,6 +277,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       contactName: dashboardData.company.contactName,
       contactEmail: dashboardData.company.contactEmail,
       shopifyCompanyId: dashboardData.company.shopifyCompanyId,
+      paymentTermsTemplateId: dashboardData.company.paymentTeam || "",
     },
     creditLimit: creditSummary.creditLimit.toNumber(),
     availableCredit: creditSummary.availableCredit.toNumber(),
@@ -393,12 +425,17 @@ function getOrderStatusBadge(status: string) {
   );
 }
 
+
 export default function CompanyDashboard() {
   const data = useLoaderData<LoaderData>();
   const fetcher = useFetcher();
   const [isEditingCredit, setIsEditingCredit] = useState(false);
   const [creditLimitValue, setCreditLimitValue] = useState(
     data.creditLimit.toString()
+  );
+  const [isEditingPaymentTerms, setIsEditingPaymentTerms] = useState(false);
+  const [selectedPaymentTerms, setSelectedPaymentTerms] = useState(
+    data.company.paymentTermsTemplateId || ""
   );
 
   const creditStatus = getCreditStatusColor(data.creditPercentageUsed);
@@ -424,6 +461,38 @@ export default function CompanyDashboard() {
     setIsEditingCredit(false);
   };
 
+  const handlePaymentTermsUpdate = () => {
+    const formData = new FormData();
+    formData.append("intent", "updatePaymentTeam");
+    formData.append("id", data.company.id);
+    formData.append("paymentTermsTemplateId", selectedPaymentTerms);
+
+    fetcher.submit(formData, { method: "POST" });
+    setIsEditingPaymentTerms(false);
+  };
+
+  const handleCancelPaymentTermsEdit = () => {
+    setSelectedPaymentTerms(data.company.paymentTermsTemplateId || "");
+    setIsEditingPaymentTerms(false);
+  };
+
+  // Payment terms options
+  const paymentTermsOptions = [
+    { value: "", label: "No payment terms" },
+    { value: "due_on_fulfillment", label: "Due on fulfillment" },
+    { value: "net_7", label: "Net 7" },
+    { value: "net_15", label: "Net 15" },
+    { value: "net_30", label: "Net 30" },
+    { value: "net_45", label: "Net 45" },
+    { value: "net_60", label: "Net 60" },
+    { value: "net_90", label: "Net 90" },
+  ];
+
+  const getPaymentTermsLabel = (value: string) => {
+    const option = paymentTermsOptions.find(opt => opt.value === value);
+    return option ? option.label : "No payment terms";
+  };
+
   return (
     <s-page heading={`${data.company.name} - Credit Dashboard`}>
       <div style={{ marginBottom: 16 }}>
@@ -440,8 +509,161 @@ export default function CompanyDashboard() {
         </Link>
       </div>
 
+      {/* Payment Terms Edit Modal */}
+      {isEditingPaymentTerms && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={handleCancelPaymentTermsEdit}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              borderRadius: 8,
+              padding: 24,
+              width: "90%",
+              maxWidth: 500,
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 20,
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+                Edit payment terms
+              </h2>
+              <button
+                onClick={handleCancelPaymentTermsEdit}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  color: "#5c5f62",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  marginBottom: 8,
+                  color: "#202223",
+                }}
+              >
+                Set payment terms for {data.company.name}
+              </label>
+              <select
+                value={selectedPaymentTerms}
+                onChange={(e) => setSelectedPaymentTerms(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  fontSize: 13,
+                  border: "1px solid #c9ccd0",
+                  borderRadius: 6,
+                  backgroundColor: "white",
+                  cursor: "pointer",
+                }}
+              >
+                {paymentTermsOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                onClick={handleCancelPaymentTermsEdit}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  border: "1px solid #c9ccd0",
+                  borderRadius: 6,
+                  backgroundColor: "white",
+                  cursor: "pointer",
+                  color: "#202223",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePaymentTermsUpdate}
+                disabled={fetcher.state === "submitting"}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  border: "none",
+                  borderRadius: 6,
+                  backgroundColor: "#008060",
+                  color: "white",
+                  cursor: fetcher.state === "submitting" ? "not-allowed" : "pointer",
+                  opacity: fetcher.state === "submitting" ? 0.6 : 1,
+                }}
+              >
+                {fetcher.state === "submitting" ? "Saving..." : "Save"}
+              </button>
+            </div>
+
+            {fetcher.data?.intent === "updatePaymentTeam" && fetcher.data?.success && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 8,
+                  fontSize: 12,
+                  color: "#008060",
+                  backgroundColor: "#d4f3e6",
+                  borderRadius: 4,
+                }}
+              >
+                ✓ Payment terms updated successfully
+              </div>
+            )}
+            {fetcher.data?.intent === "updatePaymentTeam" && !fetcher.data?.success && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 8,
+                  fontSize: 12,
+                  color: "#d72c0d",
+                  backgroundColor: "#ffd9d9",
+                  borderRadius: 4,
+                }}
+              >
+                {fetcher.data?.errors?.[0] || "Failed to update payment terms"}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Company Information Section */}
-   <s-section heading="Company Information">
+      <s-section heading="Company Information">
         <div
           style={{
             border: "1px solid #e0e0e0",
@@ -453,7 +675,7 @@ export default function CompanyDashboard() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2fr 1.5fr 2fr 1.5fr",
+              gridTemplateColumns: "2fr 1.5fr 2fr 1.5fr 1.5fr",
               gap: 24,
               alignItems: "start",
             }}
@@ -525,6 +747,47 @@ export default function CompanyDashboard() {
                 }}
               >
                 {data.company.contactEmail || "—"}
+              </div>
+            </div>
+
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  marginBottom: 6,
+                  fontWeight: 500,
+                }}
+              >
+                Payment Terms
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#202223",
+                  }}
+                >
+                  {getPaymentTermsLabel(data.company.paymentTermsTemplateId)}
+                </div>
+                <button
+                  onClick={() => setIsEditingPaymentTerms(true)}
+                  style={{
+                    padding: "4px 6px",
+                    border: "none",
+                    background: "none",
+                    cursor: "pointer",
+                    color: "#5c5f62",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                  title="Edit payment terms"
+                >
+                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                </button>
               </div>
             </div>
 
@@ -618,18 +881,30 @@ export default function CompanyDashboard() {
                   >
                     {formatCurrency(data.creditLimit)}
                   </div>
-                  <s-button
+                  <button
                     onClick={() => setIsEditingCredit(true)}
-                    variant="primary"
+                    style={{
+                      padding: "4px 3px",
+                      border: "none",
+                      background: "none",
+                      cursor: "pointer",
+                      color: "#5c5f62",
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                    title="Edit credit limit"
                   >
-                    Edit
-                  </s-button>
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
                 </div>
               )}
             </div>
           </div>
         </div>
       </s-section>
+
       {/* Top Row: Company Info, Credit Status, Order Summary */}
       <div
         style={{
@@ -756,93 +1031,94 @@ export default function CompanyDashboard() {
           </div>
         </s-section>
       </div>
-        <s-section>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Users</h3>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => {
-                  const formData = new FormData();
-                  formData.append("intent", "syncUsers");
-                  fetcher.submit(formData, { method: "POST" });
-                }}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 6,
-                  border: "1px solid #c9ccd0",
-                  color: "#202223",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  backgroundColor: "white",
-                  cursor: "pointer",
-                  textAlign: "center",
-                }}
-                disabled={fetcher.state === "submitting"}
-              >
-                {fetcher.state === "submitting" ? "Syncing..." : "Sync Users"}
-              </button>
-              <Link
-                to={`/app/companies/${data.company.id}/users`}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 6,
-                  border: "1px solid #c9ccd0",
-                  textDecoration: "none",
-                  color: "#202223",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  backgroundColor: "white",
-                  cursor: "pointer",
-                  textAlign: "center",
-                }}
-              >
-                View All User
-              </Link>
-            </div>
+
+      <s-section>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Users</h3>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => {
+                const formData = new FormData();
+                formData.append("intent", "syncUsers");
+                fetcher.submit(formData, { method: "POST" });
+              }}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid #c9ccd0",
+                color: "#202223",
+                fontSize: 12,
+                fontWeight: 500,
+                backgroundColor: "white",
+                cursor: "pointer",
+                textAlign: "center",
+              }}
+              disabled={fetcher.state === "submitting"}
+            >
+              {fetcher.state === "submitting" ? "Syncing..." : "Sync Users"}
+            </button>
+            <Link
+              to={`/app/companies/${data.company.id}/users`}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid #c9ccd0",
+                textDecoration: "none",
+                color: "#202223",
+                fontSize: 12,
+                fontWeight: 500,
+                backgroundColor: "white",
+                cursor: "pointer",
+                textAlign: "center",
+              }}
+            >
+              View All Users
+            </Link>
           </div>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>Total Users:</span>
-              <strong>{data.totalUsers}</strong>
-            </div>
-            <div style={{ borderTop: "1px solid #e0e0e0" }} />
-            {data.users.slice(0, 3).map((user) => (
-              <div
-                key={user.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  fontSize: 13,
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 500 }}>
-                    {[user.firstName, user.lastName].filter(Boolean).join(" ") ||
-                      user.email}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#5c5f62" }}>
-                    {user.companyRole || user.role}
-                  </div>
+        </div>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Total Users:</span>
+            <strong>{data.totalUsers}</strong>
+          </div>
+          <div style={{ borderTop: "1px solid #e0e0e0" }} />
+          {data.users.slice(0, 3).map((user) => (
+            <div
+              key={user.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: 13,
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 500 }}>
+                  {[user.firstName, user.lastName].filter(Boolean).join(" ") ||
+                    user.email}
                 </div>
-                <span
-                  style={{
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                    fontSize: 11,
-                    backgroundColor: user.status === "ACTIVE" ? "#d4f3e6" : "#e0e0e0",
-                    color: user.status === "ACTIVE" ? "#008060" : "#5c5f62",
-                  }}
-                >
-                  {user.status}
-                </span>
+                <div style={{ fontSize: 11, color: "#5c5f62" }}>
+                  {user.companyRole || user.role}
+                </div>
               </div>
-            ))}
-          </div>
-        </s-section>
+              <span
+                style={{
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  fontSize: 11,
+                  backgroundColor: user.status === "ACTIVE" ? "#d4f3e6" : "#e0e0e0",
+                  color: user.status === "ACTIVE" ? "#008060" : "#5c5f62",
+                }}
+              >
+                {user.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      </s-section>
 
       {/* Recent Orders */}
-     <s-section>
+      <s-section>
         <div
           style={{
             display: "flex",

@@ -305,6 +305,7 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
       contactEmail: true,
       shopId: true,
       shopifyCompanyId: true,
+      paymentTeam: true,
     },
   });
 

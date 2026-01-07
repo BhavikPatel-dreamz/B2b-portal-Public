@@ -171,6 +171,7 @@ model CompanyAccount {
   contactEmail     String?
 
   creditLimit      Decimal  @default(0) @db.Decimal(14, 2)
+  paymentTeam      String?
 
   users            User[]               @relation("CompanyUsers")
   orders           B2BOrder[]           @relation("CompanyAccountOrders")

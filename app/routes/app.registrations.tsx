@@ -98,7 +98,7 @@ const buildUserErrorList = (payload: any) => {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
@@ -114,7 +114,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const submissions = await prisma.registrationSubmission.findMany({
     where: {
       shopId: store.id,
-      status: "PENDING"
+      status: "PENDING",
     },
     orderBy: { createdAt: "desc" },
   });
@@ -123,6 +123,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shopId: store.id },
     orderBy: { name: "asc" },
   });
+
+  // Fetch payment terms templates - NO 'first' argument
+  const paymentTermsResponse = await admin.graphql(
+    `#graphql
+    query {
+      paymentTermsTemplates {
+        id
+        name
+        paymentTermsType
+        dueInDays
+        description
+        translatedName
+      }
+    }`,
+  );
+
+  const paymentTermsData = await paymentTermsResponse.json();
+  const paymentTermsTemplates = paymentTermsData.data.paymentTermsTemplates;
 
   return Response.json({
     submissions: submissions.map((submission) => ({
@@ -137,6 +155,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       creditLimit: company.creditLimit.toString(),
       updatedAt: company.updatedAt.toISOString(),
     })),
+    paymentTermsTemplates, // Add this
     storeMissing: false,
   });
 };
@@ -515,8 +534,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
         }
-
         const customer = payload?.data?.customerCreate?.customer;
+        const registrationData = await prisma.registrationSubmission.findFirst({
+          where: { email },
+        });
+
+        if (!registrationData) {
+          await prisma.registrationSubmission.create({
+            data: {
+              contactName: `${firstName} ${lastName || ""}`.trim(),
+              email,
+              phone: phone || "",
+              shopifyCustomerId: customer?.id || null,
+              status: "PENDING",
+              companyName: "",
+              businessType: "",
+              shopId: store.id,
+            },
+          });
+        }
         return Response.json({
           intent,
           success: true,
@@ -575,6 +611,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             locationName: location?.name || null,
           };
         }
+        const companyExists = await prisma.companyAccount.findFirst({
+          where: { name: companyName },
+        });
+        if (companyExists) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company already exists"],
+          });
+        }
 
         return Response.json({
           intent,
@@ -583,7 +629,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: company ? "Company exists" : "No company found",
         });
       }
-
       case "createCompany": {
         const companyName = (form.companyName as string)?.trim();
         const locationName =
@@ -594,6 +639,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const provinceCode = (form.provinceCode as string)?.trim();
         const zip = (form.zip as string)?.trim();
         const phone = (form.locationPhone as string)?.trim();
+        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
 
         if (!companyName || !address1 || !city || !countryCode || !zip) {
           return Response.json({
@@ -605,21 +651,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        // Create company
         const createCompanyResponse = await admin.graphql(
           `#graphql
- mutation CompanyCreate($input: CompanyCreateInput!) {
-    companyCreate(input: $input) {
-      company {
-        id
-        name
+    mutation CompanyCreate($input: CompanyCreateInput!) {
+      companyCreate(input: $input) {
+        company {
+          id
+          name
+        }
+        userErrors {
+          field
+          message
+        }
       }
-      userErrors {
-        field
-        message
-      }
-    }
-  }
-  `,
+    }`,
           {
             variables: {
               input: {
@@ -634,6 +680,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyPayload = await createCompanyResponse.json();
         const companyErrors = buildUserErrorList(companyPayload);
 
+        const companyExists = await prisma.companyAccount.findFirst({
+          where: { name: companyName },
+        });
+        if (!companyExists) {
+          await prisma.companyAccount.create({
+            data: {
+              shopId: store.id,
+              name: companyName,
+              shopifyCompanyId: companyPayload.data.companyCreate.company.id,
+              paymentTeam: paymentTermsTemplateId,
+            },
+          });
+        }
+
         if (companyErrors.length) {
           return Response.json({
             intent,
@@ -644,34 +704,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const companyId = companyPayload.data.companyCreate.company.id;
 
+        // Prepare location input
+        const locationInput: any = {
+          name: locationName,
+          shippingAddress: {
+            address1,
+            city,
+            countryCode,
+            zip,
+            phone: phone || undefined,
+          },
+        };
+
+        // Add payment terms if provided
+        if (paymentTermsTemplateId) {
+          locationInput.buyerExperienceConfiguration = {
+            paymentTermsTemplateId,
+          };
+        }
+
+        // Create location with payment terms
         const createLocationResponse = await admin.graphql(
           `#graphql
-  mutation CompanyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
-    companyLocationCreate(companyId: $companyId, input: $input) {
-      companyLocation {
-        id
-        name
+    mutation CompanyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
+      companyLocationCreate(companyId: $companyId, input: $input) {
+        companyLocation {
+          id
+          name
+        }
+        userErrors {
+          field
+          message
+        }
       }
-      userErrors {
-        field
-        message
-      }
-    }
-  }
-  `,
+    }`,
           {
             variables: {
               companyId,
-              input: {
-                name: locationName,
-                shippingAddress: {
-                  address1,
-                  city,
-                  countryCode,
-                  zip,
-                  phone: phone || undefined,
-                },
-              },
+              input: locationInput,
             },
           },
         );
@@ -756,7 +826,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         // Call the function with separate arguments, not an object
-        await sendCompanyAssignmentEmail(store.storeOwnerName,email, companyName, contactName);
+        await sendCompanyAssignmentEmail(
+          store.storeOwnerName,
+          email,
+          companyName,
+          contactName,
+        );
 
         return Response.json({
           intent,
@@ -909,11 +984,17 @@ const StepBadge = ({ label, active }: { label: string; active: boolean }) => (
 );
 
 export default function RegistrationApprovals() {
-  const { submissions, companies, storeMissing } =
+  const { submissions, companies, storeMissing, paymentTermsTemplates } =
     useLoaderData<{
       submissions: RegistrationSubmission[];
       companies: CompanyAccount[];
       storeMissing: boolean;
+      paymentTermsTemplates: Array<{
+        id: string;
+        name: string;
+        paymentTermsType: string;
+        dueInDays: number | null;
+      }>;
     }>();
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [step, setStep] = useState<
@@ -1112,67 +1193,72 @@ export default function RegistrationApprovals() {
               </thead>
               <tbody>
                 {submissions
-                 .filter((submission) => submission.status === "PENDING")
-                 .map((submission) => (
-                  <tr
-                    key={submission.id}
-                    style={{ borderTop: "1px solid #e3e3e3" }}
-                  >
-                    <td style={{ padding: "8px" }}>{submission.companyName}</td>
-                    <td style={{ padding: "8px" }}>{submission.contactName}</td>
-                    <td style={{ padding: "8px" }}>{submission.email}</td>
-                    <td style={{ padding: "8px" }}>{submission.phone}</td>
-                    <td style={{ padding: "8px" }}>
-                      <s-badge
-                        tone={
-                          submission.status === "APPROVED"
-                            ? "success"
-                            : submission.status === "REJECTED"
-                              ? "critical"
-                              : "attention"
-                        }
-                      >
-                        {submission.status}
-                      </s-badge>
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      {formatDate(submission.createdAt)}
-                    </td>
-                    <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                      {submission.status === "PENDING" ? (
-                        <>
-                          <s-button
-                            size="slim"
-                            onClick={() => startApproval(submission)}
-                            {...(isFlowLoading && selected?.id === submission.id
-                              ? { loading: true }
-                              : {})}
-                          >
-                            Approve
-                          </s-button>
-                          <s-button
-                            tone="critical"
-                            variant="tertiary"
-                            size="slim"
-                            onClick={() => rejectSubmission(submission)}
-                            style={{ marginLeft: 8 }}
-                            {...(isRejecting && selected?.id === submission.id
-                              ? { loading: true }
-                              : {})}
-                          >
-                            Reject
-                          </s-button>
-                        </>
-                      ) : (
-                        <span style={{ color: "#5c5f62", fontSize: 14 }}>
-                          {submission.status === "APPROVED"
-                            ? "Approved"
-                            : "Rejected"}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                  .filter((submission) => submission.status === "PENDING")
+                  .map((submission) => (
+                    <tr
+                      key={submission.id}
+                      style={{ borderTop: "1px solid #e3e3e3" }}
+                    >
+                      <td style={{ padding: "8px" }}>
+                        {submission.companyName}
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {submission.contactName}
+                      </td>
+                      <td style={{ padding: "8px" }}>{submission.email}</td>
+                      <td style={{ padding: "8px" }}>{submission.phone}</td>
+                      <td style={{ padding: "8px" }}>
+                        <s-badge
+                          tone={
+                            submission.status === "APPROVED"
+                              ? "success"
+                              : submission.status === "REJECTED"
+                                ? "critical"
+                                : "attention"
+                          }
+                        >
+                          {submission.status}
+                        </s-badge>
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {formatDate(submission.createdAt)}
+                      </td>
+                      <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
+                        {submission.status === "PENDING" ? (
+                          <>
+                            <s-button
+                              size="slim"
+                              onClick={() => startApproval(submission)}
+                              {...(isFlowLoading &&
+                              selected?.id === submission.id
+                                ? { loading: true }
+                                : {})}
+                            >
+                              Approve
+                            </s-button>
+                            <s-button
+                              tone="critical"
+                              variant="tertiary"
+                              size="slim"
+                              onClick={() => rejectSubmission(submission)}
+                              style={{ marginLeft: 8 }}
+                              {...(isRejecting && selected?.id === submission.id
+                                ? { loading: true }
+                                : {})}
+                            >
+                              Reject
+                            </s-button>
+                          </>
+                        ) : (
+                          <span style={{ color: "#5c5f62", fontSize: 14 }}>
+                            {submission.status === "APPROVED"
+                              ? "Approved"
+                              : "Rejected"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
@@ -1262,18 +1348,23 @@ export default function RegistrationApprovals() {
                 >
                   <h4 style={{ marginTop: 0 }}>Check Customer</h4>
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Checking if a customer already exists with email: {selected.email}
+                    Checking if a customer already exists with email:{" "}
+                    {selected.email}
                   </p>
 
-                  {isFlowLoading && flowFetcher.data?.intent === "checkCustomer" ? (
+                  {isFlowLoading &&
+                  flowFetcher.data?.intent === "checkCustomer" ? (
                     <s-banner tone="info" title="Checking...">
-                      <s-text>Please wait while we search for existing customer.</s-text>
+                      <s-text>
+                        Please wait while we search for existing customer.
+                      </s-text>
                     </s-banner>
                   ) : customer ? (
                     <>
                       <s-banner tone="success" title="Customer found">
                         <s-text>
-                          {customer.firstName || ""} {customer.lastName || ""} · {customer.email}
+                          {customer.firstName || ""} {customer.lastName || ""} ·{" "}
+                          {customer.email}
                         </s-text>
                       </s-banner>
                       <div style={{ marginTop: 12 }}>
@@ -1285,7 +1376,9 @@ export default function RegistrationApprovals() {
                   ) : (
                     <>
                       <s-banner tone="attention" title="No customer found">
-                        <s-text>No existing customer found. You'll need to create one.</s-text>
+                        <s-text>
+                          No existing customer found. You'll need to create one.
+                        </s-text>
                       </s-banner>
                       <div style={{ marginTop: 12 }}>
                         <s-button onClick={() => setStep("createCustomer")}>
@@ -1328,7 +1421,13 @@ export default function RegistrationApprovals() {
                         gap: 4,
                       }}
                     >
-                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#5c5f62",
+                          fontWeight: 500,
+                        }}
+                      >
                         Email
                       </span>
                       <input
@@ -1349,7 +1448,13 @@ export default function RegistrationApprovals() {
                         gap: 4,
                       }}
                     >
-                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#5c5f62",
+                          fontWeight: 500,
+                        }}
+                      >
                         First name
                       </span>
                       <input
@@ -1370,7 +1475,13 @@ export default function RegistrationApprovals() {
                         gap: 4,
                       }}
                     >
-                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#5c5f62",
+                          fontWeight: 500,
+                        }}
+                      >
                         Last name
                       </span>
                       <input
@@ -1390,7 +1501,13 @@ export default function RegistrationApprovals() {
                         gap: 4,
                       }}
                     >
-                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#5c5f62",
+                          fontWeight: 500,
+                        }}
+                      >
                         Phone
                       </span>
                       <input
@@ -1423,7 +1540,7 @@ export default function RegistrationApprovals() {
                   </form>
                 </div>
               )}
-
+             
               {/* Step: Create Company */}
               {step === "createCompany" && (
                 <div
@@ -1442,7 +1559,8 @@ export default function RegistrationApprovals() {
                     <>
                       <s-banner tone="success" title="Company exists">
                         <s-text>
-                          {company.name} · {company.locationName || "Main location"}
+                          {company.name} ·{" "}
+                          {company.locationName || "Main location"}
                         </s-text>
                       </s-banner>
                       <div style={{ marginTop: 12 }}>
@@ -1469,7 +1587,13 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           Company name
                         </span>
                         <input
@@ -1483,6 +1607,9 @@ export default function RegistrationApprovals() {
                           }}
                         />
                       </label>
+
+                      {/* Payment Terms Dropdown - NEW FIELD */}
+                  
                       <label
                         style={{
                           display: "flex",
@@ -1490,7 +1617,47 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
+                          Payment terms
+                        </span>
+                        <select
+                          name="paymentTerms"
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            border: "1px solid #c9ccd0",
+                            backgroundColor: "white",
+                          }}
+                        >
+                          <option value="">No payment terms</option>
+                          {paymentTermsTemplates?.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           Location name
                         </span>
                         <input
@@ -1504,6 +1671,8 @@ export default function RegistrationApprovals() {
                           }}
                         />
                       </label>
+
+                      {/* ... rest of the form fields remain same ... */}
                       <label
                         style={{
                           display: "flex",
@@ -1511,7 +1680,13 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           Address 1
                         </span>
                         <input
@@ -1532,7 +1707,13 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           City
                         </span>
                         <input
@@ -1552,7 +1733,13 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           Province/State code
                         </span>
                         <input
@@ -1572,7 +1759,13 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           Country code
                         </span>
                         <input
@@ -1593,7 +1786,13 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           Postal code
                         </span>
                         <input
@@ -1613,7 +1812,13 @@ export default function RegistrationApprovals() {
                           gap: 4,
                         }}
                       >
-                        <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                          }}
+                        >
                           Phone
                         </span>
                         <input
@@ -1637,7 +1842,9 @@ export default function RegistrationApprovals() {
                         </s-button>
                         <s-button
                           variant="tertiary"
-                          onClick={() => setStep(customer ? "check" : "createCustomer")}
+                          onClick={() =>
+                            setStep(customer ? "check" : "createCustomer")
+                          }
                         >
                           Back
                         </s-button>
@@ -1646,7 +1853,6 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
               )}
-
               {/* Step: Assign Contact */}
               {step === "assign" && (
                 <div
@@ -1664,7 +1870,8 @@ export default function RegistrationApprovals() {
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info" title="Ready to assign">
                       <s-text>
-                        Customer: {customer?.firstName} {customer?.lastName}<br />
+                        Customer: {customer?.firstName} {customer?.lastName}
+                        <br />
                         Company: {company?.name}
                       </s-text>
                     </s-banner>
@@ -1717,8 +1924,10 @@ export default function RegistrationApprovals() {
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info" title="Email details">
                       <s-text>
-                        To: {selected.email}<br />
-                        Contact: {selected.contactName}<br />
+                        To: {selected.email}
+                        <br />
+                        Contact: {selected.contactName}
+                        <br />
                         Company: {selected.companyName}
                       </s-text>
                     </s-banner>
@@ -1744,10 +1953,16 @@ export default function RegistrationApprovals() {
                     >
                       Send Welcome Email
                     </s-button>
-                    <s-button variant="tertiary" onClick={() => setStep("assign")}>
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => setStep("assign")}
+                    >
                       Back
                     </s-button>
-                    <s-button variant="tertiary" onClick={() => setStep("complete")}>
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => setStep("complete")}
+                    >
                       Skip Email
                     </s-button>
                   </div>
@@ -1770,9 +1985,19 @@ export default function RegistrationApprovals() {
 
                   <div style={{ marginTop: 12 }}>
                     <label
-                      style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
                     >
-                      <span style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#5c5f62",
+                          fontWeight: 500,
+                        }}
+                      >
                         Review notes (optional)
                       </span>
                       <textarea
@@ -1839,31 +2064,6 @@ export default function RegistrationApprovals() {
   );
 }
 
-// function StepBadge({ label, active }: { label: string; active: boolean }) {
-//   return (
-//     <span
-//       style={{
-//         padding: "6px 12px",
-//         borderRadius: 6,
-//         fontSize: 13,
-//         fontWeight: 500,
-//         background: active ? "#008060" : "#f1f2f4",
-//         color: active ? "white" : "#5c5f62",
-//       }}
-//     >
-//       {label}
-//     </span>
-//   );
-// }
-
-// function formatDate(dateString: string) {
-//   const date = new Date(dateString);
-//   return date.toLocaleDateString("en-US", {
-//     month: "short",
-//     day: "numeric",
-//     year: "numeric",
-//   });
-// }
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
