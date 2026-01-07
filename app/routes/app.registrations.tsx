@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -428,6 +428,7 @@ export async function assignCompanyToCustomer(
   }
 }
 
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const store = await prisma.store.findUnique({
@@ -560,6 +561,64 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: "Customer created",
         });
       }
+
+      case "updateCustomer": {
+        const customerId = (form.customerId as string)?.trim();
+        const email = (form.email as string)?.trim();
+        const firstName = (form.firstName as string)?.trim();
+        const lastName = (form.lastName as string)?.trim();
+        const phone = (form.phone as string)?.trim() || undefined;
+
+        if (!customerId || !email || !firstName) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Customer ID, first name and email are required"],
+          });
+        }
+
+        const response = await admin.graphql(
+          `#graphql
+          mutation UpdateCustomer($input: CustomerInput!) {
+            customerUpdate(input: $input) {
+              customer {
+                id
+                email
+                firstName
+                lastName
+                phone
+              }
+              userErrors { field message }
+            }
+          }
+        `,
+          {
+            variables: {
+              input: {
+                id: customerId,
+                email,
+                firstName,
+                lastName: lastName || undefined,
+                phone,
+              },
+            },
+          },
+        );
+
+        const payload = await response.json();
+        const errors = buildUserErrorList(payload);
+        if (errors.length) {
+          return Response.json({ intent, success: false, errors });
+        }
+
+        return Response.json({
+          intent,
+          success: true,
+          customer: payload?.data?.customerUpdate?.customer,
+          message: "Customer updated",
+        });
+      }
+
       case "checkCompany": {
         const companyName = (form.companyName as string)?.trim();
         if (!companyName) {
@@ -629,6 +688,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: company ? "Company exists" : "No company found",
         });
       }
+
       case "createCompany": {
         const companyName = (form.companyName as string)?.trim();
         const locationName =
@@ -646,12 +706,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             intent,
             success: false,
             errors: [
-              "Company name, location name, address, city, country, and zip are required",
+              "Company name, address, city, country, and zip are required",
             ],
           });
         }
 
-        // Create company
+        // 1. Create Company
         const createCompanyResponse = await admin.graphql(
           `#graphql
     mutation CompanyCreate($input: CompanyCreateInput!) {
@@ -680,20 +740,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyPayload = await createCompanyResponse.json();
         const companyErrors = buildUserErrorList(companyPayload);
 
-        const companyExists = await prisma.companyAccount.findFirst({
-          where: { name: companyName },
-        });
-        if (!companyExists) {
-          await prisma.companyAccount.create({
-            data: {
-              shopId: store.id,
-              name: companyName,
-              shopifyCompanyId: companyPayload.data.companyCreate.company.id,
-              paymentTeam: paymentTermsTemplateId,
-            },
-          });
-        }
-
         if (companyErrors.length) {
           return Response.json({
             intent,
@@ -704,8 +750,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const companyId = companyPayload.data.companyCreate.company.id;
 
-        // Prepare location input
-        const locationInput: any = {
+        // Save to Prisma
+        const companyExists = await prisma.companyAccount.findFirst({
+          where: { name: companyName },
+        });
+        if (!companyExists) {
+          await prisma.companyAccount.create({
+            data: {
+              shopId: store.id,
+              name: companyName,
+              shopifyCompanyId: companyId,
+              paymentTeam: paymentTermsTemplateId,
+            },
+          });
+        }
+
+        // 2. Create Location
+        const locationInput = {
           name: locationName,
           shippingAddress: {
             address1,
@@ -716,14 +777,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         };
 
-        // Add payment terms if provided
-        if (paymentTermsTemplateId) {
-          locationInput.buyerExperienceConfiguration = {
-            paymentTermsTemplateId,
-          };
-        }
-
-        // Create location with payment terms
         const createLocationResponse = await admin.graphql(
           `#graphql
     mutation CompanyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
@@ -731,6 +784,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         companyLocation {
           id
           name
+          buyerExperienceConfiguration {
+            paymentTerms {
+              id
+            }
+          }
         }
         userErrors {
           field
@@ -759,6 +817,52 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const location =
           locationPayload.data.companyLocationCreate.companyLocation;
+        const paymentTermsId =
+          location.buyerExperienceConfiguration?.paymentTerms?.id;
+
+        // 3. Update Payment Terms (if paymentTermsTemplateId is provided and paymentTermsId exists)
+        if (paymentTermsTemplateId && paymentTermsId) {
+          const updatePaymentTermsResponse = await admin.graphql(
+            `#graphql
+      mutation PaymentTermsUpdate($input: PaymentTermsUpdateInput!) {
+        paymentTermsUpdate(input: $input) {
+          paymentTerms {
+            id
+            paymentTermsTemplate {
+              id
+              name
+            }
+          }
+          userErrors {
+            code
+            field
+            message
+          }
+        }
+      }`,
+            {
+              variables: {
+                input: {
+                  paymentTermsId: paymentTermsId,
+                  paymentTermsAttributes: {
+                    paymentTermsTemplateId: paymentTermsTemplateId,
+                  },
+                },
+              },
+            },
+          );
+
+          const paymentTermsPayload = await updatePaymentTermsResponse.json();
+          const paymentTermsErrors = buildUserErrorList(paymentTermsPayload);
+
+          if (paymentTermsErrors.length) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: paymentTermsErrors,
+            });
+          }
+        }
 
         return Response.json({
           intent,
@@ -768,8 +872,80 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             name: companyName,
             locationId: location.id,
             locationName: location.name,
+            paymentTermsId: paymentTermsId,
           },
-          message: "Company and location created",
+          message: "Company, location, and payment terms created successfully",
+        });
+      }
+
+      case "updateCompany": {
+        const companyId = (form.companyId as string)?.trim();
+        const locationId = (form.locationId as string)?.trim();
+        const companyName = (form.companyName as string)?.trim();
+        const locationName = (form.locationName as string)?.trim();
+        const address1 = (form.address1 as string)?.trim();
+        const city = (form.city as string)?.trim();
+        const countryCode = (form.countryCode as string)?.trim();
+        const provinceCode = (form.provinceCode as string)?.trim();
+        const zip = (form.zip as string)?.trim();
+        const phone = (form.locationPhone as string)?.trim();
+
+        if (!companyId || !locationId) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company ID and Location ID are required"],
+          });
+        }
+
+        // Update location
+        const updateLocationResponse = await admin.graphql(
+          `#graphql
+          mutation CompanyLocationUpdate($id: ID!, $input: CompanyLocationInput!) {
+            companyLocationUpdate(id: $id, input: $input) {
+              companyLocation {
+                id
+                name
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }`,
+          {
+            variables: {
+              id: locationId,
+              input: {
+                name: locationName,
+                shippingAddress: {
+                  address1,
+                  city,
+                  countryCode,
+                  provinceCode,
+                  zip,
+                  phone: phone || undefined,
+                },
+              },
+            },
+          },
+        );
+
+        const locationPayload = await updateLocationResponse.json();
+        const locationErrors = buildUserErrorList(locationPayload);
+
+        if (locationErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: locationErrors,
+          });
+        }
+
+        return Response.json({
+          intent,
+          success: true,
+          message: "Company updated successfully",
         });
       }
 
@@ -825,7 +1001,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // Call the function with separate arguments, not an object
         await sendCompanyAssignmentEmail(
           store.storeOwnerName,
           email,
@@ -967,21 +1142,33 @@ const formatCredit = (value?: string | null) => {
   });
 };
 
-const StepBadge = ({ label, active }: { label: string; active: boolean }) => (
-  <span
-    style={{
-      display: "inline-block",
-      padding: "4px 10px",
-      borderRadius: 12,
-      background: active ? "#1f73b7" : "#dfe3e8",
-      color: active ? "white" : "#202223",
-      fontSize: 12,
-      letterSpacing: 0.2,
-    }}
-  >
-    {label}
-  </span>
-);
+function StepBadge({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        padding: "6px 14px",
+        borderRadius: 20,
+        cursor: "pointer",
+        background: active ? "#1f2937" : "#e5e7eb",
+        color: active ? "#ffffff" : "#111827",
+        fontSize: 13,
+        fontWeight: 500,
+        userSelect: "none",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
 
 export default function RegistrationApprovals() {
   const { submissions, companies, storeMissing, paymentTermsTemplates } =
@@ -1008,6 +1195,10 @@ export default function RegistrationApprovals() {
   const [customer, setCustomer] = useState<ActionJson["customer"]>(null);
   const [company, setCompany] = useState<ActionJson["company"]>(null);
   const [reviewNotes, setReviewNotes] = useState("");
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showCompanyModal, setShowCompanyModal] = useState(false);
+  const [editMode, setEditMode] = useState<"create" | "update">("create");
+
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
   const revalidator = useRevalidator();
@@ -1015,6 +1206,26 @@ export default function RegistrationApprovals() {
 
   const isFlowLoading = flowFetcher.state !== "idle";
   const isRejecting = rejectFetcher.state !== "idle";
+
+  const checkRef = useRef<HTMLDivElement>(null);
+  const createCustomerRef = useRef<HTMLDivElement>(null);
+  const createCompanyRef = useRef<HTMLDivElement>(null);
+  const assignRef = useRef<HTMLDivElement>(null);
+  const emailRef = useRef<HTMLDivElement>(null);
+  const completeRef = useRef<HTMLDivElement>(null);
+
+  const goToStep = (
+    stepName: StepName,
+    ref: React.RefObject<HTMLDivElement>,
+  ) => {
+    setStep(stepName);
+    requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  };
 
   useEffect(() => {
     if (!flowFetcher.data) return;
@@ -1032,12 +1243,20 @@ export default function RegistrationApprovals() {
     }
 
     if (
-      flowFetcher.data.intent === "createCustomer" &&
+      (flowFetcher.data.intent === "createCustomer" ||
+        flowFetcher.data.intent === "updateCustomer") &&
       flowFetcher.data.success
     ) {
       setCustomer(flowFetcher.data.customer || null);
-      setStep("createCompany");
-      shopify.toast.show?.("Customer created");
+      if (flowFetcher.data.intent === "createCustomer") {
+        setStep("createCompany");
+      }
+      setShowCustomerModal(false);
+      shopify.toast.show?.(
+        flowFetcher.data.intent === "createCustomer"
+          ? "Customer created"
+          : "Customer updated",
+      );
       return;
     }
 
@@ -1053,12 +1272,20 @@ export default function RegistrationApprovals() {
     }
 
     if (
-      flowFetcher.data.intent === "createCompany" &&
+      (flowFetcher.data.intent === "createCompany" ||
+        flowFetcher.data.intent === "updateCompany") &&
       flowFetcher.data.success
     ) {
-      setCompany(flowFetcher.data.company || null);
-      setStep("assign");
-      shopify.toast.show?.("Company created");
+      if (flowFetcher.data.intent === "createCompany") {
+        setCompany(flowFetcher.data.company || null);
+        setStep("assign");
+      }
+      setShowCompanyModal(false);
+      shopify.toast.show?.(
+        flowFetcher.data.intent === "createCompany"
+          ? "Company created"
+          : "Company updated",
+      );
       return;
     }
 
@@ -1168,6 +1395,7 @@ export default function RegistrationApprovals() {
 
   return (
     <s-page heading="Registration submissions">
+      {/* Quick Action Buttons */}
       <s-section heading="">
         {submissions.length === 0 ? (
           <s-empty-state heading="No submissions yet" />
@@ -1265,6 +1493,517 @@ export default function RegistrationApprovals() {
         )}
       </s-section>
 
+      {/* Customer Create/Update Modal */}
+      {showCustomerModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(17, 24, 39, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div
+            style={{
+              width: "min(600px, 90vw)",
+              background: "white",
+              borderRadius: 12,
+              boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                padding: "18px 24px",
+                borderBottom: "1px solid #e3e3e3",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <h3 style={{ margin: 0 }}>
+                {editMode === "create" ? "Create Customer" : "Update Customer"}
+              </h3>
+              <s-button
+                variant="tertiary"
+                onClick={() => setShowCustomerModal(false)}
+              >
+                Close
+              </s-button>
+            </div>
+            <div style={{ padding: "18px 24px" }}>
+              <form
+                style={{ display: "grid", gap: 12 }}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const data = new FormData(form);
+                  data.append(
+                    "intent",
+                    editMode === "create" ? "createCustomer" : "updateCustomer",
+                  );
+                  if (editMode === "update" && customer?.id) {
+                    data.append("customerId", customer.id);
+                  }
+                  flowFetcher.submit(data, { method: "post" });
+                }}
+              >
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Email *
+                  </span>
+                  <input
+                    name="email"
+                    type="email"
+                    defaultValue={customer?.email || selected?.email || ""}
+                    required
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    First name *
+                  </span>
+                  <input
+                    name="firstName"
+                    defaultValue={
+                      customer?.firstName || contactNameParts.firstName || ""
+                    }
+                    required
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Last name
+                  </span>
+                  <input
+                    name="lastName"
+                    defaultValue={
+                      customer?.lastName || contactNameParts.lastName || ""
+                    }
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Phone
+                  </span>
+                  <input
+                    name="phone"
+                    defaultValue={customer?.phone || selected?.phone || ""}
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                  <s-button
+                    type="submit"
+                    {...(isFlowLoading &&
+                    (flowFetcher.data?.intent === "createCustomer" ||
+                      flowFetcher.data?.intent === "updateCustomer")
+                      ? { loading: true }
+                      : {})}
+                  >
+                    {editMode === "create"
+                      ? "Create Customer"
+                      : "Update Customer"}
+                  </s-button>
+                  <s-button
+                    variant="tertiary"
+                    onClick={() => setShowCustomerModal(false)}
+                  >
+                    Cancel
+                  </s-button>
+                </div>
+              </form>
+              {flowFetcher.data?.errors &&
+                flowFetcher.data.errors.length > 0 && (
+                  <s-banner
+                    tone="critical"
+                    title="Error"
+                    style={{ marginTop: 16 }}
+                  >
+                    <s-unordered-list>
+                      {flowFetcher.data.errors.map((err) => (
+                        <s-list-item key={err}>{err}</s-list-item>
+                      ))}
+                    </s-unordered-list>
+                  </s-banner>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company Create/Update Modal */}
+      {showCompanyModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(17, 24, 39, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div
+            style={{
+              width: "min(700px, 90vw)",
+              background: "white",
+              borderRadius: 12,
+              boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                padding: "18px 24px",
+                borderBottom: "1px solid #e3e3e3",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <h3 style={{ margin: 0 }}>
+                {editMode === "create" ? "Create Company" : "Update Company"}
+              </h3>
+              <s-button
+                variant="tertiary"
+                onClick={() => setShowCompanyModal(false)}
+              >
+                Close
+              </s-button>
+            </div>
+            <div style={{ padding: "18px 24px" }}>
+              <form
+                style={{ display: "grid", gap: 12 }}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const data = new FormData(form);
+                  data.append(
+                    "intent",
+                    editMode === "create" ? "createCompany" : "updateCompany",
+                  );
+                  if (editMode === "update") {
+                    data.append("companyId", company?.id || "");
+                    data.append("locationId", company?.locationId || "");
+                  }
+                  flowFetcher.submit(data, { method: "post" });
+                }}
+              >
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Company name *
+                  </span>
+                  <input
+                    name="companyName"
+                    defaultValue={company?.name || selected?.companyName || ""}
+                    required
+                    disabled={editMode === "update"}
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                      backgroundColor:
+                        editMode === "update" ? "#f3f4f6" : "white",
+                    }}
+                  />
+                </label>
+                {editMode === "create" && (
+                  <label
+                    style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "#5c5f62",
+                        fontWeight: 500,
+                      }}
+                    >
+                      Payment terms
+                    </span>
+                    <select
+                      name="paymentTerms"
+                      style={{
+                        padding: 10,
+                        borderRadius: 8,
+                        border: "1px solid #c9ccd0",
+                        backgroundColor: "white",
+                      }}
+                    >
+                      <option value="">No payment terms</option>
+                      {paymentTermsTemplates?.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Location name *
+                  </span>
+                  <input
+                    name="locationName"
+                    defaultValue={
+                      company?.locationName ||
+                      `${selected?.companyName || "Company"} HQ`
+                    }
+                    required
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Address 1 *
+                  </span>
+                  <input
+                    name="address1"
+                    required
+                    placeholder="123 Example St"
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    City *
+                  </span>
+                  <input
+                    name="city"
+                    required
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Province/State code
+                  </span>
+                  <input
+                    name="provinceCode"
+                    placeholder="CA"
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Country code *
+                  </span>
+                  <input
+                    name="countryCode"
+                    placeholder="US"
+                    required
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Postal code *
+                  </span>
+                  <input
+                    name="zip"
+                    required
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Phone
+                  </span>
+                  <input
+                    name="locationPhone"
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                  <s-button
+                    type="submit"
+                    {...(isFlowLoading &&
+                    (flowFetcher.data?.intent === "createCompany" ||
+                      flowFetcher.data?.intent === "updateCompany")
+                      ? { loading: true }
+                      : {})}
+                  >
+                    {editMode === "create"
+                      ? "Create Company"
+                      : "Update Company"}
+                  </s-button>
+                  <s-button
+                    variant="tertiary"
+                    onClick={() => setShowCompanyModal(false)}
+                  >
+                    Cancel
+                  </s-button>
+                </div>
+              </form>
+              {flowFetcher.data?.errors &&
+                flowFetcher.data.errors.length > 0 && (
+                  <s-banner
+                    tone="critical"
+                    title="Error"
+                    style={{ marginTop: 16 }}
+                  >
+                    <s-unordered-list>
+                      {flowFetcher.data.errors.map((err) => (
+                        <s-list-item key={err}>{err}</s-list-item>
+                      ))}
+                    </s-unordered-list>
+                  </s-banner>
+                )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Original Approval Flow Modal */}
       {selected && (
         <div
           style={{
@@ -1320,25 +2059,38 @@ export default function RegistrationApprovals() {
                 <StepBadge
                   label="1. Check customer"
                   active={step === "check"}
+                  onClick={() => goToStep("check", checkRef)}
                 />
                 <StepBadge
                   label="2. Create customer"
                   active={step === "createCustomer"}
+                  onClick={() => goToStep("createCustomer", createCustomerRef)}
                 />
                 <StepBadge
                   label="3. Create company"
                   active={step === "createCompany"}
+                  onClick={() => goToStep("createCompany", createCompanyRef)}
                 />
                 <StepBadge
                   label="4. Assign contact"
                   active={step === "assign"}
+                  onClick={() => goToStep("assign", assignRef)}
                 />
-                <StepBadge label="5. Welcome email" active={step === "email"} />
-                <StepBadge label="6. Complete" active={step === "complete"} />
+                <StepBadge
+                  label="5. Welcome email"
+                  active={step === "email"}
+                  onClick={() => goToStep("email", emailRef)}
+                />
+                <StepBadge
+                  label="6. Complete"
+                  active={step === "complete"}
+                  onClick={() => goToStep("complete", completeRef)}
+                />
               </div>
 
               {/* Step: Check Customer */}
-              {step === "check" && (
+
+                        {step === "check" && (
                 <div
                   style={{
                     border: "1px solid #e3e3e3",
@@ -1540,7 +2292,7 @@ export default function RegistrationApprovals() {
                   </form>
                 </div>
               )}
-             
+
               {/* Step: Create Company */}
               {step === "createCompany" && (
                 <div
@@ -1609,7 +2361,7 @@ export default function RegistrationApprovals() {
                       </label>
 
                       {/* Payment Terms Dropdown - NEW FIELD */}
-                  
+
                       <label
                         style={{
                           display: "flex",
