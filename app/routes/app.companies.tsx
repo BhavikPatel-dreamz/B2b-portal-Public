@@ -23,6 +23,7 @@ type LoaderCompany = {
   contactEmail: string | null;
   creditLimit: string;
   updatedAt: string;
+  userCount: number;
 };
 
 interface ActionResponse {
@@ -78,6 +79,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { updatedAt: "desc" },
     skip,
     take: limit,
+    include: {
+      _count: {
+        select: { users: true },
+      },
+    },
   });
 
   return Response.json({
@@ -87,6 +93,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           ...company,
           creditLimit: company.creditLimit.toString(),
           updatedAt: company.updatedAt.toISOString(),
+          userCount: company._count?.users ?? 0,
         }) satisfies LoaderCompany,
     ),
     storeMissing: false,
@@ -325,6 +332,7 @@ return (
                     Shopify company ID
                   </th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Users</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Credit</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
@@ -360,6 +368,7 @@ return (
                         <span style={{ color: "#5c5f62" }}>Not set</span>
                       )}
                     </td>
+                    <td style={{ padding: "8px" }}>{company.userCount}</td>
                     <td style={{ padding: "8px" }}>
                       {formatCredit(company.creditLimit)}
                     </td>
