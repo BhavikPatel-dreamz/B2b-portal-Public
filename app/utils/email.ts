@@ -175,11 +175,13 @@ This email was sent to notify you about a new company inquiry.
 }
 
 export async function sendCompanyAssignmentEmail(
+  storeOwnerName:string,
   email: string,
   companyName: string,
   contactName: string,
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
+    storeOwnerName,
     companyName,
     contactName,
   );
@@ -193,6 +195,7 @@ export async function sendCompanyAssignmentEmail(
 }
 
 function generateCompanyAssignmentTemplate(
+  storeOwnerName:string,
   companyName: string,
   contactName: string,
 ) {
@@ -225,7 +228,7 @@ function generateCompanyAssignmentTemplate(
 
       <p>
         We are pleased to inform you that a company has been successfully
-        assigned to your account by the <strong>Store Owner</strong>.
+        assigned to your account by the <strong>${storeOwnerName}</strong>.
       </p>
 
       <div class="highlight">
@@ -245,7 +248,7 @@ function generateCompanyAssignmentTemplate(
 
       <p>
         Best regards,<br />
-        <strong>Store Owner</strong>
+        <strong>${storeOwnerName}</strong>
       </p>
     </div>
   </div>
@@ -256,7 +259,7 @@ function generateCompanyAssignmentTemplate(
   const text = `
 Company Assigned Successfully
 
-Hello Company Admin,
+Hello ${contactName},
 
 A company has been successfully assigned to your account by the Store Admin.
 
@@ -270,7 +273,7 @@ and locations.
 If you have any questions or need assistance, please contact our support team.
 
 Best regards,
-Store Owner
+<strong>${storeOwnerName}</strong>
 `;
 
   return { html, text };

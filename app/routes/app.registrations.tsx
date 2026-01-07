@@ -756,7 +756,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         // Call the function with separate arguments, not an object
-        await sendCompanyAssignmentEmail(email, companyName, contactName);
+        await sendCompanyAssignmentEmail(store.storeOwnerName,email, companyName, contactName);
 
         return Response.json({
           intent,
