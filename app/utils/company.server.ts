@@ -237,6 +237,12 @@ export const syncShopifyUsers = async (
                 company {
                   id
                   name
+                  mainContact {
+                    id
+                    customer {
+                      id
+                    }
+                  }
                 }
                 title
                 roleAssignments(first: 10) {
@@ -309,6 +315,10 @@ export const syncShopifyUsers = async (
               companyRole = "approver";
             }
 
+            // Check if this customer is the main contact of the company
+            const isMainContact = profile.company?.mainContact?.customer?.id === customerGid;
+            const userRole = isMainContact ? "STORE_ADMIN" : "STORE_USER";
+
             // Upsert user in local DB
             await prisma.user.upsert({
               where: { email: customer.email },
@@ -321,14 +331,14 @@ export const syncShopifyUsers = async (
                 shopId: store.id,
                 status: "APPROVED",
                 isActive: true,
-                role: "STORE_USER",
+                role: userRole,
               },
               create: {
                 email: customer.email,
                 firstName: customer.firstName || null,
                 lastName: customer.lastName || null,
                 password: "", // B2B users register themselves
-                role: "STORE_USER",
+                role: userRole,
                 status: "APPROVED",
                 isActive: true,
                 shopId: store.id,
