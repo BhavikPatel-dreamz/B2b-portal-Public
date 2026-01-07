@@ -1,7 +1,7 @@
 
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { authenticate } from "../shopify.server";
+import { authenticate, registerWebhooks } from "../shopify.server";
 import { upsertStore } from "../services/store.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -13,6 +13,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     accessToken: session.accessToken,
     scope: session.scope,
   });
+
+  // Ensure webhooks are registered for this shop
+  try {
+    await registerWebhooks({ session });
+  } catch (err) {
+    console.error("Failed to register webhooks", err);
+  }
 
   return null;
 };
