@@ -67,6 +67,8 @@ export const syncShopifyCompanies = async (
 
     let syncedCount = 0;
     const errors: string[] = [];
+    // Collect all Shopify company IDs
+    const shopifyCompanyIds = allCompanies.map(company => company.id);
 
     // Step 2-5: Process each company
     for (const company of allCompanies) {
@@ -129,9 +131,43 @@ export const syncShopifyCompanies = async (
       }
     }
 
+    // Step 6: Delete companies that don't exist in Shopify anymore
+    try {
+      const deleteResult = await prisma.companyAccount.deleteMany({
+        where: {
+          shopId: store.id,
+          shopifyCompanyId: {
+            not: null,
+            notIn: shopifyCompanyIds,
+          },
+        },
+      });
+
+      console.log(`Deleted ${deleteResult.count} companies that no longer exist in Shopify`);
+
+      if (deleteResult.count > 0) {
+        return {
+          success: true,
+          syncedCount,
+          deletedCount: deleteResult.count,
+          errors,
+          message:
+            errors.length > 0
+              ? `Synced ${syncedCount} companies, deleted ${deleteResult.count} companies with ${errors.length} errors`
+              : `Successfully synced ${syncedCount} companies and deleted ${deleteResult.count} obsolete companies`,
+        };
+      }
+    } catch (deleteError) {
+      console.error("Error deleting obsolete companies:", deleteError);
+      errors.push(
+        `Failed to delete obsolete companies: ${deleteError instanceof Error ? deleteError.message : "Unknown error"}`,
+      );
+    }
+
     return {
       success: true,
       syncedCount,
+      deletedCount: 0,
       errors,
       message:
         errors.length > 0
@@ -143,6 +179,7 @@ export const syncShopifyCompanies = async (
     return {
       success: false,
       syncedCount: 0,
+      deletedCount: 0,
       errors: [
         error instanceof Error ? error.message : "Unknown sync error occurred",
       ],
