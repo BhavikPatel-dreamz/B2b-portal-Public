@@ -169,3 +169,172 @@ export const parseCredit = (value?: string) => {
   if (Number.isNaN(numeric)) return null;
   return new Prisma.Decimal(numeric);
 };
+
+/**
+ * Sync Shopify B2B customers/users to local database
+ * Fetches customers with B2B access, creates/updates User records
+ * SERVER ONLY - Uses Prisma and admin context
+ */
+export const syncShopifyUsers = async (
+  admin: any,
+  store: any,
+) => {
+  try {
+    // Fetch all customers with B2B company contact profiles
+    let allCustomers: any[] = [];
+    let hasNextPage = true;
+    let cursor: string | null = null;
+
+    while (hasNextPage) {
+      const customersQuery = `
+        query GetB2BCustomers($cursor: String) {
+          customers(first: 100, after: $cursor, query: "has_company_contact_profile:true") {
+            nodes {
+              id
+              email
+              firstName
+              lastName
+              phone
+              companyContactProfiles {
+                id
+                company {
+                  id
+                  name
+                }
+                title
+                roleAssignments(first: 10) {
+                  edges {
+                    node {
+                      role {
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      `;
+
+      const response = await admin.graphql(customersQuery, {
+        variables: { cursor },
+      });
+      const result = await response.json();
+      const data = result?.data?.customers;
+
+      if (data?.nodes) {
+        allCustomers = [...allCustomers, ...data.nodes];
+      }
+
+      hasNextPage = data?.pageInfo?.hasNextPage || false;
+      cursor = data?.pageInfo?.endCursor || null;
+    }
+
+    let syncedCount = 0;
+    const errors: string[] = [];
+
+    // Process each customer with B2B company profiles
+    for (const customer of allCustomers) {
+      try {
+        if (!customer.email) continue;
+
+        const customerGid = customer.id; // Already a GID from Shopify
+        const profiles = customer.companyContactProfiles || [];
+
+        // For each company profile this customer has, create/update a user
+        for (const profile of profiles) {
+          try {
+            const companyId = profile.company?.id;
+            if (!companyId) continue;
+
+            // Find the company in our local DB
+            const localCompany = await prisma.companyAccount.findFirst({
+              where: {
+                shopId: store.id,
+                shopifyCompanyId: companyId,
+              },
+              select: { id: true },
+            });
+
+            if (!localCompany) continue;
+
+            // Determine company role from Shopify role assignments
+            let companyRole = "member";
+            const roles = profile.roleAssignments?.edges || [];
+            if (roles.some((r: any) => r.node?.role?.name?.includes("Admin"))) {
+              companyRole = "admin";
+            } else if (roles.some((r: any) => r.node?.role?.name?.includes("Approver"))) {
+              companyRole = "approver";
+            }
+
+            // Upsert user in local DB
+            await prisma.user.upsert({
+              where: { email: customer.email },
+              update: {
+                firstName: customer.firstName || null,
+                lastName: customer.lastName || null,
+                shopifyCustomerId: customerGid,
+                companyId: localCompany.id,
+                companyRole,
+                shopId: store.id,
+                status: "APPROVED",
+                isActive: true,
+                role: "STORE_USER",
+              },
+              create: {
+                email: customer.email,
+                firstName: customer.firstName || null,
+                lastName: customer.lastName || null,
+                password: "", // B2B users register themselves
+                role: "STORE_USER",
+                status: "APPROVED",
+                isActive: true,
+                shopId: store.id,
+                companyId: localCompany.id,
+                companyRole,
+                shopifyCustomerId: customerGid,
+              },
+            });
+
+            syncedCount++;
+          } catch (profileError) {
+            console.error(`Error syncing user profile:`, profileError);
+            errors.push(
+              `Failed to sync profile for ${customer.email}: ${profileError instanceof Error ? profileError.message : "Unknown error"}`,
+            );
+          }
+        }
+      } catch (customerError) {
+        console.error(`Error syncing customer:`, customerError);
+        errors.push(
+          `Failed to sync ${customer.email}: ${customerError instanceof Error ? customerError.message : "Unknown error"}`,
+        );
+      }
+    }
+
+    return {
+      success: true,
+      syncedCount,
+      errors,
+      message:
+        errors.length > 0
+          ? `Synced ${syncedCount} users with ${errors.length} errors`
+          : `Successfully synced ${syncedCount} users`,
+    };
+  } catch (error) {
+    console.error("Sync error:", error);
+    return {
+      success: false,
+      syncedCount: 0,
+      errors: [
+        error instanceof Error ? error.message : "Unknown sync error occurred",
+      ],
+      message: "Sync failed",
+    };
+  }
+};

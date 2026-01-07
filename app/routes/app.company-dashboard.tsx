@@ -1,13 +1,11 @@
-import type { LoaderFunctionArgs } from "react-router";
-import { Link, useLoaderData } from "react-router";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { Link, useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
 import { getCompanyDashboardData } from "../services/company.server";
-import {parseForm, parseCredit } from "../utils/company.server";
-import { ActionFunctionArgs } from "react-router";
+import {parseForm, parseCredit, syncShopifyUsers } from "../utils/company.server";
 import { useState } from "react";
-import { useFetcher } from "react-router";
 
 type LoaderData = {
   company: {
@@ -172,6 +170,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       return Response.json({ intent, success: true, message: "Company saved" });
+    }
+
+    case "syncUsers": {
+      try {
+        const result = await syncShopifyUsers(admin, store);
+        return Response.json({
+          intent,
+          success: result.success,
+          message: result.message,
+          syncedCount: result.syncedCount,
+          errors: result.errors,
+        });
+      } catch (error) {
+        return Response.json({
+          intent,
+          success: false,
+          message: "Failed to sync users",
+          errors: [error instanceof Error ? error.message : "Unknown error"],
+        }, { status: 500 });
+      }
     }
 
     default:
@@ -741,23 +759,46 @@ export default function CompanyDashboard() {
         <s-section>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Users</h3>
-            <Link
-              to={`/app/companies/${data.company.id}/users`}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "1px solid #c9ccd0",
-                textDecoration: "none",
-                color: "#202223",
-                fontSize: 12,
-                fontWeight: 500,
-                backgroundColor: "white",
-                cursor: "pointer",
-                textAlign: "center",
-              }}
-            >
-              View All User
-            </Link>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => {
+                  const formData = new FormData();
+                  formData.append("intent", "syncUsers");
+                  fetcher.submit(formData, { method: "POST" });
+                }}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #c9ccd0",
+                  color: "#202223",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  backgroundColor: "white",
+                  cursor: "pointer",
+                  textAlign: "center",
+                }}
+                disabled={fetcher.state === "submitting"}
+              >
+                {fetcher.state === "submitting" ? "Syncing..." : "Sync Users"}
+              </button>
+              <Link
+                to={`/app/companies/${data.company.id}/users`}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #c9ccd0",
+                  textDecoration: "none",
+                  color: "#202223",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  backgroundColor: "white",
+                  cursor: "pointer",
+                  textAlign: "center",
+                }}
+              >
+                View All User
+              </Link>
+            </div>
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
