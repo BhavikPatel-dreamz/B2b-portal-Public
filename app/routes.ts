@@ -8,6 +8,9 @@ export default [
   // Webhooks
   route("webhooks/app/scopes_update", "routes/webhooks.app.scopes_update.tsx"),
   route("webhooks/app/uninstalled", "routes/webhooks.app.uninstalled.tsx"),
+  route("webhooks/orders/create", "routes/webhooks.orders_create.tsx"),
+  route("webhooks/orders/paid", "routes/webhooks.orders_paid.tsx"),
+  route("webhooks/orders/cancelled", "routes/webhooks.orders_cancelled.tsx"),
 
   // API Proxy routes (using prefix for folder organization)
   ...prefix("api/proxy", [
