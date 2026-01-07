@@ -6,6 +6,7 @@ import {
   createRegistration,
   getRegistrationByEmail,
 } from "app/services/registration.server";
+import prisma from "app/db.server";
 
 /**
  * API endpoint for B2B registration form submission
@@ -93,11 +94,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     console.log("✅ Registration created:", registration.id);
+    const companyDetail = await prisma.companyAccount.findFirst({
+      where: {
+        shopId: store.id,
+        name: companyName,
+      },
+    });
 
     // Try to send email notification (optional - don't fail if email not configured)
     if (store.submissionEmail) {
       const emailResult = await sendRegistrationEmail(
+        companyDetail?.id || '',
         store.submissionEmail,
+        store.storeOwnerName,
         email,
         companyName,
         contactName,

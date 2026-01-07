@@ -52,15 +52,19 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
 }
 
 export async function sendRegistrationEmail(
+  companyId: string,
   contactEmail: string,
+  storeOwnerName: string,
   email: string,
   companyName: string,
   contactName: string
 ) {
   const { html, text } = generateRegistrationTemplate(
+    companyId,
     companyName,
     contactName,
-    email
+    email,
+    storeOwnerName,
   );
 
   return sendEmail({
@@ -71,7 +75,7 @@ export async function sendRegistrationEmail(
   });
 }
 
-function generateRegistrationTemplate(companyName: string, contactName: string, email: string) {
+function generateRegistrationTemplate(companyId:string,companyName: string, contactName: string, email: string, storeOwnerName: string) {
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -97,7 +101,7 @@ function generateRegistrationTemplate(companyName: string, contactName: string, 
     </div>
 
     <div class="content">
-      <p>Hello <strong>Store Owner</strong>,</p>
+      <p>Hello <strong>Store Owner ${storeOwnerName}</strong>,</p>
 
       <p>
         We are pleased to inform you that a new company inquiry has been successfully
@@ -119,10 +123,11 @@ function generateRegistrationTemplate(companyName: string, contactName: string, 
         If you have any questions or need assistance, please feel free to
         contact our support team.
       </p>
+      link: <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/companies/${companyId}">Company Details</a>
 
       <p>
         Best regards,<br />
-        <strong>${email}</strong>
+        <strong>${contactName}</strong>
       </p>
     </div>
   </div>
@@ -133,7 +138,7 @@ function generateRegistrationTemplate(companyName: string, contactName: string, 
   const text = `
  Company Inquiry: ${companyName}
 
-Hello Store Owner,
+Hello Store Owner ${storeOwnerName},
 
 A new company inquiry has been received on the platform.
 
@@ -144,9 +149,10 @@ Contact Email: ${email}
 You can now log in to your dashboard to review company details and manage access.
 
 If you have any questions or need assistance, please contact our support team.
+ link: <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/companies/${companyId}">Company Details</a>
 
 Best regards,
-${email}
+${contactName}
 
 ---
 This email was sent to notify you about a new company inquiry.

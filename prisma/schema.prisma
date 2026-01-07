@@ -52,7 +52,8 @@ model Store {
   id            String    @id @default(cuid())
   shopDomain    String    @unique
   shopName      String?
-  contactEmail   String?
+  storeOwnerName   String?
+  contactEmail  String?
   themeColor    String?
   accessToken   String?
   scope         String?
