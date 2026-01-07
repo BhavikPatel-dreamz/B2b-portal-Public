@@ -4,6 +4,10 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
 import { getCompanyDashboardData } from "../services/company.server";
+import {parseForm, parseCredit } from "../utils/company.server";
+import { ActionFunctionArgs } from "react-router";
+import { useState } from "react";
+import { useFetcher } from "react-router";
 
 type LoaderData = {
   company: {
@@ -57,6 +61,126 @@ type LoaderData = {
     createdAt: string;
   }>;
   totalUsers: number;
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: session.shop },
+  });
+
+  if (!store) {
+    return Response.json(
+      { intent: "unknown", success: false, errors: ["Store not found"] },
+      { status: 404 },
+    );
+  }
+
+  const form = await parseForm(request);
+  const intent = (form.intent as string) || "";
+
+  switch (intent) {
+    case "updateCredit": {
+      const id = (form.id as string)?.trim();
+      const creditRaw = (form.creditLimit as string) || "0";
+      const credit = parseCredit(creditRaw);
+
+      if (!id) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company id is required"],
+        });
+      }
+      if (!credit) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit must be a number"],
+        });
+      }
+
+      await prisma.companyAccount.update({
+        where: { id },
+        data: { creditLimit: credit },
+      });
+
+      return Response.json({
+        intent,
+        success: true,
+        message: "Credit updated",
+      });
+    }
+
+    case "createCompany": {
+      const name = (form.name as string)?.trim();
+      const shopifyCompanyId =
+        (form.shopifyCompanyId as string)?.trim() || null;
+      const contactName = (form.contactName as string)?.trim() || null;
+      const contactEmail = (form.contactEmail as string)?.trim() || null;
+      const credit = parseCredit((form.creditLimit as string) || undefined);
+
+      if (!name) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company name is required"],
+        });
+      }
+      if (!credit) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit must be a number"],
+        });
+      }
+
+      if (shopifyCompanyId) {
+        await prisma.companyAccount.upsert({
+          where: {
+            shopId_shopifyCompanyId: {
+              shopId: store.id,
+              shopifyCompanyId,
+            },
+          },
+          update: {
+            name,
+            contactName,
+            contactEmail,
+            creditLimit: credit,
+          },
+          create: {
+            shopId: store.id,
+            shopifyCompanyId,
+            name,
+            contactName,
+            contactEmail,
+            creditLimit: credit,
+          },
+        });
+      } else {
+        await prisma.companyAccount.create({
+          data: {
+            shopId: store.id,
+            shopifyCompanyId: null,
+            name,
+            contactName,
+            contactEmail,
+            creditLimit: credit,
+          },
+        });
+      }
+
+      return Response.json({ intent, success: true, message: "Company saved" });
+    }
+
+    default:
+      return Response.json({
+        intent,
+        success: false,
+        errors: ["Unknown intent"],
+      });
+  }
 };
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -253,6 +377,11 @@ function getOrderStatusBadge(status: string) {
 
 export default function CompanyDashboard() {
   const data = useLoaderData<LoaderData>();
+  const fetcher = useFetcher();
+  const [isEditingCredit, setIsEditingCredit] = useState(false);
+  const [creditLimitValue, setCreditLimitValue] = useState(
+    data.creditLimit.toString()
+  );
 
   const creditStatus = getCreditStatusColor(data.creditPercentageUsed);
   const creditStatusColor =
@@ -261,6 +390,21 @@ export default function CompanyDashboard() {
       : creditStatus === "warning"
         ? "#b98900"
         : "#d72c0d";
+
+  const handleCreditUpdate = () => {
+    const formData = new FormData();
+    formData.append("intent", "updateCredit");
+    formData.append("id", data.company.id);
+    formData.append("creditLimit", creditLimitValue);
+
+    fetcher.submit(formData, { method: "POST" });
+    setIsEditingCredit(false);
+  };
+
+  const handleCancelEdit = () => {
+    setCreditLimitValue(data.creditLimit.toString());
+    setIsEditingCredit(false);
+  };
 
   return (
     <s-page heading={`${data.company.name} - Credit Dashboard`}>
@@ -279,8 +423,7 @@ export default function CompanyDashboard() {
       </div>
 
       {/* Company Information Section */}
-
-      <s-section heading="Company Information">
+   <s-section heading="Company Information">
         <div
           style={{
             border: "1px solid #e0e0e0",
@@ -292,8 +435,9 @@ export default function CompanyDashboard() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gridTemplateColumns: "2fr 1.5fr 2fr 1.5fr",
               gap: 24,
+              alignItems: "start",
             }}
           >
             {/* Company Name */}
@@ -364,6 +508,106 @@ export default function CompanyDashboard() {
               >
                 {data.company.contactEmail || "—"}
               </div>
+            </div>
+
+            {/* Credit Limit - Editable */}
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  marginBottom: 6,
+                  fontWeight: 500,
+                }}
+              >
+                Credit Limit
+              </div>
+              {isEditingCredit ? (
+                <div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="number"
+                      value={creditLimitValue}
+                      onChange={(e) => setCreditLimitValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleCreditUpdate();
+                        } else if (e.key === "Escape") {
+                          handleCancelEdit();
+                        }
+                      }}
+                      autoFocus
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        padding: "4px 8px",
+                        border: "1px solid #c9ccd0",
+                        borderRadius: 4,
+                        width: "100px",
+                      }}
+                      step="0.01"
+                      min="0"
+                    />
+                    <button
+                      onClick={handleCreditUpdate}
+                      disabled={fetcher.state === "submitting"}
+                      style={{
+                        padding: "4px 8px",
+                        fontSize: 11,
+                        fontWeight: 500,
+                        backgroundColor: "#008060",
+                        color: "white",
+                        border: "none",
+                        borderRadius: 4,
+                        cursor: fetcher.state === "submitting" ? "not-allowed" : "pointer",
+                        opacity: fetcher.state === "submitting" ? 0.6 : 1,
+                      }}
+                    >
+                      {fetcher.state === "submitting" ? "..." : "✓"}
+                    </button>
+                  </div>
+                  {fetcher.data?.intent === "updateCredit" && fetcher.data?.success && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#008060",
+                        marginTop: 4,
+                      }}
+                    >
+                      ✓ Updated successfully
+                    </div>
+                  )}
+                  {fetcher.data?.intent === "updateCredit" && !fetcher.data?.success && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#d72c0d",
+                        marginTop: 4,
+                      }}
+                    >
+                      {fetcher.data?.errors?.[0] || "Failed to update"}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#202223",
+                    }}
+                  >
+                    {formatCurrency(data.creditLimit)}
+                  </div>
+                  <s-button
+                    onClick={() => setIsEditingCredit(true)}
+                    variant="primary"
+                  >
+                    Edit
+                  </s-button>
+                </div>
+              )}
             </div>
           </div>
         </div>
