@@ -205,7 +205,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     case "syncUsers": {
       try {
-        const result = await syncShopifyUsers(admin, store);
+        const companyId = (form.companyId as string)?.trim();
+        if (!companyId) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company ID is required"],
+          }, { status: 400 });
+        }
+        const result = await syncShopifyUsers(admin, store, companyId);
         return Response.json({
           intent,
           success: result.success,
@@ -966,6 +974,7 @@ export default function CompanyDashboard() {
               onClick={() => {
                 const formData = new FormData();
                 formData.append("intent", "syncUsers");
+                formData.append("companyId", data.company.id);
                 fetcher.submit(formData, { method: "POST" });
               }}
               style={{

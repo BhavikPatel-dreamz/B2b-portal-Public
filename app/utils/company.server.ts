@@ -215,6 +215,7 @@ export const parseCredit = (value?: string) => {
 export const syncShopifyUsers = async (
   admin: any,
   store: any,
+  companyId?: string,
 ) => {
   try {
     // Fetch all customers with B2B company contact profiles
@@ -281,6 +282,24 @@ export const syncShopifyUsers = async (
     let syncedCount = 0;
     const errors: string[] = [];
 
+    // Get the shopify company ID if filtering by company
+    let targetShopifyCompanyId: string | null = null;
+    if (companyId) {
+      const localCompany = await prisma.companyAccount.findUnique({
+        where: { id: companyId },
+        select: { shopifyCompanyId: true },
+      });
+      if (!localCompany) {
+        return {
+          success: false,
+          syncedCount: 0,
+          errors: ["Company not found"],
+          message: "Company not found",
+        };
+      }
+      targetShopifyCompanyId = localCompany.shopifyCompanyId;
+    }
+
     // Process each customer with B2B company profiles
     for (const customer of allCustomers) {
       try {
@@ -292,14 +311,19 @@ export const syncShopifyUsers = async (
         // For each company profile this customer has, create/update a user
         for (const profile of profiles) {
           try {
-            const companyId = profile.company?.id;
-            if (!companyId) continue;
+            const shopifyCompanyId = profile.company?.id;
+            if (!shopifyCompanyId) continue;
+
+            // If filtering by company, skip profiles that don't match
+            if (targetShopifyCompanyId && shopifyCompanyId !== targetShopifyCompanyId) {
+              continue;
+            }
 
             // Find the company in our local DB
             const localCompany = await prisma.companyAccount.findFirst({
               where: {
                 shopId: store.id,
-                shopifyCompanyId: companyId,
+                shopifyCompanyId: shopifyCompanyId,
               },
               select: { id: true },
             });
