@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -6,8 +7,15 @@ import { Prisma } from "@prisma/client";
 
 // Handle Shopify ORDERS_CREATE webhook
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { payload, shop, topic } = await authenticate.webhook(request);
-  console.log(`Received ${topic} webhook for ${shop}`);
+  try {
+    const { payload, shop, topic } = await authenticate.webhook(request);
+    console.log(`Received ${topic} webhook for ${shop}`);
+
+    // If an outdated subscription points edited to this path, ignore gracefully
+    if (topic !== "orders/create") {
+      console.info(`Webhook topic ${topic} hit orders/create route. Ignoring.`);
+      return new Response();
+    }
 
   try {
     // Basic validation
@@ -116,5 +124,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.error("Failed to log B2B order from orders/create webhook", err);
     // Return 200 so Shopify doesn't retry indefinitely; log for follow-up
     return new Response();
+  }
+  } catch (verifyErr) {
+    let headers: Record<string, string> | undefined;
+    try {
+      headers = Object.fromEntries(request.headers.entries());
+    } catch (e) {
+      // ignore header logging failure
+    }
+    console.error("Webhook verification failed for orders/create", verifyErr, headers ? { headers } : undefined);
+    return new Response("Unauthorized", { status: 401 });
   }
 };

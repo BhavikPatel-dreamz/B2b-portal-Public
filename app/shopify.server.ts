@@ -1,4 +1,4 @@
-import "@shopify/shopify-app-react-router/adapters/node";
+import "@shopify/shopify-app-remix/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
@@ -48,15 +48,19 @@ const shopify = shopifyApp({
   webhooks: {
     ORDERS_CREATE: {
       deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/orders_create",
+      callbackUrl: "/webhooks/orders/create",
     },
     ORDERS_PAID: {
       deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/orders_paid",
+      callbackUrl: "/webhooks/orders/paid",
     },
     ORDERS_CANCELLED: {
       deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/orders_cancelled",
+      callbackUrl: "/webhooks/orders/cancelled",
+    },
+    ORDERS_EDITED: {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: "/webhooks/orders/edited",
     },
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
@@ -72,3 +76,5 @@ export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
 export const sessionStorage = shopify.sessionStorage;
+
+

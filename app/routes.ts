@@ -11,6 +11,7 @@ export default [
   route("webhooks/orders/create", "routes/webhooks.orders_create.tsx"),
   route("webhooks/orders/paid", "routes/webhooks.orders_paid.tsx"),
   route("webhooks/orders/cancelled", "routes/webhooks.orders_cancelled.tsx"),
+  route("webhooks/orders/edited", "routes/webhooks.orders_edited.tsx"),
 
   // API Proxy routes (using prefix for folder organization)
   ...prefix("api/proxy", [

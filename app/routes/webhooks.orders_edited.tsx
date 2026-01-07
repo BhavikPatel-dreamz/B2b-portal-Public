@@ -5,7 +5,7 @@ import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
 import { Prisma } from "@prisma/client";
 
-// Handle Shopify ORDERS_PAID webhook
+// Handle Shopify ORDERS_EDITED webhook
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { payload, shop, topic } = await authenticate.webhook(request);
   console.log(`Received ${topic} webhook for ${shop}`);
@@ -17,33 +17,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!store) return new Response();
 
     const orderIdNum = (payload as any).id as number | undefined;
-    const totalPriceStr = ((payload as any).total_price ?? (payload as any).current_total_price ?? "0") as string;
     if (!orderIdNum) return new Response();
 
     const orderGid = `gid://shopify/Order/${orderIdNum}`;
 
-    const order = await prisma.b2BOrder.findFirst({
-      where: { shopId: store.id, shopifyOrderId: orderGid },
-      select: { id: true, orderTotal: true },
-    });
-    if (!order) return new Response();
-
-    // If Shopify says paid, mark fully paid locally
+    // Update local B2B order totals/statuses based on edited order
+    const totalPriceStr = ((payload as any).total_price ?? (payload as any).current_total_price ?? "0") as string;
     const orderTotal = new Prisma.Decimal(totalPriceStr);
 
+    const existing = await prisma.b2BOrder.findFirst({
+      where: { shopId: store.id, shopifyOrderId: orderGid },
+      select: { id: true, paidAmount: true },
+    });
+
+    if (!existing) return new Response();
+
+    const paidAmount = existing.paidAmount ?? new Prisma.Decimal(0);
+    const remainingBalance = orderTotal.minus(paidAmount);
+
     await prisma.b2BOrder.update({
-      where: { id: order.id },
+      where: { id: existing.id },
       data: {
-        paymentStatus: "paid",
-        paidAmount: orderTotal,
-        remainingBalance: new Prisma.Decimal(0),
-        paidAt: new Date(),
+        orderTotal,
+        remainingBalance,
+        orderStatus: remainingBalance.isZero() ? "delivered" : "processing",
       },
     });
 
     return new Response();
   } catch (err) {
-    console.error("Failed to handle ORDERS_PAID webhook", err);
+    console.error("Failed to handle ORDERS_EDITED webhook", err);
     return new Response();
   }
 };
