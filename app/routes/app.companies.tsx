@@ -341,12 +341,12 @@ return (
                   {/* <th style={{ textAlign: "left", padding: "8px" }}>
                     Shopify company ID
                   </th> */}
-                  <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Users</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Credit Limit</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Used Credit</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Available Credit</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
+                  <th style={{ textAlign: "left", padding: "8px" ,width:"20%" }}>Contact</th>
+                  <th style={{ textAlign: "left", padding: "8px" ,width:"30%"}}>Users</th>
+                  <th style={{ textAlign: "left", padding: "8px" ,width:"10%" }}>Credit Limit</th>
+                  <th style={{ textAlign: "left", padding: "8px" ,width:"10%" }}>Used Credit</th>
+                  <th style={{ textAlign: "left", padding: "8px" ,width:"10%" }}>Available Credit</th>
+                  <th style={{ textAlign: "left", padding: "8px" ,width:"10%" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
