@@ -327,17 +327,17 @@ return (
         {companies.length === 0 ? (
           <s-empty-state heading={searchQuery ? "No companies found" : "No companies yet"} />
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div style={}>
             <table
               style={{
                 width: "100%",
-                borderCollapse: "collapse",
-                minWidth: 1200,
+                borderCollapse: "collapse"
+
               }}
             >
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: "8px", width:"10%" }}>Company</th>
+                  <th style={{ textAlign: "left", padding: "8px", width:"7%" }}>Company</th>
                   {/* <th style={{ textAlign: "left", padding: "8px" }}>
                     Shopify company ID
                   </th> */}
