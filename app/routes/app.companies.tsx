@@ -346,7 +346,6 @@ return (
                   <th style={{ textAlign: "left", padding: "8px" }}>Credit Limit</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Used Credit</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Available Credit</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
                 </tr>
               </thead>
@@ -356,7 +355,9 @@ return (
                     key={company.id}
                     style={{ borderTop: "1px solid #e3e3e3" }}
                   >
-                    <td style={{ padding: "8px" }}>{company.name}{company.shopifyCompanyId
+                    <td style={{ padding: "8px" }}>{company.name}
+                      <br/>
+                      {company.shopifyCompanyId
                         ? company.shopifyCompanyId.replace(
                             "gid://shopify/Company/",
                             "",
@@ -379,7 +380,7 @@ return (
                           {company.contactName}
                           <br/>
                           {company.contactEmail
-                            ? ` • ${company.contactEmail}`
+                            ? `${company.contactEmail}`
                             : ""}
                         </span>
                       ) : (
@@ -400,9 +401,9 @@ return (
                     }}>
                       {formatCredit(company.availableCredit)}
                     </td>
-                    <td style={{ padding: "8px" }}>
+                    {/* <td style={{ padding: "8px" }}>
                       {new Date(company.updatedAt).toLocaleString()}
-                    </td>
+                    </td> */}
                     <td style={{ padding: "8px", minWidth: 180 }}>
                       <Link
                         to={`/app/companies/${company.id}`}
