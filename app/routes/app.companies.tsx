@@ -14,6 +14,7 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { syncShopifyCompanies, parseForm, parseCredit } from "../utils/company.server";
 import { formatCredit } from "../utils/company.utils";
+import { calculateAvailableCredit } from "../services/creditService";
 
 type LoaderCompany = {
   id: string;
@@ -22,6 +23,8 @@ type LoaderCompany = {
   contactName: string | null;
   contactEmail: string | null;
   creditLimit: string;
+  usedCredit: string;
+  availableCredit: string;
   updatedAt: string;
   userCount: number;
 };
@@ -86,16 +89,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
+  // Calculate credit information for each company
+  const companiesWithCredit = await Promise.all(
+    companies.map(async (company) => {
+      const creditInfo = await calculateAvailableCredit(company.id);
+      return {
+        ...company,
+        creditLimit: company.creditLimit.toString(),
+        usedCredit: creditInfo ? creditInfo.usedCredit.toString() : "0",
+        availableCredit: creditInfo ? creditInfo.availableCredit.toString() : company.creditLimit.toString(),
+        updatedAt: company.updatedAt.toISOString(),
+        userCount: company._count?.users ?? 0,
+      } satisfies LoaderCompany;
+    })
+  );
+
   return Response.json({
-    companies: companies.map(
-      (company) =>
-        ({
-          ...company,
-          creditLimit: company.creditLimit.toString(),
-          updatedAt: company.updatedAt.toISOString(),
-          userCount: company._count?.users ?? 0,
-        }) satisfies LoaderCompany,
-    ),
+    companies: companiesWithCredit,
     storeMissing: false,
     totalCount,
     currentPage: page,
@@ -322,7 +332,7 @@ return (
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
-                minWidth: 900,
+                minWidth: 1200,
               }}
             >
               <thead>
@@ -333,7 +343,9 @@ return (
                   </th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Users</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Credit</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Credit Limit</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Used Credit</th>
+                  <th style={{ textAlign: "left", padding: "8px" }}>Available Credit</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Updated</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
                 </tr>
@@ -371,6 +383,16 @@ return (
                     <td style={{ padding: "8px" }}>{company.userCount}</td>
                     <td style={{ padding: "8px" }}>
                       {formatCredit(company.creditLimit)}
+                    </td>
+                    <td style={{ padding: "8px", color: "#d72c0d" }}>
+                      {formatCredit(company.usedCredit)}
+                    </td>
+                    <td style={{
+                      padding: "8px",
+                      color: parseFloat(company.availableCredit) >= 0 ? "#008060" : "#d72c0d",
+                      fontWeight: parseFloat(company.availableCredit) < 0 ? 600 : 400
+                    }}>
+                      {formatCredit(company.availableCredit)}
                     </td>
                     <td style={{ padding: "8px" }}>
                       {new Date(company.updatedAt).toLocaleString()}
