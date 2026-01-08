@@ -171,7 +171,6 @@ const parseForm = async (request: Request) => {
   return Object.fromEntries(formData);
 };
 
-
 export async function assignCompanyToCustomer(
   admin: AdminApiContext,
   customerId: string,
@@ -197,7 +196,7 @@ export async function assignCompanyToCustomer(
           }
         }
       }`,
-      { variables: { companyId } }
+      { variables: { companyId } },
     );
 
     const companyJson = await companyRes.json();
@@ -231,7 +230,7 @@ export async function assignCompanyToCustomer(
           userErrors { message }
         }
       }`,
-      { variables: { companyId, customerId } }
+      { variables: { companyId, customerId } },
     );
 
     const contactJson = await contactRes.json();
@@ -270,7 +269,7 @@ export async function assignCompanyToCustomer(
           companyContactRoleId,
           companyLocationId,
         },
-      }
+      },
     );
 
     const roleJson = await roleRes.json();
@@ -299,12 +298,11 @@ export async function assignCompanyToCustomer(
           userErrors { message }
         }
       }`,
-      { variables: { companyId, companyContactId } }
+      { variables: { companyId, companyContactId } },
     );
 
     const mainContactJson = await mainContactRes.json();
-    const mainContactPayload =
-      mainContactJson.data?.companyAssignMainContact;
+    const mainContactPayload = mainContactJson.data?.companyAssignMainContact;
 
     if (mainContactPayload?.userErrors?.length) {
       return {
@@ -327,7 +325,6 @@ export async function assignCompanyToCustomer(
     };
   }
 }
-
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -790,40 +787,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       case "assignMainContact": {
-  const companyId = (form.companyId as string)?.trim();
-  const customerId = normalizeCustomerId(form.customerId as string);
-  const locationId = (form.locationId as string)?.trim(); 
+        const companyId = (form.companyId as string)?.trim();
+        const customerId = normalizeCustomerId(form.customerId as string);
+        const locationId = (form.locationId as string)?.trim();
 
-  if (!companyId || !customerId || !locationId) {
-    return Response.json({
-      intent,
-      success: false,
-      errors: ["Company, customer and location are required"],
-    });
-  }
+        if (!companyId || !customerId || !locationId) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company, customer and location are required"],
+          });
+        }
 
-  const result = await assignCompanyToCustomer(
-    admin,
-    customerId,
-    companyId,
-    locationId,
-  );
+        const result = await assignCompanyToCustomer(
+          admin,
+          customerId,
+          companyId,
+          locationId,
+        );
 
-  if (!result.success) {
-    return Response.json({
-      intent,
-      success: false,
-      errors: [`${result.step}: ${result.error}`],
-    });
-  }
+        if (!result.success) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [`${result.step}: ${result.error}`],
+          });
+        }
 
-  return Response.json({
-    intent,
-    success: true,
-    message: "Main contact assigned successfully",
-  });
-}
-
+        return Response.json({
+          intent,
+          success: true,
+          message: "Main contact assigned successfully",
+        });
+      }
 
       case "sendWelcomeEmail": {
         const email = (form.email as string)?.trim();
@@ -1036,8 +1032,8 @@ export default function RegistrationApprovals() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editMode, setEditMode] = useState<"create" | "update">("create");
-  const [selectedCountry, setSelectedCountry] = useState("");
-  const [selectedCountryModal, setSelectedCountryModal] = useState("");
+  const [customerMode, setCustomerMode] = useState<"create" | "update">("create");
+
 
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
@@ -1691,7 +1687,6 @@ export default function RegistrationApprovals() {
                   />
                 </label>
 
-
                 <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                   <s-button
                     type="submit"
@@ -1849,14 +1844,22 @@ export default function RegistrationApprovals() {
                           {customer.email}
                         </s-text>
                       </s-banner>
-                      <div style={{ marginTop: 12 }}>
+                      <div style={{ marginTop: 12,display: "flex", gap: 10}}>
                         <s-button onClick={() => setStep("createCompany")}>
                           Continue to Company Setup
                         </s-button>
-                        <s-button onClick={() => setStep("createCompany")}>
+                         <s-button
+                          onClick={() => {
+                            setCustomerMode("update");
+                            setStep("createCustomer");
+                          }}
+                        >
                           Update Customer
                         </s-button>
                       </div>
+                      
+                       
+                      
                     </>
                   ) : (
                     <>

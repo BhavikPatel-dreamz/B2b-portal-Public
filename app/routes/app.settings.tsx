@@ -432,7 +432,7 @@ export default function SettingsPage() {
                       colorInput.value = e.target.value;
                     }
                   }}
-                  name="themeColor"
+                  // name="themeColor"
                   placeholder="#005bd3"
                   style={{
                     flex: 1,
