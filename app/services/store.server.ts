@@ -16,6 +16,8 @@ export interface UpdateStoreInput {
   submissionEmail?: string | null;
   companyWelcomeEmailTemplate?: string | null;
   companyWelcomeEmailEnabled?: boolean;
+  contactEmail?: string | null;
+  themeColor?: string | null;
 }
 
 /**

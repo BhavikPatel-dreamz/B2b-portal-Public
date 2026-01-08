@@ -17,6 +17,8 @@ interface LoaderData {
     shopName: string;
     logo: string;
     submissionEmail: string;
+    contactEmail: string;
+    themeColor: string;
     companyWelcomeEmailTemplate?: string;
     companyWelcomeEmailEnabled?: boolean;
   };
@@ -49,6 +51,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         shopName: store.shopName || "",
         logo: store.logo || "",
         submissionEmail: store.submissionEmail || "",
+        contactEmail: store.contactEmail || "",
+        themeColor: store.themeColor || "",
         companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
         companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
       },
@@ -72,29 +76,50 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const logoRaw = (formData.get("logo") as string | null)?.trim() || "";
+  const shopName = (formData.get("shopName") as string | null)?.trim() || "";
   const submissionEmailRaw =
     (formData.get("submissionEmail") as string | null)?.trim() || "";
+  const contactEmailRaw =
+    (formData.get("contactEmail") as string | null)?.trim() || "";
+  const themeColorRaw =
+    (formData.get("themeColor") as string | null)?.trim() || "";
   const companyWelcomeEmailTemplate =
     (formData.get("companyWelcomeEmailTemplate") as string | null)?.trim() || "";
   const companyWelcomeEmailEnabled =
     (formData.get("companyWelcomeEmailEnabled") as string | null) === "on";
+
+  const errors: string[] = [];
 
   const submissionEmail = submissionEmailRaw || null;
   if (
     submissionEmail &&
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submissionEmail)
   ) {
-    return Response.json(
-      { success: false, errors: ["Enter a valid email address."] },
-      { status: 400 },
-    );
+    errors.push("Enter a valid registration notification email address.");
+  }
+
+  const contactEmail = contactEmailRaw || null;
+  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+    errors.push("Enter a valid contact email address.");
+  }
+
+  const themeColor = themeColorRaw || null;
+  if (themeColor && !/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(themeColor)) {
+    errors.push("Theme color must be a hex value like #0d6efd or #123.");
+  }
+
+  if (errors.length > 0) {
+    return Response.json({ success: false, errors }, { status: 400 });
   }
 
   const logo = logoRaw || null;
 
   await updateStore(store.id, {
     logo,
+    shopName,
     submissionEmail,
+    contactEmail,
+    themeColor,
     companyWelcomeEmailTemplate: companyWelcomeEmailTemplate || null,
     companyWelcomeEmailEnabled,
   });
@@ -301,6 +326,40 @@ export default function SettingsPage() {
 
             <div style={{ display: "grid", gap: 6 }}>
               <label
+                htmlFor="contactEmail"
+                style={{ fontWeight: 600, fontSize: 14 }}
+              >
+                Primary contact email
+              </label>
+              <input
+                id="contactEmail"
+                name="contactEmail"
+                type="email"
+                defaultValue={store?.contactEmail}
+                placeholder="support@yourstore.com"
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9cccf",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = "#005bd3";
+                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = "#c9cccf";
+                  e.target.style.boxShadow = "none";
+                }}
+              />
+              <s-text tone="subdued" variant="bodySm">
+                Shared contact inbox for customers and notifications.
+              </s-text>
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label
                 htmlFor="companyWelcomeEmailEnabled"
                 style={{ fontWeight: 600, fontSize: 14 }}
               >
@@ -323,6 +382,70 @@ export default function SettingsPage() {
               </div>
               <s-text tone="subdued" variant="bodySm">
                 Enable to receive email notifications whenever companies are synced from Shopify B2B.
+              </s-text>
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label
+                htmlFor="themeColor"
+                style={{ fontWeight: 600, fontSize: 14 }}
+              >
+                Theme color
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <input
+                  id="themeColor"
+                  type="color"
+                  defaultValue={store?.themeColor || "#005bd3"}
+                  style={{
+                    width: 52,
+                    height: 36,
+                    border: "1px solid #c9cccf",
+                    borderRadius: 8,
+                    padding: 0,
+                    cursor: "pointer",
+                    background: "#fff",
+                  }}
+                  onChange={(e) => {
+                    const textInput = document.getElementById("themeColorText") as HTMLInputElement | null;
+                    if (textInput) {
+                      textInput.value = e.target.value;
+                    }
+                  }}
+                />
+                <input
+                  id="themeColorText"
+                  name="themeColor"
+                  type="text"
+                  defaultValue={store?.themeColor || ""}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "#005bd3";
+                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "#c9cccf";
+                    e.target.style.boxShadow = "none";
+                  }}
+                  onChange={(e) => {
+                    const colorInput = document.getElementById("themeColor") as HTMLInputElement | null;
+                    if (colorInput && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(e.target.value)) {
+                      colorInput.value = e.target.value;
+                    }
+                  }}
+                  name="themeColor"
+                  placeholder="#005bd3"
+                  style={{
+                    flex: 1,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #c9cccf",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+              </div>
+              <s-text tone="subdued" variant="bodySm">
+                Primary accent color used across storefront surfaces. Accepts hex values.
               </s-text>
             </div>
 
