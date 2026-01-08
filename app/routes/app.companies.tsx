@@ -338,9 +338,9 @@ return (
               <thead>
                 <tr>
                   <th style={{ textAlign: "left", padding: "8px" }}>Company</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>
+                  {/* <th style={{ textAlign: "left", padding: "8px" }}>
                     Shopify company ID
-                  </th>
+                  </th> */}
                   <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Users</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Credit Limit</th>
@@ -356,8 +356,13 @@ return (
                     key={company.id}
                     style={{ borderTop: "1px solid #e3e3e3" }}
                   >
-                    <td style={{ padding: "8px" }}>{company.name}</td>
-                    <td
+                    <td style={{ padding: "8px" }}>{company.name}{company.shopifyCompanyId
+                        ? company.shopifyCompanyId.replace(
+                            "gid://shopify/Company/",
+                            "",
+                          )
+                        : "–"}</td>
+                    {/* <td
                       style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
                     >
                       {company.shopifyCompanyId
@@ -366,12 +371,13 @@ return (
                             "",
                           )
                         : "–"}
-                    </td>
+                    </td> */}
 
                     <td style={{ padding: "8px" }}>
                       {company.contactName ? (
                         <span>
                           {company.contactName}
+                          <br/>
                           {company.contactEmail
                             ? ` • ${company.contactEmail}`
                             : ""}
