@@ -176,88 +176,37 @@ export async function assignCompanyToCustomer(
   admin: AdminApiContext,
   customerId: string,
   companyId: string,
+  companyLocationId: string,
 ) {
-  if (!customerId || !companyId) {
+  if (!customerId || !companyId || !companyLocationId) {
     return {
       success: false,
-      error: "Company and customer are required",
+      error: "Company, customer and location are required",
       step: "validation",
     };
   }
 
   try {
-    // 1️⃣ Get first company location
-    const locationQuery = `
-      query getCompanyLocations($companyId: ID!) {
-        company(id: $companyId) {
-          locations(first: 1) {
-            edges {
-              node { id name }
-            }
-          }
-        }
-      }
-    `;
-    const locationRes = await admin.graphql(locationQuery, {
-      variables: { companyId },
-    });
-    const locationJson = await locationRes.json();
-
-    let companyLocationId =
-      locationJson.data?.company?.locations?.edges?.[0]?.node?.id;
-
-    // 2️⃣ If no location, create one
-    if (!companyLocationId) {
-      const createLocationMutation = `
-        mutation companyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
-          companyLocationCreate(companyId: $companyId, input: $input) {
-            companyLocation { id name }
-            userErrors { field message }
-          }
-        }
-      `;
-      const createLocationRes = await admin.graphql(createLocationMutation, {
-        variables: { companyId, input: { name: "Main Location" } },
-      });
-
-      const createLocationJson = await createLocationRes.json();
-      const createLocationPayload =
-        createLocationJson.data?.companyLocationCreate;
-
-      if (createLocationPayload?.userErrors?.length) {
-        return {
-          success: false,
-          error: createLocationPayload.userErrors[0].message,
-          step: "createLocation",
-        };
-      }
-
-      companyLocationId = createLocationPayload.companyLocation.id;
-    }
-
-    // 3️⃣ Get contact roles
-    const companyQuery = `
+    /* 1️⃣ Get contact roles */
+    const companyRes = await admin.graphql(
+      `#graphql
       query getCompany($companyId: ID!) {
         company(id: $companyId) {
           contactRoles(first: 10) {
             edges { node { id name } }
           }
         }
-      }
-    `;
-    const companyRes = await admin.graphql(companyQuery, {
-      variables: { companyId },
-    });
+      }`,
+      { variables: { companyId } }
+    );
+
     const companyJson = await companyRes.json();
     const roles = companyJson.data?.company?.contactRoles?.edges || [];
 
-    let companyContactRoleId = roles.find(
-      (edge: any) => edge.node.name.toLowerCase() === "company admin",
-    )?.node?.id;
-
-    if (!companyContactRoleId && roles.length > 0) {
-      companyContactRoleId = roles[0].node.id;
-    }
+    let companyContactRoleId =
+      roles.find(
+        (edge: any) => edge.node.name.toLowerCase() === "company admin",
+      )?.node?.id || roles[0]?.node?.id;
 
     if (!companyContactRoleId) {
       return {
@@ -267,18 +216,24 @@ export async function assignCompanyToCustomer(
       };
     }
 
-    // 4️⃣ Assign customer as company contact
-    const assignContactMutation = `
-      mutation companyAssignCustomerAsContact($companyId: ID!, $customerId: ID!) {
-        companyAssignCustomerAsContact(companyId: $companyId, customerId: $customerId) {
+    /* 2️⃣ Assign customer as contact */
+    const contactRes = await admin.graphql(
+      `#graphql
+      mutation companyAssignCustomerAsContact(
+        $companyId: ID!
+        $customerId: ID!
+      ) {
+        companyAssignCustomerAsContact(
+          companyId: $companyId
+          customerId: $customerId
+        ) {
           companyContact { id }
-          userErrors { field message }
+          userErrors { message }
         }
-      }
-    `;
-    const contactRes = await admin.graphql(assignContactMutation, {
-      variables: { companyId, customerId },
-    });
+      }`,
+      { variables: { companyId, customerId } }
+    );
+
     const contactJson = await contactRes.json();
     const contactPayload = contactJson.data?.companyAssignCustomerAsContact;
 
@@ -292,24 +247,32 @@ export async function assignCompanyToCustomer(
 
     const companyContactId = contactPayload.companyContact.id;
 
-    // 5️⃣ Assign role & location to contact
-    const assignRoleMutation = `
-      mutation companyContactAssignRole($companyContactId: ID!, $companyContactRoleId: ID!, $companyLocationId: ID!) {
+    /* 3️⃣ Assign role + PROVIDED location */
+    const roleRes = await admin.graphql(
+      `#graphql
+      mutation companyContactAssignRole(
+        $companyContactId: ID!
+        $companyContactRoleId: ID!
+        $companyLocationId: ID!
+      ) {
         companyContactAssignRole(
           companyContactId: $companyContactId
           companyContactRoleId: $companyContactRoleId
           companyLocationId: $companyLocationId
         ) {
-          companyContactRoleAssignment {
-            id role { id name } companyLocation { id name }
-          }
-          userErrors { field message }
+          companyContactRoleAssignment { id }
+          userErrors { message }
         }
+      }`,
+      {
+        variables: {
+          companyContactId,
+          companyContactRoleId,
+          companyLocationId,
+        },
       }
-    `;
-    const roleRes = await admin.graphql(assignRoleMutation, {
-      variables: { companyContactId, companyContactRoleId, companyLocationId },
-    });
+    );
+
     const roleJson = await roleRes.json();
     const rolePayload = roleJson.data?.companyContactAssignRole;
 
@@ -321,20 +284,27 @@ export async function assignCompanyToCustomer(
       };
     }
 
-    // 6️⃣ Assign main contact
-    const assignMainContactMutation = `
-      mutation companyAssignMainContact($companyId: ID!, $companyContactId: ID!) {
-        companyAssignMainContact(companyId: $companyId, companyContactId: $companyContactId) {
-          company { id name mainContact { id customer { id email } } }
-          userErrors { field message }
+    /* 4️⃣ Assign main contact */
+    const mainContactRes = await admin.graphql(
+      `#graphql
+      mutation companyAssignMainContact(
+        $companyId: ID!
+        $companyContactId: ID!
+      ) {
+        companyAssignMainContact(
+          companyId: $companyId
+          companyContactId: $companyContactId
+        ) {
+          company { id name }
+          userErrors { message }
         }
-      }
-    `;
-    const mainContactRes = await admin.graphql(assignMainContactMutation, {
-      variables: { companyId, companyContactId },
-    });
+      }`,
+      { variables: { companyId, companyContactId } }
+    );
+
     const mainContactJson = await mainContactRes.json();
-    const mainContactPayload = mainContactJson.data?.companyAssignMainContact;
+    const mainContactPayload =
+      mainContactJson.data?.companyAssignMainContact;
 
     if (mainContactPayload?.userErrors?.length) {
       return {
@@ -347,11 +317,9 @@ export async function assignCompanyToCustomer(
     return {
       success: true,
       companyContactId,
-      roleAssignment: rolePayload.companyContactRoleAssignment,
       company: mainContactPayload.company,
     };
   } catch (error) {
-    console.error("Error in assignCompanyToCustomer:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -359,6 +327,7 @@ export async function assignCompanyToCustomer(
     };
   }
 }
+
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -821,43 +790,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       case "assignMainContact": {
-        const companyId = (form.companyId as string)?.trim();
-        const customerIdRaw = (form.customerId as string)?.trim();
+  const companyId = (form.companyId as string)?.trim();
+  const customerId = normalizeCustomerId(form.customerId as string);
+  const locationId = (form.locationId as string)?.trim(); 
 
-        if (!companyId || !customerIdRaw) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company and customer are required"],
-          });
-        }
+  if (!companyId || !customerId || !locationId) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Company, customer and location are required"],
+    });
+  }
 
-        const customerId = normalizeCustomerId(customerIdRaw) || "";
+  const result = await assignCompanyToCustomer(
+    admin,
+    customerId,
+    companyId,
+    locationId,
+  );
 
-        const result = await assignCompanyToCustomer(
-          admin,
-          customerId,
-          companyId,
-        );
+  if (!result.success) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: [`${result.step}: ${result.error}`],
+    });
+  }
 
-        if (!result.success) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: [`${result.step}: ${result.error}`],
-          });
-        }
+  return Response.json({
+    intent,
+    success: true,
+    message: "Main contact assigned successfully",
+  });
+}
 
-        return Response.json({
-          intent,
-          success: true,
-          message: "Main contact assigned and ordering approved successfully",
-          data: {
-            companyContactId: result.companyContactId,
-            company: result.company,
-          },
-        });
-      }
 
       case "sendWelcomeEmail": {
         const email = (form.email as string)?.trim();
@@ -1886,6 +1852,9 @@ export default function RegistrationApprovals() {
                       <div style={{ marginTop: 12 }}>
                         <s-button onClick={() => setStep("createCompany")}>
                           Continue to Company Setup
+                        </s-button>
+                        <s-button onClick={() => setStep("createCompany")}>
+                          Update Customer
                         </s-button>
                       </div>
                     </>
