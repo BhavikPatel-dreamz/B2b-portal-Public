@@ -11,6 +11,7 @@ export interface CreateUserInput {
   shopId?: string | null;
   companyId?: string | null;
   companyRole?: string | null;
+  shopifyCustomerId?: string | null; // Shopify customer GID for linking
 }
 
 export interface UpdateUserInput {
@@ -47,6 +48,7 @@ export async function createUser(data: CreateUserInput) {
       shopId: data.shopId,
       companyId: data.companyId,
       companyRole: data.companyRole,
+      shopifyCustomerId: data.shopifyCustomerId,
       isActive: true,
     },
     include: {
