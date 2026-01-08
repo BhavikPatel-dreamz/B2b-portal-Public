@@ -4,7 +4,7 @@ import { getStoreByDomain } from "../../services/store.server";
 import {
   calculateAvailableCredit,
   validateTieredCreditForOrder,
-
+  deductTieredCredit,
 } from "../../services/tieredCreditService";
 
 import prisma from "../../db.server";
@@ -261,7 +261,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
 
       // Deduct credit and create transaction log
-      await deductCredit(companyId, b2bOrder.id, totalAmount, user.id);
+      await deductTieredCredit(companyId, user.id, b2bOrder.id, totalAmount, "order_created");
 
       // Create draft order in Shopify
       const shopifyResult = await createShopifyDraftOrder(admin, {
