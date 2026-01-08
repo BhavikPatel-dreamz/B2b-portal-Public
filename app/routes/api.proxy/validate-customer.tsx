@@ -11,6 +11,11 @@ import prisma from "app/db.server";
  * API endpoint to validate if a customer is logged in and has B2B/company access
  * This is used by the embed.js to check access before rendering the dashboard
  *
+ * Checks both the registrationSubmission table and User table to determine access.
+ * Users can be approved through either:
+ * 1. Registration submission process (registrationSubmission table)
+ * 2. Direct user creation via admin/company flows (User table)
+ *
  * Returns:
  * - isLoggedIn: boolean - if customer is logged in via Shopify
  * - hasB2BAccess: boolean - if customer has B2B/company access
@@ -62,15 +67,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
-    // STEP 4: Check registration status in our database
-    const registration = await prisma.registrationSubmission.findFirst({
-      where: {
-        OR: [
-          { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
-          { shopifyCustomerId: loggedInCustomerId },
-        ],
-      },
-    });
+    // STEP 4: Check user status in our database
+    // Check both registrationSubmission table and User table
+    const [registration, user] = await Promise.all([
+      prisma.registrationSubmission.findFirst({
+        where: {
+          OR: [
+            { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
+            { shopifyCustomerId: loggedInCustomerId },
+          ],
+        },
+      }),
+      prisma.user.findFirst({
+        where: {
+          OR: [
+            { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
+            { shopifyCustomerId: loggedInCustomerId },
+          ],
+          shopId: store.id,
+        },
+        include: {
+          company: true,
+        },
+      }),
+    ]);
 
     // STEP 5: Check if customer has B2B access in Shopify
     // 5a. First check via CompanyContact (primary method for B2B customers)
@@ -110,67 +130,92 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }
 
-    // STEP 6: Determine access based on B2B status and registration
+    // STEP 6: Determine access based on B2B status, registration, and user records
     if (hasB2BInShopify) {
       // User is part of a company in Shopify
 
-      if (!registration) {
-        // Has B2B access but not in our database - redirect to register
-        console.log("⚠️ Customer has B2B in Shopify but not registered in our database");
-        return Response.json({
-          isLoggedIn: true,
-          hasB2BAccess: false,
-          customerId: loggedInCustomerId,
-          customerStatus: null,
-          redirectTo: "/apps/b2b-portal/registration",
-          message: "Please complete registration to access the B2B portal",
-        });
-      }
+      // Check if user has approved access in either registration or user table
+      const isApprovedViaRegistration = registration?.status === "APPROVED";
+      const isApprovedViaUser = user?.status === "APPROVED" && user.isActive;
 
-      if (registration.status === "APPROVED") {
-        // Registration approved - grant access
-        console.log("✅ Customer approved - granting access");
+      if (isApprovedViaRegistration || isApprovedViaUser) {
+        // User has approved access - grant access
+        console.log("✅ Customer approved - granting access", {
+          viaRegistration: isApprovedViaRegistration,
+          viaUser: isApprovedViaUser
+        });
+
+        const customerName = registration?.contactName ||
+                           (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '');
+
         return Response.json({
           isLoggedIn: true,
           hasB2BAccess: true,
           logo: store.logo,
           email: store.contactEmail,
           customerId: loggedInCustomerId,
-          customerName: registration.contactName || "",
-          customerStatus: registration.status,
+          customerName,
+          customerStatus: isApprovedViaRegistration ? registration.status : user?.status,
           accessMethod,
           ...additionalInfo,
           message: "Access granted",
         });
-      } else {
-        // Registration exists but not approved
-        console.log("⏳ Customer registration pending/rejected");
+      }
+
+      // Check if user exists but is not approved
+      if (registration || user) {
+        const status = registration?.status || user?.status;
+        const customerName = registration?.contactName ||
+                           (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '');
+
+        console.log("⏳ Customer exists but not approved", {
+          registrationStatus: registration?.status,
+          userStatus: user?.status,
+          userActive: user?.isActive
+        });
+
         return Response.json({
           isLoggedIn: true,
           hasB2BAccess: false,
           customerId: loggedInCustomerId,
-          customerName: registration.contactName || "",
-          customerStatus: registration.status,
+          customerName,
+          customerStatus: status,
           redirectTo: "/apps/b2b-portal/registration",
-          message: "Your registration has already been submitted and is under review",
+          message: "Your account exists but is not approved yet",
           alreadySubmitted: true,
         });
       }
+
+      // No registration and no user record - redirect to register
+      console.log("⚠️ Customer has B2B in Shopify but not registered in our database");
+      return Response.json({
+        isLoggedIn: true,
+        hasB2BAccess: false,
+        customerId: loggedInCustomerId,
+        customerStatus: null,
+        redirectTo: "/apps/b2b-portal/registration",
+        message: "Please complete registration to access the B2B portal",
+      });
     } else {
       // No B2B access in Shopify
       console.log("⚠️ Customer does not have B2B access in Shopify");
 
-      if (registration) {
-        // Has registration but no B2B access in Shopify
+      if (registration || user) {
+        // Has registration or user record but no B2B access in Shopify
+        const status = registration?.status || user?.status;
+        const customerName = registration?.contactName ||
+                           (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '');
+
         return Response.json({
           isLoggedIn: true,
           hasB2BAccess: false,
-          customerStatus: registration.status,
+          customerStatus: status,
           customerId: loggedInCustomerId,
+          customerName,
           redirectTo: "/apps/b2b-portal/registration",
-          message: registration.status === "APPROVED"
-            ? "Your registration is approved but B2B access not configured in Shopify"
-            : "Your registration has already been submitted and is under review",
+          message: status === "APPROVED"
+            ? "Your account is approved but B2B access not configured in Shopify"
+            : "Your account has already been submitted and is under review",
           alreadySubmitted: true,
         });
       } else {
