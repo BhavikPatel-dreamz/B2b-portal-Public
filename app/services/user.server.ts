@@ -273,6 +273,24 @@ export async function deleteAllUserSessions(userId: string) {
 }
 
 /**
+ * Get active approved user by shop and Shopify customer ID
+ */
+export async function getUserByShopifyCustomerId(
+  shopId: string,
+  shopifyCustomerId: string,
+) {
+  return await prisma.user.findFirst({
+    where: {
+      shopId,
+      shopifyCustomerId,
+      isActive: true,
+      status: "APPROVED",
+    },
+    select: { id: true, companyId: true },
+  });
+}
+
+/**
  * Validate session and get user
  */
 export async function validateSession(token: string) {

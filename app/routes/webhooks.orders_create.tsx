@@ -1,43 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
+import { createOrder } from "../services/order.server";
+import { getUserByShopifyCustomerId } from "../services/user.server";
 import { Prisma } from "@prisma/client";
 
-// Handle Shopify ORDERS_CREATE webhook
-async function verifyHmac(request: Request) {
-  const secret = process.env.SHOPIFY_API_SECRET || "";
-  const received = request.headers.get("x-shopify-hmac-sha256") || "";
-  if (!secret || !received) return { ok: false as const, reason: "missing-secret-or-hmac" };
-
-  const clone = request.clone();
-  const bodyBuf = Buffer.from(await clone.arrayBuffer());
-  const digest = createHmac("sha256", secret).update(bodyBuf).digest();
-  const receivedBuf = Buffer.from(received, "base64");
-
-  const ok = receivedBuf.length === digest.length && timingSafeEqual(receivedBuf, digest);
-  if (!ok) {
-    return { ok: false as const, reason: "hmac-mismatch", computed: digest.toString("base64"), received };
-  }
-  return { ok: true as const };
-}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  console.log("orders/create webhook received");
   try {
-    const pre = await verifyHmac(request);
-    if (!pre.ok) {
-      const headers = Object.fromEntries(request.headers.entries());
-      console.error("Pre-HMAC check failed for orders/create", { ...pre, headers });
-      return new Response("Unauthorized", { status: 401 });
-    }
 
     const { payload, shop, topic } = await authenticate.webhook(request);
-    console.log(`Received ${topic} webhook for ${shop}`);
+    console.log(`Received ${topic} webhook for ${shop} ${payload }`);
 
     // If an outdated subscription points edited to this path, ignore gracefully
-    if (topic !== "orders/create") {
+    if (topic !== "ORDERS_CREATE") {
       console.info(`Webhook topic ${topic} hit orders/create route. Ignoring.`);
       return new Response();
     }
@@ -73,15 +51,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const orderGid = orderIdNum ? `gid://shopify/Order/${orderIdNum}` : undefined;
 
     // Find portal user for this shop + customer
-    const user = await prisma.user.findFirst({
-      where: {
-        shopId: store.id,
-        shopifyCustomerId: customerGid,
-        isActive: true,
-        status: "APPROVED",
-      },
-      select: { id: true, companyId: true },
-    });
+    const user = await getUserByShopifyCustomerId(store.id, customerGid);
+
+    console.log("Mapped user for customer:", { user, customerGid, userId: user?.id, companyId: user?.companyId });
 
     if (!user || !user.companyId) {
       console.info(
@@ -128,20 +100,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const paidAmount = paymentStatus === "paid" ? orderTotal : new Prisma.Decimal(0);
     const remainingBalance = orderTotal.minus(paidAmount);
 
-    // Create B2B order entry
-    await prisma.b2BOrder.create({
-      data: {
-        companyId: user.companyId,
-        createdByUserId: user.id,
-        shopId: store.id,
-        shopifyOrderId: orderGid,
-        orderTotal,
-        creditUsed: new Prisma.Decimal(0), // unknown from Shopify checkout; treat as 0
-        paymentStatus,
-        orderStatus,
-        paidAmount,
-        remainingBalance,
-      },
+    // Create B2B order entry via service
+    await createOrder({
+      companyId: user.companyId,
+      createdByUserId: user.id,
+      shopId: store.id,
+      shopifyOrderId: orderGid,
+      orderTotal,
+      creditUsed: new Prisma.Decimal(0),
+      remainingBalance,
+      paymentStatus,
+      orderStatus,
     });
 
     return new Response();

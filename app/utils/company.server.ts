@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, UserRole, UserStatus } from "@prisma/client";
 import prisma from "../db.server";
 import { sendCompanyWelcomeEmail } from "../services/notification.server";
 
@@ -78,8 +78,10 @@ export const syncShopifyCompanies = async (
 
         // Check if user exists
         if (mainContact?.email) {
+          const shopifyCustomerId = mainContact.id;
+
           // Upsert company data to Prisma
-          await prisma.companyAccount.upsert({
+          const upsertedCompany = await prisma.companyAccount.upsert({
             where: {
               shopId_shopifyCompanyId: {
                 shopId: store.id,
@@ -102,6 +104,35 @@ export const syncShopifyCompanies = async (
                 : null,
               contactEmail: mainContact.email,
               creditLimit: new Prisma.Decimal(0),
+            },
+          });
+
+          // Ensure the company's main contact exists as a store admin user
+          await prisma.user.upsert({
+            where: { shopId_email: { shopId: store.id, email: mainContact.email } },
+            update: {
+              firstName: mainContact.firstName || null,
+              lastName: mainContact.lastName || null,
+              shopifyCustomerId,
+              shopId: store.id,
+              companyId: upsertedCompany.id,
+              companyRole: "admin",
+              role: UserRole.STORE_ADMIN,
+              status: UserStatus.APPROVED,
+              isActive: true,
+            },
+            create: {
+              email: mainContact.email,
+              firstName: mainContact.firstName || null,
+              lastName: mainContact.lastName || null,
+              password: "", // Placeholder password; Shopify-auth users don't log in directly
+              shopifyCustomerId,
+              shopId: store.id,
+              companyId: upsertedCompany.id,
+              companyRole: "admin",
+              role: UserRole.STORE_ADMIN,
+              status: UserStatus.APPROVED,
+              isActive: true,
             },
           });
 
@@ -345,7 +376,7 @@ export const syncShopifyUsers = async (
 
             // Upsert user in local DB
             await prisma.user.upsert({
-              where: { email: customer.email },
+              where: { shopId_email: { shopId: store.id, email: customer.email } },
               update: {
                 firstName: customer.firstName || null,
                 lastName: customer.lastName || null,

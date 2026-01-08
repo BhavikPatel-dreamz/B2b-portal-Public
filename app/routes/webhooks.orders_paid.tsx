@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
+import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { Prisma } from "@prisma/client";
 
 // Handle Shopify ORDERS_PAID webhook
@@ -22,23 +22,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const orderGid = `gid://shopify/Order/${orderIdNum}`;
 
-    const order = await prisma.b2BOrder.findFirst({
-      where: { shopId: store.id, shopifyOrderId: orderGid },
-      select: { id: true, orderTotal: true },
-    });
+    const order = await getOrderByShopifyId(store.id, orderGid);
     if (!order) return new Response();
 
     // If Shopify says paid, mark fully paid locally
     const orderTotal = new Prisma.Decimal(totalPriceStr);
 
-    await prisma.b2BOrder.update({
-      where: { id: order.id },
-      data: {
-        paymentStatus: "paid",
-        paidAmount: orderTotal,
-        remainingBalance: new Prisma.Decimal(0),
-        paidAt: new Date(),
-      },
+    await updateOrder(order.id, {
+      paymentStatus: "paid",
+      paidAmount: orderTotal,
+      remainingBalance: new Prisma.Decimal(0),
+      paidAt: new Date(),
     });
 
     return new Response();

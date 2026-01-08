@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
+import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { restoreCredit } from "../services/creditService";
 
 // Handle Shopify ORDERS_CANCELLED webhook
@@ -21,34 +21,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const orderGid = `gid://shopify/Order/${orderIdNum}`;
 
-    const order = await prisma.b2BOrder.findFirst({
-      where: { shopId: store.id, shopifyOrderId: orderGid },
-      select: {
-        id: true,
-        companyId: true,
-        remainingBalance: true,
-        paidAmount: true,
-      },
-    });
+    const order = await getOrderByShopifyId(store.id, orderGid);
     if (!order) return new Response();
 
     // Restore any remaining balance to credit ledger
     try {
       if (order.remainingBalance) {
-        await restoreCredit(order.companyId, order.id, order.remainingBalance, "system", "cancelled");
+        await restoreCredit(order.companyId!, order.id, order.remainingBalance, "system", "cancelled");
       }
     } catch (creditErr) {
       console.error("Failed to restore credit on cancellation", creditErr);
     }
 
     // Mark the order as cancelled locally
-    await prisma.b2BOrder.update({
-      where: { id: order.id },
-      data: {
-        orderStatus: "cancelled",
-        paymentStatus: "cancelled",
-        remainingBalance: 0,
-      },
+    await updateOrder(order.id, {
+      orderStatus: "cancelled",
+      paymentStatus: "cancelled",
+      remainingBalance: 0,
     });
 
     return new Response();

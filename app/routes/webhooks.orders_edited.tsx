@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
+import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { Prisma } from "@prisma/client";
 
 // Handle Shopify ORDERS_EDITED webhook
@@ -16,32 +16,100 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const store = await getStoreByDomain(shop);
     if (!store) return new Response();
 
-    const orderIdNum = (payload as any).id as number | undefined;
+    // Extract order ID from order_edit wrapper
+    const orderIdNum = (payload as any).order_edit?.order_id as number | undefined;
     if (!orderIdNum) return new Response();
 
     const orderGid = `gid://shopify/Order/${orderIdNum}`;
 
-    // Update local B2B order totals/statuses based on edited order
-    const totalPriceStr = ((payload as any).total_price ?? (payload as any).current_total_price ?? "0") as string;
-    const orderTotal = new Prisma.Decimal(totalPriceStr);
+    // Find existing order in our DB
+    const existing = await getOrderByShopifyId(store.id, orderGid);
 
-    const existing = await prisma.b2BOrder.findFirst({
-      where: { shopId: store.id, shopifyOrderId: orderGid },
-      select: { id: true, paidAmount: true },
+    // Only sync if order exists and belongs to a registered B2B company
+    if (!existing?.companyId) return new Response();
+
+    // Since order_edit webhook doesn't have full order details,
+    // we need to fetch order from Shopify to get current status/totals
+    const adminSession = await authenticate.admin(request);
+    if (!adminSession) return new Response();
+
+    const orderQuery = `
+      query GetOrder($id: ID!) {
+        order(id: $id) {
+          id
+          totalPriceSet {
+            shopMoney {
+              amount
+            }
+          }
+          financialStatus
+          fulfillmentStatus
+        }
+      }
+    `;
+
+    const response = await adminSession.graphql(orderQuery, {
+      variables: { id: orderGid },
     });
+    const result = await response.json();
+    const order = result?.data?.order;
+    if (!order) return new Response();
 
-    if (!existing) return new Response();
+    // Map statuses from Shopify
+    const financialStatus = order.financialStatus as string | undefined;
+    const fulfillmentStatus = order.fulfillmentStatus as string | undefined;
+    let paymentStatus: string = "pending";
+    switch (financialStatus) {
+      case "PAID":
+        paymentStatus = "paid";
+        break;
+      case "PARTIALLY_PAID":
+        paymentStatus = "partial";
+        break;
+      case "REFUNDED":
+      case "VOIDED":
+        paymentStatus = "cancelled";
+        break;
+      default:
+        paymentStatus = "pending";
+    }
 
-    const paidAmount = existing.paidAmount ?? new Prisma.Decimal(0);
+    let orderStatus: string = "submitted";
+    switch (fulfillmentStatus) {
+      case "FULFILLED":
+        orderStatus = "delivered";
+        break;
+      case "PARTIAL":
+      case "IN_PROGRESS":
+        orderStatus = "processing";
+        break;
+      case "CANCELLED":
+        orderStatus = "cancelled";
+        break;
+      default:
+        orderStatus = "submitted";
+    }
+
+    const orderTotal = new Prisma.Decimal(
+      order.totalPriceSet?.shopMoney?.amount ?? "0",
+    );
+    const currentPaid = existing.paidAmount ?? new Prisma.Decimal(0);
+    const paidAmount = paymentStatus === "paid" ? orderTotal : currentPaid;
     const remainingBalance = orderTotal.minus(paidAmount);
 
-    await prisma.b2BOrder.update({
-      where: { id: existing.id },
-      data: {
-        orderTotal,
-        remainingBalance,
-        orderStatus: remainingBalance.isZero() ? "delivered" : "processing",
-      },
+    // Update existing order via service
+    await updateOrder(existing.id, {
+      orderTotal,
+      paymentStatus,
+      orderStatus: paymentStatus === "cancelled" ? "cancelled" : orderStatus,
+      paidAmount,
+      remainingBalance,
+      paidAt:
+        paymentStatus === "paid"
+          ? existing.paidAt ?? new Date()
+          : remainingBalance.isZero()
+            ? existing.paidAt ?? new Date()
+            : existing.paidAt,
     });
 
     return new Response();

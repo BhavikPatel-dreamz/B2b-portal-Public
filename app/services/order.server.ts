@@ -86,6 +86,23 @@ export async function getOrderById(id: string) {
 }
 
 /**
+ * Get order by Shop ID and Shopify Order GID (used by webhooks)
+ */
+export async function getOrderByShopifyId(shopId: string, shopifyOrderId: string) {
+  return await prisma.b2BOrder.findFirst({
+    where: { shopId, shopifyOrderId },
+    select: {
+      id: true,
+      orderTotal: true,
+      companyId: true,
+      remainingBalance: true,
+      paidAmount: true,
+      paidAt: true,
+    },
+  });
+}
+
+/**
  * Get orders by company
  */
 export async function getOrdersByCompany(

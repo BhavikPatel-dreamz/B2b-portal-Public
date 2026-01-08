@@ -79,7 +79,7 @@ model Store {
 // User accounts (for your B2B portal)
 model User {
   id           String        @id @default(cuid())
-  email        String        @unique
+  email        String
   firstName    String?
   lastName     String?
   password     String        // Password hash
@@ -111,6 +111,7 @@ model User {
   @@index([shopId])
   @@index([role])
   @@index([companyId])
+  @@unique([shopId, email])
 }
 
 // User sessions (for login/logout)
