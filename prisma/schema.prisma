@@ -158,6 +158,7 @@ model RegistrationSubmission {
   @@index([shopId])
   @@index([email])
   @@index([status])
+  @@unique([shopId, email])
 }
 
 // Store-level company records for credit management

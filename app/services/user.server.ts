@@ -73,9 +73,14 @@ export async function getUserById(id: string) {
 /**
  * Get user by email
  */
-export async function getUserByEmail(email: string) {
+export async function getUserByEmail(email: string, shopId?: string) {
   return await prisma.user.findUnique({
-    where: { email },
+    where: {
+      shopId_email: {
+        email,
+        shopId: shopId ?? null
+      }
+    },
     include: {
       shop: true,
       company: true,
