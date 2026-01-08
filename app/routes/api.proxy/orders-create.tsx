@@ -2,10 +2,11 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../../shopify.server";
 import { getStoreByDomain } from "../../services/store.server";
 import {
-  canCreateOrder,
-  deductCredit,
   calculateAvailableCredit,
-} from "../../services/creditService";
+  validateTieredCreditForOrder,
+
+} from "../../services/tieredCreditService";
+
 import prisma from "../../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
 
@@ -169,12 +170,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    // Verify user belongs to company
+    // Verify user belongs to company and get user info
     const user = await prisma.user.findFirst({
       where: {
         companyId,
         isActive: true,
         status: "APPROVED",
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        userCreditLimit: true,
+        userCreditUsed: true,
       },
     });
 
@@ -193,18 +202,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    // Check credit availability
-    const creditCheck = await canCreateOrder(companyId, totalAmount);
+    // Use tiered credit validation (checks both company and user limits)
+    const creditValidation = await validateTieredCreditForOrder(
+      companyId,
+      user.id,
+      totalAmount
+    );
 
-    if (!creditCheck.canCreate) {
-      const availableCredit = creditCheck.availableCredit || new Decimal(0);
+    if (!creditValidation.canCreate) {
+      const shortfallAmount = creditValidation.creditInfo
+        ? new Decimal(totalAmount).minus(
+            creditValidation.limitingFactor === "company"
+              ? creditValidation.creditInfo.company.availableCredit
+              : creditValidation.creditInfo.user.userCreditAvailable
+          ).toNumber()
+        : totalAmount;
+
       return Response.json(
         {
           error: "Insufficient credit",
-          message: creditCheck.message,
-          availableCredit: availableCredit.toNumber(),
+          message: creditValidation.message,
+          limitingFactor: creditValidation.limitingFactor,
+          availableCredit: creditValidation.creditInfo
+            ? (creditValidation.limitingFactor === "company"
+                ? creditValidation.creditInfo.company.availableCredit.toNumber()
+                : creditValidation.creditInfo.user.userCreditAvailable.toNumber())
+            : 0,
           requiredAmount: totalAmount,
-          shortfall: new Decimal(totalAmount).minus(availableCredit).toNumber(),
+          shortfall: shortfallAmount,
+          userInfo: creditValidation.creditInfo ? {
+            hasUserLimit: creditValidation.creditInfo.user.hasUserLimit,
+            userCreditAvailable: creditValidation.creditInfo.user.userCreditAvailable.toNumber(),
+            userCreditLimit: creditValidation.creditInfo.user.userCreditLimit?.toNumber() || null,
+          } : null,
         },
         { status: 400 }
       );

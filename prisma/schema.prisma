@@ -99,6 +99,10 @@ model User {
   company      CompanyAccount? @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: Cascade)
   companyRole  String?       // member, approver, admin
 
+  // User-level credit limits
+  userCreditLimit   Decimal?  @db.Decimal(14, 2)  // Individual user credit limit (null = no limit set)
+  userCreditUsed    Decimal   @default(0) @db.Decimal(14, 2)  // Amount currently used by user
+
   // Relations
   sessions     UserSession[]
   ordersCreated B2BOrder[]   @relation("UserCreatedOrders")
@@ -277,6 +281,7 @@ model B2BOrder {
 
   orderTotal       Decimal   @db.Decimal(14, 2)
   creditUsed       Decimal   @db.Decimal(14, 2)  // How much credit was used for this order
+  userCreditUsed   Decimal   @db.Decimal(14, 2)  // How much of user's personal credit was used
 
   // Payment tracking
   paymentStatus    String    @default("pending")   // pending, partial, paid, cancelled
@@ -304,6 +309,7 @@ model CreditTransaction {
   companyId        String
   company          CompanyAccount @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  userId           String?     // Track which user initiated the transaction
   orderId          String?     // Nullable if not order-related
 
   transactionType  String      // order_created, order_paid, order_cancelled, credit_adjustment, payment_received
