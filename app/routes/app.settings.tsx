@@ -166,6 +166,40 @@ export default function SettingsPage() {
 
         <s-card>
           <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
+
+<div style={{ display: "grid", gap: 6 }}>
+              <label htmlFor="name" style={{ fontWeight: 600, fontSize: 14 }}>
+                Store name
+              </label>
+              <input
+                id="shopName"
+                name="shopName"
+                type="text"
+                defaultValue={store?.shopName}
+                placeholder="Store name"
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9cccf",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = "#005bd3";
+                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = "#c9cccf";
+                  e.target.style.boxShadow = "none";
+                }}
+              />
+              <s-text tone="subdued" variant="bodySm">
+                Store name shown across emails or customer views.
+              </s-text>
+
+
+            </div>
+
             <div style={{ display: "grid", gap: 6 }}>
               <label htmlFor="logo" style={{ fontWeight: 600, fontSize: 14 }}>
                 Logo URL
