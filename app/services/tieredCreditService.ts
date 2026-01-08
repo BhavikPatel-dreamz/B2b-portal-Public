@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
+import { autoSyncCreditMetafields } from "./metafieldSync.server";
 
 interface UserCreditInfo {
   userId: string;
@@ -182,7 +183,8 @@ export async function deductTieredCredit(
   companyId: string,
   userId: string,
   orderId: string,
-  amount: number | Decimal
+  amount: number | Decimal,
+  transactionType: string = "order_created"
 ): Promise<void> {
   const amountDecimal = new Decimal(amount);
 
@@ -198,7 +200,7 @@ export async function deductTieredCredit(
       companyId,
       userId,
       orderId,
-      transactionType: "order_created",
+      transactionType,
       creditAmount: amountDecimal.negated(), // Negative for deduction
       previousBalance: creditInfo.company.availableCredit,
       newBalance: creditInfo.company.availableCredit.minus(amountDecimal),
@@ -228,6 +230,14 @@ export async function deductTieredCredit(
       remainingBalance: amountDecimal,
     },
   });
+
+  // **Auto-sync metafields for checkout extension**
+  try {
+    await autoSyncCreditMetafields(companyId, userId);
+  } catch (syncError) {
+    console.warn("Failed to sync credit metafields after deduction:", syncError);
+    // Don't fail the transaction if metafield sync fails
+  }
 }
 
 /**
