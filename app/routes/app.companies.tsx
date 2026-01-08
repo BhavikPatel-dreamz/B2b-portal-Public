@@ -327,9 +327,9 @@ return (
         {companies.length === 0 ? (
           <s-empty-state heading={searchQuery ? "No companies found" : "No companies yet"} />
         ) : (
-          <div style={}>
+          <div>
             <table
-              style={{
+              style={{  
                 width: "100%",
                 borderCollapse: "collapse"
 
