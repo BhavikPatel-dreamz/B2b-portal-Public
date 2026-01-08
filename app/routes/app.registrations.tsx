@@ -34,6 +34,7 @@ interface RegistrationSubmission {
 }
 
 interface ActionJson {
+  existsInDb: any;
   intent: string;
   success: boolean;
   message?: string;
@@ -428,7 +429,6 @@ export async function assignCompanyToCustomer(
   }
 }
 
-
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const store = await prisma.store.findUnique({
@@ -689,31 +689,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
-      case "createCompany": {
-        const companyName = (form.companyName as string)?.trim();
-        const locationName =
-          (form.locationName as string)?.trim() || `${companyName} HQ`;
-        const address1 = (form.address1 as string)?.trim();
-        const city = (form.city as string)?.trim();
-        const countryCode = (form.countryCode as string)?.trim();
-        const provinceCode = (form.provinceCode as string)?.trim();
-        const zip = (form.zip as string)?.trim();
-        const phone = (form.locationPhone as string)?.trim();
-        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+    case "createCompany": {
+  const companyName = (form.companyName as string)?.trim();
+  const locationName =
+    (form.locationName as string)?.trim() || `${companyName} HQ`;
+  const address1 = (form.address1 as string)?.trim();
+  const city = (form.city as string)?.trim();
+  const countryCode = (form.countryCode as string)?.trim();
+  // const provinceCode = (form.provinceCode as string)?.trim();
+  const zip = (form.zip as string)?.trim();
+  const phone = (form.locationPhone as string)?.trim();
+  const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
 
-        if (!companyName || !address1 || !city || !countryCode || !zip) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: [
-              "Company name, address, city, country, and zip are required",
-            ],
-          });
-        }
+  if (!companyName || !address1 || !city || !countryCode || !zip) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: [
+        "Company name, address, city, country, and zip are required",
+      ],
+    });
+  }
 
-        // 1. Create Company
-        const createCompanyResponse = await admin.graphql(
-          `#graphql
+  // 1. Create Company
+  const createCompanyResponse = await admin.graphql(
+    `#graphql
     mutation CompanyCreate($input: CompanyCreateInput!) {
       companyCreate(input: $input) {
         company {
@@ -726,68 +726,74 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
     }`,
-          {
-            variables: {
-              input: {
-                company: {
-                  name: companyName,
-                },
-              },
-            },
+    {
+      variables: {
+        input: {
+          company: {
+            name: companyName,
           },
-        );
+        },
+      },
+    },
+  );
 
-        const companyPayload = await createCompanyResponse.json();
-        const companyErrors = buildUserErrorList(companyPayload);
+  const companyPayload = await createCompanyResponse.json();
+  const companyErrors = buildUserErrorList(companyPayload);
 
-        if (companyErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: companyErrors,
-          });
-        }
+  if (companyErrors.length) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: companyErrors,
+    });
+  }
 
-        const companyId = companyPayload.data.companyCreate.company.id;
+  const companyId = companyPayload.data.companyCreate.company.id;
 
-        // Save to Prisma
-        const companyExists = await prisma.companyAccount.findFirst({
-          where: { name: companyName },
-        });
-        if (!companyExists) {
-          await prisma.companyAccount.create({
-            data: {
-              shopId: store.id,
-              name: companyName,
-              shopifyCompanyId: companyId,
-              paymentTeam: paymentTermsTemplateId,
-            },
-          });
-        }
+  // Save to Prisma
+  const companyExists = await prisma.companyAccount.findFirst({
+    where: { name: companyName },
+  });
+  if (!companyExists) {
+    await prisma.companyAccount.create({
+      data: {
+        shopId: store.id,
+        name: companyName,
+        shopifyCompanyId: companyId,
+        paymentTeam: paymentTermsTemplateId,
+      },
+    });
+  }
 
-        // 2. Create Location
-        const locationInput = {
-          name: locationName,
-          shippingAddress: {
-            address1,
-            city,
-            countryCode,
-            zip,
-            phone: phone || undefined,
-          },
-        };
+  // 2. Create Location
+  const locationInput = {
+    name: locationName,
+    shippingAddress: {
+      address1,
+      city,
+      countryCode,
+      zip,
+      // ...(provinceCode ? { provinceCode } : {}),
+      ...(phone ? { phone } : {}),
+    },
+    ...(paymentTermsTemplateId ? {
+      buyerExperienceConfiguration: {
+        paymentTermsTemplateId: paymentTermsTemplateId,
+      },
+    } : {}),
+  };
 
-        const createLocationResponse = await admin.graphql(
-          `#graphql
+  const createLocationResponse = await admin.graphql(
+    `#graphql
     mutation CompanyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
       companyLocationCreate(companyId: $companyId, input: $input) {
         companyLocation {
           id
           name
-          buyerExperienceConfiguration {
-            paymentTerms {
-              id
-            }
+          shippingAddress {
+            address1
+            city
+            zip
           }
         }
         userErrors {
@@ -796,158 +802,129 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
     }`,
-          {
-            variables: {
-              companyId,
-              input: locationInput,
-            },
-          },
-        );
+    {
+      variables: {
+        companyId,
+        input: locationInput,
+      },
+    },
+  );
 
-        const locationPayload = await createLocationResponse.json();
-        const locationErrors = buildUserErrorList(locationPayload);
+  const locationPayload = await createLocationResponse.json();
+  const locationErrors = buildUserErrorList(locationPayload);
 
-        if (locationErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: locationErrors,
-          });
-        }
+  if (locationErrors.length) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: locationErrors,
+    });
+  }
 
-        const location =
-          locationPayload.data.companyLocationCreate.companyLocation;
-        const paymentTermsId =
-          location.buyerExperienceConfiguration?.paymentTerms?.id;
+  const location =
+    locationPayload.data.companyLocationCreate.companyLocation;
 
-        // 3. Update Payment Terms (if paymentTermsTemplateId is provided and paymentTermsId exists)
-        if (paymentTermsTemplateId && paymentTermsId) {
-          const updatePaymentTermsResponse = await admin.graphql(
-            `#graphql
-      mutation PaymentTermsUpdate($input: PaymentTermsUpdateInput!) {
-        paymentTermsUpdate(input: $input) {
-          paymentTerms {
-            id
-            paymentTermsTemplate {
-              id
-              name
-            }
+  return Response.json({
+    intent,
+    success: true,
+    company: {
+      id: companyId,
+      name: companyName,
+      locationId: location.id,
+      locationName: location.name,
+    },
+    message: "Company and location created successfully",
+  });
+}
+
+
+     case "updateCompany": {
+  const companyId = (form.companyId as string)?.trim();
+  const locationId = (form.locationId as string)?.trim();
+  const companyName = (form.companyName as string)?.trim();
+  const locationName = (form.locationName as string)?.trim();
+  const address1 = (form.address1 as string)?.trim();
+  const city = (form.city as string)?.trim();
+  const countryCode = (form.countryCode as string)?.trim();
+  // const provinceCode = (form.provinceCode as string)?.trim();
+  const zip = (form.zip as string)?.trim();
+  const phone = (form.locationPhone as string)?.trim();
+
+  if (!companyId || !locationId) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Company ID and Location ID are required"],
+    });
+  }
+
+  // Update location
+  const updateLocationResponse = await admin.graphql(
+    `#graphql
+    mutation CompanyLocationUpdate($companyLocationId: ID!, $input: CompanyLocationUpdateInput!) {
+      companyLocationUpdate(companyLocationId: $companyLocationId, input: $input) {
+        companyLocation {
+          id
+          name
+          shippingAddress {
+            address1
+            city
+            countryCode
+            provinceCode
+            zip
+            phone
           }
-          userErrors {
-            code
-            field
-            message
-          }
         }
-      }`,
-            {
-              variables: {
-                input: {
-                  paymentTermsId: paymentTermsId,
-                  paymentTermsAttributes: {
-                    paymentTermsTemplateId: paymentTermsTemplateId,
-                  },
-                },
-              },
-            },
-          );
-
-          const paymentTermsPayload = await updatePaymentTermsResponse.json();
-          const paymentTermsErrors = buildUserErrorList(paymentTermsPayload);
-
-          if (paymentTermsErrors.length) {
-            return Response.json({
-              intent,
-              success: false,
-              errors: paymentTermsErrors,
-            });
-          }
+        userErrors {
+          field
+          message
         }
-
-        return Response.json({
-          intent,
-          success: true,
-          company: {
-            id: companyId,
-            name: companyName,
-            locationId: location.id,
-            locationName: location.name,
-            paymentTermsId: paymentTermsId,
-          },
-          message: "Company, location, and payment terms created successfully",
-        });
       }
-
-      case "updateCompany": {
-        const companyId = (form.companyId as string)?.trim();
-        const locationId = (form.locationId as string)?.trim();
-        const companyName = (form.companyName as string)?.trim();
-        const locationName = (form.locationName as string)?.trim();
-        const address1 = (form.address1 as string)?.trim();
-        const city = (form.city as string)?.trim();
-        const countryCode = (form.countryCode as string)?.trim();
-        const provinceCode = (form.provinceCode as string)?.trim();
-        const zip = (form.zip as string)?.trim();
-        const phone = (form.locationPhone as string)?.trim();
-
-        if (!companyId || !locationId) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company ID and Location ID are required"],
-          });
-        }
-
-        // Update location
-        const updateLocationResponse = await admin.graphql(
-          `#graphql
-          mutation CompanyLocationUpdate($id: ID!, $input: CompanyLocationInput!) {
-            companyLocationUpdate(id: $id, input: $input) {
-              companyLocation {
-                id
-                name
-              }
-              userErrors {
-                field
-                message
-              }
-            }
-          }`,
-          {
-            variables: {
-              id: locationId,
-              input: {
-                name: locationName,
-                shippingAddress: {
-                  address1,
-                  city,
-                  countryCode,
-                  provinceCode,
-                  zip,
-                  phone: phone || undefined,
-                },
-              },
-            },
+    }`,
+    {
+      variables: {
+        companyLocationId: locationId,
+        input: {
+          name: locationName,
+          shippingAddress: {
+            address1,
+            city,
+            countryCode,
+            // ...(provinceCode ? { provinceCode } : {}),
+            zip,
+            ...(phone ? { phone } : {}),
           },
-        );
+        },
+      },
+    },
+  );
 
-        const locationPayload = await updateLocationResponse.json();
-        const locationErrors = buildUserErrorList(locationPayload);
+  const locationPayload = await updateLocationResponse.json();
+  const locationErrors = buildUserErrorList(locationPayload);
 
-        if (locationErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: locationErrors,
-          });
-        }
+  if (locationErrors.length) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: locationErrors,
+    });
+  }
 
-        return Response.json({
-          intent,
-          success: true,
-          message: "Company updated successfully",
-        });
-      }
+  const updatedLocation = locationPayload.data.companyLocationUpdate.companyLocation;
+
+  return Response.json({
+    intent,
+    success: true,
+    company: {
+      id: companyId,
+      name: companyName,
+      locationId: updatedLocation.id,
+      locationName: updatedLocation.name,
+    },
+    message: "Company updated successfully",
+  });
+}
+
 
       case "assignMainContact": {
         const companyId = (form.companyId as string)?.trim();
@@ -1187,6 +1164,7 @@ export default function RegistrationApprovals() {
   const [step, setStep] = useState<
     | "check"
     | "createCustomer"
+    | "updateCompany"
     | "createCompany"
     | "assign"
     | "email"
@@ -1226,100 +1204,118 @@ export default function RegistrationApprovals() {
       });
     });
   };
+  
+useEffect(() => {
+  if (!flowFetcher.data) return;
 
-  useEffect(() => {
-    if (!flowFetcher.data) return;
+  if (
+    flowFetcher.data.intent === "checkCustomer" &&
+    flowFetcher.data.customer
+  ) {
+    setCustomer(flowFetcher.data.customer);
+    flowFetcher.submit(
+      { intent: "checkCompany", companyName: selected?.companyName || "" },
+      { method: "post" },
+    );
+    return;
+  }
 
-    if (
-      flowFetcher.data.intent === "checkCustomer" &&
-      flowFetcher.data.customer
-    ) {
-      setCustomer(flowFetcher.data.customer);
-      flowFetcher.submit(
-        { intent: "checkCompany", companyName: selected?.companyName || "" },
-        { method: "post" },
-      );
-      return;
+  if (
+    (flowFetcher.data.intent === "createCustomer" ||
+      flowFetcher.data.intent === "updateCustomer") &&
+    flowFetcher.data.success
+  ) {
+    setCustomer(flowFetcher.data.customer || null);
+    if (flowFetcher.data.intent === "createCustomer") {
+      setStep("createCompany");
     }
+    setShowCustomerModal(false);
+    shopify.toast.show?.(
+      flowFetcher.data.intent === "createCustomer"
+        ? "Customer created"
+        : "Customer updated",
+    );
+    return;
+  }
 
-    if (
-      (flowFetcher.data.intent === "createCustomer" ||
-        flowFetcher.data.intent === "updateCustomer") &&
-      flowFetcher.data.success
-    ) {
-      setCustomer(flowFetcher.data.customer || null);
-      if (flowFetcher.data.intent === "createCustomer") {
-        setStep("createCompany");
-      }
-      setShowCustomerModal(false);
-      shopify.toast.show?.(
-        flowFetcher.data.intent === "createCustomer"
-          ? "Customer created"
-          : "Customer updated",
-      );
-      return;
-    }
-
-    if (flowFetcher.data.intent === "checkCompany") {
-      if (flowFetcher.data.company) {
-        setCompany(flowFetcher.data.company);
-        setStep("assign");
-        shopify.toast.show?.("Company already exists");
+  if (flowFetcher.data.intent === "checkCompany") {
+    setStep("createCompany");
+    
+    if (flowFetcher.data.company) {
+      // Company exists - set company data but DON'T open edit form
+      setCompany(flowFetcher.data.company);
+      // Important: Don't set editMode here, let it remain as is
+      
+      // Show appropriate message
+      if (flowFetcher.data.existsInDb) {
+        shopify.toast.show?.("Company already exists - you can review or edit details");
       } else {
-        setStep("createCompany");
+        shopify.toast.show?.("Company found in Shopify");
       }
-      return;
-    }
-
-    if (
-      (flowFetcher.data.intent === "createCompany" ||
-        flowFetcher.data.intent === "updateCompany") &&
-      flowFetcher.data.success
-    ) {
-      if (flowFetcher.data.intent === "createCompany") {
-        setCompany(flowFetcher.data.company || null);
-        setStep("assign");
-      }
-      setShowCompanyModal(false);
-      shopify.toast.show?.(
-        flowFetcher.data.intent === "createCompany"
-          ? "Company created"
-          : "Company updated",
-      );
-      return;
-    }
-
-    if (
-      flowFetcher.data.intent === "assignMainContact" &&
-      flowFetcher.data.success
-    ) {
-      setStep("email");
-      shopify.toast.show?.("Main contact assigned");
-      return;
-    }
-
-    if (
-      flowFetcher.data.intent === "sendWelcomeEmail" &&
-      flowFetcher.data.success
-    ) {
-      setStep("complete");
-      shopify.toast.show?.("Welcome email sent");
-      return;
-    }
-
-    if (
-      flowFetcher.data.intent === "completeApproval" &&
-      flowFetcher.data.success
-    ) {
-      setSelected(null);
-      setCustomer(null);
+    } else {
+      // Company doesn't exist - clear company to show create form
       setCompany(null);
-      setStep("check");
-      setReviewNotes("");
-      revalidator.revalidate();
-      shopify.toast.show?.("Registration approved");
     }
-  }, [flowFetcher.data, shopify, revalidator]);
+    return;
+  }
+
+  if (
+    (flowFetcher.data.intent === "createCompany" ||
+      flowFetcher.data.intent === "updateCompany") &&
+    flowFetcher.data.success
+  ) {
+    setCompany(flowFetcher.data.company || null);
+    
+    if (flowFetcher.data.intent === "createCompany") {
+      // After creating, move to assign step
+      setStep("assign");
+      setEditMode("create");
+    } else {
+      // After updating, close edit form and stay on createCompany step
+      setEditMode("create"); // This closes the edit form
+    }
+    
+    setShowCompanyModal(false);
+    shopify.toast.show?.(
+      flowFetcher.data.intent === "createCompany"
+        ? "Company created successfully"
+        : "Company updated successfully",
+    );
+    return;
+  }
+
+  if (
+    flowFetcher.data.intent === "assignMainContact" &&
+    flowFetcher.data.success
+  ) {
+    setStep("email");
+    shopify.toast.show?.("Main contact assigned");
+    return;
+  }
+
+  if (
+    flowFetcher.data.intent === "sendWelcomeEmail" &&
+    flowFetcher.data.success
+  ) {
+    setStep("complete");
+    shopify.toast.show?.("Welcome email sent");
+    return;
+  }
+
+  if (
+    flowFetcher.data.intent === "completeApproval" &&
+    flowFetcher.data.success
+  ) {
+    setSelected(null);
+    setCustomer(null);
+    setCompany(null);
+    setStep("check");
+    setReviewNotes("");
+    setEditMode("create");
+    revalidator.revalidate();
+    shopify.toast.show?.("Registration approved");
+  }
+}, [flowFetcher.data, shopify, revalidator]);
 
   useEffect(() => {
     if (rejectFetcher.data?.success) {
@@ -1720,7 +1716,9 @@ export default function RegistrationApprovals() {
               }}
             >
               <h3 style={{ margin: 0 }}>
-                {editMode === "create" ? "Create Company" : "Update Company"}
+                {editMode === "create"
+                  ? "Create Company"
+                  : "Update Company Location"}
               </h3>
               <s-button
                 variant="tertiary"
@@ -1773,6 +1771,7 @@ export default function RegistrationApprovals() {
                     }}
                   />
                 </label>
+
                 {editMode === "create" && (
                   <label
                     style={{ display: "flex", flexDirection: "column", gap: 4 }}
@@ -1804,6 +1803,7 @@ export default function RegistrationApprovals() {
                     </select>
                   </label>
                 )}
+
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -1830,6 +1830,7 @@ export default function RegistrationApprovals() {
                     }}
                   />
                 </label>
+
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -1853,6 +1854,7 @@ export default function RegistrationApprovals() {
                     }}
                   />
                 </label>
+
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -1875,6 +1877,7 @@ export default function RegistrationApprovals() {
                     }}
                   />
                 </label>
+
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -1897,6 +1900,7 @@ export default function RegistrationApprovals() {
                     }}
                   />
                 </label>
+
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -1942,6 +1946,7 @@ export default function RegistrationApprovals() {
                     }}
                   />
                 </label>
+
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -1963,6 +1968,7 @@ export default function RegistrationApprovals() {
                     }}
                   />
                 </label>
+
                 <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                   <s-button
                     type="submit"
@@ -1974,7 +1980,7 @@ export default function RegistrationApprovals() {
                   >
                     {editMode === "create"
                       ? "Create Company"
-                      : "Update Company"}
+                      : "Update Location"}
                   </s-button>
                   <s-button
                     variant="tertiary"
@@ -1984,6 +1990,7 @@ export default function RegistrationApprovals() {
                   </s-button>
                 </div>
               </form>
+
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (
                   <s-banner
@@ -2090,7 +2097,7 @@ export default function RegistrationApprovals() {
 
               {/* Step: Check Customer */}
 
-                        {step === "check" && (
+              {step === "check" && (
                 <div
                   style={{
                     border: "1px solid #e3e3e3",
@@ -2144,467 +2151,839 @@ export default function RegistrationApprovals() {
 
               {/* Step: Create Customer */}
               {step === "createCustomer" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                >
-                  <h4 style={{ marginTop: 0 }}>Create Customer</h4>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Fill in the customer details below.
-                  </p>
+                <div>
+                  {customer ? (
+                    <>
+                      <s-banner tone="info" title="Customer exists">
+                        <s-text>
+                          {customer.firstName} {customer.lastName} ·{" "}
+                          {customer.email}
+                        </s-text>
+                      </s-banner>
 
-                  <form
-                    style={{ display: "grid", gap: 12, marginTop: 12 }}
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const form = e.currentTarget;
-                      const data = new FormData(form);
-                      data.append("intent", "createCustomer");
-                      flowFetcher.submit(data, { method: "post" });
-                    }}
-                  >
-                    <label
+                      {/* Show update form */}
+                      <form
+                        style={{ display: "grid", gap: 12, marginTop: 12 }}
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const form = e.currentTarget;
+                          const data = new FormData(form);
+                          data.append("intent", "updateCustomer");
+                          data.append("customerId", customer.id);
+                          flowFetcher.submit(data, { method: "post" });
+                        }}
+                      >
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span>Email *</span>
+                          <input
+                            name="email"
+                            defaultValue={customer.email}
+                            required
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span>First Name *</span>
+                          <input
+                            name="firstName"
+                            defaultValue={customer.firstName}
+                            required
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span>Last Name</span>
+                          <input
+                            name="lastName"
+                            defaultValue={customer.lastName}
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span>Phone</span>
+                          <input
+                            name="phone"
+                            defaultValue={customer.phone}
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                          <s-button
+                            type="submit"
+                            {...(isFlowLoading ? { loading: true } : {})}
+                          >
+                            Update Customer
+                          </s-button>
+                          <s-button
+                            variant="tertiary"
+                            onClick={() => setStep("check")}
+                          >
+                            Back
+                          </s-button>
+                        </div>
+                      </form>
+                    </>
+                  ) : (
+                    // Existing creation form remains
+
+                    <div
                       style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
+                        border: "1px solid #e3e3e3",
+                        borderRadius: 12,
+                        padding: 16,
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "#5c5f62",
-                          fontWeight: 500,
+                      <h4 style={{ marginTop: 0 }}>Create Customer</h4>
+                      <p style={{ color: "#5c5f62", marginTop: 4 }}>
+                        Fill in the customer details below.
+                      </p>
+
+                      <form
+                        style={{ display: "grid", gap: 12, marginTop: 12 }}
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const form = e.currentTarget;
+                          const data = new FormData(form);
+                          data.append("intent", "createCustomer");
+                          flowFetcher.submit(data, { method: "post" });
                         }}
                       >
-                        Email
-                      </span>
-                      <input
-                        name="email"
-                        defaultValue={selected.email}
-                        required
-                        style={{
-                          padding: 10,
-                          borderRadius: 8,
-                          border: "1px solid #c9ccd0",
-                        }}
-                      />
-                    </label>
-                    <label
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "#5c5f62",
-                          fontWeight: 500,
-                        }}
-                      >
-                        First name
-                      </span>
-                      <input
-                        name="firstName"
-                        defaultValue={contactNameParts.firstName}
-                        required
-                        style={{
-                          padding: 10,
-                          borderRadius: 8,
-                          border: "1px solid #c9ccd0",
-                        }}
-                      />
-                    </label>
-                    <label
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "#5c5f62",
-                          fontWeight: 500,
-                        }}
-                      >
-                        Last name
-                      </span>
-                      <input
-                        name="lastName"
-                        defaultValue={contactNameParts.lastName}
-                        style={{
-                          padding: 10,
-                          borderRadius: 8,
-                          border: "1px solid #c9ccd0",
-                        }}
-                      />
-                    </label>
-                    <label
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "#5c5f62",
-                          fontWeight: 500,
-                        }}
-                      >
-                        Phone
-                      </span>
-                      <input
-                        name="phone"
-                        defaultValue={selected.phone}
-                        style={{
-                          padding: 10,
-                          borderRadius: 8,
-                          border: "1px solid #c9ccd0",
-                        }}
-                      />
-                    </label>
-                    <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                      <s-button
-                        type="submit"
-                        {...(isFlowLoading &&
-                        flowFetcher.data?.intent === "createCustomer"
-                          ? { loading: true }
-                          : {})}
-                      >
-                        Create Customer
-                      </s-button>
-                      <s-button
-                        variant="tertiary"
-                        onClick={() => setStep("check")}
-                      >
-                        Back
-                      </s-button>
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: "#5c5f62",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Email
+                          </span>
+                          <input
+                            name="email"
+                            defaultValue={selected.email}
+                            required
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: "#5c5f62",
+                              fontWeight: 500,
+                            }}
+                          >
+                            First name
+                          </span>
+                          <input
+                            name="firstName"
+                            defaultValue={contactNameParts.firstName}
+                            required
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: "#5c5f62",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Last name
+                          </span>
+                          <input
+                            name="lastName"
+                            defaultValue={contactNameParts.lastName}
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              color: "#5c5f62",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Phone
+                          </span>
+                          <input
+                            name="phone"
+                            defaultValue={selected.phone}
+                            style={{
+                              padding: 10,
+                              borderRadius: 8,
+                              border: "1px solid #c9ccd0",
+                            }}
+                          />
+                        </label>
+                        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                          <s-button
+                            type="submit"
+                            {...(isFlowLoading &&
+                            flowFetcher.data?.intent === "createCustomer"
+                              ? { loading: true }
+                              : {})}
+                          >
+                            Create Customer
+                          </s-button>
+                          <s-button
+                            variant="tertiary"
+                            onClick={() => setStep("check")}
+                          >
+                            Back
+                          </s-button>
+                        </div>
+                      </form>
                     </div>
-                  </form>
+                  )}
                 </div>
               )}
 
               {/* Step: Create Company */}
-              {step === "createCompany" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                >
-                  <h4 style={{ marginTop: 0 }}>Create Company & Location</h4>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Create the company record and main location.
-                  </p>
+             {step === "createCompany" && (
+  <div
+    style={{
+      border: "1px solid #e3e3e3",
+      borderRadius: 12,
+      padding: 16,
+    }}
+  >
+    <h4 style={{ marginTop: 0 }}>Create Company & Location</h4>
+    <p style={{ color: "#5c5f62", marginTop: 4 }}>
+      Create the company record and main location.
+    </p>
 
-                  {company ? (
-                    <>
-                      <s-banner tone="success" title="Company exists">
-                        <s-text>
-                          {company.name} ·{" "}
-                          {company.locationName || "Main location"}
-                        </s-text>
-                      </s-banner>
-                      <div style={{ marginTop: 12 }}>
-                        <s-button onClick={() => setStep("assign")}>
-                          Continue to Assign Contact
-                        </s-button>
-                      </div>
-                    </>
-                  ) : (
-                    <form
-                      style={{ display: "grid", gap: 12, marginTop: 12 }}
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const form = e.currentTarget;
-                        const data = new FormData(form);
-                        data.append("intent", "createCompany");
-                        flowFetcher.submit(data, { method: "post" });
-                      }}
-                    >
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Company name
-                        </span>
-                        <input
-                          name="companyName"
-                          defaultValue={selected.companyName}
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
+    {company ? (
+      <>
+        <s-banner tone="success" title="Company exists">
+          <s-text>
+            {company.name} · {company.locationName || "Main location"}
+          </s-text>
+        </s-banner>
 
-                      {/* Payment Terms Dropdown - NEW FIELD */}
+        {/* Always show edit form when company exists */}
+        {editMode !== "update" && (
+          <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+            <s-button onClick={() => setStep("assign")}>
+              Continue to Assign Contact
+            </s-button>
+            <s-button
+              variant="secondary"
+              onClick={() => setEditMode("update")}
+            >
+              Edit Company Details
+            </s-button>
+          </div>
+        )}
 
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Payment terms
-                        </span>
-                        <select
-                          name="paymentTerms"
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                            backgroundColor: "white",
-                          }}
-                        >
-                          <option value="">No payment terms</option>
-                          {paymentTermsTemplates?.map((template) => (
-                            <option key={template.id} value={template.id}>
-                              {template.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+        {/* Inline Edit Form - shows when editMode is "update" */}
+        {editMode === "update" && (
+          <form
+            style={{
+              display: "grid",
+              gap: 12,
+              marginTop: 16,
+              padding: 16,
+              background: "#f9fafb",
+              borderRadius: 8,
+              border: "1px solid #e3e3e3",
+            }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const data = new FormData(form);
+              data.append("intent", "updateCompany");
+              data.append("companyId", company?.id || "");
+              data.append("locationId", company?.locationId || "");
+              flowFetcher.submit(data, { method: "post" });
+            }}
+          >
+            <h5 style={{ margin: "0 0 8px 0" }}>Edit Location Details</h5>
 
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Location name
-                        </span>
-                        <input
-                          name="locationName"
-                          defaultValue={`${selected.companyName} HQ`}
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                Company name *
+              </span>
+              <input
+                name="companyName"
+                defaultValue={company?.name || ""}
+                required
+                disabled
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  backgroundColor: "#f3f4f6",
+                }}
+              />
+            </label>
 
-                      {/* ... rest of the form fields remain same ... */}
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Address 1
-                        </span>
-                        <input
-                          name="address1"
-                          required
-                          placeholder="123 Example St"
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          City
-                        </span>
-                        <input
-                          name="city"
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Province/State code
-                        </span>
-                        <input
-                          name="provinceCode"
-                          placeholder="CA"
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Country code
-                        </span>
-                        <input
-                          name="countryCode"
-                          placeholder="US"
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Postal code
-                        </span>
-                        <input
-                          name="zip"
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Phone
-                        </span>
-                        <input
-                          name="locationPhone"
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-                      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                        <s-button
-                          type="submit"
-                          {...(isFlowLoading &&
-                          flowFetcher.data?.intent === "createCompany"
-                            ? { loading: true }
-                            : {})}
-                        >
-                          Create Company
-                        </s-button>
-                        <s-button
-                          variant="tertiary"
-                          onClick={() =>
-                            setStep(customer ? "check" : "createCustomer")
-                          }
-                        >
-                          Back
-                        </s-button>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              )}
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                Location name *
+              </span>
+              <input
+                name="locationName"
+                defaultValue={company?.locationName || ""}
+                required
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                }}
+              />
+            </label>
+
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                Address 1 *
+              </span>
+              <input
+                name="address1"
+                required
+                placeholder="123 Example St"
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                }}
+              />
+            </label>
+
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                City *
+              </span>
+              <input
+                name="city"
+                required
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                }}
+              />
+            </label>
+
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                Province/State code
+              </span>
+              <input
+                name="provinceCode"
+                placeholder="CA"
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                }}
+              />
+            </label>
+
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                Country code *
+              </span>
+              <input
+                name="countryCode"
+                placeholder="US"
+                required
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                }}
+              />
+            </label>
+
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                Postal code *
+              </span>
+              <input
+                name="zip"
+                required
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                }}
+              />
+            </label>
+
+            <label
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#5c5f62",
+                  fontWeight: 500,
+                }}
+              >
+                Phone
+              </span>
+              <input
+                name="locationPhone"
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                }}
+              />
+            </label>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <s-button
+                type="submit"
+                {...(isFlowLoading &&
+                flowFetcher.data?.intent === "updateCompany"
+                  ? { loading: true }
+                  : {})}
+              >
+                Update Location
+              </s-button>
+              <s-button
+                variant="tertiary"
+                type="button"
+                onClick={() => setEditMode("create")}
+              >
+                Cancel
+              </s-button>
+            </div>
+          </form>
+        )}
+
+        {/* Show Continue button again after edit form closes */}
+        {editMode !== "update" && (
+          <div style={{ marginTop: 12 }}>
+            <s-button onClick={() => setStep("assign")}>
+              Continue to Assign Contact
+            </s-button>
+          </div>
+        )}
+      </>
+    ) : (
+      <form
+        style={{ display: "grid", gap: 12, marginTop: 12 }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          const data = new FormData(form);
+          data.append("intent", "createCompany");
+          flowFetcher.submit(data, { method: "post" });
+        }}
+      >
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Company name *
+          </span>
+          <input
+            name="companyName"
+            defaultValue={selected.companyName}
+            required
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Payment terms
+          </span>
+          <select
+            name="paymentTerms"
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+              backgroundColor: "white",
+            }}
+          >
+            <option value="">No payment terms</option>
+            {paymentTermsTemplates?.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Location name *
+          </span>
+          <input
+            name="locationName"
+            defaultValue={`${selected.companyName} HQ`}
+            required
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Address 1 *
+          </span>
+          <input
+            name="address1"
+            required
+            placeholder="123 Example St"
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            City *
+          </span>
+          <input
+            name="city"
+            required
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Province/State code
+          </span>
+          <input
+            name="provinceCode"
+            placeholder="CA"
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Country code *
+          </span>
+          <input
+            name="countryCode"
+            placeholder="US"
+            required
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Postal code *
+          </span>
+          <input
+            name="zip"
+            required
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              color: "#5c5f62",
+              fontWeight: 500,
+            }}
+          >
+            Phone
+          </span>
+          <input
+            name="locationPhone"
+            style={{
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+            }}
+          />
+        </label>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <s-button
+            type="submit"
+            {...(isFlowLoading &&
+            flowFetcher.data?.intent === "createCompany"
+              ? { loading: true }
+              : {})}
+          >
+            Create Company
+          </s-button>
+          <s-button
+            variant="tertiary"
+            onClick={() =>
+              setStep(customer ? "check" : "createCustomer")
+            }
+          >
+            Back
+          </s-button>
+        </div>
+      </form>
+    )}
+  </div>
+)}
               {/* Step: Assign Contact */}
               {step === "assign" && (
                 <div
