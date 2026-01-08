@@ -701,57 +701,76 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
-    case "updateCompany": {
-  const companyId = (form.companyId as string)?.trim();
-  const locationId = (form.locationId as string)?.trim();
-  const companyName = (form.companyName as string)?.trim();
-  const locationName = (form.locationName as string)?.trim();
-  const address1 = (form.address1 as string)?.trim();
-  const city = (form.city as string)?.trim();
-  const countryCode = (form.countryCode as string)?.trim();
-  const zip = (form.zip as string)?.trim();
-  const phone = (form.locationPhone as string)?.trim();
+      case "updateCompany": {
+        const companyId = (form.companyId as string)?.trim();
+        const locationId = (form.locationId as string)?.trim();
+        const companyName = (form.companyName as string)?.trim();
+        const locationName = (form.locationName as string)?.trim();
+        const phone = (form.locationPhone as string)?.trim();
 
-  if (!companyId || !locationId || !address1 || !city || !countryCode || !zip) {
-    return Response.json({
-      intent,
-      success: false,
-      errors: ["Company ID, location ID, address, city, country, and zip are required"],
-    });
-  }
+        /* -----------------------------
+   1️⃣ Update COMPANY NAME
+  ----------------------------- */
+        const updateCompanyResponse = await admin.graphql(
+          `#graphql
+  mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
+    companyUpdate(companyId: $companyId, input: $input) {
+      company {
+        id
+        name
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }`,
+          {
+            variables: {
+              companyId,
+              input: {
+                name: companyName,
+              },
+            },
+          },
+        );
 
-  // Create the address input object
-  const addressInput: any = {
-    address1,
-    city,
-    countryCode,
-    zip,
-  };
+        const companyPayload = await updateCompanyResponse.json();
+        const companyErrors = buildUserErrorList(companyPayload);
 
-  if (phone) {
-    addressInput.phone = phone;
-  }
+        if (companyErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: companyErrors,
+          });
+        }
 
-  // Create the location input with nested address
-  const locationInput = {
-    name: locationName,
-    address: addressInput,
-  };
+        /* -----------------------------
+   2️⃣ Update LOCATION NAME + PHONE
+  ----------------------------- */
+        const locationInput: any = {
+          name: locationName,
+        };
 
-  const updateLocationResponse = await admin.graphql(
-    `#graphql
-    mutation CompanyLocationUpdate($companyLocationId: ID!, $input: CompanyLocationUpdateInput!) {
-      companyLocationUpdate(companyLocationId: $companyLocationId, input: $input) {
+        if (phone) {
+          locationInput.phone = phone;
+        }
+
+        const updateLocationResponse = await admin.graphql(
+          `#graphql
+    mutation CompanyLocationUpdate(
+      $companyLocationId: ID!
+      $input: CompanyLocationUpdateInput!
+    ) {
+      companyLocationUpdate(
+        companyLocationId: $companyLocationId
+        input: $input
+      ) {
         companyLocation {
           id
           name
-          shippingAddress {
-            address1
-            city
-            countryCode
-            zip
-            phone
-          }
+          phone
         }
         userErrors {
           field
@@ -759,44 +778,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
     }`,
-    {
-      variables: {
-        companyLocationId: locationId,
-        input: locationInput,
-      },
-    },
-  );
+          {
+            variables: {
+              companyLocationId: locationId,
+              input: locationInput,
+            },
+          },
+        );
 
-  const payload = await updateLocationResponse.json();
-  const errors = buildUserErrorList(payload);
+        const locationPayload = await updateLocationResponse.json();
+        const locationErrors = buildUserErrorList(locationPayload);
 
-  if (errors.length) {
-    return Response.json({
-      intent,
-      success: false,
-      errors,
-    });
-  }
+        if (locationErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: locationErrors,
+          });
+        }
 
-  const updatedLocation = payload?.data?.companyLocationUpdate?.companyLocation;
+        const updatedLocation =
+          locationPayload.data?.companyLocationUpdate?.companyLocation;
 
-  return Response.json({
-    intent,
-    success: true,
-    company: {
-      id: companyId,
-      name: companyName,
-      locationId: updatedLocation?.id,
-      locationName: updatedLocation?.name,
-      address1: updatedLocation?.shippingAddress?.address1 || "",
-      city: updatedLocation?.shippingAddress?.city || "",
-      countryCode: updatedLocation?.shippingAddress?.countryCode || "",
-      zip: updatedLocation?.shippingAddress?.zip || "",
-      phone: updatedLocation?.shippingAddress?.phone || "",
-    },
-    message: "Company location updated",
-  });
-}
+        return Response.json({
+          intent,
+          success: true,
+          company: {
+            id: companyId,
+            name: companyName,
+            locationId: updatedLocation?.id,
+            locationName: updatedLocation?.name,
+            phone: updatedLocation?.phone || "",
+          },
+          message: "Company and location updated successfully",
+        });
+      }
+
       case "createCompany": {
         const companyName = (form.companyName as string)?.trim();
         const locationName =
@@ -2531,7 +2548,7 @@ export default function RegistrationApprovals() {
                           }}
                         >
                           <h5 style={{ margin: "0 0 8px 0" }}>
-                            Edit Location Details
+                            Edit Company Details
                           </h5>
 
                           <label
@@ -2554,12 +2571,10 @@ export default function RegistrationApprovals() {
                               name="companyName"
                               defaultValue={company?.name || ""}
                               required
-                              disabled
                               style={{
                                 padding: 10,
                                 borderRadius: 8,
                                 border: "1px solid #c9ccd0",
-                                backgroundColor: "#f3f4f6",
                               }}
                             />
                           </label>
@@ -2606,120 +2621,6 @@ export default function RegistrationApprovals() {
                                 fontWeight: 500,
                               }}
                             >
-                              Address 1 *
-                            </span>
-                            <input
-                              name="address1"
-                              defaultValue={company?.address1 || ""}
-                              required
-                              placeholder="123 Example St"
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
-                            />
-                          </label>
-
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
-                              City *
-                            </span>
-                            <input
-                              name="city"
-                              defaultValue={company?.city || ""}
-                              required
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
-                            />
-                          </label>
-
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
-                              Country code *
-                            </span>
-                            <input
-                              name="countryCode"
-                              defaultValue={company?.countryCode || ""}
-                              placeholder="US"
-                              required
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
-                            />
-                          </label>
-
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
-                              Postal code *
-                            </span>
-                            <input
-                              name="zip"
-                              defaultValue={company?.zip || ""}
-                              required
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
-                            />
-                          </label>
-
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
                               Phone
                             </span>
                             <input
@@ -2743,7 +2644,7 @@ export default function RegistrationApprovals() {
                                 ? { loading: true }
                                 : {})}
                             >
-                              Update Location
+                              Update Company
                             </s-button>
                             <s-button
                               variant="tertiary"
