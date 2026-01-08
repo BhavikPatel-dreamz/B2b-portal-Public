@@ -2688,14 +2688,7 @@ useEffect(() => {
           </form>
         )}
 
-        {/* Show Continue button again after edit form closes */}
-        {editMode !== "update" && (
-          <div style={{ marginTop: 12 }}>
-            <s-button onClick={() => setStep("assign")}>
-              Continue to Assign Contact
-            </s-button>
-          </div>
-        )}
+        
       </>
     ) : (
       <form
