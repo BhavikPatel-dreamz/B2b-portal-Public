@@ -4,6 +4,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
 import { getCompanyDashboardData } from "../services/company.server";
+import { redirect } from "@remix-run/node";
 import {
   parseForm,
   parseCredit,
@@ -262,11 +263,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         data: { isActive: false },
       });
 
-      return Response.json({
-        intent,
-        success: true,
-        message: "Company deactivated",
-      });
+      return redirect("/app/companies");
     }
 
     default:
@@ -922,7 +919,6 @@ export default function CompanyDashboard() {
                 </div>
               )}
             </div>
-
             <updateFetcher.Form
               method="post"
               onSubmit={() => setDeactivatingId(data.company.id)}
@@ -932,7 +928,6 @@ export default function CompanyDashboard() {
 
               <button
                 type="submit"
-                to="/app/companies"
                 disabled={deactivatingId === data.company.id}
                 style={{
                   display: "inline-flex",

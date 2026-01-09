@@ -67,6 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Build where clause with search
   const whereClause = {
     shopId: store.id,
+    isDisable: false,
     ...(searchQuery && {
       OR: [
         { name: { contains: searchQuery, mode: "insensitive" as const } },
