@@ -178,6 +178,7 @@ model CompanyAccount {
 
   creditLimit      Decimal  @default(0) @db.Decimal(14, 2)
   paymentTeam      String?
+  isDisable        Boolean?  @default(false)
 
   users            User[]               @relation("CompanyUsers")
   orders           B2BOrder[]           @relation("CompanyAccountOrders")

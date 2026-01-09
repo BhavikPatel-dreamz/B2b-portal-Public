@@ -3,12 +3,7 @@ import type {
   LoaderFunctionArgs,
   HeadersFunction,
 } from "react-router";
-import {
-  useFetcher,
-  useLoaderData,
-  Link,
-  useSearchParams,
-} from "react-router";
+import { useFetcher, useLoaderData, Link, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -16,6 +11,7 @@ import { syncShopifyCompanies, parseForm, parseCredit } from "../utils/company.s
 import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
 import { calculateAvailableCredit } from "../services/creditService";
+import { useEffect, useState } from "react";
 
 type LoaderCompany = {
   id: string;
@@ -46,7 +42,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!store) {
     return Response.json(
-      { companies: [], storeMissing: true, totalCount: 0, currentPage: 1, totalPages: 0 },
+      {
+        companies: [],
+        storeMissing: true,
+        totalCount: 0,
+        currentPage: 1,
+        totalPages: 0,
+      },
       { status: 404 },
     );
   }
@@ -64,9 +66,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ...(searchQuery && {
       OR: [
         { name: { contains: searchQuery, mode: "insensitive" as const } },
-        { shopifyCompanyId: { contains: searchQuery, mode: "insensitive" as const } },
-        { contactName: { contains: searchQuery, mode: "insensitive" as const } },
-        { contactEmail: { contains: searchQuery, mode: "insensitive" as const } },
+        {
+          shopifyCompanyId: {
+            contains: searchQuery,
+            mode: "insensitive" as const,
+          },
+        },
+        {
+          contactName: { contains: searchQuery, mode: "insensitive" as const },
+        },
+        {
+          contactEmail: { contains: searchQuery, mode: "insensitive" as const },
+        },
       ],
     }),
   };
@@ -98,11 +109,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ...company,
         creditLimit: company.creditLimit.toString(),
         usedCredit: creditInfo ? creditInfo.usedCredit.toString() : "0",
-        availableCredit: creditInfo ? creditInfo.availableCredit.toString() : company.creditLimit.toString(),
+        availableCredit: creditInfo
+          ? creditInfo.availableCredit.toString()
+          : company.creditLimit.toString(),
         updatedAt: company.updatedAt.toISOString(),
         userCount: company._count?.users ?? 0,
       } satisfies LoaderCompany;
-    })
+    }),
   );
 
   return Response.json({
@@ -133,7 +146,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   switch (intent) {
     case "syncCompanies": {
-      const result = await syncShopifyCompanies(admin, store, store.submissionEmail);
+      const result = await syncShopifyCompanies(
+        admin,
+        store,
+        store.submissionEmail,
+      );
       return Response.json({
         intent,
         success: result.success,
@@ -212,6 +229,55 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       return Response.json({ intent, success: true, message: "Company saved" });
     }
+    case "deactivateCompany": {
+      const id = (form.id as string)?.trim();
+
+      if (!id) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company id is required"],
+        });
+      }
+
+      const companyData = await prisma.companyAccount.update({
+        where: { id },
+        data: { isDisable: true },
+      });
+      const registrationData = await prisma.registrationSubmission.findFirst({
+        where: { companyName: companyData.name },
+      });
+      if (!registrationData) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Registration data not found"],
+        });
+      }
+      await prisma.registrationSubmission.delete({
+        where: { id: registrationData.id },
+      });
+      const userData = await prisma.user.findFirst({
+        where: { companyId: companyData.id },
+      });
+      if (!userData) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["User data not found"],
+        });
+      }
+      await prisma.user.update({
+        where: { id: userData.id },
+        data: { isActive: false },
+      });
+
+      return Response.json({
+        intent,
+        success: true,
+        message: "Company deactivated",
+      });
+    }
 
     default:
       return Response.json({
@@ -223,8 +289,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function CompaniesPage() {
-  const { companies, storeMissing, totalCount, currentPage, totalPages, searchQuery } = useLoaderData<typeof loader>();
+  const {
+    companies,
+    storeMissing,
+    totalCount,
+    currentPage,
+    totalPages,
+    searchQuery,
+  } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+
 
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
@@ -247,7 +322,16 @@ export default function CompaniesPage() {
     );
   }
 
-return (
+  useEffect(() => {
+  if (updateFetcher.state === "idle") {
+    setDeactivatingId(null);
+  }
+}, [updateFetcher.state]);
+
+
+
+
+  return (
     <s-page heading="Companies">
       <s-section>
         <div
@@ -262,11 +346,7 @@ return (
 
           <syncFetcher.Form method="post">
             <input name="intent" value="syncCompanies" hidden readOnly />
-            <s-button
-              type="submit"
-              variant="secondary"
-              loading={isSyncing}
-            >
+            <s-button type="submit" variant="secondary" loading={isSyncing}>
               Company Sync
             </s-button>
           </syncFetcher.Form>
@@ -303,28 +383,57 @@ return (
         </div>
 
         {companies.length === 0 ? (
-          <s-empty-state heading={searchQuery ? "No companies found" : "No companies yet"} />
+          <s-empty-state
+            heading={searchQuery ? "No companies found" : "No companies yet"}
+          />
         ) : (
           <div>
             <table
               style={{
                 width: "100%",
-                borderCollapse: "collapse"
-
+                borderCollapse: "collapse",
               }}
             >
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: "8px", width:"7%" }}>Company</th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                  >
+                    Company
+                  </th>
                   {/* <th style={{ textAlign: "left", padding: "8px" }}>
                     Shopify company ID
                   </th> */}
-                  <th style={{ textAlign: "left", padding: "8px" ,width:"20%" }}>Contact</th>
-                  <th style={{ textAlign: "left", padding: "8px" ,width:"5%"}}>Users</th>
-                  <th style={{ textAlign: "left", padding: "8px" ,width:"7%" }}>Credit Limit</th>
-                  <th style={{ textAlign: "left", padding: "8px" ,width:"7%" }}>Used Credit</th>
-                  <th style={{ textAlign: "left", padding: "8px" ,width:"7%" }}>Available Credit</th>
-                  <th style={{ textAlign: "left", padding: "8px" ,width:"10%" }}>Actions</th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "20%" }}
+                  >
+                    Contact
+                  </th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "5%" }}
+                  >
+                    Users
+                  </th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                  >
+                    Credit Limit
+                  </th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                  >
+                    Used Credit
+                  </th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                  >
+                    Available Credit
+                  </th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "10%" }}
+                  >
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -333,14 +442,16 @@ return (
                     key={company.id}
                     style={{ borderTop: "1px solid #e3e3e3" }}
                   >
-                    <td style={{ padding: "8px" }}>{company.name}
-                      <br/>
+                    <td style={{ padding: "8px" }}>
+                      {company.name}
+                      <br />
                       {company.shopifyCompanyId
                         ? company.shopifyCompanyId.replace(
                             "gid://shopify/Company/",
                             "",
                           )
-                        : "–"}</td>
+                        : "–"}
+                    </td>
                     {/* <td
                       style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
                     >
@@ -356,7 +467,7 @@ return (
                       {company.contactName ? (
                         <span>
                           {company.contactName}
-                          <br/>
+                          <br />
                           {company.contactEmail
                             ? `${company.contactEmail}`
                             : ""}
@@ -372,34 +483,82 @@ return (
                     <td style={{ padding: "8px", color: "#d72c0d" }}>
                       {formatCredit(company.usedCredit)}
                     </td>
-                    <td style={{
-                      padding: "8px",
-                      color: parseFloat(company.availableCredit) >= 0 ? "#008060" : "#d72c0d",
-                      fontWeight: parseFloat(company.availableCredit) < 0 ? 600 : 400
-                    }}>
+                    <td
+                      style={{
+                        padding: "8px",
+                        color:
+                          parseFloat(company.availableCredit) >= 0
+                            ? "#008060"
+                            : "#d72c0d",
+                        fontWeight:
+                          parseFloat(company.availableCredit) < 0 ? 600 : 400,
+                      }}
+                    >
                       {formatCredit(company.availableCredit)}
                     </td>
                     {/* <td style={{ padding: "8px" }}>
                       {new Date(company.updatedAt).toLocaleString()}
                     </td> */}
-                    <td style={{ padding: "8px", minWidth: 180 }}>
-                      <Link
-                        to={`/app/companies/${company.id}`}
-                        style={{
-                          display: "inline-block",
-                          padding: "6px 12px",
-                          borderRadius: 6,
-                          border: "1px solid #c9ccd0",
-                          textDecoration: "none",
-                          color: "#202223",
-                          fontSize: 13,
-                          fontWeight: 500,
-                          backgroundColor: "white",
-                          cursor: "pointer",
-                        }}
-                      >
+                    <td
+                      style={{
+                        padding: "8px",
+                        minWidth: 200,
+                        display: "flex",
+                        gap: 8, // 👈 space between buttons
+                        alignItems: "center",
+                      }}
+                    >
+                      {/* View Button */}
+                      <Link to={`/app/companies/${company.id}`} style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            minWidth: 60, // 👈 same size
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            border: "1px solid #c9ccd0",
+                            textDecoration: "none",
+                            color: "#202223",
+                            fontSize: 13,
+                            fontWeight: 500,
+                            backgroundColor: "white",
+                            cursor: "pointer",
+                            opacity: isUpdating ? 0.6 : 1,
+                      }}>
                         View
                       </Link>
+
+                      {/* Deactivate Button */}
+                      <updateFetcher.Form
+  method="post"
+  onSubmit={() => setDeactivatingId(company.id)}
+>
+  
+  <input type="hidden" name="intent" value="deactivateCompany" />
+  <input type="hidden" name="id" value={company.id} />
+
+  <button
+    type="submit"
+    disabled={deactivatingId === company.id}
+    style={{
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: 90,
+      padding: "6px 12px",
+      borderRadius: 6,
+      border: "1px solid #c9ccd0",
+      backgroundColor: "white",
+      cursor: "pointer",
+      fontSize: 13,
+      fontWeight: 500,
+      opacity: deactivatingId === company.id ? 0.6 : 1,
+    }}
+  >
+    {deactivatingId === company.id ? "Deactivating..." : "DeActive"}
+  </button>
+</updateFetcher.Form>
+
                     </td>
                   </tr>
                 ))}
@@ -437,51 +596,55 @@ return (
             </Link>
 
             <div style={{ display: "flex", gap: 8 }}>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
-                // Show first page, last page, current page, and pages around current
-                const showPage =
-                  pageNum === 1 ||
-                  pageNum === totalPages ||
-                  Math.abs(pageNum - currentPage) <= 1;
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                (pageNum) => {
+                  // Show first page, last page, current page, and pages around current
+                  const showPage =
+                    pageNum === 1 ||
+                    pageNum === totalPages ||
+                    Math.abs(pageNum - currentPage) <= 1;
 
-                const showEllipsis =
-                  (pageNum === 2 && currentPage > 3) ||
-                  (pageNum === totalPages - 1 && currentPage < totalPages - 2);
+                  const showEllipsis =
+                    (pageNum === 2 && currentPage > 3) ||
+                    (pageNum === totalPages - 1 &&
+                      currentPage < totalPages - 2);
 
-                if (showEllipsis) {
+                  if (showEllipsis) {
+                    return (
+                      <span
+                        key={pageNum}
+                        style={{
+                          padding: "8px 12px",
+                          color: "#999",
+                        }}
+                      >
+                        ...
+                      </span>
+                    );
+                  }
+
+                  if (!showPage) return null;
+
                   return (
-                    <span
+                    <Link
                       key={pageNum}
+                      to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(pageNum) })}`}
                       style={{
                         padding: "8px 12px",
-                        color: "#999",
+                        borderRadius: 8,
+                        border: "1px solid #c9ccd0",
+                        textDecoration: "none",
+                        color: pageNum === currentPage ? "white" : "#202223",
+                        background:
+                          pageNum === currentPage ? "#005bd3" : "white",
+                        fontWeight: pageNum === currentPage ? 600 : 400,
                       }}
                     >
-                      ...
-                    </span>
+                      {pageNum}
+                    </Link>
                   );
-                }
-
-                if (!showPage) return null;
-
-                return (
-                  <Link
-                    key={pageNum}
-                    to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(pageNum) })}`}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                      textDecoration: "none",
-                      color: pageNum === currentPage ? "white" : "#202223",
-                      background: pageNum === currentPage ? "#005bd3" : "white",
-                      fontWeight: pageNum === currentPage ? 600 : 400,
-                    }}
-                  >
-                    {pageNum}
-                  </Link>
-                );
-              })}
+                },
+              )}
             </div>
 
             <Link
