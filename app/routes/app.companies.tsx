@@ -15,7 +15,7 @@ import {
 import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
 import { calculateAvailableCredit } from "../services/creditService";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 type LoaderCompany = {
   id: string;
@@ -233,55 +233,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       return Response.json({ intent, success: true, message: "Company saved" });
     }
-    case "deactivateCompany": {
-      const id = (form.id as string)?.trim();
-
-      if (!id) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["Company id is required"],
-        });
-      }
-
-      const companyData = await prisma.companyAccount.update({
-        where: { id },
-        data: { isDisable: true },
-      });
-      const registrationData = await prisma.registrationSubmission.findFirst({
-        where: { companyName: companyData.name },
-      });
-      if (!registrationData) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["Registration data not found"],
-        });
-      }
-      await prisma.registrationSubmission.delete({
-        where: { id: registrationData.id },
-      });
-      const userData = await prisma.user.findFirst({
-        where: { companyId: companyData.id },
-      });
-      if (!userData) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["User data not found"],
-        });
-      }
-      await prisma.user.update({
-        where: { id: userData.id },
-        data: { isActive: false },
-      });
-
-      return Response.json({
-        intent,
-        success: true,
-        message: "Company deactivated",
-      });
-    }
 
     default:
       return Response.json({
@@ -324,12 +275,6 @@ export default function CompaniesPage() {
       </s-page>
     );
   }
-
-  useEffect(() => {
-    if (updateFetcher.state === "idle") {
-      setDeactivatingId(null);
-    }
-  }, [updateFetcher.state]);
 
   return (
     <s-page heading="Companies">
@@ -452,16 +397,6 @@ export default function CompaniesPage() {
                           )
                         : "–"}
                     </td>
-                    {/* <td
-                      style={{ padding: "8px", fontSize: 12, color: "#5c5f62" }}
-                    >
-                      {company.shopifyCompanyId
-                        ? company.shopifyCompanyId.replace(
-                            "gid://shopify/Company/",
-                            "",
-                          )
-                        : "–"}
-                    </td> */}
 
                     <td style={{ padding: "8px" }}>
                       {company.contactName ? (
@@ -530,42 +465,6 @@ export default function CompaniesPage() {
                       >
                         View
                       </Link>
-
-                      {/* Deactivate Button */}
-                      <updateFetcher.Form
-                        method="post"
-                        onSubmit={() => setDeactivatingId(company.id)}
-                      >
-                        <input
-                          type="hidden"
-                          name="intent"
-                          value="deactivateCompany"
-                        />
-                        <input type="hidden" name="id" value={company.id} />
-
-                        <button
-                          type="submit"
-                          disabled={deactivatingId === company.id}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            minWidth: 90,
-                            padding: "6px 12px",
-                            borderRadius: 6,
-                            border: "1px solid #c9ccd0",
-                            backgroundColor: "white",
-                            cursor: "pointer",
-                            fontSize: 13,
-                            fontWeight: 500,
-                            opacity: deactivatingId === company.id ? 0.6 : 1,
-                          }}
-                        >
-                          {deactivatingId === company.id
-                            ? "Deactivating..."
-                            : "DeActive"}
-                        </button>
-                      </updateFetcher.Form>
                     </td>
                   </tr>
                 ))}

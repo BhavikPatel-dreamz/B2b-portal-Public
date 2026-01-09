@@ -4,9 +4,13 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
 import { getCompanyDashboardData } from "../services/company.server";
-import {parseForm, parseCredit, syncShopifyUsers } from "../utils/company.server";
+import {
+  parseForm,
+  parseCredit,
+  syncShopifyUsers,
+} from "../utils/company.server";
 import { updateCredit } from "../services/company.server";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type LoaderData = {
   company: {
@@ -90,7 +94,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     case "updatePaymentTeam": {
       const id = (form.id as string)?.trim();
-      const paymentTermsTemplateId = (form.paymentTermsTemplateId as string)?.trim() || null;
+      const paymentTermsTemplateId =
+        (form.paymentTermsTemplateId as string)?.trim() || null;
 
       if (!id) {
         return Response.json({
@@ -106,7 +111,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           errors: ["Payment team is required"],
         });
       }
-      console.log(paymentTermsTemplateId,"565656");
+      console.log(paymentTermsTemplateId, "565656");
       await prisma.companyAccount.update({
         where: { id },
         data: { paymentTeam: paymentTermsTemplateId },
@@ -185,11 +190,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       try {
         const companyId = (form.companyId as string)?.trim();
         if (!companyId) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company ID is required"],
-          }, { status: 400 });
+          return Response.json(
+            {
+              intent,
+              success: false,
+              errors: ["Company ID is required"],
+            },
+            { status: 400 },
+          );
         }
         const result = await syncShopifyUsers(admin, store, companyId);
         return Response.json({
@@ -200,13 +208,65 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           errors: result.errors,
         });
       } catch (error) {
+        return Response.json(
+          {
+            intent,
+            success: false,
+            message: "Failed to sync users",
+            errors: [error instanceof Error ? error.message : "Unknown error"],
+          },
+          { status: 500 },
+        );
+      }
+    }
+    case "deactivateCompany": {
+      const id = (form.id as string)?.trim();
+
+      if (!id) {
         return Response.json({
           intent,
           success: false,
-          message: "Failed to sync users",
-          errors: [error instanceof Error ? error.message : "Unknown error"],
-        }, { status: 500 });
+          errors: ["Company id is required"],
+        });
       }
+
+      const companyData = await prisma.companyAccount.update({
+        where: { id },
+        data: { isDisable: true },
+      });
+      const registrationData = await prisma.registrationSubmission.findFirst({
+        where: { companyName: companyData.name },
+      });
+      if (!registrationData) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Registration data not found"],
+        });
+      }
+      await prisma.registrationSubmission.delete({
+        where: { id: registrationData.id },
+      });
+      const userData = await prisma.user.findFirst({
+        where: { companyId: companyData.id },
+      });
+      if (!userData) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["User data not found"],
+        });
+      }
+      await prisma.user.update({
+        where: { id: userData.id },
+        data: { isActive: false },
+      });
+
+      return Response.json({
+        intent,
+        success: true,
+        message: "Company deactivated",
+      });
     }
 
     default:
@@ -335,19 +395,25 @@ function formatDate(dateString: string): string {
   });
 }
 
-
-
+interface ActionResponse {
+  intent: string;
+  success: boolean;
+  message?: string;
+  errors?: string[];
+}
 
 export default function CompanyDashboard() {
   const data = useLoaderData<LoaderData>();
   const fetcher = useFetcher();
   const [isEditingCredit, setIsEditingCredit] = useState(false);
   const [creditLimitValue, setCreditLimitValue] = useState(
-    data.creditLimit.toString()
+    data.creditLimit.toString(),
   );
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const updateFetcher = useFetcher<ActionResponse>();
   const [isEditingPaymentTerms, setIsEditingPaymentTerms] = useState(false);
   const [selectedPaymentTerms, setSelectedPaymentTerms] = useState(
-    data.company.paymentTermsTemplateId || ""
+    data.company.paymentTermsTemplateId || "",
   );
 
   const creditStatus = getCreditStatusColor(data.creditPercentageUsed);
@@ -401,9 +467,15 @@ export default function CompanyDashboard() {
   ];
 
   const getPaymentTermsLabel = (value: string) => {
-    const option = paymentTermsOptions.find(opt => opt.value === value);
+    const option = paymentTermsOptions.find((opt) => opt.value === value);
     return option ? option.label : "No payment terms";
   };
+
+  useEffect(() => {
+    if (updateFetcher.state === "idle") {
+      setDeactivatingId(null);
+    }
+  }, [updateFetcher.state]);
 
   return (
     <s-page heading={`${data.company.name} - Credit Dashboard`}>
@@ -507,7 +579,9 @@ export default function CompanyDashboard() {
               </select>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
               <button
                 onClick={handleCancelPaymentTermsEdit}
                 style={{
@@ -534,7 +608,8 @@ export default function CompanyDashboard() {
                   borderRadius: 6,
                   backgroundColor: "#008060",
                   color: "white",
-                  cursor: fetcher.state === "submitting" ? "not-allowed" : "pointer",
+                  cursor:
+                    fetcher.state === "submitting" ? "not-allowed" : "pointer",
                   opacity: fetcher.state === "submitting" ? 0.6 : 1,
                 }}
               >
@@ -542,34 +617,37 @@ export default function CompanyDashboard() {
               </button>
             </div>
 
-            {fetcher.data?.intent === "updatePaymentTeam" && fetcher.data?.success && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 8,
-                  fontSize: 12,
-                  color: "#008060",
-                  backgroundColor: "#d4f3e6",
-                  borderRadius: 4,
-                }}
-              >
-                ✓ Payment terms updated successfully
-              </div>
-            )}
-            {fetcher.data?.intent === "updatePaymentTeam" && !fetcher.data?.success && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 8,
-                  fontSize: 12,
-                  color: "#d72c0d",
-                  backgroundColor: "#ffd9d9",
-                  borderRadius: 4,
-                }}
-              >
-                {fetcher.data?.errors?.[0] || "Failed to update payment terms"}
-              </div>
-            )}
+            {fetcher.data?.intent === "updatePaymentTeam" &&
+              fetcher.data?.success && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 8,
+                    fontSize: 12,
+                    color: "#008060",
+                    backgroundColor: "#d4f3e6",
+                    borderRadius: 4,
+                  }}
+                >
+                  ✓ Payment terms updated successfully
+                </div>
+              )}
+            {fetcher.data?.intent === "updatePaymentTeam" &&
+              !fetcher.data?.success && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 8,
+                    fontSize: 12,
+                    color: "#d72c0d",
+                    backgroundColor: "#ffd9d9",
+                    borderRadius: 4,
+                  }}
+                >
+                  {fetcher.data?.errors?.[0] ||
+                    "Failed to update payment terms"}
+                </div>
+              )}
           </div>
         </div>
       )}
@@ -587,9 +665,9 @@ export default function CompanyDashboard() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2fr 1.5fr 2fr 1.5fr 1.5fr",
+              gridTemplateColumns: "2fr 1.5fr 2fr 1.5fr 1.5fr auto",
               gap: 24,
-              alignItems: "start",
+              alignItems: "center",
             }}
           >
             {/* Company Name */}
@@ -696,9 +774,21 @@ export default function CompanyDashboard() {
                   }}
                   title="Edit payment terms"
                 >
-                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -717,7 +807,9 @@ export default function CompanyDashboard() {
               </div>
               {isEditingCredit ? (
                 <div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
                     <input
                       type="number"
                       value={creditLimitValue}
@@ -752,35 +844,40 @@ export default function CompanyDashboard() {
                         color: "white",
                         border: "none",
                         borderRadius: 4,
-                        cursor: fetcher.state === "submitting" ? "not-allowed" : "pointer",
+                        cursor:
+                          fetcher.state === "submitting"
+                            ? "not-allowed"
+                            : "pointer",
                         opacity: fetcher.state === "submitting" ? 0.6 : 1,
                       }}
                     >
                       {fetcher.state === "submitting" ? "..." : "✓"}
                     </button>
                   </div>
-                  {fetcher.data?.intent === "updateCredit" && fetcher.data?.success && (
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#008060",
-                        marginTop: 4,
-                      }}
-                    >
-                      ✓ Updated successfully
-                    </div>
-                  )}
-                  {fetcher.data?.intent === "updateCredit" && !fetcher.data?.success && (
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#d72c0d",
-                        marginTop: 4,
-                      }}
-                    >
-                      {fetcher.data?.errors?.[0] || "Failed to update"}
-                    </div>
-                  )}
+                  {fetcher.data?.intent === "updateCredit" &&
+                    fetcher.data?.success && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#008060",
+                          marginTop: 4,
+                        }}
+                      >
+                        ✓ Updated successfully
+                      </div>
+                    )}
+                  {fetcher.data?.intent === "updateCredit" &&
+                    !fetcher.data?.success && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#d72c0d",
+                          marginTop: 4,
+                        }}
+                      >
+                        {fetcher.data?.errors?.[0] || "Failed to update"}
+                      </div>
+                    )}
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -806,13 +903,58 @@ export default function CompanyDashboard() {
                     }}
                     title="Edit credit limit"
                   >
-                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
                     </svg>
                   </button>
                 </div>
               )}
             </div>
+
+            <updateFetcher.Form
+              method="post"
+              onSubmit={() => setDeactivatingId(data.company.id)}
+            >
+              <input type="hidden" name="intent" value="deactivateCompany" />
+              <input type="hidden" name="id" value={data.company.id} />
+
+              <button
+                type="submit"
+                to="/app/companies"
+                disabled={deactivatingId === data.company.id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: 100,
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  border: "1px solid #d72c0d",
+                  backgroundColor: "white",
+                  color: "#d72c0d",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  opacity: deactivatingId === data.company.id ? 0.6 : 1,
+                }}
+              >
+                {deactivatingId === data.company.id
+                  ? "Deactivating..."
+                  : "Deactivate"}
+              </button>
+            </updateFetcher.Form>
           </div>
         </div>
       </s-section>
@@ -945,7 +1087,14 @@ export default function CompanyDashboard() {
       </div>
 
       <s-section>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Users</h3>
           <div style={{ display: "flex", gap: 8 }}>
             <button
@@ -1019,7 +1168,8 @@ export default function CompanyDashboard() {
                   padding: "2px 6px",
                   borderRadius: 4,
                   fontSize: 11,
-                  backgroundColor: user.status === "ACTIVE" ? "#d4f3e6" : "#e0e0e0",
+                  backgroundColor:
+                    user.status === "ACTIVE" ? "#d4f3e6" : "#e0e0e0",
                   color: user.status === "ACTIVE" ? "#008060" : "#5c5f62",
                 }}
               >
@@ -1040,7 +1190,9 @@ export default function CompanyDashboard() {
             marginBottom: 12,
           }}
         >
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Recent Orders</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+            Recent Orders
+          </h3>
           <Link
             to={`/app/companies/${data.company.id}/orders`}
             style={{
