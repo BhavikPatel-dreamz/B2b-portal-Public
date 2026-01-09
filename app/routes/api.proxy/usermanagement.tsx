@@ -120,7 +120,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       const name = c.customer.lastName
         ? `${c.customer.firstName} ${c.customer.lastName}`.trim()
-        : Registrationdata?.contactName;
+        : c.customer.firstName || Registrationdata?.contactName;
       return {
         id: c.id,
         name,
@@ -330,6 +330,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shop,
           store.accessToken,
         );
+        await prisma.user.delete({
+          where: { id: userId },
+        });
 
         if (result.error) {
           return Response.json({ error: result.error }, { status: 500 });

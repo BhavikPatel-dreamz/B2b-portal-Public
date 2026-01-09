@@ -3486,19 +3486,35 @@ export async function deleteCompanyCustomer(
 
     const result = await response.json();
 
-    if (result.data?.companyContactDelete?.userErrors?.length > 0) {
-      return { error: result.data.companyContactDelete.userErrors[0].message };
+    // 🔴 GraphQL errors
+    if (result.errors?.length) {
+      return { error: result.errors[0].message };
+    }
+
+    const userErrors = result.data?.companyContactDelete?.userErrors;
+    if (userErrors?.length) {
+      return { error: userErrors[0].message };
+    }
+
+    const deletedId =
+      result.data?.companyContactDelete?.deletedCompanyContactId;
+
+    if (!deletedId) {
+      return { error: "Failed to delete company contact" };
     }
 
     return {
       success: true,
-      deletedId: result.data?.companyContactDelete?.deletedCompanyContactId
+      deletedId
     };
   } catch (error) {
     console.error("Error deleting company customer:", error);
-    return { error: error instanceof Error ? error.message : 'Unknown error' };
+    return {
+      error: error instanceof Error ? error.message : "Unknown error"
+    };
   }
 }
+
 
 export async function getCompanyContactEmail(
   contactId: string,
