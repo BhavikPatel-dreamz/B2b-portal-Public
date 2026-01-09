@@ -7,7 +7,11 @@ import { useFetcher, useLoaderData, Link, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { syncShopifyCompanies, parseForm, parseCredit } from "../utils/company.server";
+import {
+  syncShopifyCompanies,
+  parseForm,
+  parseCredit,
+} from "../utils/company.server";
 import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
 import { calculateAvailableCredit } from "../services/creditService";
@@ -300,7 +304,6 @@ export default function CompaniesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
 
-
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
 
@@ -323,13 +326,10 @@ export default function CompaniesPage() {
   }
 
   useEffect(() => {
-  if (updateFetcher.state === "idle") {
-    setDeactivatingId(null);
-  }
-}, [updateFetcher.state]);
-
-
-
+    if (updateFetcher.state === "idle") {
+      setDeactivatingId(null);
+    }
+  }, [updateFetcher.state]);
 
   return (
     <s-page heading="Companies">
@@ -509,56 +509,63 @@ export default function CompaniesPage() {
                       }}
                     >
                       {/* View Button */}
-                      <Link to={`/app/companies/${company.id}`} style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            minWidth: 60, // 👈 same size
-                            padding: "6px 12px",
-                            borderRadius: 6,
-                            border: "1px solid #c9ccd0",
-                            textDecoration: "none",
-                            color: "#202223",
-                            fontSize: 13,
-                            fontWeight: 500,
-                            backgroundColor: "white",
-                            cursor: "pointer",
-                            opacity: isUpdating ? 0.6 : 1,
-                      }}>
+                      <Link
+                        to={`/app/companies/${company.id}`}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: 60, // 👈 same size
+                          padding: "6px 12px",
+                          borderRadius: 6,
+                          border: "1px solid #c9ccd0",
+                          textDecoration: "none",
+                          color: "#202223",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          backgroundColor: "white",
+                          cursor: "pointer",
+                          opacity: isUpdating ? 0.6 : 1,
+                        }}
+                      >
                         View
                       </Link>
 
                       {/* Deactivate Button */}
                       <updateFetcher.Form
-  method="post"
-  onSubmit={() => setDeactivatingId(company.id)}
->
-  
-  <input type="hidden" name="intent" value="deactivateCompany" />
-  <input type="hidden" name="id" value={company.id} />
+                        method="post"
+                        onSubmit={() => setDeactivatingId(company.id)}
+                      >
+                        <input
+                          type="hidden"
+                          name="intent"
+                          value="deactivateCompany"
+                        />
+                        <input type="hidden" name="id" value={company.id} />
 
-  <button
-    type="submit"
-    disabled={deactivatingId === company.id}
-    style={{
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      minWidth: 90,
-      padding: "6px 12px",
-      borderRadius: 6,
-      border: "1px solid #c9ccd0",
-      backgroundColor: "white",
-      cursor: "pointer",
-      fontSize: 13,
-      fontWeight: 500,
-      opacity: deactivatingId === company.id ? 0.6 : 1,
-    }}
-  >
-    {deactivatingId === company.id ? "Deactivating..." : "DeActive"}
-  </button>
-</updateFetcher.Form>
-
+                        <button
+                          type="submit"
+                          disabled={deactivatingId === company.id}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            minWidth: 90,
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            border: "1px solid #c9ccd0",
+                            backgroundColor: "white",
+                            cursor: "pointer",
+                            fontSize: 13,
+                            fontWeight: 500,
+                            opacity: deactivatingId === company.id ? 0.6 : 1,
+                          }}
+                        >
+                          {deactivatingId === company.id
+                            ? "Deactivating..."
+                            : "DeActive"}
+                        </button>
+                      </updateFetcher.Form>
                     </td>
                   </tr>
                 ))}
