@@ -451,6 +451,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
+        const userData = await prisma.user.findFirst({
+          where: {
+            shopifyCustomerId: customer?.id || null,
+            email,
+          },
+        });
+        if (!userData) {
+          await prisma.user.create({
+            data: {
+              email,
+              firstName,
+              lastName: lastName || "",
+              shopifyCustomerId: customer?.id || null,
+              shopId: store.id,
+              status: "PENDING",
+              role: "STORE_ADMIN",
+              password: "",
+              companyRole: "admin",
+            },
+          });
+        }
+
         return Response.json({
           intent,
           success: true,
@@ -506,6 +528,65 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const errors = buildUserErrorList(payload);
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
+        }
+        const registrationData = await prisma.registrationSubmission.findFirst({
+          where: { email },
+        });
+        if (registrationData) {
+          await prisma.registrationSubmission.update({
+            where: { id: registrationData.id },
+            data: {
+              contactName: `${firstName} ${lastName || ""}`.trim(),
+              email,
+              phone: phone || "",
+              status: "PENDING",
+              shopifyCustomerId: customerId || null,
+            },
+          });
+        } else {
+          await prisma.registrationSubmission.create({
+            data: {
+              contactName: `${firstName} ${lastName || ""}`.trim(),
+              email,
+              phone: phone || "",
+              status: "PENDING",
+              shopifyCustomerId: customerId || null,
+            },
+          });
+        }
+        const userData = await prisma.user.findFirst({
+          where: {
+            email,
+          },
+        });
+        if (!userData) {
+          await prisma.user.create({
+            data: {
+              email,
+              firstName,
+              lastName: lastName || "",
+              shopifyCustomerId: customerId || null,
+              shopId: store.id,
+              status: "PENDING",
+              role: "STORE_ADMIN",
+              password: "",
+              companyRole: "admin",
+            },
+          });
+        } else {
+          await prisma.user.update({
+            where: { id: userData.id },
+            data: {
+              email,
+              firstName,
+              lastName: lastName || "",
+              shopifyCustomerId: customerId || null,
+              shopId: store.id,
+              status: "PENDING",
+              role: "STORE_ADMIN",
+              companyRole: "admin",
+            },
+          });
         }
 
         return Response.json({
@@ -578,103 +659,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           company: companyData,
           existsInDb: !!companyExists,
           message: company ? "Company exists" : "No company found",
-        });
-      }
-
-      case "updateCompany": {
-        const companyId = (form.companyId as string)?.trim();
-        const locationId = (form.locationId as string)?.trim();
-        const companyName = (form.companyName as string)?.trim();
-        const locationName = (form.locationName as string)?.trim();
-        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
-
-        if (!companyId || !locationId || !companyName || !locationName) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company name and location name are required"],
-          });
-        }
-
-        /* 1️⃣ Update Company Name */
-        const updateCompanyResponse = await admin.graphql(
-          `#graphql
-    mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
-      companyUpdate(companyId: $companyId, input: $input) {
-        company { id name }
-        userErrors { field message }
-      }
-    }`,
-          {
-            variables: {
-              companyId,
-              input: { name: companyName },
-            },
-          },
-        );
-
-        const companyPayload = await updateCompanyResponse.json();
-        const companyErrors = buildUserErrorList(companyPayload);
-
-        if (companyErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: companyErrors,
-          });
-        }
-
-        /* 2️⃣ Update Location Name + Payment Terms */
-        const locationInput: any = {
-          name: locationName,
-        };
-
-        if (paymentTermsTemplateId) {
-          locationInput.buyerExperienceConfiguration = {
-            paymentTermsTemplateId,
-          };
-        }
-
-        const updateLocationResponse = await admin.graphql(
-          `#graphql
-    mutation CompanyLocationUpdate(
-      $companyLocationId: ID!
-      $input: CompanyLocationUpdateInput!
-    ) {
-      companyLocationUpdate(companyLocationId: $companyLocationId, input: $input) {
-        companyLocation { id name }
-        userErrors { field message }
-      }
-    }`,
-          {
-            variables: {
-              companyLocationId: locationId,
-              input: locationInput,
-            },
-          },
-        );
-
-        const locationPayload = await updateLocationResponse.json();
-        const locationErrors = buildUserErrorList(locationPayload);
-
-        if (locationErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: locationErrors,
-          });
-        }
-
-        return Response.json({
-          intent,
-          success: true,
-          company: {
-            id: companyId,
-            name: companyName,
-            locationId,
-            locationName,
-          },
-          message: "Company and location updated successfully",
         });
       }
 
@@ -785,6 +769,102 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: "Company created successfully",
         });
       }
+      case "updateCompany": {
+        const companyId = (form.companyId as string)?.trim();
+        const locationId = (form.locationId as string)?.trim();
+        const companyName = (form.companyName as string)?.trim();
+        const locationName = (form.locationName as string)?.trim();
+        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+
+        if (!companyId || !locationId || !companyName || !locationName) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company name and location name are required"],
+          });
+        }
+
+        /* 1️⃣ Update Company Name */
+        const updateCompanyResponse = await admin.graphql(
+          `#graphql
+    mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
+      companyUpdate(companyId: $companyId, input: $input) {
+        company { id name }
+        userErrors { field message }
+      }
+    }`,
+          {
+            variables: {
+              companyId,
+              input: { name: companyName },
+            },
+          },
+        );
+
+        const companyPayload = await updateCompanyResponse.json();
+        const companyErrors = buildUserErrorList(companyPayload);
+
+        if (companyErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: companyErrors,
+          });
+        }
+
+        /* 2️⃣ Update Location Name + Payment Terms */
+        const locationInput: any = {
+          name: locationName,
+        };
+
+        if (paymentTermsTemplateId) {
+          locationInput.buyerExperienceConfiguration = {
+            paymentTermsTemplateId,
+          };
+        }
+
+        const updateLocationResponse = await admin.graphql(
+          `#graphql
+    mutation CompanyLocationUpdate(
+      $companyLocationId: ID!
+      $input: CompanyLocationUpdateInput!
+    ) {
+      companyLocationUpdate(companyLocationId: $companyLocationId, input: $input) {
+        companyLocation { id name }
+        userErrors { field message }
+      }
+    }`,
+          {
+            variables: {
+              companyLocationId: locationId,
+              input: locationInput,
+            },
+          },
+        );
+
+        const locationPayload = await updateLocationResponse.json();
+        const locationErrors = buildUserErrorList(locationPayload);
+
+        if (locationErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: locationErrors,
+          });
+        }
+        
+        return Response.json({
+          intent,
+          success: true,
+          company: {
+            id: companyId,
+            name: companyName,
+            locationId,
+            locationName,
+          },
+          message: "Company and location updated successfully",
+        });
+      }
 
       case "assignMainContact": {
         const companyId = (form.companyId as string)?.trim();
@@ -850,6 +930,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       case "completeApproval": {
         const registrationId = (form.registrationId as string)?.trim();
+
         const customerId = normalizeCustomerId(
           (form.customerId as string) || "",
         );
@@ -857,6 +938,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyName = (form.companyName as string)?.trim();
         const contactName = (form.contactName as string)?.trim() || null;
         const contactEmail = (form.contactEmail as string)?.trim() || null;
+        const paymentTermsTemplateId =
+          (form.paymentTermsTemplateId as string)?.trim() || null;
         const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!registrationId || !customerId) {
@@ -880,17 +963,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
 
         if (companyId || companyName) {
-          await prisma.companyAccount.upsert({
+          const companyData = await prisma.companyAccount.upsert({
             where: {
               shopId_shopifyCompanyId: {
                 shopId: store.id,
-                shopifyCompanyId: companyId || null,
+                shopifyCompanyId: companyId || "",
               },
             },
             update: {
               name: companyName || undefined,
               contactName,
               contactEmail,
+              paymentTeam: paymentTermsTemplateId || null,
             },
             create: {
               shopId: store.id,
@@ -899,8 +983,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               contactName,
               contactEmail,
               creditLimit: new Prisma.Decimal(0),
+              paymentTeam: paymentTermsTemplateId || null,
             },
           });
+          const user = await prisma.user.findFirst({
+            where: { shopifyCustomerId: customerId || "" },
+          });
+          if (user) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                status: "APPROVED",
+                isActive: true,
+                companyId: companyData.id || null,
+                userCreditLimit: new Prisma.Decimal(0),
+              },
+            });
+          }
         }
 
         return Response.json({
@@ -913,6 +1012,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "reject": {
         const registrationId = (form.registrationId as string)?.trim();
         const note = (form.reviewNotes as string)?.trim() || null;
+        const userId = (form.userId as string)?.trim() || null;
 
         if (!registrationId) {
           return Response.json({
@@ -929,6 +1029,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             reviewedAt: new Date(),
             reviewedBy: session.id,
             reviewNotes: note,
+          },
+        });
+
+        await prisma.user.update({
+          where: { id: userId || "" },
+          data: {
+            status: "REJECTED",
+            isActive: false,
+            companyId: null,
+            userCreditLimit: null,
           },
         });
 
@@ -1032,8 +1142,9 @@ export default function RegistrationApprovals() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editMode, setEditMode] = useState<"create" | "update">("create");
-  const [customerMode, setCustomerMode] = useState<"create" | "update">("create");
-
+  const [customerMode, setCustomerMode] = useState<"create" | "update">(
+    "create",
+  );
 
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
@@ -1844,11 +1955,11 @@ export default function RegistrationApprovals() {
                           {customer.email}
                         </s-text>
                       </s-banner>
-                      <div style={{ marginTop: 12,display: "flex", gap: 10}}>
+                      <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
                         <s-button onClick={() => setStep("createCompany")}>
                           Continue to Company Setup
                         </s-button>
-                         <s-button
+                        <s-button
                           onClick={() => {
                             setCustomerMode("update");
                             setStep("createCustomer");
