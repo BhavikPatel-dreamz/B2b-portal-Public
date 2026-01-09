@@ -283,14 +283,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59, 999),
     );
 
-    // 📊 Fetch current month orders count
-    // 🔑 Base query (company + RBAC)
-   // 🔑 Base query (company + RBAC)
-const baseQueryParts = [`company_id:${extractId(company.companyId)}`];
+ const baseQueryParts: string[] = [
+  `company_id:${extractId(company.companyId)}`,
+];
 
-// ✅ Logged-in location user → own orders only
+// 👤 Location user → own orders only
 if (accessLevel === "location_user") {
   baseQueryParts.push(`customer_id:${customerId}`);
+}
+
+// 📍 Restrict by locations if applicable
+if (allowedLocationIds && allowedLocationIds.length > 0) {
+  const locationQuery = allowedLocationIds
+    .map((id) => `location_id:${extractId(id)}`)
+    .join(" OR ");
+
+  baseQueryParts.push(`(${locationQuery})`);
 }
 
 const currentMonthQuery = buildDateRangeQuery(
@@ -298,7 +306,6 @@ const currentMonthQuery = buildDateRangeQuery(
   currentMonthStartUTC,
   currentMonthEndUTC,
 );
-console.log(currentMonthQuery);
 
 const currentMonthCount = await getCompanyOrdersCount(
   shop,
@@ -307,19 +314,17 @@ const currentMonthCount = await getCompanyOrdersCount(
 );
 
 
-    // 📅 Previous Month
-    const previousMonthQuery = buildDateRangeQuery(
-      baseQueryParts,
-      previousMonthStartUTC,
-      previousMonthEndUTC,
-    );
-    
+ const previousMonthQuery = buildDateRangeQuery(
+  baseQueryParts,
+  previousMonthStartUTC,
+  previousMonthEndUTC,
+);
 
-    const previousMonthCount = await getCompanyOrdersCount(
-      shop,
-      store.accessToken,
-      previousMonthQuery,
-    );
+const previousMonthCount = await getCompanyOrdersCount(
+  shop,
+  store.accessToken,
+  previousMonthQuery,
+);
 
     console.log({
       currentMonthCount,
