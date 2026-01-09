@@ -16,6 +16,7 @@ import { authenticate } from "../shopify.server";
 import { sendCompanyAssignmentEmail } from "app/utils/email";
 
 interface RegistrationSubmission {
+  paymentTerm: string;
   id: string;
   companyName: string;
   contactName: string;
@@ -66,6 +67,7 @@ interface CompanyAccount {
   contactName: string | null;
   contactEmail: string | null;
   creditLimit: string;
+  paymentTerm: string | null;
   updatedAt: string;
 }
 
@@ -665,7 +667,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "createCompany": {
         const companyName = (form.companyName as string)?.trim();
         const locationName = (form.locationName as string)?.trim();
-        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+        const paymentTermsTemplateId = (form.paymentTerm as string)?.trim();
 
         if (!companyName || !locationName) {
           return Response.json({
@@ -852,7 +854,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             errors: locationErrors,
           });
         }
-        
+
         return Response.json({
           intent,
           success: true,
@@ -939,7 +941,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const contactName = (form.contactName as string)?.trim() || null;
         const contactEmail = (form.contactEmail as string)?.trim() || null;
         const paymentTermsTemplateId =
-          (form.paymentTermsTemplateId as string)?.trim() || null;
+          (form.paymentTerm as string)?.trim() || null;
+
         const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!registrationId || !customerId) {
@@ -962,44 +965,62 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        if (companyId || companyName) {
-          const companyData = await prisma.companyAccount.upsert({
+        let companyData;
+
+        if (companyId) {
+          companyData = await prisma.companyAccount.upsert({
             where: {
               shopId_shopifyCompanyId: {
                 shopId: store.id,
-                shopifyCompanyId: companyId || "",
+                shopifyCompanyId: companyId,
               },
             },
             update: {
-              name: companyName || undefined,
-              contactName,
-              contactEmail,
-              paymentTeam: paymentTermsTemplateId || null,
+              name: companyName ?? undefined,
+              contactName: contactName ?? undefined,
+              contactEmail: contactEmail ?? undefined,
+              paymentTeam:
+                paymentTermsTemplateId !== null
+                  ? paymentTermsTemplateId
+                  : undefined,
             },
             create: {
               shopId: store.id,
-              shopifyCompanyId: companyId || null,
+              shopifyCompanyId: companyId,
               name: companyName || "Company",
               contactName,
               contactEmail,
               creditLimit: new Prisma.Decimal(0),
-              paymentTeam: paymentTermsTemplateId || null,
+              paymentTeam: paymentTermsTemplateId,
             },
           });
-          const user = await prisma.user.findFirst({
-            where: { shopifyCustomerId: customerId || "" },
+        } else if (companyName) {
+          companyData = await prisma.companyAccount.create({
+            data: {
+              shopId: store.id,
+              shopifyCompanyId: null,
+              name: companyName,
+              contactName,
+              contactEmail,
+              creditLimit: new Prisma.Decimal(0),
+              paymentTeam: paymentTermsTemplateId ?? null,
+            },
           });
-          if (user) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                status: "APPROVED",
-                isActive: true,
-                companyId: companyData.id || null,
-                userCreditLimit: new Prisma.Decimal(0),
-              },
-            });
-          }
+        }
+        const user = await prisma.user.findFirst({
+          where: { shopifyCustomerId: customerId },
+        });
+
+        if (user && companyData) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              status: "APPROVED",
+              isActive: true,
+              companyId: companyData.id,
+              userCreditLimit: new Prisma.Decimal(0),
+            },
+          });
         }
 
         return Response.json({
@@ -1319,6 +1340,7 @@ export default function RegistrationApprovals() {
         companyName: company?.name || selected.companyName,
         contactName: selected.contactName,
         contactEmail: selected.email,
+        paymentTermsTemplateId: selected.paymentTerm || "",
         reviewNotes,
       },
       { method: "post" },
@@ -1968,9 +1990,6 @@ export default function RegistrationApprovals() {
                           Update Customer
                         </s-button>
                       </div>
-                      
-                       
-                      
                     </>
                   ) : (
                     <>
