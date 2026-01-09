@@ -13,6 +13,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { syncShopifyCompanies, parseForm, parseCredit } from "../utils/company.server";
+import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
 import { calculateAvailableCredit } from "../services/creditService";
 
@@ -142,35 +143,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
     case "updateCredit": {
-      const id = (form.id as string)?.trim();
-      const creditRaw = (form.creditLimit as string) || "0";
-      const credit = parseCredit(creditRaw);
+      const formData = new FormData();
+      formData.append("id", (form.id as string) || "");
+      formData.append("creditLimit", (form.creditLimit as string) || "0");
 
-      if (!id) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["Company id is required"],
-        });
-      }
-      if (!credit) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["Credit must be a number"],
-        });
-      }
-
-      await prisma.companyAccount.update({
-        where: { id },
-        data: { creditLimit: credit },
-      });
-
-      return Response.json({
-        intent,
-        success: true,
-        message: "Credit updated",
-      });
+      const result = await updateCredit(formData, admin);
+      return Response.json(result);
     }
 
     case "createCompany": {
@@ -329,7 +307,7 @@ return (
         ) : (
           <div>
             <table
-              style={{  
+              style={{
                 width: "100%",
                 borderCollapse: "collapse"
 

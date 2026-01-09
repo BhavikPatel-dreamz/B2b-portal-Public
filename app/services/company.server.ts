@@ -1,5 +1,7 @@
 import prisma from "../db.server";
 import { Prisma } from "@prisma/client";
+import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+import { parseCredit } from "../utils/company.server";
 
 export interface CreateCompanyInput {
   shopId: string;
@@ -470,4 +472,176 @@ export async function getCompanyOrders(companyId: string, shopId: string) {
     company,
     orders,
   };
+}
+
+/**
+ * Update company credit limit and sync to Shopify metadata
+ */
+export async function updateCredit(
+  form: FormData,
+  admin?: AdminApiContext
+): Promise<{
+  intent: string;
+  success: boolean;
+  message?: string;
+  errors?: string[];
+}> {
+  const intent = "updateCredit";
+  const id = (form.get("id") as string)?.trim();
+  const creditRaw = (form.get("creditLimit") as string) || "0";
+  const credit = parseCredit(creditRaw);
+
+  if (!id) {
+    return {
+      intent,
+      success: false,
+      errors: ["Company id is required"],
+    };
+  }
+  if (!credit) {
+    return {
+      intent,
+      success: false,
+      errors: ["Credit must be a number"],
+    };
+  }
+
+  try {
+    // Update local database
+    const updatedCompany = await prisma.companyAccount.update({
+      where: { id },
+      data: { creditLimit: credit },
+    });
+
+    // Sync to Shopify metadata if admin context is available and company has Shopify ID
+    if (admin && updatedCompany.shopifyCompanyId) {
+      try {
+        await updateCompanyMetafield(admin, updatedCompany.shopifyCompanyId, {
+          namespace: "b2b_portal",
+          key: "credit_limit",
+          value: credit.toString(),
+          type: "number_decimal"
+        });
+      } catch (shopifyError) {
+        console.error("Failed to sync credit to Shopify:", shopifyError);
+        // Continue execution - local update succeeded
+      }
+    }
+
+    return {
+      intent,
+      success: true,
+      message: "Credit updated",
+    };
+  } catch (error) {
+    console.error("Error updating credit:", error);
+    return {
+      intent,
+      success: false,
+      errors: ["Failed to update credit limit"],
+    };
+  }
+}
+
+/**
+ * Update or create a metafield on a Shopify company
+ */
+export async function updateCompanyMetafield(
+  admin: AdminApiContext,
+  shopifyCompanyId: string,
+  metafield: {
+    namespace: string;
+    key: string;
+    value: string;
+    type: string;
+  }
+) {
+  const mutation = `
+    mutation CompanyMetafieldSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields {
+          key
+          namespace
+          value
+          createdAt
+          updatedAt
+        }
+        userErrors {
+          field
+          message
+          code
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    metafields: [
+      {
+        ownerId: shopifyCompanyId,
+        namespace: metafield.namespace,
+        key: metafield.key,
+        type: metafield.type,
+        value: metafield.value,
+      },
+    ],
+  };
+
+  const response = await admin.graphql(mutation, {
+    variables,
+  });
+
+  const data = await response.json();
+
+  if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
+    const errorMessage = data.errors?.[0]?.message ||
+      data.data?.metafieldsSet?.userErrors?.[0]?.message ||
+      "Unknown error occurred";
+    throw new Error(`Failed to update company metafield: ${errorMessage}`);
+  }
+
+  return data.data.metafieldsSet.metafields[0];
+}
+
+/**
+ * Get company metafield from Shopify
+ */
+export async function getCompanyMetafield(
+  admin: AdminApiContext,
+  shopifyCompanyId: string,
+  namespace: string,
+  key: string
+) {
+  const query = `
+    query CompanyMetafield($ownerId: ID!, $namespace: String!, $key: String!) {
+      company(id: $ownerId) {
+        metafield(namespace: $namespace, key: $key) {
+          value
+          type
+          namespace
+          key
+          updatedAt
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    ownerId: shopifyCompanyId,
+    namespace,
+    key,
+  };
+
+  const response = await admin.graphql(query, {
+    variables,
+  });
+
+  const data = await response.json();
+
+  if (data.errors) {
+    const errorMessage = data.errors[0]?.message || "Unknown error occurred";
+    throw new Error(`Failed to get company metafield: ${errorMessage}`);
+  }
+
+  return data.data?.company?.metafield || null;
 }
