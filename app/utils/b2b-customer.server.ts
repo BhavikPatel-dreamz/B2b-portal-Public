@@ -4450,11 +4450,13 @@ export async function getCompanyOrdersCount(
  * @param shopifyCustomerId - Shopify customer GID
  * @param shopifyCompanyId - Shopify company GID
  * @param shopName - Shop domain
+ * @param userCreditLimit - Optional user credit limit
  */
 async function createOrUpdateLocalUser({
   email,
   firstName,
   lastName,
+  userCreditLimit,
   shopifyCustomerId,
   shopifyCompanyId,
   shopName
@@ -4465,6 +4467,7 @@ async function createOrUpdateLocalUser({
   shopifyCustomerId: string;
   shopifyCompanyId: string;
   shopName: string;
+  userCreditLimit?: number;
 }) {
   // Get the store information
   const store = await getStoreByDomain(shopName);
@@ -4508,10 +4511,11 @@ async function createOrUpdateLocalUser({
       shopId: store.id,
       companyId: companyAccount?.id || null,
       companyRole: "member", // Default role
-      shopifyCustomerId: shopifyCustomerId // Link to Shopify customer
+      shopifyCustomerId: shopifyCustomerId, // Link to Shopify customer
+      userCreditLimit:userCreditLimit || 0,
     });
 
-    console.log(`✅ Created local user: ${newUser.id} for email: ${email}`);
+    console.log(`✅ Created local user: ${newUser.id} for email: ${email},"4454545454`);
   } else {
     // Update existing user with Shopify customer ID and company info if missing
     await prisma.user.update({
@@ -4521,6 +4525,7 @@ async function createOrUpdateLocalUser({
         companyId: companyAccount?.id || existingUser.companyId,
         firstName: firstName || existingUser.firstName,
         lastName: lastName || existingUser.lastName,
+        userCreditLimit:userCreditLimit || existingUser.userCreditLimit,
         status: "APPROVED" // Ensure they're approved
       }
     });
