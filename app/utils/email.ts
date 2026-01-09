@@ -181,9 +181,9 @@ export async function sendCompanyAssignmentEmail(
   contactName: string,
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
-    storeOwnerName,
-    companyName,
-    contactName,
+    storeOwnerName || 'Store Owner',
+    companyName || 'Company Name',
+    contactName || 'Contact Name',
   );
 
   return sendEmail({
