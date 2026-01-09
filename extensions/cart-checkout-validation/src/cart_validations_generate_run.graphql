@@ -1,0 +1,36 @@
+query CartValidationsGenerateRunInput {
+  cart {
+    lines {
+      quantity
+      cost {
+        totalAmount {
+          amount
+        }
+      }
+    }
+    cost {
+      totalAmount {
+        amount
+      }
+    }
+    buyerIdentity {
+      customer {
+        id
+        metafield(namespace: "b2b_portal", key: "company_id") {
+          value
+        }
+      }
+      purchasingCompany {
+        company {
+          id
+          creditLimit: metafield(namespace: "b2b_portal", key: "credit_limit") {
+            value
+          }
+          creditUsed: metafield(namespace: "b2b_portal", key: "credit_used") {
+            value
+          }
+        }
+      }
+    }
+  }
+}

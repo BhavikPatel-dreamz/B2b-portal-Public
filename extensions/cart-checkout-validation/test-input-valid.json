@@ -1,0 +1,33 @@
+{
+  "cart": {
+    "lines": [
+      {
+        "quantity": 1
+      }
+    ],
+    "cost": {
+      "totalAmount": {
+        "amount": "50.00"
+      }
+    },
+    "buyerIdentity": {
+      "customer": {
+        "id": "gid://shopify/Customer/12345",
+        "metafield": {
+          "value": "company_123"
+        }
+      },
+      "purchasingCompany": {
+        "company": {
+          "id": "gid://shopify/Company/123",
+          "creditLimit": {
+            "value": "1000.00"
+          },
+          "creditUsed": {
+            "value": "900.00"
+          }
+        }
+      }
+    }
+  }
+}
