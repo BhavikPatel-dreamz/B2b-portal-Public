@@ -63,10 +63,10 @@ export async function sendRegistrationEmail(
 ) {
   const { html, text } = generateRegistrationTemplate(
     companyId,
-    companyName,
-    contactName,
+    companyName || 'Company Name',
+    contactName || 'Contact Name',
     email,
-    storeOwnerName,
+    storeOwnerName || 'Store Owner',
   );
 
   return sendEmail({
