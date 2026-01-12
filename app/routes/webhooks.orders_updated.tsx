@@ -3,7 +3,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
-import { validateTieredCreditForOrder, deductTieredCredit, refundTieredCredit } from "../services/tieredCreditService";
+import { validateTieredCreditForOrder, deductTieredCredit, restoreTieredCredit } from "../services/tieredCreditService";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { Prisma } from "@prisma/client";
 
@@ -157,7 +157,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           console.log(`❌ Order cancelled - refunding reserved credit`);
 
           try {
-            await refundTieredCredit({
+            await restoreTieredCredit({
               companyId: user.companyId,
               userId: user.id,
               amount: existingOrder.creditUsed.toNumber(),

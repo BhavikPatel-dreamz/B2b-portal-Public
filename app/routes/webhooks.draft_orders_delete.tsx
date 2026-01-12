@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import { db } from "../db.server";
+import db from "../db.server";
 import { tieredCreditService } from "../services/tieredCreditService";
 import { getUserById } from "../services/user.server";
 import { getOrderByShopifyIdWithDetails } from "../services/order.server";
