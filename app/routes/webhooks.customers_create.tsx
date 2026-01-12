@@ -102,6 +102,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // 1. Send a welcome email to the new user
     // 2. Trigger a notification to administrators about the new user registration
     // 3. Set up initial user permissions or credit limits
+
+    return new Response();
+
+  } catch (error) {
+    console.error("Error processing customers/create webhook:", error);
     return new Response("Internal server error", { status: 500 });
   }
 };
