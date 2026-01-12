@@ -8,7 +8,7 @@ export interface CreateUserInput {
   password: string; // Should be hashed before passing to this function
   role?: UserRole;
   status?: UserStatus;
-  shopId?: string | null;
+  shopId: string; // Required for public app - every user must be assigned to a shop
   companyId?: string | null;
   companyRole?: string | null;
   shopifyCustomerId?: string | null; // Shopify customer GID for linking
@@ -23,7 +23,7 @@ export interface UpdateUserInput {
   role?: UserRole;
   status?: UserStatus;
   isActive?: boolean;
-  shopId?: string | null;
+  shopId?: string; // Optional in updates, but if provided must be valid shop
   companyId?: string | null;
   companyRole?: string | null;
   userCreditLimit?: number | null;
@@ -63,11 +63,14 @@ export async function createUser(data: CreateUserInput) {
 }
 
 /**
- * Get user by ID
+ * Get user by ID with shop isolation
  */
-export async function getUserById(id: string) {
-  return await prisma.user.findUnique({
-    where: { id },
+export async function getUserById(id: string, shopId: string) {
+  return await prisma.user.findFirst({
+    where: {
+      id,
+      shopId // Ensure user belongs to the requesting shop
+    },
     include: {
       shop: true,
       company: true,
@@ -77,14 +80,14 @@ export async function getUserById(id: string) {
 }
 
 /**
- * Get user by email
+ * Get user by email within a specific shop
  */
-export async function getUserByEmail(email: string, shopId?: string) {
+export async function getUserByEmail(email: string, shopId: string) {
   return await prisma.user.findUnique({
     where: {
       shopId_email: {
         email,
-        shopId: shopId ?? null
+        shopId
       }
     },
     include: {
@@ -134,10 +137,11 @@ export async function getUsersByShop(
 }
 
 /**
- * Get users by company
+ * Get users by company within a specific shop
  */
 export async function getUsersByCompany(
   companyId: string,
+  shopId: string,
   options?: {
     companyRole?: string;
     status?: UserStatus;
@@ -146,6 +150,7 @@ export async function getUsersByCompany(
 ) {
   const where: Prisma.UserWhereInput = {
     companyId,
+    shopId, // Ensure users belong to the requesting shop
   };
 
   if (options?.companyRole) {
@@ -165,9 +170,19 @@ export async function getUsersByCompany(
 }
 
 /**
- * Update a user
+ * Update a user with shop validation
  */
-export async function updateUser(id: string, data: UpdateUserInput) {
+export async function updateUser(id: string, shopId: string, data: UpdateUserInput) {
+  // First verify the user belongs to the shop
+  const existingUser = await prisma.user.findFirst({
+    where: { id, shopId },
+    select: { id: true },
+  });
+
+  if (!existingUser) {
+    throw new Error("User not found or does not belong to this shop");
+  }
+
   return await prisma.user.update({
     where: { id },
     data: {
@@ -182,9 +197,19 @@ export async function updateUser(id: string, data: UpdateUserInput) {
 }
 
 /**
- * Delete a user
+ * Delete a user with shop validation
  */
-export async function deleteUser(id: string) {
+export async function deleteUser(id: string, shopId: string) {
+  // First verify the user belongs to the shop
+  const existingUser = await prisma.user.findFirst({
+    where: { id, shopId },
+    select: { id: true },
+  });
+
+  if (!existingUser) {
+    throw new Error("User not found or does not belong to this shop");
+  }
+
   return await prisma.user.delete({
     where: { id },
   });
@@ -302,9 +327,23 @@ export async function getUserByShopifyCustomerId(
 }
 
 /**
- * Validate session and get user
+ * Get user by ID across all shops (for super admin use cases)
  */
-export async function validateSession(token: string) {
+export async function getUserByIdGlobal(id: string) {
+  return await prisma.user.findUnique({
+    where: { id },
+    include: {
+      shop: true,
+      company: true,
+      sessions: true,
+    },
+  });
+}
+
+/**
+ * Validate session and get user with optional shop validation
+ */
+export async function validateSession(token: string, expectedShopId?: string) {
   const session = await getSessionByToken(token);
 
   if (!session) {
@@ -313,6 +352,11 @@ export async function validateSession(token: string) {
 
   if (session.expiresAt < new Date()) {
     await deleteSession(token);
+    return null;
+  }
+
+  // If expectedShopId is provided, validate user belongs to that shop
+  if (expectedShopId && session.user.shopId !== expectedShopId) {
     return null;
   }
 

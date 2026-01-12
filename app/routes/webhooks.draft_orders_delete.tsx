@@ -2,6 +2,8 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { db } from "../db.server";
 import { tieredCreditService } from "../services/tieredCreditService";
+import { getUserById } from "../services/user.server";
+import { getOrderByShopifyIdWithDetails } from "../services/order.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { topic, shop, session, payload } = await authenticate.webhook(request);
@@ -14,30 +16,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       name: draftOrder.name,
     });
 
-    // Find existing B2B order record
-    const existingOrder = await db.b2BOrder.findFirst({
-      where: {
-        shopifyOrderId: draftOrder.id.toString(),
-        shop: { domain: shop },
-        orderStatus: "draft",
-      },
-      include: {
-        company: {
-          include: {
-            account: true,
-          },
-        },
-        user: true,
-      },
+    // Find the store first to get shopId
+    const store = await db.store.findUnique({
+      where: { shopDomain: shop },
+      select: { id: true },
     });
 
-    if (!existingOrder) {
+    if (!store) {
+      console.log("❌ Store not found - skipping B2B processing");
+      return new Response("OK", { status: 200 });
+    }
+
+    // Find existing B2B order record using order service
+    const existingOrder = await getOrderByShopifyIdWithDetails(store.id, draftOrder.id.toString());
+
+    if (!existingOrder || existingOrder.orderStatus !== "draft") {
       console.log("❌ No existing B2B draft order found - skipping");
       return new Response("OK", { status: 200 });
     }
 
     console.log(`✅ Found existing B2B draft order: ${existingOrder.shopifyOrderId}`);
     console.log(`💰 Releasing reserved credit: ${existingOrder.creditUsed}`);
+
+    // Get user details using user service
+    const user = await getUserById(existingOrder.createdByUserId, store.id);
+    if (!user) {
+      console.log("❌ User not found or doesn't belong to this shop - continuing with order deletion");
+    }
 
     // Release any reserved credit
     if (existingOrder.creditUsed && existingOrder.creditUsed > 0) {

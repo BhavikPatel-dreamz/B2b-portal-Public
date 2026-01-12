@@ -103,6 +103,32 @@ export async function getOrderByShopifyId(shopId: string, shopifyOrderId: string
 }
 
 /**
+ * Get complete order details by Shop ID and Shopify Order GID with all relations
+ */
+export async function getOrderByShopifyIdWithDetails(shopId: string, shopifyOrderId: string) {
+  return await prisma.b2BOrder.findFirst({
+    where: { shopId, shopifyOrderId },
+    include: {
+      company: {
+        include: {
+          account: true,
+        },
+      },
+      createdByUser: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      payments: true,
+      shop: true,
+    },
+  });
+}
+
+/**
  * Get orders by company
  */
 export async function getOrdersByCompany(

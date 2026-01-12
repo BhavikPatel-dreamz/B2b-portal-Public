@@ -432,4 +432,4 @@ export {
   deductCredit,
   restoreCredit,
   getCreditSummary,
-} from "../../services/creditService";
+} from "./creditService";

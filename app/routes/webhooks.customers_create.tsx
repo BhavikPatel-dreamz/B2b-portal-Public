@@ -3,7 +3,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { createUser, getUserByEmail } from "../services/user.server";
-import { getCompaniesByShop, getCompanyByShopifyId } from "../services/company.server";
+import { getCompaniesByShop } from "../services/company.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("customers/create webhook received");

@@ -30,7 +30,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Find B2B user by Shopify customer ID
     const b2bUser = await db.user.findFirst({
       where: {
-        shopifyCustomerId: customerId,
+        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
         shop: shop,
       },
       include: {
