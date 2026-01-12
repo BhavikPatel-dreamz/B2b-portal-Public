@@ -130,14 +130,14 @@ export default function Index() {
       description: `${availableCreditPercentage}% remaining`,
       tone: availableCreditPercentage < 20 ? 'critical' as const : availableCreditPercentage < 40 ? 'warning' as const : 'success' as const,
       percentage: availableCreditPercentage
-    },
-    {
-      label: 'Pending Credit',
-      value: `$${data.pendingCreditAmount.toLocaleString()}`,
-      description: `${pendingCreditPercentage}% awaiting payment`,
-      tone: pendingCreditPercentage > 30 ? 'warning' as const : 'info' as const,
-      percentage: pendingCreditPercentage
-    },
+    }
+    // {
+    //   label: 'Pending Credit',
+    //   value: `$${data.pendingCreditAmount.toLocaleString()}`,
+    //   description: `${pendingCreditPercentage}% awaiting payment`,
+    //   tone: pendingCreditPercentage > 30 ? 'warning' as const : 'info' as const,
+    //   percentage: pendingCreditPercentage
+    // },
   ];
 
   // Company registration statistics
@@ -294,10 +294,10 @@ export default function Index() {
                       <div style={{ width: '16px', height: '16px', backgroundColor: '#d73e3e', borderRadius: '2px' }}></div>
                       <s-text variant="bodySm">Used Credit: ${data.totalCreditUsed.toLocaleString()}</s-text>
                     </s-stack>
-                    <s-stack direction="inline" gap="small" alignment="center">
+                    {/* <s-stack direction="inline" gap="small" alignment="center">
                       <div style={{ width: '16px', height: '16px', backgroundColor: '#ffc453', borderRadius: '2px' }}></div>
                       <s-text variant="bodySm">Pending Credit: ${data.pendingCreditAmount.toLocaleString()}</s-text>
-                    </s-stack>
+                    </s-stack> */}
                     <s-stack direction="inline" gap="small" alignment="center">
                       <div style={{ width: '16px', height: '16px', backgroundColor: '#008060', borderRadius: '2px' }}></div>
                       <s-text variant="bodySm">Available Credit: ${data.availableCredit.toLocaleString()}</s-text>
