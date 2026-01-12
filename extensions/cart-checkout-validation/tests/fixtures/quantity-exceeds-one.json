@@ -6,22 +6,20 @@
       "cart": {
         "lines": [
           {
-            "quantity": 3,
-            "cost": {
-              "totalAmount": {
-                "amount": "50.00"
-              }
-            }
+            "quantity": 3
           }
         ],
         "cost": {
           "totalAmount": {
-            "amount": "50.00"
+            "amount": "50.00",
+            "currencyCode": "USD"
           }
         },
         "buyerIdentity": {
+          "email": "customer@example.com",
           "customer": {
             "id": "gid://shopify/Customer/12345",
+            "email": "customer@example.com",
             "metafield": {
               "value": "company_123"
             }
@@ -29,6 +27,7 @@
           "purchasingCompany": {
             "company": {
               "id": "gid://shopify/Company/123",
+              "name": "Example Company",
               "creditLimit": {
                 "value": "1000.00"
               },
@@ -46,8 +45,8 @@
           "validationAdd": {
             "errors": [
               {
-                "message": "Not possible to order more than one of each",
-                "target": "$.cart"
+                "message": "Not possible to order more than one of each item",
+                "target": "$.cart.lines[0].quantity"
               }
             ]
           }

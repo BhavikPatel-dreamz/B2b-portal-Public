@@ -12,12 +12,20 @@
 export function cartValidationsGenerateRun(input) {
   const errors = [];
 
-  // Check quantity validation (existing logic)
+  console.log('🔍 Cart validation - company data:', {
+    hasCustomer: !!input.cart.buyerIdentity?.customer,
+    hasPurchasingCompany: !!input.cart.buyerIdentity?.purchasingCompany,
+    customerEmail: input.cart.buyerIdentity?.customer?.email,
+    companyId: input.cart.buyerIdentity?.purchasingCompany?.company?.id,
+    companyName: input.cart.buyerIdentity?.purchasingCompany?.company?.name
+  });
+
+  // Check quantity validation (re-enabled)
   const quantityErrors = input.cart.lines
     .filter(({ quantity }) => quantity > 1)
-    .map(() => ({
-      message: "Not possible to order more than one of each",
-      target: "$.cart",
+    .map((line, index) => ({
+      message: "Not possible to order more than one of each item",
+      target: `$.cart.lines[${index}].quantity`,
     }));
 
   errors.push(...quantityErrors);
@@ -38,20 +46,38 @@ export function cartValidationsGenerateRun(input) {
     // Get cart total from the cart cost
     const cartTotal = input.cart.cost?.totalAmount?.amount ? parseFloat(input.cart.cost.totalAmount.amount) : 0;
 
-    // Check if company has reached credit limit first
-    if (creditUsed >= creditLimit) {
-      errors.push({
-        message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
-        target: "$.cart",
-      });
+    console.log('💰 Credit info:', {
+      creditLimit,
+      creditUsed,
+      availableCredit,
+      cartTotal
+    });
+
+    // Only perform credit validation if we have valid credit data
+    if (creditLimit > 0) {
+      // Check if company has reached credit limit first
+      if (creditUsed >= creditLimit) {
+        errors.push({
+          message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
+          target: "$.cart",
+        });
+        console.log('🚫 Credit limit reached');
+      }
+      // Only check cart total if not at limit already
+      else if (cartTotal > availableCredit) {
+        errors.push({
+          message: `Insufficient credit. Available credit: $${availableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
+          target: "$.cart",
+        });
+        console.log('🚫 Insufficient credit');
+      } else {
+        console.log('✅ Credit validation passed');
+      }
+    } else {
+      console.log('⚠️ No valid credit data - skipping credit validation');
     }
-    // Only check cart total if not at limit already
-    else if (cartTotal > availableCredit) {
-      errors.push({
-        message: `Insufficient credit. Available credit: $${availableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
-        target: "$.cart",
-      });
-    }
+  } else {
+    console.log('ℹ️ No purchasing company - regular B2C customer');
   }
 
   const operations = [

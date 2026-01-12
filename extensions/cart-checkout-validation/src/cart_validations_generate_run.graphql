@@ -2,20 +2,18 @@ query CartValidationsGenerateRunInput {
   cart {
     lines {
       quantity
-      cost {
-        totalAmount {
-          amount
-        }
-      }
     }
     cost {
       totalAmount {
         amount
+        currencyCode
       }
     }
     buyerIdentity {
+      email
       customer {
         id
+        email
         metafield(namespace: "b2b_portal", key: "company_id") {
           value
         }
@@ -23,6 +21,7 @@ query CartValidationsGenerateRunInput {
       purchasingCompany {
         company {
           id
+          name
           creditLimit: metafield(namespace: "b2b_portal", key: "credit_limit") {
             value
           }

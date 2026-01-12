@@ -6,38 +6,26 @@
       "cart": {
         "lines": [
           {
-            "quantity": 1,
-            "cost": {
-              "totalAmount": {
-                "amount": "30.00"
-              }
-            }
+            "quantity": 1
           },
           {
-            "quantity": 1,
-            "cost": {
-              "totalAmount": {
-                "amount": "20.00"
-              }
-            }
+            "quantity": 1
           },
           {
-            "quantity": 1,
-            "cost": {
-              "totalAmount": {
-                "amount": "25.00"
-              }
-            }
+            "quantity": 1
           }
         ],
         "cost": {
           "totalAmount": {
-            "amount": "75.00"
+            "amount": "75.00",
+            "currencyCode": "USD"
           }
         },
         "buyerIdentity": {
+          "email": "customer@example.com",
           "customer": {
             "id": "gid://shopify/Customer/12345",
+            "email": "customer@example.com",
             "metafield": {
               "value": "company_123"
             }
@@ -45,6 +33,7 @@
           "purchasingCompany": {
             "company": {
               "id": "gid://shopify/Company/123",
+              "name": "Example Company",
               "creditLimit": {
                 "value": "1000.00"
               },
