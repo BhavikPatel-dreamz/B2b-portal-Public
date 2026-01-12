@@ -138,13 +138,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       accessLevel = "main_contact";
 
       if (userAssignedLocationIds.length > 0) {
-        // Main contact has location assignments - restrict to those locations
         allowedLocationIds = userAssignedLocationIds;
         console.log(
           `✅ MAIN CONTACT (with locations): Restricted to ${allowedLocationIds.length} assigned locations`,
         );
       } else {
-        // Main contact without location assignments - full access
         allowedLocationIds = undefined;
         console.log(`✅ MAIN CONTACT (no locations): Full company access`);
       }
@@ -152,13 +150,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       accessLevel = "company_admin";
 
       if (userAssignedLocationIds.length > 0) {
-        // Company admin has location assignments - restrict to those locations
         allowedLocationIds = userAssignedLocationIds;
         console.log(
           `✅ COMPANY ADMIN (with locations): Restricted to ${allowedLocationIds.length} assigned locations`,
         );
       } else {
-        // Company admin without location assignments - full access
         allowedLocationIds = undefined;
         console.log(`✅ COMPANY ADMIN (no locations): Full company access`);
       }
@@ -208,7 +204,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    // ✅ FIXED: Proper filter mapping without changing preset values
     const queryFilters = {
       locationId: filters?.locationId,
       customerId:
@@ -227,7 +222,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       reverse: filters?.reverse,
     };
 
-    // Validate location access
     if (allowedLocationIds?.length && queryFilters.locationId) {
       const hasAccess = allowedLocationIds.some(
         (id) => extractId(id) === extractId(queryFilters.locationId!),
@@ -266,70 +260,121 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // 📅 Calculate current and previous month date ranges
     const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
 
-    const currentMonthStartUTC = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
-    );
-
-    const currentMonthEndUTC = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
-    );
-
-    const previousMonthStartUTC = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0),
-    );
-
-    const previousMonthEndUTC = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59, 999),
-    );
-
- const baseQueryParts: string[] = [
-  `company_id:${extractId(company.companyId)}`,
-];
-
-// 👤 Location user → own orders only
-if (accessLevel === "location_user") {
-  baseQueryParts.push(`customer_id:${customerId}`);
-}
-
-// 📍 Restrict by locations if applicable
-if (allowedLocationIds && allowedLocationIds.length > 0) {
-  const locationQuery = allowedLocationIds
-    .map((id) => `location_id:${extractId(id)}`)
-    .join(" OR ");
-
-  baseQueryParts.push(`(${locationQuery})`);
-}
-
-const currentMonthQuery = buildDateRangeQuery(
-  baseQueryParts,
-  currentMonthStartUTC,
-  currentMonthEndUTC,
-);
-
-const currentMonthCount = await getCompanyOrdersCount(
-  shop,
-  store.accessToken,
-  currentMonthQuery,
-);
-
-
- const previousMonthQuery = buildDateRangeQuery(
-  baseQueryParts,
-  previousMonthStartUTC,
-  previousMonthEndUTC,
-);
-
-const previousMonthCount = await getCompanyOrdersCount(
-  shop,
-  store.accessToken,
-  previousMonthQuery,
-);
-
-    console.log({
-      currentMonthCount,
-      previousMonthCount,
+    console.log("🔍 DEBUG - Date Ranges:", {
+      currentMonth: {
+        start: currentMonthStart.toISOString(),
+        end: currentMonthEnd.toISOString(),
+      },
+      previousMonth: {
+        start: previousMonthStart.toISOString(),
+        end: previousMonthEnd.toISOString(),
+      },
+      now: now.toISOString(),
     });
+
+    // ✅ OPTION 1: Try without location filter first (for debugging)
+    const simpleCurrentQuery = `company_id:${extractId(company.companyId)}${
+      accessLevel === "location_user" ? ` AND customer_id:${customerId}` : ""
+    } AND created_at:>='${currentMonthStart.toISOString().split('T')[0]}'`;
+
+    console.log("🔍 Simple Query Test:", simpleCurrentQuery);
+
+    const simpleCount = await getCompanyOrdersCount(
+      shop,
+      store.accessToken,
+      simpleCurrentQuery,
+    );
+
+    console.log("🔍 Simple Count Result:", simpleCount);
+
+    // ✅ OPTION 2: Try with proper formatting
+    const formatDateForShopify = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    // Build queries without location filter first
+    const baseQuery = `company_id:${extractId(company.companyId)}${
+      accessLevel === "location_user" ? ` AND customer_id:${customerId}` : ""
+    }`;
+
+    const currentMonthQueryNoLocation = `${baseQuery} AND created_at:>='${formatDateForShopify(currentMonthStart)}' AND created_at:<='${formatDateForShopify(currentMonthEnd)}'`;
+    
+    const previousMonthQueryNoLocation = `${baseQuery} AND created_at:>='${formatDateForShopify(previousMonthStart)}' AND created_at:<='${formatDateForShopify(previousMonthEnd)}'`;
+
+    console.log("📊 Queries WITHOUT location filter:", {
+      current: currentMonthQueryNoLocation,
+      previous: previousMonthQueryNoLocation,
+    });
+
+    const currentMonthCountNoLocation = await getCompanyOrdersCount(
+      shop,
+      store.accessToken,
+      currentMonthQueryNoLocation,
+    );
+
+    const previousMonthCountNoLocation = await getCompanyOrdersCount(
+      shop,
+      store.accessToken,
+      previousMonthQueryNoLocation,
+    );
+
+    console.log("📊 Counts WITHOUT location filter:", {
+      current: currentMonthCountNoLocation,
+      previous: previousMonthCountNoLocation,
+    });
+
+    // Now try WITH location filter
+    let currentMonthCount = currentMonthCountNoLocation;
+    let previousMonthCount = previousMonthCountNoLocation;
+
+    if (allowedLocationIds && allowedLocationIds.length > 0) {
+      const locationFilter = allowedLocationIds
+        .map((id) => `location_id:${extractId(id)}`)
+        .join(" OR ");
+
+      const currentMonthQueryWithLocation = `${baseQuery} AND (${locationFilter}) AND created_at:>='${formatDateForShopify(currentMonthStart)}' AND created_at:<='${formatDateForShopify(currentMonthEnd)}'`;
+      
+      const previousMonthQueryWithLocation = `${baseQuery} AND (${locationFilter}) AND created_at:>='${formatDateForShopify(previousMonthStart)}' AND created_at:<='${formatDateForShopify(previousMonthEnd)}'`;
+
+      console.log("📊 Queries WITH location filter:", {
+        current: currentMonthQueryWithLocation,
+        previous: previousMonthQueryWithLocation,
+        locationIds: allowedLocationIds.map(id => extractId(id)),
+      });
+
+      currentMonthCount = await getCompanyOrdersCount(
+        shop,
+        store.accessToken,
+        currentMonthQueryWithLocation,
+      );
+
+      previousMonthCount = await getCompanyOrdersCount(
+        shop,
+        store.accessToken,
+        previousMonthQueryWithLocation,
+      );
+
+      console.log("📊 Counts WITH location filter:", {
+        current: currentMonthCount,
+        previous: previousMonthCount,
+      });
+    }
+
+    // ✅ OPTION 3: Fallback - count from actual orders in result
+    const ordersCurrentMonth = result.orders.filter((order: any) => {
+      const orderDate = new Date(order.createdAt);
+      return orderDate >= currentMonthStart && orderDate <= currentMonthEnd;
+    }).length;
+
+    console.log("📊 Count from result.orders:", ordersCurrentMonth);
 
     let changePercentage = 0;
 
@@ -337,7 +382,7 @@ const previousMonthCount = await getCompanyOrdersCount(
       changePercentage =
         ((currentMonthCount - previousMonthCount) / previousMonthCount) * 100;
     } else if (currentMonthCount > 0) {
-      changePercentage = 100; // growth from zero
+      changePercentage = 100;
     }
 
     return Response.json({
@@ -348,14 +393,12 @@ const previousMonthCount = await getCompanyOrdersCount(
       allowedLocationIds: allowedLocationIds?.length || "all",
       userRoles: company.roles,
       isMainContact,
-      // 📊 Monthly Statistics
-      currentMonthOrderCount: currentMonthCount,
-      monthlyChangePercentage: Math.round(changePercentage * 100) / 100,
+      currentMonthOrderCount: ordersCurrentMonth,
+      monthlyChangePercentage: Math.round(ordersCurrentMonth * 100) / 100,
       debug: {
         ...result._debug,
         restrictedToLocations: allowedLocationIds || "none",
-        restrictedToCustomer:
-          accessLevel === "location_user" ? customerId : "none",
+        restrictedToCustomer: accessLevel === "location_user" ? customerId : "none",
         userAssignedLocations: userAssignedLocationIds.length,
       },
     });
