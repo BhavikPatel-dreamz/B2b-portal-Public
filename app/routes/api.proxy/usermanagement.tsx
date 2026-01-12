@@ -31,6 +31,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { companyId, store, shop, userContext, customerId } =
       await authenticateApiProxyWithPermissions(request);
 
+      const companyData = await prisma.companyAccount.findFirst({
+        where: {
+          shopifyCompanyId: companyId,
+        },
+      });
+      const userData =await prisma.user.findFirst({
+        where: {
+          companyId: companyData.id,
+          role: 'STORE_ADMIN'
+        },
+      });
+
+     const storeAdminEmail = userData?.email;
+
     // Check if user has permission to manage users
     requirePermission(
       userContext,
@@ -69,11 +83,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
-    const Registrationdata = await prisma.registrationSubmission.findFirst({
-      where: {
-        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
-      },
-    });
     // Default: List users
     const after = url.searchParams.get("after") || undefined;
     const query = url.searchParams.get("query") || "";
@@ -107,32 +116,57 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       );
     }
 
+    const customerIds = customersData.customers.map(
+      (c: any) => `${c.customer.id}`,
+    );
+    const registrations = await prisma.registrationSubmission.findMany({
+      where: {
+        shopifyCustomerId: { in: customerIds },
+      },
+    });
+    const registrationMap = new Map(
+      registrations.map((r) => [r.shopifyCustomerId, r.contactName]),
+    );
+ 
     // Map to the format expected by the component with locationRoles array
     const users = customersData.customers.map((c: any) => {
-      // Build locationRoles array from roleAssignments
-      const locationRoles =
-        c.customer.roleAssignments?.edges?.map((edge: any) => ({
-          roleName: userContext.customerEmail === c.customer.email ? "Company Admin" : edge.node.role.name,
-          locationName: edge.node.companyLocation?.name || null,
-          roleId: edge.node.role.id || null,
-          locationId: edge.node.companyLocation?.id || null,
-        })) || [];
+      const firstName = c.customer.firstName?.trim();
+      const lastName = c.customer.lastName?.trim();
 
-      const name = c.customer.lastName
-        ? `${c.customer.firstName} ${c.customer.lastName}`.trim()
-        : c.customer.firstName || Registrationdata?.contactName;
+      const registrationContactName =
+        registrationMap.get(`${c.customer.id}`) || "";
+      const name =
+        firstName && lastName
+          ? `${firstName} ${lastName}`
+          : registrationContactName;
+
+    const isThisStoreAdmin =
+  userData?.role === "STORE_ADMIN" &&
+  c.customer.email === storeAdminEmail;
+
+const locationRoles =
+  c.customer.roleAssignments?.edges?.map((edge: any) => ({
+    roleName: isThisStoreAdmin
+      ? "Company Admin"
+      : edge.node.role?.name ?? "",
+
+    locationName: edge.node.companyLocation?.name || null,
+    roleId: edge.node.role?.id || null,
+    locationId: edge.node.companyLocation?.id || null,
+  })) || [];
+
       return {
         id: c.id,
         name,
         email: c.customer.email,
         company: customersData.companyName,
-        role: userContext.customerEmail === c.customer.email ? "Company Admin" : c.roles.length > 0 ? c.roles.join(", ") : "",
-        credit: c.credit !== undefined && c.credit !== null ? c.credit : 0,
-        locations:
-          c.locationNames && c.locationNames.length > 0
-            ? c.locationNames.join(", ")
+        role:  c.roles.length > 0
+            ? c.roles.join(", ")
             : "",
-        locationRoles: locationRoles,
+        credit: c.credit ?? 0,
+        locations:
+          c.locationNames?.length > 0 ? c.locationNames.join(", ") : "",
+        locationRoles,
         reports: {
           activity: {
             lastOrder: "N/A",
