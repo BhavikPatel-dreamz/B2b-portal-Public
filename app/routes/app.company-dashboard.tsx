@@ -12,6 +12,7 @@ import {
 } from "../utils/company.server";
 import { updateCredit } from "../services/company.server";
 import { useEffect, useState } from "react";
+import { getCompanyOrdersCount } from "app/utils/b2b-customer.server";
 
 type LoaderData = {
   company: {
@@ -67,6 +68,70 @@ type LoaderData = {
   }>;
   totalUsers: number;
 };
+
+async function fetchOrdersCount(
+  shopName: string,
+  accessToken: string,
+  queryString: string
+): Promise<number> {
+  const query = `
+    query OrdersCount($query: String!) {
+      ordersCount(query: $query) {
+        count
+      }
+    }
+  `;
+
+  const response = await fetch(
+    `https://${shopName}/admin/api/2025-01/graphql.json`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": accessToken,
+      },
+      body: JSON.stringify({
+        query,
+        variables: { query: queryString },
+      }),
+    }
+  );
+
+  const data = await response.json();
+  console.log(data,"5656565");
+  if (data.errors) {
+    console.error("OrdersCount error:", data.errors);
+    return 0;
+  }
+
+  return data.data?.ordersCount?.count ?? 0;
+}
+
+export async function getCompanyOrderStats(
+  shopName: string,
+  accessToken: string,
+  baseQuery: string
+) {
+  const [total, paid, unpaid, pending] = await Promise.all([
+    fetchOrdersCount(shopName, accessToken, baseQuery),
+    fetchOrdersCount(shopName, accessToken, `${baseQuery} financial_status:paid`),
+    fetchOrdersCount(shopName, accessToken, `${baseQuery} financial_status:unpaid`),
+    fetchOrdersCount(
+      shopName,
+      accessToken,
+      `${baseQuery} financial_status:pending`
+    ),
+  ]);
+  
+
+  return {
+    total,
+    paid,
+    unpaid,
+    pending,
+  };
+}
+
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -265,6 +330,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       return redirect("/app/companies");
     }
+   case "orderCount": {
+  const query = (form.query as string)?.trim();
+
+  if (!query) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Query is required"],
+    });
+  }
+
+  const orderStats = await getCompanyOrdersCount(
+    session.shop,
+    session.accessToken,
+    query
+  );
+
+  return Response.json({
+    intent,
+    success: true,
+    orderStats,
+  });
+}
+
 
     default:
       return Response.json({
