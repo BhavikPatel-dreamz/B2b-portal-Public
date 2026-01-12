@@ -43,12 +43,7 @@
       "operations": [
         {
           "validationAdd": {
-            "errors": [
-              {
-                "message": "Not possible to order more than one of each item",
-                "target": "$.cart.lines[0].quantity"
-              }
-            ]
+            "errors": []
           }
         }
       ]

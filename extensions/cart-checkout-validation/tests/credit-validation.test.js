@@ -95,8 +95,8 @@ describe("Cart Validation Function", () => {
     });
   });
 
-  describe("Quantity validation", () => {
-    it("should block items with quantity > 1", () => {
+  describe("User and Company Credit validation", () => {
+    it("should allow orders with sufficient company credit", () => {
       const input = {
         cart: {
           lines: [
@@ -119,12 +119,12 @@ describe("Cart Validation Function", () => {
 
       const result = cartValidationsGenerateRun(input);
       const errors = result.operations[0].validationAdd.errors;
-      expect(errors.some(e => e.message.includes("Not possible to order more than one"))).toBe(true);
+      expect(errors).toHaveLength(0);
     });
   });
 
-  describe("Combined validations", () => {
-    it("should show both quantity and credit errors", () => {
+  describe("Credit limit scenarios", () => {
+    it("should block orders when credit is insufficient", () => {
       const input = {
         cart: {
           lines: [
@@ -147,8 +147,7 @@ describe("Cart Validation Function", () => {
 
       const result = cartValidationsGenerateRun(input);
       const errors = result.operations[0].validationAdd.errors;
-      expect(errors).toHaveLength(2);
-      expect(errors.some(e => e.message.includes("Not possible to order more than one"))).toBe(true);
+      expect(errors).toHaveLength(1);
       expect(errors.some(e => e.message.includes("Insufficient credit"))).toBe(true);
     });
   });

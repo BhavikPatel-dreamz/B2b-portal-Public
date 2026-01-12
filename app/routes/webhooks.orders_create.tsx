@@ -100,6 +100,77 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const paidAmount = paymentStatus === "paid" ? orderTotal : new Prisma.Decimal(0);
     const remainingBalance = orderTotal.minus(paidAmount);
 
+    console.log(`🎯 B2B Order Creation - Processing:`, {
+      orderId: orderIdNum,
+      companyId: user.companyId,
+      paymentStatus,
+      orderStatus,
+      orderTotal: orderTotal.toString(),
+      paidAmount: paidAmount.toString(),
+      remainingBalance: remainingBalance.toString()
+    });
+
+    // For B2B orders with pending payment, we still need to reserve the credit
+    // and validate against company limits
+    if (paymentStatus === "pending") {
+      console.log(`🔄 B2B Order with pending payment - reserving credit`);
+      
+      // Import credit validation service
+      const { validateTieredCreditForOrder, deductTieredCredit } = await import("../services/tieredCreditService");
+      
+      try {
+        // Validate credit availability for the order
+        const validation = await validateTieredCreditForOrder({
+          companyId: user.companyId,
+          userId: user.id,
+          orderAmount: orderTotal.toNumber(),
+        });
+
+        if (!validation.success) {
+          console.warn(`❌ Credit validation failed for pending B2B order:`, {
+            orderId: orderIdNum,
+            companyId: user.companyId,
+            reason: validation.error
+          });
+          
+          // Still create the order but mark it as requiring attention
+          await createOrder({
+            companyId: user.companyId,
+            createdByUserId: user.id,
+            shopId: store.id,
+            shopifyOrderId: orderGid,
+            orderTotal,
+            creditUsed: new Prisma.Decimal(0), // No credit used yet since payment is pending
+            remainingBalance,
+            paymentStatus: "pending",
+            orderStatus: "submitted",
+            notes: `Credit validation failed: ${validation.error}. Order requires manual review.`
+          });
+          
+          console.log(`⚠️ B2B order created with credit validation warning`);
+          return new Response();
+        }
+
+        // Validation passed - reserve credit for pending payment
+        await deductTieredCredit({
+          companyId: user.companyId,
+          userId: user.id,
+          amount: orderTotal.toNumber(),
+          orderId: orderGid || `temp-${orderIdNum}`,
+          description: `Credit reserved for pending order ${orderIdNum}`
+        });
+
+        console.log(`✅ Credit reserved for pending B2B order:`, {
+          orderId: orderIdNum,
+          creditReserved: orderTotal.toString()
+        });
+
+      } catch (creditError) {
+        console.error(`Failed to process credit for pending B2B order:`, creditError);
+        // Continue with order creation but log the error
+      }
+    }
+
     // Create B2B order entry via service
     await createOrder({
       companyId: user.companyId,
@@ -107,7 +178,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shopId: store.id,
       shopifyOrderId: orderGid,
       orderTotal,
-      creditUsed: new Prisma.Decimal(0),
+      creditUsed: paymentStatus === "pending" ? orderTotal : new Prisma.Decimal(0), // Credit is reserved for pending orders
       remainingBalance,
       paymentStatus,
       orderStatus,
