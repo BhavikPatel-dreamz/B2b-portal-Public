@@ -491,6 +491,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         100
       : 0;
 
+  // Calculate available credit properly: Credit Limit - Used Credit - Pending Credit
+  const availableCredit = Math.max(0,
+    creditSummary.creditLimit.toNumber() -
+    creditSummary.usedCredit.toNumber() -
+    creditSummary.pendingCredit.toNumber()
+  );
+
   return Response.json({
     company: {
       id: dashboardData.company.id,
@@ -501,7 +508,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       paymentTermsTemplateId: dashboardData.company.paymentTeam || "",
     },
     creditLimit: creditSummary.creditLimit.toNumber(),
-    availableCredit: creditSummary.availableCredit.toNumber(),
+    availableCredit: availableCredit,
     usedCredit: creditSummary.usedCredit.toNumber(),
     pendingCredit: creditSummary.pendingCredit.toNumber(),
     creditPercentageUsed,

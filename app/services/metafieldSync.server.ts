@@ -69,22 +69,15 @@ export async function syncCustomerCreditMetafields(
       });
     }
 
-    // Update customer metafields
+    // Update customer metafields using metafieldsSet mutation
     const mutation = `
-      mutation customerUpdate($input: CustomerInput!) {
-        customerUpdate(input: $input) {
-          customer {
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
             id
-            metafields(first: 20) {
-              edges {
-                node {
-                  id
-                  namespace
-                  key
-                  value
-                }
-              }
-            }
+            namespace
+            key
+            value
           }
           userErrors {
             field
@@ -94,28 +87,26 @@ export async function syncCustomerCreditMetafields(
       }
     `;
 
-    const customerInput = {
-      id: customerId,
-      metafields: metafields.map(field => ({
-        namespace: field.namespace,
-        key: field.key,
-        value: field.value,
-        type: field.type,
-      })),
-    };
+    const metafieldInputs = metafields.map(field => ({
+      ownerId: customerId,
+      namespace: field.namespace,
+      key: field.key,
+      value: field.value,
+      type: field.type,
+    }));
 
     const response = await admin.graphql(mutation, {
-      variables: { input: customerInput },
+      variables: { metafields: metafieldInputs },
     });
 
     const data = await response.json();
 
-    if (data.errors || data.data?.customerUpdate?.userErrors?.length > 0) {
-      const error = data.errors?.[0]?.message || data.data?.customerUpdate?.userErrors?.[0]?.message;
+    if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
+      const error = data.errors?.[0]?.message || data.data?.metafieldsSet?.userErrors?.[0]?.message;
       throw new Error(`Failed to update customer metafields: ${error}`);
     }
 
-    return { success: true, data: data.data?.customerUpdate?.customer };
+    return { success: true, data: data.data?.metafieldsSet?.metafields };
 
   } catch (error: any) {
     console.error('Error syncing customer credit metafields:', error);
@@ -174,22 +165,15 @@ export async function syncCompanyCreditMetafields(
       },
     ];
 
-    // Update company metafields
+    // Update company metafields using metafieldsSet mutation
     const mutation = `
-      mutation companyUpdate($companyId: ID!, $input: CompanyInput!) {
-        companyUpdate(companyId: $companyId, input: $input) {
-          company {
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
             id
-            metafields(first: 20) {
-              edges {
-                node {
-                  id
-                  namespace
-                  key
-                  value
-                }
-              }
-            }
+            namespace
+            key
+            value
           }
           userErrors {
             field
@@ -199,30 +183,28 @@ export async function syncCompanyCreditMetafields(
       }
     `;
 
-    const companyInput = {
-      metafields: metafields.map(field => ({
-        namespace: field.namespace,
-        key: field.key,
-        value: field.value,
-        type: field.type,
-      })),
-    };
+    const metafieldInputs = metafields.map(field => ({
+      ownerId: company.shopifyCompanyId,
+      namespace: field.namespace,
+      key: field.key,
+      value: field.value,
+      type: field.type,
+    }));
 
     const response = await admin.graphql(mutation, {
       variables: {
-        companyId: company.shopifyCompanyId,
-        input: companyInput
+        metafields: metafieldInputs
       },
     });
 
     const data = await response.json();
 
-    if (data.errors || data.data?.companyUpdate?.userErrors?.length > 0) {
-      const error = data.errors?.[0]?.message || data.data?.companyUpdate?.userErrors?.[0]?.message;
+    if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
+      const error = data.errors?.[0]?.message || data.data?.metafieldsSet?.userErrors?.[0]?.message;
       throw new Error(`Failed to update company metafields: ${error}`);
     }
 
-    return { success: true, data: data.data?.companyUpdate?.company };
+    return { success: true, data: data.data?.metafieldsSet?.metafields };
 
   } catch (error: any) {
     console.error('Error syncing company credit metafields:', error);

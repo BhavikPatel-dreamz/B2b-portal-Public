@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
-import { autoSyncCreditMetafields } from "./metafieldSync.server";
+import { syncCompanyCreditMetafields } from "./metafieldSync.server";
 import type { AdminApiContext } from "@shopify/shopify-api";
 
 interface RecalculationResult {
@@ -87,78 +87,40 @@ export async function recalculateCompanyCredit(
     result.unpaidOrdersTotal = totalUnpaidAmount;
     result.unpaidOrdersCount = unpaidOrders.length;
 
-    // Start a transaction to ensure data consistency
-    const transactionResult = await prisma.$transaction(async (tx) => {
-      // Step 1: Delete existing credit transactions for these orders
-      const orderIds = unpaidOrders.map(order => order.id);
-      const deletedTransactions = await tx.creditTransaction.deleteMany({
-        where: {
-          companyId: companyId,
-          orderId: {
-            in: orderIds,
-          },
-          transactionType: {
-            in: ["order_created", "order_updated"], // Only delete order-related transactions
-          },
+    // Calculate credit usage: Credit Limit - Pending Orders + Credit Adjustments
+    const creditAdjustments = await prisma.creditTransaction.aggregate({
+      where: {
+        companyId: companyId,
+        transactionType: {
+          in: ["credit_adjustment", "payment_received", "refund"], // Only manual adjustments
         },
-      });
-
-      console.log(`Deleted ${deletedTransactions.count} existing credit transactions`);
-
-      // Step 2: Create new credit transactions for each unpaid order
-      let runningBalance = new Decimal(0);
-      let transactionCount = 0;
-
-      for (const order of unpaidOrders) {
-        const orderAmount = order.remainingBalance;
-        const previousBalance = runningBalance;
-        runningBalance = runningBalance.plus(orderAmount);
-
-        await tx.creditTransaction.create({
-          data: {
-            companyId: companyId,
-            userId: order.createdByUserId,
-            orderId: order.id,
-            transactionType: "order_created",
-            creditAmount: orderAmount,
-            previousBalance: previousBalance,
-            newBalance: runningBalance,
-            notes: `Recalculated - Order ${order.shopifyOrderId || order.id} remaining balance`,
-            createdBy: "system_recalculation",
-          },
-        });
-
-        transactionCount++;
-      }
-
-      // Step 3: Update company credit used amount
-      await tx.companyAccount.update({
-        where: { id: companyId },
-        data: {
-          // We don't store creditUsed directly, but we can add it if needed
-          // For now, the credit used is calculated from transactions
-        },
-      });
-
-      return {
-        transactionCount,
-        newCreditUsed: runningBalance,
-      };
+      },
+      _sum: {
+        creditAmount: true,
+      },
     });
 
-    result.transactionsRecreated = transactionResult.transactionCount;
-    result.newCreditUsed = transactionResult.newCreditUsed;
+    const totalCreditAdjustments = creditAdjustments._sum.creditAmount || new Decimal(0);
+
+    // Available Credit = Credit Limit - Pending Orders + Credit Adjustments
+    const availableCredit = company.creditLimit.minus(totalUnpaidAmount).plus(totalCreditAdjustments);
+    const usedCredit = totalUnpaidAmount; // Pending orders are considered "used" credit
+
+    result.newCreditUsed = usedCredit;
+
+    console.log(`📊 Credit calculation for company ${companyId}:`, {
+      creditLimit: company.creditLimit.toNumber(),
+      pendingOrders: totalUnpaidAmount.toNumber(),
+      creditAdjustments: totalCreditAdjustments.toNumber(),
+      availableCredit: availableCredit.toNumber(),
+      usedCredit: usedCredit.toNumber(),
+    });
 
     // Step 4: Sync with Shopify metafields if admin context is provided
     if (adminContext && company.shopifyCompanyId) {
       try {
         console.log(`Syncing credit metafields for company ${company.shopifyCompanyId}`);
-        await autoSyncCreditMetafields(
-          adminContext,
-          company.shopifyCompanyId,
-          company.creditLimit,
-          result.newCreditUsed
-        );
+        await syncCompanyCreditMetafields(adminContext, companyId);
         console.log(`✅ Shopify metafields updated successfully`);
       } catch (syncError) {
         console.error(`❌ Failed to sync Shopify metafields:`, syncError);
@@ -167,13 +129,12 @@ export async function recalculateCompanyCredit(
     }
 
     result.success = true;
-    result.message = `Successfully recalculated credit. Found ${result.unpaidOrdersCount} unpaid orders totaling $${result.unpaidOrdersTotal.toFixed(2)}. Created ${result.transactionsRecreated} credit transactions.`;
+    result.message = `Successfully recalculated credit. Found ${result.unpaidOrdersCount} unpaid orders totaling $${result.unpaidOrdersTotal.toFixed(2)}. Credit calculated from: Credit Limit - Pending Orders + Adjustments.`;
 
     console.log(`✅ Credit recalculation completed for company ${companyId}:`, {
       unpaidOrdersCount: result.unpaidOrdersCount,
       unpaidOrdersTotal: result.unpaidOrdersTotal.toNumber(),
-      transactionsRecreated: result.transactionsRecreated,
-      newCreditUsed: result.newCreditUsed.toNumber(),
+      creditUsed: result.newCreditUsed.toNumber(),
     });
 
     return result;
