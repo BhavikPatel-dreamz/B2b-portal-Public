@@ -3,16 +3,16 @@ import { Link, useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
-import { getCompanyDashboardData } from "../services/company.server";
+import { getCompanyDashboardData, updateCredit } from "../services/company.server";
 import { redirect } from "@remix-run/node";
 import {
   parseForm,
   parseCredit,
   syncShopifyUsers,
 } from "../utils/company.server";
-import { updateCredit } from "../services/company.server";
 import { useEffect, useState } from "react";
 import { getCompanyOrdersCount } from "app/utils/b2b-customer.server";
+import { recalculateCompanyCredit, previewCreditRecalculation } from "../services/creditRecalculation.server";
 
 type LoaderData = {
   company: {
@@ -122,7 +122,7 @@ export async function getCompanyOrderStats(
       `${baseQuery} financial_status:pending`
     ),
   ]);
-  
+
 
   return {
     total,
@@ -341,6 +341,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 
+  if (!session.accessToken) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Access token is required"],
+    });
+  }
+
   const orderStats = await getCompanyOrdersCount(
     session.shop,
     session.accessToken,
@@ -354,6 +362,87 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 }
 
+    case "recalculateCredit": {
+      const companyId = (form.companyId as string)?.trim();
+
+      if (!companyId) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company ID is required"],
+        });
+      }
+
+      try {
+        console.log(`🔄 Starting credit recalculation for company ${companyId}`);
+
+        const result = await recalculateCompanyCredit(companyId, admin);
+
+        if (result.success) {
+          return Response.json({
+            intent,
+            success: true,
+            message: result.message,
+            data: {
+              unpaidOrdersCount: result.unpaidOrdersCount,
+              unpaidOrdersTotal: result.unpaidOrdersTotal.toNumber(),
+              transactionsRecreated: result.transactionsRecreated,
+              newCreditUsed: result.newCreditUsed.toNumber(),
+            },
+          });
+        } else {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [result.message],
+          });
+        }
+      } catch (error) {
+        console.error(`❌ Error in recalculateCredit action:`, error);
+        return Response.json({
+          intent,
+          success: false,
+          errors: [`Failed to recalculate credit: ${error instanceof Error ? error.message : 'Unknown error'}`],
+        });
+      }
+    }
+
+    case "previewRecalculation": {
+      const companyId = (form.companyId as string)?.trim();
+
+      if (!companyId) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company ID is required"],
+        });
+      }
+
+      try {
+        const preview = await previewCreditRecalculation(companyId);
+
+        if (preview) {
+          return Response.json({
+            intent,
+            success: true,
+            data: preview,
+          });
+        } else {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Failed to generate preview"],
+          });
+        }
+      } catch (error) {
+        console.error(`❌ Error in previewRecalculation action:`, error);
+        return Response.json({
+          intent,
+          success: false,
+          errors: [`Failed to preview recalculation: ${error instanceof Error ? error.message : 'Unknown error'}`],
+        });
+      }
+    }
 
     default:
       return Response.json({
@@ -501,6 +590,26 @@ export default function CompanyDashboard() {
   const [selectedPaymentTerms, setSelectedPaymentTerms] = useState(
     data.company.paymentTermsTemplateId || "",
   );
+  const [isRecalculating, setIsRecalculating] = useState(false);
+  const [showRecalculateConfirm, setShowRecalculateConfirm] = useState(false);
+  const [recalculationPreview, setRecalculationPreview] = useState<{
+    unpaidOrders: Array<{
+      id: string;
+      shopifyOrderId?: string;
+      remainingBalance: number;
+      createdBy?: string;
+      createdAt?: string;
+    }>;
+    totalPendingCredit: number;
+    newCreditUsed: number;
+    creditAvailable: number;
+    companyName?: string;
+    creditLimit?: { toNumber(): number } | number;
+    unpaidOrdersCount?: number;
+    unpaidOrdersTotal?: { toNumber(): number } | number;
+    currentTransactionsCount?: number;
+  } | null>(null);
+  const recalculateFetcher = useFetcher<ActionResponse>();
 
   const creditStatus = getCreditStatusColor(data.creditPercentageUsed);
   const creditStatusColor =
@@ -557,11 +666,62 @@ export default function CompanyDashboard() {
     return option ? option.label : "No payment terms";
   };
 
+  const handlePreviewRecalculation = () => {
+    const formData = new FormData();
+    formData.append("intent", "previewRecalculation");
+    formData.append("companyId", data.company.id);
+
+    recalculateFetcher.submit(formData, { method: "POST" });
+  };
+
+  const handleRecalculateCredit = () => {
+    setIsRecalculating(true);
+    const formData = new FormData();
+    formData.append("intent", "recalculateCredit");
+    formData.append("companyId", data.company.id);
+
+    recalculateFetcher.submit(formData, { method: "POST" });
+  };
+
+  const handleShowRecalculateModal = () => {
+    setShowRecalculateConfirm(true);
+    handlePreviewRecalculation();
+  };
+
+  const handleCancelRecalculate = () => {
+    setShowRecalculateConfirm(false);
+    setRecalculationPreview(null);
+    setIsRecalculating(false);
+  };
+
   useEffect(() => {
     if (updateFetcher.state === "idle") {
       setDeactivatingId(null);
     }
   }, [updateFetcher.state]);
+
+  useEffect(() => {
+    if (recalculateFetcher.state === "idle" && recalculateFetcher.data) {
+      const response = recalculateFetcher.data as ActionResponse & { data?: Record<string, unknown> };
+
+      if (response.intent === "previewRecalculation" && response.success && response.data) {
+        setRecalculationPreview(response.data as typeof recalculationPreview);
+      } else if (response.intent === "recalculateCredit") {
+        setIsRecalculating(false);
+        setShowRecalculateConfirm(false);
+        setRecalculationPreview(null);
+
+        if (response.success) {
+          // Optionally show success message or reload the page
+          console.log('✅ Credit recalculation completed successfully');
+          window.location.reload(); // Reload to see updated data
+        } else {
+          console.error('❌ Credit recalculation failed:', response.errors);
+          alert(`Failed to recalculate credit: ${response.errors?.[0] || 'Unknown error'}`);
+        }
+      }
+    }
+  }, [recalculateFetcher.state, recalculateFetcher.data]);
 
   return (
     <s-page heading={`${data.company.name} - Credit Dashboard`}>
@@ -581,7 +741,7 @@ export default function CompanyDashboard() {
 
       {/* Payment Terms Edit Modal */}
       {isEditingPaymentTerms && (
-        <div
+        <button
           style={{
             position: "fixed",
             top: 0,
@@ -593,10 +753,19 @@ export default function CompanyDashboard() {
             alignItems: "center",
             justifyContent: "center",
             zIndex: 1000,
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
           }}
+          aria-label="Close modal"
           onClick={handleCancelPaymentTermsEdit}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" || e.key === "Enter") {
+              handleCancelPaymentTermsEdit();
+            }
+          }}
         >
-          <div
+          <section
             style={{
               backgroundColor: "white",
               borderRadius: 8,
@@ -605,7 +774,8 @@ export default function CompanyDashboard() {
               maxWidth: 500,
               boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
             }}
-            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-labelledby="payment-terms-modal-title"
           >
             <div
               style={{
@@ -615,7 +785,7 @@ export default function CompanyDashboard() {
                 marginBottom: 20,
               }}
             >
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }} id="payment-terms-modal-title">
                 Edit payment terms
               </h2>
               <button
@@ -734,8 +904,8 @@ export default function CompanyDashboard() {
                     "Failed to update payment terms"}
                 </div>
               )}
-          </div>
-        </div>
+          </section>
+        </button>
       )}
 
       {/* Company Information Section */}
@@ -907,7 +1077,6 @@ export default function CompanyDashboard() {
                           handleCancelEdit();
                         }
                       }}
-                      autoFocus
                       style={{
                         fontSize: 13,
                         fontWeight: 600,
@@ -1124,6 +1293,51 @@ export default function CompanyDashboard() {
                   transition: "width 0.3s ease",
                 }}
               />
+            </div>
+          </div>
+
+          {/* Recalculate Credit Button */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #e0e0e0" }}>
+            <button
+              onClick={handleShowRecalculateModal}
+              disabled={recalculateFetcher.state === "submitting"}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#005bd3",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: recalculateFetcher.state === "submitting" ? "not-allowed" : "pointer",
+                opacity: recalculateFetcher.state === "submitting" ? 0.6 : 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              {recalculateFetcher.state === "submitting" ? (
+                <>
+                  <div
+                    style={{
+                      width: 12,
+                      height: 12,
+                      border: "2px solid #ffffff",
+                      borderTop: "2px solid transparent",
+                      borderRadius: "50%",
+                      animation: "spin 1s linear infinite",
+                    }}
+                  />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  🔄 Recalculate Credit
+                </>
+              )}
+            </button>
+            <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 8 }}>
+              Recalculates credit based on current unpaid orders and updates transaction history
             </div>
           </div>
         </s-section>
@@ -1411,6 +1625,252 @@ export default function CompanyDashboard() {
           </div>
         )}
       </s-section>
+
+      {/* Recalculate Credit Confirmation Modal */}
+      {showRecalculateConfirm && (
+        <button
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+          }}
+          aria-label="Close recalculation modal"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) handleCancelRecalculate();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" || e.key === "Enter") {
+              handleCancelRecalculate();
+            }
+          }}
+        >
+          <section
+            style={{
+              backgroundColor: "white",
+              borderRadius: 8,
+              padding: 24,
+              maxWidth: 600,
+              width: "90%",
+              maxHeight: "80vh",
+              overflow: "auto",
+            }}
+            role="dialog"
+            aria-labelledby="recalculate-modal-title"
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 20,
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }} id="recalculate-modal-title">
+                🔄 Recalculate Credit
+              </h3>
+              <button
+                onClick={handleCancelRecalculate}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 18,
+                  cursor: "pointer",
+                  color: "#5c5f62",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {recalculationPreview ? (
+              <>
+                <div style={{ marginBottom: 16 }}>
+                  <p style={{ margin: 0, marginBottom: 12, color: "#5c5f62" }}>
+                    This will recalculate the credit for <strong>{recalculationPreview.companyName}</strong> based on current unpaid orders.
+                  </p>
+
+                  <div style={{
+                    backgroundColor: "#f8f9fa",
+                    padding: 16,
+                    borderRadius: 6,
+                    marginBottom: 16
+                  }}>
+                    <h4 style={{ margin: 0, marginBottom: 12, fontSize: 14 }}>Preview Summary:</h4>
+                    <div style={{ display: "grid", gap: 8, fontSize: 13 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>Credit Limit:</span>
+                        <span>{formatCurrency(typeof recalculationPreview.creditLimit === 'object' && recalculationPreview.creditLimit?.toNumber ? recalculationPreview.creditLimit.toNumber() : (recalculationPreview.creditLimit as number) ?? 0)}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>Unpaid Orders:</span>
+                        <span style={{ fontWeight: 600, color: "#d72c0d" }}>{recalculationPreview.unpaidOrdersCount}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>Total Unpaid Amount:</span>
+                        <span style={{ fontWeight: 600, color: "#d72c0d" }}>
+                          {formatCurrency(typeof recalculationPreview.unpaidOrdersTotal === 'object' && recalculationPreview.unpaidOrdersTotal?.toNumber ? recalculationPreview.unpaidOrdersTotal.toNumber() : (recalculationPreview.unpaidOrdersTotal as number) ?? 0)}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>Current Transactions:</span>
+                        <span>{recalculationPreview.currentTransactionsCount}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {recalculationPreview.unpaidOrders.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <h4 style={{ margin: 0, marginBottom: 12, fontSize: 14 }}>Unpaid Orders ({recalculationPreview.unpaidOrders.length}):</h4>
+                      <div style={{
+                        maxHeight: 200,
+                        overflow: "auto",
+                        border: "1px solid #e0e0e0",
+                        borderRadius: 4
+                      }}>
+                        {recalculationPreview.unpaidOrders.map((order: {
+                          id: string;
+                          shopifyOrderId?: string;
+                          remainingBalance: number;
+                          createdBy?: string;
+                          createdAt?: string;
+                        }, index: number) => (
+                          <div
+                            key={order.id}
+                            style={{
+                              padding: 12,
+                              borderBottom: index < recalculationPreview.unpaidOrders.length - 1 ? "1px solid #e0e0e0" : "none",
+                              fontSize: 12,
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                              <span style={{ fontWeight: 500 }}>
+                                Order #{order.shopifyOrderId || order.id.slice(-8)}
+                              </span>
+                              <span style={{ fontWeight: 600 }}>
+                                {formatCurrency(order.remainingBalance)}
+                              </span>
+                            </div>
+                            <div style={{ color: "#5c5f62" }}>
+                              {order.createdBy && order.createdAt && (
+                                <>
+                                  Created by {order.createdBy} on {formatDate(order.createdAt)}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{
+                    padding: 12,
+                    backgroundColor: "#fff3cd",
+                    border: "1px solid #ffeaa7",
+                    borderRadius: 4,
+                    marginBottom: 20,
+                    fontSize: 13
+                  }}>
+                    <strong>⚠️ Warning:</strong> This action will:
+                    <ul style={{ margin: "8px 0 0 16px", paddingLeft: 0 }}>
+                      <li>Delete existing credit transactions for these orders</li>
+                      <li>Create new credit transactions based on current order amounts</li>
+                      <li>Update company credit usage in Shopify metafields</li>
+                    </ul>
+                  </div>
+
+
+                  <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                    <button
+                      onClick={handleCancelRecalculate}
+                      disabled={isRecalculating}
+                      style={{
+                        padding: "10px 16px",
+                        border: "1px solid #e0e0e0",
+                        backgroundColor: "white",
+                        borderRadius: 4,
+                        fontSize: 13,
+                        cursor: isRecalculating ? "not-allowed" : "pointer",
+                        opacity: isRecalculating ? 0.6 : 1,
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleRecalculateCredit}
+                      disabled={isRecalculating}
+                      style={{
+                        padding: "10px 16px",
+                        backgroundColor: isRecalculating ? "#cccccc" : "#d72c0d",
+                        color: "white",
+                        border: "none",
+                        borderRadius: 4,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        cursor: isRecalculating ? "not-allowed" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      {isRecalculating ? (
+                        <>
+                          <div
+                            style={{
+                              width: 12,
+                              height: 12,
+                              border: "2px solid #ffffff",
+                              borderTop: "2px solid transparent",
+                              borderRadius: "50%",
+                              animation: "spin 1s linear infinite",
+                            }}
+                          />
+                          Recalculating...
+                        </>
+                      ) : (
+                        "Confirm Recalculation"
+                      )}
+                    </button>
+                  </div>
+              </div>
+              </>
+            ) : (
+              <div style={{ textAlign: "center", padding: 20 }}>
+                <div
+                  style={{
+                    width: 24,
+                    height: 24,
+                    border: "3px solid #005bd3",
+                    borderTop: "3px solid transparent",
+                    borderRadius: "50%",
+                    animation: "spin 1s linear infinite",
+                    margin: "0 auto 16px",
+                  }}
+                />
+                <p style={{ margin: 0, color: "#5c5f62" }}>Loading preview...</p>
+              </div>
+            )}
+          </section>
+        </button>
+      )}
+
+      {/* Add CSS animation */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </s-page>
   );
 }
