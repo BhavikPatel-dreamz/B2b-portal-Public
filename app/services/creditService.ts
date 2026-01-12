@@ -24,6 +24,13 @@ export async function calculateAvailableCredit(
     return null;
   }
 
+  // Ensure creditLimit is not undefined/null
+  if (company.creditLimit === null || company.creditLimit === undefined) {
+    console.error(`Company ${companyId} has null/undefined creditLimit:`, company.creditLimit);
+    // Set default credit limit of 0
+    company.creditLimit = new Decimal(0);
+  }
+
   // Calculate used credit: sum of all unpaid order amounts (pending + partial)
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {

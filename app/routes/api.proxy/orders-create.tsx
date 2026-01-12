@@ -253,6 +253,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shopId: store.id,
           orderTotal: new Decimal(totalAmount),
           creditUsed: new Decimal(0), // Will be set by deductCredit
+          userCreditUsed: new Decimal(0), // Add required field
           paymentStatus: "pending",
           orderStatus: "draft",
           remainingBalance: new Decimal(totalAmount),

@@ -8,20 +8,24 @@ export interface CreateOrderInput {
   shopifyOrderId?: string | null;
   orderTotal: number | Prisma.Decimal;
   creditUsed: number | Prisma.Decimal;
+  userCreditUsed: number | Prisma.Decimal;  // Add missing field
   remainingBalance: number | Prisma.Decimal;
   paymentStatus?: string;
   orderStatus?: string;
+  notes?: string;  // Add optional notes field
 }
 
 export interface UpdateOrderInput {
   shopifyOrderId?: string | null;
   orderTotal?: number | Prisma.Decimal;
   creditUsed?: number | Prisma.Decimal;
+  userCreditUsed?: number | Prisma.Decimal;  // Add missing field
   paymentStatus?: string;
   orderStatus?: string;
   paidAmount?: number | Prisma.Decimal;
   remainingBalance?: number | Prisma.Decimal;
   paidAt?: Date | null;
+  notes?: string;  // Add optional notes field
 }
 
 export interface CreateOrderPaymentInput {
@@ -51,10 +55,12 @@ export async function createOrder(data: CreateOrderInput) {
       shopifyOrderId: data.shopifyOrderId,
       orderTotal: new Prisma.Decimal(data.orderTotal.toString()),
       creditUsed: new Prisma.Decimal(data.creditUsed.toString()),
+      userCreditUsed: new Prisma.Decimal(data.userCreditUsed.toString()),  // Add missing field
       remainingBalance: new Prisma.Decimal(data.remainingBalance.toString()),
       paidAmount: new Prisma.Decimal(0),
       paymentStatus: data.paymentStatus || "pending",
       orderStatus: data.orderStatus || "draft",
+      notes: data.notes,  // Add optional notes field
     },
     include: {
       company: true,
@@ -222,6 +228,9 @@ export async function updateOrder(id: string, data: UpdateOrderInput) {
   }
   if (data.creditUsed !== undefined) {
     updateData.creditUsed = new Prisma.Decimal(data.creditUsed.toString());
+  }
+  if (data.userCreditUsed !== undefined) {
+    updateData.userCreditUsed = new Prisma.Decimal(data.userCreditUsed.toString());
   }
   if (data.paidAmount !== undefined) {
     updateData.paidAmount = new Prisma.Decimal(data.paidAmount.toString());

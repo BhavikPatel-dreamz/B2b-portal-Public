@@ -4,7 +4,7 @@ import db from "../db.server";
 import { deductCredit } from "../services/tieredCreditService";
 import { getCompanyByUserId } from "../services/user.server";
 import { createOrder } from "../services/order.server";
-import { getStoreByDomain } from "app/services/store.server";
+import { getStoreByDomain } from "../services/store.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const {  shop, payload } = await authenticate.webhook(request);
@@ -72,18 +72,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       console.log(`🏦 Attempting to deduct ${totalAmount} credit for company ${b2bUser.company.id}`);
 
-      const creditResult = await deductCredit({
-        companyId: b2bUser.company.id,
-        orderAmount: totalAmount,
-        orderId: draftOrder.id.toString(),
-        description: `Credit reserved for draft order ${draftOrder.name || `#${draftOrder.id}`}`,
-      });
+      await deductCredit(
+        b2bUser.company.id,
+        draftOrder.id.toString(),
+        totalAmount,
+        b2bUser.id
+      );
 
-      console.log(`💳 Credit reservation result:`, creditResult);
-
-      // Store draft order information for tracking using order service
-      console.log(`📝 Creating B2B order record...`);
-
+      console.log(`💳 Credit reserved successfully for draft order ${draftOrder.name || `#${draftOrder.id}`}`);
       const draftOrderData = await createOrder({
         shopifyOrderId: draftOrder.id.toString(),
         companyId: b2bUser.company.id,
