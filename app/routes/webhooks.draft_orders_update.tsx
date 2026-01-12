@@ -1,0 +1,121 @@
+import type { ActionFunctionArgs } from "@remix-run/node";
+import { authenticate } from "../shopify.server";
+import { db } from "../db.server";
+import { tieredCreditService } from "../services/tieredCreditService";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { topic, shop, session, payload } = await authenticate.webhook(request);
+  console.log(`📝 Draft Order Updated webhook received for shop: ${shop}`);
+
+  try {
+    const draftOrder = payload as any;
+    console.log(`Draft Order Update Details:`, {
+      id: draftOrder.id,
+      email: draftOrder.email,
+      total_price: draftOrder.total_price,
+      currency: draftOrder.currency,
+      status: draftOrder.status,
+      line_items_count: draftOrder.line_items?.length
+    });
+
+    // Check if this is a B2B draft order
+    if (!draftOrder.customer?.id) {
+      console.log("❌ No customer found in draft order - skipping B2B processing");
+      return new Response("OK", { status: 200 });
+    }
+
+    const customerId = draftOrder.customer.id.toString();
+    console.log(`🔍 Looking for B2B user with Shopify customer ID: ${customerId}`);
+
+    // Find existing B2B order record
+    const existingOrder = await db.b2BOrder.findFirst({
+      where: {
+        shopifyOrderId: draftOrder.id.toString(),
+        shop: { domain: shop },
+      },
+      include: {
+        company: {
+          include: {
+            account: true,
+          },
+        },
+        user: true,
+      },
+    });
+
+    if (!existingOrder) {
+      console.log("❌ No existing B2B draft order found - skipping");
+      return new Response("OK", { status: 200 });
+    }
+
+    console.log(`✅ Found existing B2B draft order: ${existingOrder.orderNumber}`);
+
+    const newTotalAmount = parseFloat(draftOrder.total_price || "0");
+    const previousAmount = existingOrder.orderTotal;
+    const amountDifference = newTotalAmount - parseFloat(previousAmount.toString());
+
+    console.log(`💰 Price change: ${previousAmount} → ${newTotalAmount} (difference: ${amountDifference})`);
+
+    // Handle credit adjustment if amount changed
+    if (amountDifference !== 0) {
+      try {
+        if (amountDifference > 0) {
+          // Need to reserve more credit
+          const additionalCreditResult = await tieredCreditService.reserveCredit({
+            companyId: existingOrder.companyId,
+            userId: existingOrder.userId,
+            amount: amountDifference,
+            orderId: draftOrder.id.toString(),
+            orderNumber: draftOrder.name || draftOrder.order_number,
+            shop: shop,
+          });
+
+          console.log(`💳 Additional credit reserved:`, additionalCreditResult);
+        } else {
+          // Amount decreased, release some credit
+          const releaseAmount = Math.abs(amountDifference);
+          const releaseResult = await tieredCreditService.refundCredit({
+            companyId: existingOrder.companyId,
+            userId: existingOrder.userId,
+            amount: releaseAmount,
+            orderId: draftOrder.id.toString(),
+            reason: "Draft order amount decreased",
+            shop: shop,
+          });
+
+          console.log(`💳 Credit released:`, releaseResult);
+        }
+      } catch (creditError: any) {
+        console.error(`❌ Credit adjustment failed:`, creditError.message);
+        // Don't fail the webhook, just log the error
+      }
+    }
+
+    // Update the B2B order record
+    const updatedOrder = await db.b2BOrder.update({
+      where: {
+        id: existingOrder.id,
+      },
+      data: {
+        orderTotal: newTotalAmount,
+        creditUsed: newTotalAmount, // Update credit amount to match new total
+        remainingBalance: newTotalAmount,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(`📊 Draft order updated in B2B system:`, {
+      id: updatedOrder.id,
+      shopifyOrderId: updatedOrder.shopifyOrderId,
+      newTotal: updatedOrder.orderTotal,
+      creditUsed: updatedOrder.creditUsed,
+    });
+
+  } catch (error: any) {
+    console.error(`❌ Error processing draft order update webhook:`, error.message);
+    console.error(error.stack);
+    return new Response(`Error: ${error.message}`, { status: 500 });
+  }
+
+  return new Response("OK", { status: 200 });
+};

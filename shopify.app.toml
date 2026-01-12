@@ -47,9 +47,21 @@ api_version = "2026-01"
   topics = [ "customers/delete" ]
   uri = "/webhooks/customers/delete"
 
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/create" ]
+  uri = "/webhooks/draft_orders/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/update" ]
+  uri = "/webhooks/draft_orders/update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/delete" ]
+  uri = "/webhooks/draft_orders/delete"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_validations,read_companies,read_customers,read_locations,read_orders,read_products,write_companies,write_customers,write_locations,write_orders,write_products"
+scopes = "write_validations,read_companies,read_customers,read_locations,read_orders,read_products,write_companies,write_customers,write_locations,write_orders,write_products,read_draft_orders,write_draft_orders"
 
 [auth]
 redirect_urls = [ "https://b2b-portal-public.vercel.app/api/auth" ]
