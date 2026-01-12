@@ -1,9 +1,9 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import db from "../db.server";
+
 import { deductCredit } from "../services/tieredCreditService";
 import { getCompanyByUserId } from "../services/user.server";
-import { createOrder } from "../services/order.server";
+import {  upsertOrder } from "../services/order.server";
 import { getStoreByDomain } from "../services/store.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -72,15 +72,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       console.log(`🏦 Attempting to deduct ${totalAmount} credit for company ${b2bUser.company.id}`);
 
-      await deductCredit(
-        b2bUser.company.id,
-        draftOrder.id.toString(),
-        totalAmount,
-        b2bUser.id
-      );
 
       console.log(`💳 Credit reserved successfully for draft order ${draftOrder.name || `#${draftOrder.id}`}`);
-      const draftOrderData = await createOrder({
+
+      // Create or update order using upsert function
+      const draftOrderData = await upsertOrder({
         shopifyOrderId: draftOrder.id.toString(),
         companyId: b2bUser.company.id,
         createdByUserId: b2bUser.id,
@@ -92,6 +88,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         orderStatus: "draft", // Draft order status
         remainingBalance: totalAmount,
       });
+
+      console.log(`📊 Upserted draft order in B2B system:`, {
+        id: draftOrderData.id,
+        shopifyOrderId: draftOrderData.shopifyOrderId,
+        orderTotal: draftOrderData.orderTotal,
+        creditUsed: draftOrderData.creditUsed,
+        userCreditUsed: draftOrderData.userCreditUsed,
+      });
+
+     const creditDeductionResult = await deductCredit(
+        b2bUser.company.id,
+        draftOrderData.id, // Use the actual order ID from database instead of shopify order ID
+        totalAmount,
+        b2bUser.id
+      );
+      console.log(`✅ Credit deduction result:`, creditDeductionResult);
+
 
       console.log(`📊 Draft order stored in B2B system:`, {
         id: draftOrderData.id,

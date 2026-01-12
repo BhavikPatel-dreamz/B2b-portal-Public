@@ -44,6 +44,45 @@ export interface UpdateOrderPaymentInput {
 }
 
 /**
+ * Create or update B2B order (upsert functionality)
+ * If order exists with same shopifyOrderId and companyId, update it
+ * Otherwise create a new order
+ */
+export async function upsertOrder(data: CreateOrderInput) {
+  // Check if order already exists
+  const existingOrder = await prisma.b2BOrder.findFirst({
+    where: {
+      shopifyOrderId: data.shopifyOrderId,
+      companyId: data.companyId,
+    },
+  });
+
+  if (existingOrder) {
+    // Update existing order
+    return await prisma.b2BOrder.update({
+      where: { id: existingOrder.id },
+      data: {
+        orderTotal: new Prisma.Decimal(data.orderTotal.toString()),
+        creditUsed: new Prisma.Decimal(data.creditUsed.toString()),
+        userCreditUsed: new Prisma.Decimal(data.userCreditUsed.toString()),
+        remainingBalance: new Prisma.Decimal(data.remainingBalance.toString()),
+        paymentStatus: data.paymentStatus || "pending",
+        orderStatus: data.orderStatus || "draft",
+        notes: data.notes,
+      },
+      include: {
+        company: true,
+        createdByUser: true,
+        payments: true,
+      },
+    });
+  } else {
+    // Create new order using existing createOrder function
+    return await createOrder(data);
+  }
+}
+
+/**
  * Create a new B2B order
  */
 export async function createOrder(data: CreateOrderInput) {

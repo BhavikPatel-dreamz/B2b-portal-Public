@@ -1,5 +1,7 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
+import { syncCompanyCreditMetafields } from "./metafieldSync.server";
+import { authenticate } from "../shopify.server";
 
 interface CreditAvailability {
   creditLimit: Decimal;
@@ -125,28 +127,85 @@ export async function deductCredit(
   const previousBalance = creditInfo.availableCredit;
   const newBalance = previousBalance.minus(amountDecimal);
 
-  // Create credit transaction log
-  await prisma.creditTransaction.create({
-    data: {
+  // Check if credit transaction already exists for this order
+  const existingTransaction = await prisma.creditTransaction.findFirst({
+    where: {
       companyId,
       orderId,
       transactionType: "order_created",
-      creditAmount: amountDecimal.negated(), // Negative because we're deducting
-      previousBalance,
-      newBalance,
-      notes: `Credit deducted for order ${orderId}`,
-      createdBy: userId,
     },
   });
 
-  // Update the order to reflect credit used
-  await prisma.b2BOrder.update({
+  if (existingTransaction) {
+    // Update existing transaction
+    await prisma.creditTransaction.update({
+      where: { id: existingTransaction.id },
+      data: {
+        creditAmount: amountDecimal.negated(), // Negative because we're deducting
+        previousBalance,
+        newBalance,
+        notes: `Credit deducted for order ${orderId} (updated)`,
+        createdBy: userId,
+      },
+    });
+  } else {
+    // Create new credit transaction log
+    await prisma.creditTransaction.create({
+      data: {
+        companyId,
+        orderId,
+        transactionType: "order_created",
+        creditAmount: amountDecimal.negated(), // Negative because we're deducting
+        previousBalance,
+        newBalance,
+        notes: `Credit deducted for order ${orderId}`,
+        createdBy: userId,
+      },
+    });
+  }
+
+  // Check if the order exists in our database before updating
+  const existingOrder = await prisma.b2BOrder.findUnique({
     where: { id: orderId },
-    data: {
-      creditUsed: amountDecimal,
-      remainingBalance: amountDecimal,
-    },
+    select: { id: true },
   });
+
+  if (existingOrder) {
+    // Update the order to reflect credit used
+    await prisma.b2BOrder.update({
+      where: { id: orderId },
+      data: {
+        creditUsed: amountDecimal,
+        remainingBalance: amountDecimal,
+      },
+    });
+  } else {
+    console.log(`⚠️ Order ${orderId} not found in database - skipping order update`);
+  }
+
+  // Sync updated credit information to Shopify metafields for cart validation
+  try {
+    // Get store domain to authenticate with Shopify
+    const order = await prisma.b2BOrder.findUnique({
+      where: { id: orderId },
+      include: {
+        shop: {
+          select: { shopDomain: true }
+        }
+      }
+    });
+
+    if (order?.shop?.shopDomain) {
+      const { admin } = await authenticate.admin(order.shop.shopDomain);
+      await syncCompanyCreditMetafields(admin, companyId);
+      console.log(`✅ Synced credit data to Shopify metafields for company ${companyId}`);
+    } else {
+      console.log(`⚠️ Could not find shop domain for order ${orderId} - skipping metafield sync`);
+    }
+  } catch (syncError) {
+    console.error(`❌ Failed to sync credit metafields:`, syncError);
+    // Don't throw error - credit deduction was successful, just metafield sync failed
+  }
 }
 
 /**
@@ -184,6 +243,30 @@ export async function restoreCredit(
       createdBy: userId,
     },
   });
+
+  // Sync updated credit information to Shopify metafields for cart validation
+  try {
+    // Get store domain to authenticate with Shopify
+    const order = await prisma.b2BOrder.findUnique({
+      where: { id: orderId },
+      include: {
+        shop: {
+          select: { shopDomain: true }
+        }
+      }
+    });
+
+    if (order?.shop?.shopDomain) {
+      const { admin } = await authenticate.admin(order.shop.shopDomain);
+      await syncCompanyCreditMetafields(admin, companyId);
+      console.log(`✅ Synced credit data to Shopify metafields after restore for company ${companyId}`);
+    } else {
+      console.log(`⚠️ Could not find shop domain for order ${orderId} - skipping metafield sync`);
+    }
+  } catch (syncError) {
+    console.error(`❌ Failed to sync credit metafields after restore:`, syncError);
+    // Don't throw error - credit restoration was successful, just metafield sync failed
+  }
 }
 
 /**
