@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { tieredCreditService } from "../services/tieredCreditService";
+import { deductCredit, restoreCredit } from "../services/tieredCreditService";
 import { getUserByShopifyCustomerId, getUserById } from "../services/user.server";
 import { getOrderByShopifyIdWithDetails } from "../services/order.server";
 
@@ -67,27 +67,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (amountDifference !== 0) {
       try {
         if (amountDifference > 0) {
-          // Need to reserve more credit
-          const additionalCreditResult = await tieredCreditService.reserveCredit({
+          // Need to deduct more credit
+          const additionalCreditResult = await deductCredit({
             companyId: existingOrder.companyId,
-            userId: existingOrder.userId,
-            amount: amountDifference,
+            orderAmount: amountDifference,
             orderId: draftOrder.id.toString(),
-            orderNumber: draftOrder.name || draftOrder.order_number,
-            shop: shop,
+            description: `Additional credit for draft order ${draftOrder.name || draftOrder.order_number}`,
           });
 
-          console.log(`💳 Additional credit reserved:`, additionalCreditResult);
+          console.log(`💳 Additional credit deducted:`, additionalCreditResult);
         } else {
           // Amount decreased, release some credit
           const releaseAmount = Math.abs(amountDifference);
-          const releaseResult = await tieredCreditService.refundCredit({
+          const releaseResult = await restoreCredit({
             companyId: existingOrder.companyId,
-            userId: existingOrder.userId,
-            amount: releaseAmount,
+            orderAmount: releaseAmount,
             orderId: draftOrder.id.toString(),
-            reason: "Draft order amount decreased",
-            shop: shop,
+            description: "Draft order amount decreased",
           });
 
           console.log(`💳 Credit released:`, releaseResult);

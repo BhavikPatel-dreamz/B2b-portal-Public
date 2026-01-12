@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { tieredCreditService } from "../services/tieredCreditService";
+import { restoreCredit } from "../services/tieredCreditService";
 import { getUserById } from "../services/user.server";
 import { getOrderByShopifyIdWithDetails } from "../services/order.server";
 
@@ -47,13 +47,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Release any reserved credit
     if (existingOrder.creditUsed && existingOrder.creditUsed > 0) {
       try {
-        const refundResult = await tieredCreditService.refundCredit({
+        const refundResult = await restoreCredit({
           companyId: existingOrder.companyId,
-          userId: existingOrder.createdByUserId,
-          amount: parseFloat(existingOrder.creditUsed.toString()),
+          orderAmount: parseFloat(existingOrder.creditUsed.toString()),
           orderId: existingOrder.shopifyOrderId,
-          reason: "Draft order deleted",
-          shop: shop,
+          description: "Draft order deleted",
         });
 
         console.log(`💳 Credit refunded:`, refundResult);

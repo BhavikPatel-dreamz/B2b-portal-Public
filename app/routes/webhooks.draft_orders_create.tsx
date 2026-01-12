@@ -1,12 +1,12 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { tieredCreditService } from "../services/tieredCreditService";
+import { deductCredit } from "../services/tieredCreditService";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { createOrder } from "../services/order.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { topic, shop, session, payload } = await authenticate.webhook(request);
+  const {  shop, payload } = await authenticate.webhook(request);
   console.log(`📝 Draft Order Created webhook received for shop: ${shop}`);
 
   try {
@@ -55,13 +55,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Reserve credit for the draft order (pending review)
     try {
-      const creditResult = await tieredCreditService.reserveCredit({
+      const creditResult = await deductCredit({
         companyId: b2bUser.company.id,
-        userId: b2bUser.id,
-        amount: totalAmount,
+        orderAmount: totalAmount,
         orderId: draftOrder.id.toString(),
-        orderNumber: draftOrder.name || draftOrder.order_number,
-        shop: shop,
+        description: `Credit reserved for draft order ${draftOrder.name || draftOrder.order_number}`,
       });
 
       console.log(`💳 Credit reservation result:`, creditResult);
@@ -73,7 +71,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         createdByUserId: b2bUser.id,
         shopId: store.id,
         orderTotal: totalAmount,
-        creditUsed: creditResult.amount,
+        creditUsed: totalAmount, // Use total amount since we deducted credit
         paymentStatus: "pending",
         orderStatus: "draft", // Draft order status
         remainingBalance: totalAmount,
