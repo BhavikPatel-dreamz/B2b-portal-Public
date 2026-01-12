@@ -326,6 +326,24 @@ export async function getUserByShopifyCustomerId(
   });
 }
 
+/* get user comny by the id */
+export async function getCompanyByUserId(
+  shopId: string,
+  shopifyCustomerId: string,
+) {
+  return await prisma.user.findFirst({
+    where: {
+      shopId,
+      shopifyCustomerId,
+      isActive: true,
+      status: "APPROVED",
+    },
+    include: {
+      company: true,
+    },
+  });
+}
+
 /**
  * Get user by ID across all shops (for super admin use cases)
  */

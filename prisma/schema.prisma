@@ -290,6 +290,9 @@ model B2BOrder {
   paidAmount       Decimal   @default(0) @db.Decimal(14, 2)
   remainingBalance Decimal   @db.Decimal(14, 2)
 
+  // Optional notes for order tracking
+  notes            String?   // Order notes, credit issues, etc.
+
   // Relations
   payments         OrderPayment[]
 

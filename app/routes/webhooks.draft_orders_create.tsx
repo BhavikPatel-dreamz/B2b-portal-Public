@@ -2,23 +2,40 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { deductCredit } from "../services/tieredCreditService";
-import { getUserByShopifyCustomerId } from "../services/user.server";
+import { getCompanyByUserId } from "../services/user.server";
 import { createOrder } from "../services/order.server";
+import { getStoreByDomain } from "app/services/store.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const {  shop, payload } = await authenticate.webhook(request);
+  console.log(JSON.stringify(payload))
   console.log(`📝 Draft Order Created webhook received for shop: ${shop}`);
 
   try {
     const draftOrder = payload as any;
+
+    // Validate required fields from the payload
+    if (!draftOrder.id || !draftOrder.total_price) {
+      console.log("❌ Invalid draft order payload - missing required fields");
+      return new Response("Invalid payload", { status: 400 });
+    }
+
     console.log(`Draft Order Details:`, {
       id: draftOrder.id,
+      name: draftOrder.name,
       email: draftOrder.email,
       total_price: draftOrder.total_price,
       currency: draftOrder.currency,
       status: draftOrder.status,
+      b2b: draftOrder["b2b?"],
       line_items_count: draftOrder.line_items?.length
     });
+
+    // Check if this is a B2B draft order
+    if (!draftOrder["b2b?"] || draftOrder["b2b?"] !== true) {
+      console.log("❌ Not a B2B draft order - skipping B2B processing");
+      return new Response("OK", { status: 200 });
+    }
 
     // Check if this is a B2B draft order
     if (!draftOrder.customer?.id) {
@@ -30,18 +47,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log(`🔍 Looking for B2B user with Shopify customer ID: ${customerId}`);
 
     // Find the store first to get shopId
-    const store = await db.store.findUnique({
-      where: { shopDomain: shop },
-      select: { id: true },
-    });
 
-    if (!store) {
-      console.log("❌ Store not found - skipping B2B processing");
-      return new Response("OK", { status: 200 });
-    }
+    const store = await getStoreByDomain(shop);
+        if (!store) {
+          console.log(`Store not found for domain ${shop} — skipping B2B order log`);
+          return new Response();
+        }
+
 
     // Find B2B user by Shopify customer ID using user service
-    const b2bUser = await getUserByShopifyCustomerId(store.id, `gid://shopify/Customer/${customerId}`);
+    const b2bUser = await getCompanyByUserId(store.id, `gid://shopify/Customer/${customerId}`);
 
     if (!b2bUser?.company) {
       console.log("❌ No B2B company found for customer - skipping B2B processing");
@@ -55,16 +70,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Reserve credit for the draft order (pending review)
     try {
+      console.log(`🏦 Attempting to deduct ${totalAmount} credit for company ${b2bUser.company.id}`);
+
       const creditResult = await deductCredit({
         companyId: b2bUser.company.id,
         orderAmount: totalAmount,
         orderId: draftOrder.id.toString(),
-        description: `Credit reserved for draft order ${draftOrder.name || draftOrder.order_number}`,
+        description: `Credit reserved for draft order ${draftOrder.name || `#${draftOrder.id}`}`,
       });
 
       console.log(`💳 Credit reservation result:`, creditResult);
 
       // Store draft order information for tracking using order service
+      console.log(`📝 Creating B2B order record...`);
+
       const draftOrderData = await createOrder({
         shopifyOrderId: draftOrder.id.toString(),
         companyId: b2bUser.company.id,
@@ -72,6 +91,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopId: store.id,
         orderTotal: totalAmount,
         creditUsed: totalAmount, // Use total amount since we deducted credit
+        userCreditUsed: 0, // Add required field - no user-specific credit used for draft orders
         paymentStatus: "pending",
         orderStatus: "draft", // Draft order status
         remainingBalance: totalAmount,
@@ -82,11 +102,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopifyOrderId: draftOrderData.shopifyOrderId,
         orderTotal: draftOrderData.orderTotal,
         creditUsed: draftOrderData.creditUsed,
+        userCreditUsed: draftOrderData.userCreditUsed,
       });
 
     } catch (creditError: any) {
-      console.error(`❌ Credit reservation failed:`, creditError.message);
+      console.error(`❌ Credit reservation failed:`, {
+        error: creditError.message,
+        stack: creditError.stack,
+        companyId: b2bUser.company.id,
+        orderAmount: totalAmount
+      });
       // Don't fail the webhook, just log the error
+      return new Response(`Credit reservation failed: ${creditError.message}`, { status: 500 });
     }
 
   } catch (error: any) {

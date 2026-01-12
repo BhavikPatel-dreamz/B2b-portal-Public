@@ -2,11 +2,11 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { deductCredit, restoreCredit } from "../services/tieredCreditService";
-import { getUserByShopifyCustomerId, getUserById } from "../services/user.server";
+import { getUserById } from "../services/user.server";
 import { getOrderByShopifyIdWithDetails } from "../services/order.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { topic, shop, session, payload } = await authenticate.webhook(request);
+  const {  shop,  payload } = await authenticate.webhook(request);
   console.log(`📝 Draft Order Updated webhook received for shop: ${shop}`);
 
   try {

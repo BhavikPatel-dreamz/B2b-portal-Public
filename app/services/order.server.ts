@@ -109,11 +109,7 @@ export async function getOrderByShopifyIdWithDetails(shopId: string, shopifyOrde
   return await prisma.b2BOrder.findFirst({
     where: { shopId, shopifyOrderId },
     include: {
-      company: {
-        include: {
-          account: true,
-        },
-      },
+      company: {},
       createdByUser: {
         select: {
           id: true,

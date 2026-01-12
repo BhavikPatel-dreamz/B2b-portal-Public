@@ -114,10 +114,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // and validate against company limits
     if (paymentStatus === "pending") {
       console.log(`🔄 B2B Order with pending payment - reserving credit`);
-      
+
       // Import credit validation service
       const { validateTieredCreditForOrder, deductTieredCredit } = await import("../services/tieredCreditService");
-      
+
       try {
         // Validate credit availability for the order
         const validation = await validateTieredCreditForOrder({
@@ -132,7 +132,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             companyId: user.companyId,
             reason: validation.error
           });
-          
+
           // Still create the order but mark it as requiring attention
           await createOrder({
             companyId: user.companyId,
@@ -141,12 +141,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             shopifyOrderId: orderGid,
             orderTotal,
             creditUsed: new Prisma.Decimal(0), // No credit used yet since payment is pending
+            userCreditUsed: new Prisma.Decimal(0), // No user credit used yet
             remainingBalance,
             paymentStatus: "pending",
             orderStatus: "submitted",
             notes: `Credit validation failed: ${validation.error}. Order requires manual review.`
           });
-          
+
           console.log(`⚠️ B2B order created with credit validation warning`);
           return new Response();
         }
@@ -179,6 +180,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shopifyOrderId: orderGid,
       orderTotal,
       creditUsed: paymentStatus === "pending" ? orderTotal : new Prisma.Decimal(0), // Credit is reserved for pending orders
+      userCreditUsed: new Prisma.Decimal(0), // No user credit used for orders
       remainingBalance,
       paymentStatus,
       orderStatus,
