@@ -66,6 +66,10 @@ const shopify = shopifyApp({
       deliveryMethod: DeliveryMethod.Http,
       callbackUrl: "/webhooks/customers/create",
     },
+    CUSTOMERS_DELETE: {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: "/webhooks/customers/delete",
+    },
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
