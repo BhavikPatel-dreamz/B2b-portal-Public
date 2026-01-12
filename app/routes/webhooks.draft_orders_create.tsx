@@ -7,7 +7,7 @@ import {  upsertOrder } from "../services/order.server";
 import { getStoreByDomain } from "../services/store.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const {  shop, payload } = await authenticate.webhook(request);
+  const { admin, shop, payload } = await authenticate.webhook(request);
   console.log(JSON.stringify(payload))
   console.log(`📝 Draft Order Created webhook received for shop: ${shop}`);
 
@@ -101,7 +101,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         b2bUser.company.id,
         draftOrderData.id, // Use the actual order ID from database instead of shopify order ID
         totalAmount,
-        b2bUser.id
+        b2bUser.id,
+        admin // Pass admin context for metafield sync
       );
       console.log(`✅ Credit deduction result:`, creditDeductionResult);
 

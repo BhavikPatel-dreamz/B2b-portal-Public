@@ -105,16 +105,24 @@ export async function canCreateOrder(
   };
 }
 
+interface CreditDeductionResult {
+  success: boolean;
+  message?: string;
+  newBalance?: Decimal;
+  creditUsed?: Decimal;
+}
+
 /**
- * Deduct credit when an order is created
+ * Deduct credit for an order
  * Creates a transaction log and updates the order's credit usage
  */
 export async function deductCredit(
   companyId: string,
   orderId: string,
   amount: number | Decimal,
-  userId: string
-): Promise<void> {
+  userId: string,
+  admin?: any // Optional admin context for metafield sync
+): Promise<CreditDeductionResult> {
   const amountDecimal = new Decimal(amount);
 
   // Get current credit info
@@ -184,28 +192,24 @@ export async function deductCredit(
   }
 
   // Sync updated credit information to Shopify metafields for cart validation
-  try {
-    // Get store domain to authenticate with Shopify
-    const order = await prisma.b2BOrder.findUnique({
-      where: { id: orderId },
-      include: {
-        shop: {
-          select: { shopDomain: true }
-        }
-      }
-    });
-
-    if (order?.shop?.shopDomain) {
-      const { admin } = await authenticate.admin(order.shop.shopDomain);
+  if (admin) {
+    try {
       await syncCompanyCreditMetafields(admin, companyId);
       console.log(`✅ Synced credit data to Shopify metafields for company ${companyId}`);
-    } else {
-      console.log(`⚠️ Could not find shop domain for order ${orderId} - skipping metafield sync`);
+    } catch (syncError) {
+      console.error(`❌ Failed to sync credit metafields:`, syncError);
+      // Don't throw error - credit deduction was successful, just metafield sync failed
     }
-  } catch (syncError) {
-    console.error(`❌ Failed to sync credit metafields:`, syncError);
-    // Don't throw error - credit deduction was successful, just metafield sync failed
+  } else {
+    console.log(`⚠️ No admin context provided - skipping metafield sync`);
   }
+
+  return {
+    success: true,
+    message: `Credit deducted successfully for order ${orderId}`,
+    newBalance,
+    creditUsed: amountDecimal
+  };
 }
 
 /**
@@ -217,7 +221,8 @@ export async function restoreCredit(
   orderId: string,
   amount: number | Decimal,
   userId: string,
-  reason: "cancelled" | "refunded" = "cancelled"
+  reason: "cancelled" | "refunded" = "cancelled",
+  admin?: any // Optional admin context for metafield sync
 ): Promise<void> {
   const amountDecimal = new Decimal(amount);
 
@@ -245,27 +250,16 @@ export async function restoreCredit(
   });
 
   // Sync updated credit information to Shopify metafields for cart validation
-  try {
-    // Get store domain to authenticate with Shopify
-    const order = await prisma.b2BOrder.findUnique({
-      where: { id: orderId },
-      include: {
-        shop: {
-          select: { shopDomain: true }
-        }
-      }
-    });
-
-    if (order?.shop?.shopDomain) {
-      const { admin } = await authenticate.admin(order.shop.shopDomain);
+  if (admin) {
+    try {
       await syncCompanyCreditMetafields(admin, companyId);
       console.log(`✅ Synced credit data to Shopify metafields after restore for company ${companyId}`);
-    } else {
-      console.log(`⚠️ Could not find shop domain for order ${orderId} - skipping metafield sync`);
+    } catch (syncError) {
+      console.error(`❌ Failed to sync credit metafields after restore:`, syncError);
+      // Don't throw error - credit restoration was successful, just metafield sync failed
     }
-  } catch (syncError) {
-    console.error(`❌ Failed to sync credit metafields after restore:`, syncError);
-    // Don't throw error - credit restoration was successful, just metafield sync failed
+  } else {
+    console.log(`⚠️ No admin context provided for restore - skipping metafield sync`);
   }
 }
 
