@@ -215,7 +215,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           redirectTo: "/apps/b2b-portal/registration",
           message: status === "APPROVED"
             ? "Your account is approved but B2B access not configured in Shopify"
-            : "Your account has already been submitted and is under review",
+            : status === 'REJECTED' ? "Your account has been rejected. Please contact support team." : "Your account has already been submitted and is under review",
           alreadySubmitted: true,
         });
       } else {
