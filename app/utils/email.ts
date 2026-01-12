@@ -179,11 +179,13 @@ export async function sendCompanyAssignmentEmail(
   email: string,
   companyName: string,
   contactName: string,
+  note?: string,
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
     storeOwnerName || 'Store Owner',
     companyName || 'Company Name',
     contactName || 'Contact Name',
+    note || 'important note: ',
   );
 
   return sendEmail({
@@ -198,6 +200,7 @@ function generateCompanyAssignmentTemplate(
   storeOwnerName:string,
   companyName: string,
   contactName: string,
+  note?: string,
 ) {
   const html = `
 <!DOCTYPE html>
@@ -212,7 +215,7 @@ function generateCompanyAssignmentTemplate(
     .header { background-color: #0d6efd; padding: 20px; text-align: center; color: #fff; border-radius: 8px 8px 0 0; }
     .content { background-color: #ffffff; padding: 30px; border: 1px solid #dee2e6; }
     .footer { background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d; border-radius: 0 0 8px 8px; }
-    .btn { display: inline-block; padding: 12px 24px; background-color: #0d6efd; color: #fff; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+    .btn { display: inline-block; padding: 12px 24px; background-color:rgb(255, 255, 255); color: #fff; text-decoration: none; border-radius: 4px; margin: 20px 0; }
     .btn:hover { background-color: #0b5ed7; }
     .highlight { background-color: #e7f1ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
   </style>
@@ -241,9 +244,19 @@ function generateCompanyAssignmentTemplate(
         users, and locations.
       </p>
 
+       <p style="text-align: center;">
+        <a href="https://findash-shipping-1.myshopify.com/pages/b2b-page" class="btn">
+          View B2B Dashboard
+        </a>
+      </p>
+
       <p>
         If you have any questions or face any issues, please feel free to
         contact our support team.
+      </p>
+
+      <p style="text-align;">
+        <b>Note:</b> ${note || ''}
       </p>
 
       <p>

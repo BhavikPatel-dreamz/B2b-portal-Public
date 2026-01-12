@@ -907,6 +907,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const email = (form.email as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
         const contactName = (form.contactName as string)?.trim();
+        const note = (form.reviewNotes as string)?.trim() || null; // ✅ Extracting reviewNotes
 
         if (!email) {
           return Response.json({
@@ -921,7 +922,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           email,
           companyName,
           contactName,
+          note, // ✅ Passing note as first parameter
         );
+
+        const registerData = await prisma.registrationSubmission.findFirst({
+          where: {
+            email,
+          },
+        });
+        if (registerData) {
+          await prisma.registrationSubmission.update({
+            where: { id: registerData.id },
+            data: {
+              reviewNotes: note,
+            },
+          });
+        }
 
         return Response.json({
           intent,
@@ -943,8 +959,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const paymentTermsTemplateId =
           (form.paymentTerm as string)?.trim() || null;
 
-        const note = (form.reviewNotes as string)?.trim() || null;
-
         if (!registrationId || !customerId) {
           return Response.json({
             intent,
@@ -959,7 +973,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             status: "APPROVED",
             reviewedAt: new Date(),
             reviewedBy: session.id,
-            reviewNotes: note,
             shopifyCustomerId: customerId,
             workflowCompleted: true,
           },
@@ -2658,6 +2671,37 @@ export default function RegistrationApprovals() {
                     </s-banner>
                   </div>
 
+                  <div style={{ marginTop: 12 }}>
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#5c5f62",
+                          fontWeight: 500,
+                        }}
+                      >
+                        Review notes (optional)
+                      </span>
+                      <textarea
+                        value={reviewNotes}
+                        onChange={(e) => setReviewNotes(e.target.value)}
+                        placeholder="Add any notes about this approval"
+                        style={{
+                          minHeight: 80,
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                        }}
+                      />
+                    </label>
+                  </div>
+
                   <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                     <s-button
                       onClick={() =>
@@ -2667,6 +2711,7 @@ export default function RegistrationApprovals() {
                             email: selected.email,
                             contactName: selected.contactName,
                             companyName: selected.companyName,
+                            reviewNotes: reviewNotes, // Add this line
                           },
                           { method: "post" },
                         )
@@ -2704,7 +2749,7 @@ export default function RegistrationApprovals() {
                   }}
                 >
                   <h4 style={{ marginTop: 0 }}>Complete Approval</h4>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
+                  {/* <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Review and add any notes before completing the approval.
                   </p>
 
@@ -2737,7 +2782,7 @@ export default function RegistrationApprovals() {
                         }}
                       />
                     </label>
-                  </div>
+                  </div> */}
 
                   <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                     <s-button
