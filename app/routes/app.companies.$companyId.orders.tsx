@@ -9,6 +9,7 @@ type LoaderData = {
     name: string;
     shopifyCompanyId: string | null;
   };
+  shop: string;
   orders: Array<{
     id: string;
     shopifyOrderId: string | null;
@@ -21,6 +22,8 @@ type LoaderData = {
     createdBy: string;
   }>;
 };
+
+
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -49,6 +52,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       name: data.company.name,
       shopifyCompanyId: data.company.shopifyCompanyId,
     },
+    shop: session.shop,
     orders: data.orders.map((order) => ({
       id: order.id,
       shopifyOrderId: order.shopifyOrderId,
@@ -303,7 +307,28 @@ export default function CompanyOrdersPage() {
                       {order.id.substring(0, 8)}
                     </td>
                     <td style={{ padding: 12, fontSize: 12, color: "#5c5f62" }}>
-                      {order.shopifyOrderId || "—"}
+                      {order.shopifyOrderId ? (
+                        <a
+                          href={`https://${data.shop}/admin/orders/${order.shopifyOrderId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            color: "#005bd3",
+                            textDecoration: "none",
+                            fontWeight: 500,
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.textDecoration = "underline";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.textDecoration = "none";
+                          }}
+                        >
+                          #{order.shopifyOrderId} ↗
+                        </a>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
                       {formatDate(order.createdAt)}

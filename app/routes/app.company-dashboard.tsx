@@ -485,17 +485,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   const creditPercentageUsed =
     creditSummary.creditLimit.toNumber() > 0
-      ? ((creditSummary.usedCredit.toNumber() +
-          creditSummary.pendingCredit.toNumber()) /
+      ? (creditSummary.usedCredit.toNumber() /
           creditSummary.creditLimit.toNumber()) *
         100
       : 0;
 
-  // Calculate available credit properly: Credit Limit - Used Credit - Pending Credit
+  // Calculate available credit properly: Credit Limit - Used Credit
+  // (pendingCredit is now 0 with the updated logic)
   const availableCredit = Math.max(0,
     creditSummary.creditLimit.toNumber() -
-    creditSummary.usedCredit.toNumber() -
-    creditSummary.pendingCredit.toNumber()
+    creditSummary.usedCredit.toNumber()
   );
 
   return Response.json({

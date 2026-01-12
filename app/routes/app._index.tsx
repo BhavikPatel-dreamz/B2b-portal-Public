@@ -56,35 +56,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
-  // Calculate total credit used from orders
-  const creditUsageStats = await prisma.b2BOrder.aggregate({
+  // Calculate total used credit from all unpaid orders (new business logic)
+  // All unpaid orders are considered "used credit" regardless of status
+  const usedCreditStats = await prisma.b2BOrder.aggregate({
     where: {
       shopId: store.id,
-      paymentStatus: { in: ["paid", "partial"] },
+      paymentStatus: { in: ["pending", "partial"] }, // All unpaid orders
+      orderStatus: { notIn: ["cancelled"] }, // Exclude cancelled orders
     },
     _sum: {
-      creditUsed: true,
-      orderTotal: true,
+      remainingBalance: true, // Use remainingBalance instead of creditUsed
     },
   });
 
-  // Calculate pending credit (unpaid orders using credit)
-  const pendingCreditStats = await prisma.b2BOrder.aggregate({
-    where: {
-      shopId: store.id,
-      paymentStatus: "pending",
-      creditUsed: { gt: 0 },
-    },
-    _sum: {
-      creditUsed: true,
-    },
-  });
+  // With the new logic, pending credit is always 0
+  // All unpaid orders are counted as "used credit"
+  const pendingCreditAmount = 0;
 
   const totalCreditAllowed = Number(creditStats._sum.creditLimit || 0);
-  const totalCreditUsed = Number(creditUsageStats._sum.creditUsed || 0);
-  const pendingCreditAmount = Number(pendingCreditStats._sum.creditUsed || 0);
-  const totalOrderValue = Number(creditUsageStats._sum.orderTotal || 0);
-  const availableCredit = totalCreditAllowed - totalCreditUsed - pendingCreditAmount;
+  const totalCreditUsed = Number(usedCreditStats._sum.remainingBalance || 0);
+  const availableCredit = totalCreditAllowed - totalCreditUsed;
 
   return {
     totalCompanies,
@@ -97,7 +88,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     totalCreditUsed,
     availableCredit,
     pendingCreditAmount,
-    totalOrderValue,
   };
 };
 

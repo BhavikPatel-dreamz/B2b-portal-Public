@@ -25,7 +25,9 @@ type LoaderCompany = {
   contactEmail: string | null;
   creditLimit: string;
   usedCredit: string;
+  pendingCredit: string;
   availableCredit: string;
+  creditUsagePercentage: number;
   updatedAt: string;
   userCount: number;
 };
@@ -110,13 +112,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const companiesWithCredit = await Promise.all(
     companies.map(async (company) => {
       const creditInfo = await calculateAvailableCredit(company.id);
+      const creditLimitNum = parseFloat(company.creditLimit.toString());
+      const usedCreditNum = creditInfo ? parseFloat(creditInfo.usedCredit.toString()) : 0;
+      const pendingCreditNum = creditInfo ? parseFloat(creditInfo.pendingCredit.toString()) : 0;
+      const creditUsagePercentage = creditLimitNum > 0 ? Math.round((usedCreditNum / creditLimitNum) * 100) : 0;
+
       return {
         ...company,
         creditLimit: company.creditLimit.toString(),
         usedCredit: creditInfo ? creditInfo.usedCredit.toString() : "0",
+        pendingCredit: creditInfo ? creditInfo.pendingCredit.toString() : "0",
         availableCredit: creditInfo
           ? creditInfo.availableCredit.toString()
           : company.creditLimit.toString(),
+        creditUsagePercentage,
         updatedAt: company.updatedAt.toISOString(),
         userCount: company._count?.users ?? 0,
       } satisfies LoaderCompany;
@@ -343,15 +352,12 @@ export default function CompaniesPage() {
               <thead>
                 <tr>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                    style={{ textAlign: "left", padding: "8px", width: "15%" }}
                   >
                     Company
                   </th>
-                  {/* <th style={{ textAlign: "left", padding: "8px" }}>
-                    Shopify company ID
-                  </th> */}
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "20%" }}
+                    style={{ textAlign: "left", padding: "8px", width: "15%" }}
                   >
                     Contact
                   </th>
@@ -361,19 +367,29 @@ export default function CompaniesPage() {
                     Users
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
                   >
                     Credit Limit
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
                   >
                     Used Credit
                   </th>
+                  {/* <th
+                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
+                  >
+                    Pending Credit
+                  </th> */}
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "7%" }}
+                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
                   >
                     Available Credit
+                  </th>
+                  <th
+                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
+                  >
+                    Usage %
                   </th>
                   <th
                     style={{ textAlign: "left", padding: "8px", width: "10%" }}
@@ -416,9 +432,12 @@ export default function CompaniesPage() {
                     <td style={{ padding: "8px" }}>
                       {formatCredit(company.creditLimit)}
                     </td>
-                    <td style={{ padding: "8px", color: "#d72c0d" }}>
+                    <td style={{ padding: "8px", color: "#d72c0d", fontWeight: 500 }}>
                       {formatCredit(company.usedCredit)}
                     </td>
+                    {/* <td style={{ padding: "8px", color: "#b98900" }}>
+                      {formatCredit(company.pendingCredit)}
+                    </td> */}
                     <td
                       style={{
                         padding: "8px",
@@ -427,10 +446,20 @@ export default function CompaniesPage() {
                             ? "#008060"
                             : "#d72c0d",
                         fontWeight:
-                          parseFloat(company.availableCredit) < 0 ? 600 : 400,
+                          parseFloat(company.availableCredit) < 0 ? 600 : 500,
                       }}
                     >
                       {formatCredit(company.availableCredit)}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px",
+                        color: company.creditUsagePercentage >= 90 ? "#d72c0d" :
+                               company.creditUsagePercentage >= 70 ? "#b98900" : "#008060",
+                        fontWeight: 500
+                      }}
+                    >
+                      {company.creditUsagePercentage}%
                     </td>
                     {/* <td style={{ padding: "8px" }}>
                       {new Date(company.updatedAt).toLocaleString()}
