@@ -77,7 +77,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         error: 'A registration with this email already exists. Please contact support if you need assistance.'
       }, { status: 409 });
     }
-
+    const CompanyAction =await prisma.companyAccount.findFirst({
+      where: {
+        shopId: store.id,
+        name: companyName,
+      },
+    });
+    if (CompanyAction) {
+      return Response.json({
+        success: false,
+        error: 'A registration with this company name already exists. Please contact support if you need assistance.'
+      }, { status: 409 });
+    }
     // Save the registration submission to the database
     const registration = await createRegistration({
       companyName,

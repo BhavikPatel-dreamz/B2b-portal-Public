@@ -128,7 +128,7 @@ function generateRegistrationTemplate(
       </p>
 
       <p style="text-align: center;">
-        <a href="https://findash-shipping-1.myshopify.com/pages/b2b-page" class="btn">
+        <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/registrations" class="btn">
           View B2B Page
         </a>
       </p>

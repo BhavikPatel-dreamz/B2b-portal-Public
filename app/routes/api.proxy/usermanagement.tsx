@@ -112,7 +112,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // Build locationRoles array from roleAssignments
       const locationRoles =
         c.customer.roleAssignments?.edges?.map((edge: any) => ({
-          roleName: userContext.isMainContact == true ? "Company Admin" : edge.node.role.name,
+          roleName: userContext.customerEmail === c.customer.email ? "Company Admin" : edge.node.role.name,
           locationName: edge.node.companyLocation?.name || null,
           roleId: edge.node.role.id || null,
           locationId: edge.node.companyLocation?.id || null,
@@ -126,7 +126,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         name,
         email: c.customer.email,
         company: customersData.companyName,
-        role: userContext.isMainContact == true ? "Company Admin" : c.roles.length > 0 ? c.roles.join(", ") : "",
+        role: userContext.customerEmail === c.customer.email ? "Company Admin" : c.roles.length > 0 ? c.roles.join(", ") : "",
         credit: c.credit !== undefined && c.credit !== null ? c.credit : 0,
         locations:
           c.locationNames && c.locationNames.length > 0
