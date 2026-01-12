@@ -6,15 +6,54 @@
       "cart": {
         "lines": [
           {
-            "quantity": 1
+            "quantity": 1,
+            "cost": {
+              "totalAmount": {
+                "amount": "30.00"
+              }
+            }
           },
           {
-            "quantity": 1
+            "quantity": 1,
+            "cost": {
+              "totalAmount": {
+                "amount": "20.00"
+              }
+            }
           },
           {
-            "quantity": 1
+            "quantity": 1,
+            "cost": {
+              "totalAmount": {
+                "amount": "25.00"
+              }
+            }
           }
-        ]
+        ],
+        "cost": {
+          "totalAmount": {
+            "amount": "75.00"
+          }
+        },
+        "buyerIdentity": {
+          "customer": {
+            "id": "gid://shopify/Customer/12345",
+            "metafield": {
+              "value": "company_123"
+            }
+          },
+          "purchasingCompany": {
+            "company": {
+              "id": "gid://shopify/Company/123",
+              "creditLimit": {
+                "value": "1000.00"
+              },
+              "creditUsed": {
+                "value": "100.00"
+              }
+            }
+          }
+        }
       }
     },
     "output": {

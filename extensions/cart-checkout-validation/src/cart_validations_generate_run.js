@@ -38,18 +38,17 @@ export function cartValidationsGenerateRun(input) {
     // Get cart total from the cart cost
     const cartTotal = input.cart.cost?.totalAmount?.amount ? parseFloat(input.cart.cost.totalAmount.amount) : 0;
 
-    // Check if cart total exceeds available credit
-    if (cartTotal > availableCredit) {
-      errors.push({
-        message: `Insufficient credit. Available credit: $${availableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
-        target: "$.cart",
-      });
-    }
-
-    // Check if company has reached credit limit
+    // Check if company has reached credit limit first
     if (creditUsed >= creditLimit) {
       errors.push({
         message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
+        target: "$.cart",
+      });
+    }
+    // Only check cart total if not at limit already
+    else if (cartTotal > availableCredit) {
+      errors.push({
+        message: `Insufficient credit. Available credit: $${availableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
         target: "$.cart",
       });
     }
