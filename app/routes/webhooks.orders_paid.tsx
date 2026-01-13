@@ -3,9 +3,9 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
-import { validateTieredCreditForOrder, deductTieredCredit } from "../services/tieredCreditService";
+
 import { Prisma } from "@prisma/client";
-import prisma from "../db.server";
+
 
 /**
  * Trigger post-payment credit validation

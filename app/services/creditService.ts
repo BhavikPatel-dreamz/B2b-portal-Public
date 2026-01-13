@@ -1,7 +1,7 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
 import { syncCompanyCreditMetafields } from "./metafieldSync.server";
-import { authenticate } from "../shopify.server";
+
 
 interface CreditAvailability {
   creditLimit: Decimal;

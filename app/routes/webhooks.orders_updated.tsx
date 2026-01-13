@@ -5,6 +5,7 @@ import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { validateTieredCreditForOrder, restoreTieredCredit } from "../services/tieredCreditService";
 import { getUserByShopifyCustomerId } from "../services/user.server";
+import { calculateAvailableCredit } from "../services/creditService";
 import { Prisma } from "@prisma/client";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -235,13 +236,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         } else if (paymentStatus === "partial") {
           // Partial payment - credit used is the unpaid amount
           const unpaidAmount = orderTotal.minus(paidAmount);
+
+          // Calculate company's remaining credit balance after this order
+          const companyCredit = await calculateAvailableCredit(user.companyId);
+          const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
+
           await updateOrder(existingOrder.id, {
             paymentStatus: "partial",
             orderStatus: "submitted",
             orderTotal: new Prisma.Decimal(totalPriceStr),
             paidAmount: paidAmount,
             creditUsed: unpaidAmount, // Credit used is the unpaid portion
-            remainingBalance: unpaidAmount, // Same as creditUsed for this order
+            remainingBalance: companyRemainingBalance, // Company's remaining credit balance
             updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
           });
 
@@ -249,13 +255,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             orderTotal: totalPriceStr,
             paidAmount: paidAmount.toString(),
             creditUsed: unpaidAmount.toString(), // Unpaid amount charged to credit
-            remainingBalance: unpaidAmount.toString()
+            companyRemainingBalance: companyRemainingBalance.toString()
           });
 
         } else {
           // Other status changes - update all relevant order details
-          const remainingBalance = orderTotal.minus(paidAmount);
+
           const creditToUse = paymentStatus === "paid" ? orderTotal : paidAmount;
+
+          // Calculate company's remaining credit balance after this order
+          const unpaidAmount = orderTotal.minus(paidAmount);
+          const companyCredit = await calculateAvailableCredit(user.companyId);
+          const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
 
           await updateOrder(existingOrder.id, {
             paymentStatus,
@@ -263,7 +274,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             orderTotal: orderTotal,
             paidAmount: paidAmount,
             creditUsed: creditToUse, // Credit used based on payment status
-            remainingBalance: remainingBalance,
+            remainingBalance: companyRemainingBalance, // Company's remaining credit balance
             updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
             notes: paymentTerms ?
               `Payment Terms: ${paymentTerms.payment_terms_name || 'Net'} ${paymentTerms.due_in_days || 0} days` :
@@ -276,7 +287,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             orderTotal: orderTotal.toString(),
             paidAmount: paidAmount.toString(),
             creditUsed: creditToUse.toString(),
-            remainingBalance: remainingBalance.toString(),
+            companyRemainingBalance: companyRemainingBalance.toString(),
             currency: currency
           });
         }
@@ -284,8 +295,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } catch (error) {
         console.error(`Failed to process payment status change:`, error);
         // Still update basic order info with current totals
-        const remainingBalance = orderTotal.minus(paidAmount);
+
         const creditToUse = paymentStatus === "paid" ? orderTotal : paidAmount;
+
+        // Calculate company's remaining credit balance after this order
+        const unpaidAmount = orderTotal.minus(paidAmount);
+        const companyCredit = await calculateAvailableCredit(user.companyId);
+        const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
 
         await updateOrder(existingOrder.id, {
           paymentStatus,
@@ -293,7 +309,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           orderTotal: new Prisma.Decimal(totalPriceStr),
           paidAmount: paidAmount,
           creditUsed: creditToUse,
-          remainingBalance: remainingBalance,
+          remainingBalance: companyRemainingBalance, // Company's remaining credit balance
           updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
           notes: `Status update error: ${error instanceof Error ? error.message : 'Unknown error'}`
         });
@@ -303,12 +319,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Only fulfillment status changed - but still update all order details to keep in sync
       const unpaidAmount = orderTotal.minus(paidAmount);
 
+      // Calculate company's remaining credit balance after this order
+      const companyCredit = await calculateAvailableCredit(user.companyId);
+      const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
+
       await updateOrder(existingOrder.id, {
         orderStatus,
         orderTotal: new Prisma.Decimal(totalPriceStr),
         paidAmount: paidAmount,
         creditUsed: unpaidAmount, // Credit used is unpaid amount
-        remainingBalance: unpaidAmount, // Same as creditUsed for this order
+        remainingBalance: companyRemainingBalance, // Company's remaining credit balance
         updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
         notes: paymentTerms ?
           `Payment Terms: ${paymentTerms.payment_terms_name || 'Net'} ${paymentTerms.due_in_days || 0} days` :
@@ -319,7 +339,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         orderTotal: totalPriceStr,
         paidAmount: paidAmount.toString(),
         creditUsed: unpaidAmount.toString(),
-        remainingBalance: unpaidAmount.toString()
+        companyRemainingBalance: companyRemainingBalance.toString()
       });
     }
 
