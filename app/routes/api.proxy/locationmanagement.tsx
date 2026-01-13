@@ -5,7 +5,8 @@ import {
   getCompanyLocations,
   createCompanyLocation,
   updateCompanyLocation,
-  deleteCompanyLocation
+  deleteCompanyLocation,
+  checkLocationHasUsers,
 } from "../../utils/b2b-customer.server";
 
 /**
@@ -26,25 +27,26 @@ import {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
-    const { companyId, store, shop } = await authenticateApiProxyWithPermissions(request);
+    const { companyId, store, shop } =
+      await authenticateApiProxyWithPermissions(request);
 
     if (!store.accessToken) {
       return Response.json(
         { error: "Store access token not available" },
-        { status: 500 }
+        { status: 500 },
       );
     }
     // Fetch all locations
     const locationsData = await getCompanyLocations(
       companyId,
       shop,
-      store.accessToken
+      store.accessToken,
     );
 
     if (locationsData.error) {
       return Response.json(
         { error: "Failed to fetch locations" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -57,7 +59,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.error("Proxy error (GET):", error);
     return Response.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 };
@@ -69,20 +71,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     // Authenticate and validate B2B access with permissions
-    const { companyId, store, shop, userContext } = await authenticateApiProxyWithPermissions(request);
+    const { companyId, store, shop, userContext } =
+      await authenticateApiProxyWithPermissions(request);
 
     // Check if user has permission to manage locations
     requirePermission(
       userContext,
-      'canManageLocations',
-      'You do not have permission to manage locations. Only Company Admins and Main Contacts can create, edit, or delete locations.'
+      "canManageLocations",
+      "You do not have permission to manage locations. Only Company Admins and Main Contacts can create, edit, or delete locations.",
     );
 
     // Ensure accessToken is available
     if (!store.accessToken) {
       return Response.json(
         { error: "Store access token not available" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -93,12 +96,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Handle different actions
     switch (actionType) {
       case "create": {
-        const { name, address1, address2, city, province, zip, country, phone, externalId, note } = body;
+        const {
+          name,
+          address1,
+          address2,
+          city,
+          province,
+          zip,
+          country,
+          phone,
+          externalId,
+          note,
+        } = body;
 
         if (!name) {
           return Response.json(
             { error: "Location name is required" },
-            { status: 400 }
+            { status: 400 },
           );
         }
 
@@ -117,19 +131,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             phone: phone || "",
             externalId: externalId || "",
             note: note || "",
-          }
+          },
         );
 
         // FIX: Check for error and return proper status code
         if (result.error) {
           return Response.json(
-            { 
+            {
               error: result.error,
               details: result.details,
               userErrors: result.userErrors,
-              field: result.field
-            }, 
-            { status: 400 } // Changed from 500 to 400 for better error handling
+              field: result.field,
+            },
+            { status: 400 }, // Changed from 500 to 400 for better error handling
           );
         }
 
@@ -137,12 +151,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       case "edit": {
-        const { locationId, name, address1, address2, city, province, zip, country, phone, externalId, note } = body;
+        const {
+          locationId,
+          name,
+          address1,
+          address2,
+          city,
+          province,
+          zip,
+          country,
+          phone,
+          externalId,
+          note,
+        } = body;
 
         if (!locationId) {
           return Response.json(
             { error: "Location ID is required for editing" },
-            { status: 400 }
+            { status: 400 },
           );
         }
 
@@ -161,17 +187,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             phone: phone || undefined,
             externalId: externalId || undefined,
             note: note || undefined,
-          }
+          },
         );
 
         // FIX: Proper error handling
         if (result.error) {
           return Response.json(
-            { 
-              error: result.error, 
-              userErrors: result.userErrors
-            }, 
-            { status: 400 }
+            {
+              error: result.error,
+              userErrors: result.userErrors,
+            },
+            { status: 400 },
           );
         }
 
@@ -184,40 +210,59 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (!locationId) {
           return Response.json(
             { error: "Location ID is required for deletion" },
-            { status: 400 }
+            { status: 400 },
           );
         }
 
+        // Check if location has assigned users
+        const userCheck = await checkLocationHasUsers(
+          locationId,
+          shop,
+          store.accessToken,
+        );
+
+        if (userCheck.error) {
+          return Response.json(
+            { error: "Failed to verify location status" },
+            { status: 500 },
+          );
+        }
+
+        if (userCheck.hasUsers) {
+          return Response.json(
+            {
+              error: `Cannot delete location "${userCheck.locationName}". It has ${userCheck.userCount} assigned user(s). Please unassign all users before deleting.`,
+              assignedUsers: userCheck.userCount,
+            },
+            { status: 400 },
+          );
+        }
+
+        // Proceed with deletion
         const result = await deleteCompanyLocation(
           locationId,
           shop,
-          store.accessToken
+          store.accessToken,
         );
 
-        // FIX: Proper error handling
         if (result.error) {
-          return Response.json(
-            { 
-              error: result.error
-            }, 
-            { status: 400 }
-          );
+          return Response.json({ error: result.error }, { status: 400 });
         }
 
-        return Response.json({ success: true, deletedId: result.deletedId });
+        return Response.json({
+          success: true,
+          deletedId: result.deletedId,
+        });
       }
 
       default:
-        return Response.json(
-          { error: "Invalid action type" },
-          { status: 400 }
-        );
+        return Response.json({ error: "Invalid action type" }, { status: 400 });
     }
   } catch (error) {
     console.error("Proxy error (POST):", error);
     return Response.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 };

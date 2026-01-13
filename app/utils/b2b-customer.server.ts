@@ -4048,6 +4048,60 @@ export async function deleteCompanyLocation(
   }
 }
 
+export async function checkLocationHasUsers(
+  locationId: string,
+  shopName: string,
+  accessToken: string
+) {
+  try {
+    const query = `
+      query {
+        companyLocation(id: "${locationId}") {
+          id
+          name
+          roleAssignments(first: 250) {
+            edges {
+              node {
+                id
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({ query }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (data.errors) {
+      console.error("GraphQL Errors:", data.errors);
+      return { error: "Failed to check location users" };
+    }
+
+    const location = data.data.companyLocation;
+    const userCount = location?.roleAssignments?.edges?.length || 0;
+
+    return {
+      hasUsers: userCount > 0,
+      userCount: userCount,
+      locationName: location?.name
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
 // Function to get advanced company orders with filtering and pagination
 export async function getAdvancedCompanyOrders(
   shopName: string,
