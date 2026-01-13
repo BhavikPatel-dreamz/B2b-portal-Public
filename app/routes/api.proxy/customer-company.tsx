@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../../shopify.server";
 import { getStoreByDomain } from "../../services/store.server";
 import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
+import { getProxyParams } from "app/utils/proxy.server";
 
 /**
  * Loader function to handle GET requests for current user company information
@@ -10,11 +11,7 @@ import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     try {
         // Authenticate the proxy request
-        await authenticate.public.appProxy(request);
-
-        const url = new URL(request.url);
-        const customerId = url.searchParams.get("customerId");
-        const shop = url.searchParams.get("shop");
+        const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
 
         if (!customerId || !shop) {
             return Response.json(
@@ -77,13 +74,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     try {
         // Authenticate the proxy request
-        await authenticate.public.appProxy(request);
+      const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
 
-        // Parse the body
-        const { customerId, shop } = await request.json();
-
-        if (!customerId) {
-            return Response.json({ error: 'Customer ID required' }, { status: 400 });
+        if (!customerId || !shop) {
+            return Response.json({ error: 'Customer ID and shop are required' }, { status: 400 });
         }
 
         if (!shop) {
