@@ -175,6 +175,7 @@ This email was sent to notify you about a new company inquiry.
 }
 
 export async function sendCompanyAssignmentEmail(
+  shopName: string,
   storeOwnerName:string,
   email: string,
   companyName: string,
@@ -182,6 +183,7 @@ export async function sendCompanyAssignmentEmail(
   note?: string,
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
+    shopName || 'Shop Name',
     storeOwnerName || 'Store Owner',
     companyName || 'Company Name',
     contactName || 'Contact Name',
@@ -197,6 +199,7 @@ export async function sendCompanyAssignmentEmail(
 }
 
 function generateCompanyAssignmentTemplate(
+  shopName: string,
   storeOwnerName:string,
   companyName: string,
   contactName: string,
@@ -261,7 +264,7 @@ function generateCompanyAssignmentTemplate(
 
       <p>
         Best regards,<br />
-        <strong>${storeOwnerName}</strong>
+        <strong>${shopName}</strong>
       </p>
     </div>
   </div>

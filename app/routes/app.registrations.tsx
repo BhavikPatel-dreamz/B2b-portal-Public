@@ -918,6 +918,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         await sendCompanyAssignmentEmail(
+          store.shopName,
           store.storeOwnerName,
           email,
           companyName,
