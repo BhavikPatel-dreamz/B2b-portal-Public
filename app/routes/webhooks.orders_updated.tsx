@@ -16,7 +16,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // If an outdated subscription points to this path, ignore gracefully
     if (topic !== "ORDERS_UPDATED" && topic !== "ORDERS_EDITED") {
       console.info(`Webhook topic ${topic} hit orders/updated route. Ignoring.`);
-      return new Response();
+      return new Response(null, { status: 200 });
     }
 
     // Basic validation
@@ -28,7 +28,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const store = await getStoreByDomain(shop);
     if (!store) {
       console.warn(`Store not found for domain ${shop} — skipping B2B order update`);
-      return new Response();
+      return new Response(null, { status: 200 });
     }
 
     // Extract order data from webhook payload
@@ -60,7 +60,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     })();
     if (!customer || !customer.id || !orderIdNum) {
       console.info("Order has no customer or ID; skipping B2B order update");
-      return new Response();
+      return new Response(null, { status: 200 });
     }
 
     const customerGid = `gid://shopify/Customer/${customer.id}`;
@@ -73,7 +73,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const existingOrder = await getOrderByShopifyId(store.id, orderGid);
     if (!existingOrder) {
       console.info(`No B2B order found for Shopify order ${orderGid} - skipping update`);
-      return new Response();
+      return new Response(null, { status: 200 });
     }
 
     console.log(`📝 Updating B2B order:`, {
@@ -102,7 +102,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const user = await getUserByShopifyCustomerId(store.id, customerGid);
     if (!user || !user.companyId) {
       console.info(`No mapped B2B user/company for customer ${customerGid} - skipping credit processing`);
-      return new Response();
+      return new Response(null, { status: 200 });
     }
 
     // Map Shopify statuses to our local statuses
