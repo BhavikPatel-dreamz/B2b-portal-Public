@@ -37,6 +37,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const firstName = customer.first_name;
     const lastName = customer.last_name;
     const customerTags = customer.tags || "";
+    const credit = customer.credit || 0;
 
     if (!customerEmail || !customerId) {
       console.info("Customer has no email or ID; skipping B2B user creation");
@@ -93,7 +94,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       companyId: assignedCompany.id,
       companyRole: "member",
       shopifyCustomerId: customerGid,
-      userCreditLimit: 0,
+      userCreditLimit: credit,
     });
 
     console.log(`Created B2B user ${newUser.id} for Shopify customer ${customerId} and assigned to company ${assignedCompany.name}`);

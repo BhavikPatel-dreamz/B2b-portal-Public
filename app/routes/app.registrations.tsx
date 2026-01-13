@@ -379,6 +379,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const payload = await response.json();
         const customer = payload?.data?.customers?.nodes?.[0] || null;
+        
+        const Registration = await prisma.registrationSubmission.findFirst({
+          where: { email },
+        });
+
+
+        const user = await prisma.user.findFirst({
+          where: { email },
+        });
+        if(!user){
+          await prisma.user.create({
+            data: {
+              email,
+              firstName: Registration?.contactName?.split(" ")[0] || undefined,
+              lastName: Registration?.contactName?.split(" ")[1] || undefined,
+              status: "PENDING",
+              shopId: store.id,
+              isActive: false,
+              role: "STORE_ADMIN",
+              userCreditLimit: 0,
+              password: "",
+            },
+          });
+        }
 
         return Response.json({
           intent,
@@ -1012,7 +1036,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           companyData = await prisma.companyAccount.create({
             data: {
               shopId: store.id,
-              shopifyCompanyId: null,
+              shopifyCompanyId: companyId,
               name: companyName,
               contactName,
               contactEmail,
@@ -1022,13 +1046,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
         const user = await prisma.user.findFirst({
-          where: { shopifyCustomerId: customerId },
+          where: { email: companyData.contactEmail },
         });
 
-        if (user && companyData) {
+        if (user || companyData) {
           await prisma.user.update({
             where: { id: user.id },
             data: {
+              shopifyCustomerId: customerId,
+              companyRole: "admin",
               status: "APPROVED",
               isActive: true,
               companyId: companyData.id,

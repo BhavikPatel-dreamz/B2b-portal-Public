@@ -1857,6 +1857,7 @@ export async function createCompanyCustomer(
         email: customerData.email,
         firstName: customerData.firstName,
         lastName: customerData.lastName,
+        userCreditLimit: customerData.credit,
         shopifyCustomerId: customerId,
         shopifyCompanyId: companyId,
         shopName

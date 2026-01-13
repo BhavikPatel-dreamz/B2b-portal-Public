@@ -31,19 +31,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { companyId, store, shop, userContext, customerId } =
       await authenticateApiProxyWithPermissions(request);
 
-      const companyData = await prisma.companyAccount.findFirst({
-        where: {
-          shopifyCompanyId: companyId,
-        },
-      });
-      const userData =await prisma.user.findFirst({
-        where: {
-          companyId: companyData.id,
-          role: 'STORE_ADMIN'
-        },
-      });
+    const companyData = await prisma.companyAccount.findFirst({
+      where: {
+        shopifyCompanyId: companyId,
+      },
+    });
 
-     const storeAdminEmail = userData?.email;
+    const userData = await prisma.user.findFirst({
+      where: {
+        companyId: companyData.id,
+        role: "STORE_ADMIN",
+      },
+    });
+   ;
+
+    const storeAdminEmail = userData?.email;
 
     // Check if user has permission to manage users
     requirePermission(
@@ -135,34 +137,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       const registrationContactName =
         registrationMap.get(`${c.customer.id}`) || "";
-      const name =
-        firstName && lastName
-          ? `${firstName} ${lastName}`
-          : registrationContactName;
+      const name =(  firstName && lastName? `${firstName} ${lastName}` : firstName) || registrationContactName;
 
-    const isThisStoreAdmin =
-  userData?.role === "STORE_ADMIN" &&
-  c.customer.email === storeAdminEmail;
+      const isThisStoreAdmin =
+        userData?.role === "STORE_ADMIN" &&
+        c.customer.email === storeAdminEmail;
 
-const locationRoles =
-  c.customer.roleAssignments?.edges?.map((edge: any) => ({
-    roleName: isThisStoreAdmin
-      ? "Company Admin"
-      : edge.node.role?.name ?? "",
+      const locationRoles =
+        c.customer.roleAssignments?.edges?.map((edge: any) => ({
+          roleName: isThisStoreAdmin
+            ? "Company Admin"
+            : (edge.node.role?.name ?? ""),
 
-    locationName: edge.node.companyLocation?.name || null,
-    roleId: edge.node.role?.id || null,
-    locationId: edge.node.companyLocation?.id || null,
-  })) || [];
+          locationName: edge.node.companyLocation?.name || null,
+          roleId: edge.node.role?.id || null,
+          locationId: edge.node.companyLocation?.id || null,
+        })) || [];
 
       return {
         id: c.id,
         name,
         email: c.customer.email,
         company: customersData.companyName,
-        role:  c.roles.length > 0
-            ? c.roles.join(", ")
-            : "",
+        role: c.roles.length > 0 ? c.roles.join(", ") : "",
         credit: c.credit ?? 0,
         locations:
           c.locationNames?.length > 0 ? c.locationNames.join(", ") : "",
@@ -226,6 +223,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     switch (actionType) {
       case "create": {
         const { name, email, locationRoles, credit } = body;
+       
 
         if (!name || !email) {
           return Response.json(
@@ -249,6 +247,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             credit: parseFloat(credit) || 0,
           },
         );
+       
 
         // ✅ Handle errors properly
         if (result.error) {
