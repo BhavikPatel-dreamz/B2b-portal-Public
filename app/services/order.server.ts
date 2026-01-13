@@ -26,6 +26,7 @@ export interface UpdateOrderInput {
   remainingBalance?: number | Prisma.Decimal;
   paidAt?: Date | null;
   notes?: string;  // Add optional notes field
+  updatedAt?: Date | null;
 }
 
 export interface CreateOrderPaymentInput {
@@ -143,6 +144,10 @@ export async function getOrderByShopifyId(shopId: string, shopifyOrderId: string
       remainingBalance: true,
       paidAmount: true,
       paidAt: true,
+      creditUsed: true,
+      userCreditUsed: true,
+      paymentStatus: true,
+      orderStatus: true,
     },
   });
 }
