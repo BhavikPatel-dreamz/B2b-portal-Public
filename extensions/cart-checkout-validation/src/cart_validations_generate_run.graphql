@@ -22,10 +22,10 @@ query CartValidationsGenerateRunInput {
         company {
           id
           name
-          creditLimit: metafield(namespace: "b2b_portal", key: "credit_limit") {
+          creditLimit: metafield(namespace: "b2b_credit", key: "credit_limit") {
             value
           }
-          creditUsed: metafield(namespace: "b2b_portal", key: "credit_used") {
+          creditUsed: metafield(namespace: "b2b_credit", key: "credit_used") {
             value
           }
         }

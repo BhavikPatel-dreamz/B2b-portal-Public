@@ -33,7 +33,7 @@ export async function calculateAvailableCredit(
     company.creditLimit = new Decimal(0);
   }
 
-  // Calculate used credit: sum of all unpaid orders (pending orders are considered "used" credit)
+  // Calculate used credit: sum of creditUsed from all unpaid orders (pending/partial orders)
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {
       companyId,
@@ -41,11 +41,11 @@ export async function calculateAvailableCredit(
       orderStatus: { notIn: ["cancelled"] }, // All unpaid orders except cancelled
     },
     _sum: {
-      remainingBalance: true,
+      creditUsed: true, // Sum of credit used, not remainingBalance
     },
   });
 
-  const usedCredit = ordersWithBalance._sum.remainingBalance ? new Decimal(ordersWithBalance._sum.remainingBalance) : new Decimal(0);
+  const usedCredit = ordersWithBalance._sum.creditUsed ? new Decimal(ordersWithBalance._sum.creditUsed) : new Decimal(0);
 
   // Pending credit is separate - these would be orders in draft state that haven't been confirmed yet
   // For now, we're not tracking true "pending" credit separate from "used" credit
@@ -304,24 +304,52 @@ export async function getCreditSummary(companyId: string) {
   }
 
   const creditInfo = await calculateAvailableCredit(companyId);
-  const pendingInfo = await updatePendingCredit(companyId);
 
-  // Get recent transactions
-  const recentTransactions = await prisma.creditTransaction.findMany({
-    where: { companyId },
-    orderBy: { createdAt: "desc" },
-    take: 10,
+  // Get detailed order information for pending/partial orders
+  const pendingPartialOrders = await prisma.b2BOrder.findMany({
+    where: {
+      companyId,
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { notIn: ["cancelled"] },
+    },
     select: {
       id: true,
-      transactionType: true,
-      creditAmount: true,
-      previousBalance: true,
-      newBalance: true,
-      notes: true,
+      shopifyOrderId: true,
+      orderTotal: true,
+      paidAmount: true,
+      creditUsed: true,
+      remainingBalance: true,
+      paymentStatus: true,
+      orderStatus: true,
       createdAt: true,
-      orderId: true,
+      updatedAt: true,
     },
+    orderBy: { createdAt: "desc" },
   });
+
+  // Calculate totals from B2B orders
+  const totalCreditUsed = pendingPartialOrders.reduce(
+    (sum, order) => sum.plus(order.creditUsed || new Decimal(0)),
+    new Decimal(0)
+  );
+
+  const totalOrderValue = pendingPartialOrders.reduce(
+    (sum, order) => sum.plus(order.orderTotal),
+    new Decimal(0)
+  );
+
+  const totalPaidAmount = pendingPartialOrders.reduce(
+    (sum, order) => sum.plus(order.paidAmount || new Decimal(0)),
+    new Decimal(0)
+  );
+
+  const orderCounts = {
+    pending: pendingPartialOrders.filter(order => order.paymentStatus === "pending").length,
+    partial: pendingPartialOrders.filter(order => order.paymentStatus === "partial").length,
+    total: pendingPartialOrders.length,
+  };
+
+
 
   return {
     company,
@@ -329,7 +357,21 @@ export async function getCreditSummary(companyId: string) {
     usedCredit: creditInfo?.usedCredit || new Decimal(0),
     pendingCredit: creditInfo?.pendingCredit || new Decimal(0),
     availableCredit: creditInfo?.availableCredit || new Decimal(0),
-    pendingOrderCount: pendingInfo.orderCount,
-    recentTransactions,
+
+    // Enhanced B2B order information
+    orderSummary: {
+      totalOrders: orderCounts.total,
+      pendingOrders: orderCounts.pending,
+      partialOrders: orderCounts.partial,
+      totalOrderValue: totalOrderValue,
+      totalPaidAmount: totalPaidAmount,
+      totalCreditUsed: totalCreditUsed,
+    },
+
+    // Individual order details
+    pendingPartialOrders,
+
   };
 }
+
+

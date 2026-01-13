@@ -1,7 +1,9 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
 import { syncCompanyCreditMetafields } from "./metafieldSync.server";
-import type { AdminApiContext } from "@shopify/shopify-api";
+import { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+import { calculateAvailableCredit } from "./creditService";
+
 
 interface RecalculationResult {
   companyId: string;
@@ -53,39 +55,32 @@ export async function recalculateCompanyCredit(
       return result;
     }
 
-    result.previousCreditUsed = company.creditLimit; // This should be the current used amount
+    // Get current credit information using calculateAvailableCredit function
+    const creditInfo = await calculateAvailableCredit(companyId);
 
-    // Find all unpaid B2B orders for this company
-    const unpaidOrders = await prisma.b2BOrder.findMany({
+    if (!creditInfo) {
+      result.message = "Failed to calculate credit information";
+      return result;
+    }
+
+    result.previousCreditUsed = creditInfo.usedCredit;
+
+    // Get count of unpaid orders for reporting
+    const unpaidOrdersCount = await prisma.b2BOrder.count({
       where: {
         companyId: companyId,
-        paymentStatus: {
-          in: ["pending", "partial"], // Unpaid statuses
-        },
-      },
-      include: {
-        createdByUser: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
+        paymentStatus: { in: ["pending", "partial"] },
+        orderStatus: { notIn: ["cancelled"] },
       },
     });
 
-    console.log(`Found ${unpaidOrders.length} unpaid orders for company ${companyId}`);
+    console.log(`Found ${unpaidOrdersCount} unpaid orders for company ${companyId}`);
 
-    // Calculate total unpaid amount
-    let totalUnpaidAmount = new Decimal(0);
-    for (const order of unpaidOrders) {
-      const remainingBalance = order.remainingBalance;
-      totalUnpaidAmount = totalUnpaidAmount.plus(remainingBalance);
-    }
+    // Use the calculated credit information
+    const totalUnpaidAmount = creditInfo.usedCredit;
 
     result.unpaidOrdersTotal = totalUnpaidAmount;
-    result.unpaidOrdersCount = unpaidOrders.length;
+    result.unpaidOrdersCount = unpaidOrdersCount;
 
     // Calculate credit usage: Credit Limit - Pending Orders + Credit Adjustments
     const creditAdjustments = await prisma.creditTransaction.aggregate({
@@ -158,19 +153,24 @@ export async function previewCreditRecalculation(companyId: string) {
       return null;
     }
 
-    // Find all unpaid orders
+    // Use calculateAvailableCredit for consistent logic
+    const creditInfo = await calculateAvailableCredit(companyId);
+    if (!creditInfo) {
+      return null;
+    }
+
+    // Get detailed unpaid order information
     const unpaidOrders = await prisma.b2BOrder.findMany({
       where: {
         companyId: companyId,
-        paymentStatus: {
-          in: ["pending", "partial"],
-        },
+        paymentStatus: { in: ["pending", "partial"] },
+        orderStatus: { notIn: ["cancelled"] }, // Exclude cancelled orders
       },
       select: {
         id: true,
         shopifyOrderId: true,
         orderTotal: true,
-        remainingBalance: true,
+        creditUsed: true, // Use creditUsed instead of remainingBalance for consistency
         createdAt: true,
         createdByUser: {
           select: {
@@ -181,11 +181,6 @@ export async function previewCreditRecalculation(companyId: string) {
         },
       },
     });
-
-    let totalUnpaidAmount = new Decimal(0);
-    for (const order of unpaidOrders) {
-      totalUnpaidAmount = totalUnpaidAmount.plus(order.remainingBalance);
-    }
 
     // Get current credit transactions count
     const currentTransactions = await prisma.creditTransaction.count({
@@ -202,13 +197,13 @@ export async function previewCreditRecalculation(companyId: string) {
       companyName: company.name,
       creditLimit: company.creditLimit,
       unpaidOrdersCount: unpaidOrders.length,
-      unpaidOrdersTotal: totalUnpaidAmount,
+      unpaidOrdersTotal: creditInfo.usedCredit, // Use creditInfo for consistency
       currentTransactionsCount: currentTransactions,
       unpaidOrders: unpaidOrders.map(order => ({
         id: order.id,
         shopifyOrderId: order.shopifyOrderId,
         orderTotal: order.orderTotal.toNumber(),
-        remainingBalance: order.remainingBalance.toNumber(),
+        creditUsed: order.creditUsed?.toNumber() || 0, // Use creditUsed instead of remainingBalance
         createdAt: order.createdAt.toISOString(),
         createdBy: [order.createdByUser.firstName, order.createdByUser.lastName]
           .filter(Boolean)

@@ -17,6 +17,7 @@ export function cartValidationsGenerateRun(input) {
   console.log('🏢 Has purchasing company:', !!input.cart.buyerIdentity?.purchasingCompany);
   console.log('🛒 Cart total:', input.cart.cost?.totalAmount?.amount, input.cart.cost?.totalAmount?.currencyCode);
   console.log('📦 Number of line items:', input.cart.lines?.length || 0);
+  console.log('----------------------------------------',JSON.stringify(input));
 
   // Check company credit validation
   const buyerIdentity = input.cart.buyerIdentity;

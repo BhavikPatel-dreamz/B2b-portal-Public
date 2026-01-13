@@ -29,22 +29,13 @@ type LoaderData = {
   pendingCredit: number;
   creditPercentageUsed: number;
   pendingOrderCount: number;
-  recentTransactions: Array<{
-    id: string;
-    transactionType: string;
-    creditAmount: number;
-    previousBalance: number;
-    newBalance: number;
-    notes: string | null;
-    createdAt: string;
-    orderId: string | null;
-  }>;
   recentOrders: Array<{
     id: string;
     shopifyOrderId: string | null;
     orderTotal: number;
     paidAmount: number;
     remainingBalance: number;
+    creditUsed: number;
     paymentStatus: string;
     orderStatus: string;
     createdAt: string;
@@ -98,7 +89,7 @@ async function fetchOrdersCount(
   );
 
   const data = await response.json();
-  console.log(data,"5656565");
+
   if (data.errors) {
     console.error("OrdersCount error:", data.errors);
     return 0;
@@ -177,7 +168,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           errors: ["Payment team is required"],
         });
       }
-      console.log(paymentTermsTemplateId, "565656");
+
       await prisma.companyAccount.update({
         where: { id },
         data: { paymentTeam: paymentTermsTemplateId },
@@ -479,6 +470,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Get credit summary
   const creditSummary = await getCreditSummary(companyId);
 
+
   if (!creditSummary) {
     throw new Response("Unable to fetch credit summary", { status: 500 });
   }
@@ -511,17 +503,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     usedCredit: creditSummary.usedCredit.toNumber(),
     pendingCredit: creditSummary.pendingCredit.toNumber(),
     creditPercentageUsed,
-    pendingOrderCount: creditSummary.pendingOrderCount,
-    recentTransactions: creditSummary.recentTransactions.map((tx) => ({
-      id: tx.id,
-      transactionType: tx.transactionType,
-      creditAmount: tx.creditAmount.toNumber(),
-      previousBalance: tx.previousBalance.toNumber(),
-      newBalance: tx.newBalance.toNumber(),
-      notes: tx.notes,
-      createdAt: tx.createdAt.toISOString(),
-      orderId: tx.orderId,
-    })),
     recentOrders: dashboardData.recentOrders.map((order) => ({
       id: order.id,
       shopifyOrderId: order.shopifyOrderId,
@@ -530,6 +511,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       remainingBalance: order.remainingBalance.toNumber(),
       paymentStatus: order.paymentStatus,
       orderStatus: order.orderStatus,
+      creditUsed: order.creditUsed.toNumber(),
       createdAt: order.createdAt.toISOString(),
       createdBy:
         [order.createdByUser.firstName, order.createdByUser.lastName]
@@ -1567,7 +1549,7 @@ export default function CompanyDashboard() {
                       fontWeight: 600,
                     }}
                   >
-                    Amount
+                    Credit Used
                   </th>
                   <th
                     style={{
@@ -1592,30 +1574,42 @@ export default function CompanyDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {data.recentTransactions.map((tx) => (
+                {data.recentOrders.map((tx) => (
                   <tr key={tx.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
                     <td style={{ padding: 12, fontSize: 13 }}>
                       {formatDate(tx.createdAt)}
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
-                      {tx.transactionType.replace(/_/g, " ").toUpperCase()}
+                      {tx.createdAt.replace(/_/g, " ").toUpperCase()}
                     </td>
                     <td
                       style={{
                         padding: 12,
                         textAlign: "right",
                         fontSize: 13,
-                        color: tx.creditAmount >= 0 ? "#008060" : "#d72c0d",
+                        color: tx.orderTotal >= 0 ? "#008060" : "#d72c0d",
                         fontWeight: 500,
                       }}
                     >
-                      {tx.creditAmount >= 0 ? "+" : ""}
-                      {formatCurrency(tx.creditAmount)}
+                      {tx.orderTotal >= 0 ? "+" : ""}
+                      {formatCurrency(tx.orderTotal)}
                     </td>
                     <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
-                      {formatCurrency(tx.newBalance)}
+                      {formatCurrency(tx.paidAmount)}
+                    </td>
+
+                     <td
+                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
+                    >
+                      {formatCurrency(tx.creditUsed)}
+                    </td>
+
+                    <td
+                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
+                    >
+                      {formatCurrency(tx.remainingBalance)}
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
                       {tx.notes || "—"}

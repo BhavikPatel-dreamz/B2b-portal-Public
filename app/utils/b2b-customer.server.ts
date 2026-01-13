@@ -1327,7 +1327,7 @@ export async function getCompanyCustomers(
                   lastName
                   email
                   phone
-                  metafield(namespace: "custom", key: "credit") {
+                  metafield(namespace: "b2b_credit", key: "user_credit_limit") {
                     value
                     type
                   }

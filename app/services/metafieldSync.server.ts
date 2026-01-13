@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { Decimal } from "@prisma/client/runtime/library";
+import { calculateAvailableCredit } from "./tieredCreditService";
 
 /**
  * Sync credit data to Shopify metafields
@@ -135,19 +136,15 @@ export async function syncCompanyCreditMetafields(
       throw new Error('Company not found or no Shopify company ID');
     }
 
-    // Calculate used credit
-    const usedCredit = await prisma.b2BOrder.aggregate({
-      where: {
-        companyId,
-        paymentStatus: { in: ['pending', 'partial'] },
-        orderStatus: { notIn: ['cancelled'] },
-      },
-      _sum: {
-        remainingBalance: true,
-      },
-    });
+    // Calculate available credit
+    const creditData = await calculateAvailableCredit(companyId);
 
-    const creditUsed = usedCredit._sum.remainingBalance ? new Decimal(usedCredit._sum.remainingBalance) : new Decimal(0);
+    if (!creditData) {
+      throw new Error('Unable to calculate credit data');
+    }
+
+    const availableCredit = creditData.availableCredit;
+    const usedCredit = company.creditLimit.sub(availableCredit);
 
     // Prepare metafields
     const metafields: MetafieldUpdate[] = [
@@ -160,7 +157,7 @@ export async function syncCompanyCreditMetafields(
       {
         namespace: 'b2b_credit',
         key: 'credit_used',
-        value: creditUsed.toString(),
+        value: usedCredit.toString(),
         type: 'number_decimal',
       },
     ];
@@ -198,6 +195,7 @@ export async function syncCompanyCreditMetafields(
     });
 
     const data = await response.json();
+    console.log('Company metafield sync response:', data.data?.metafieldsSet?.metafields);
 
     if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
       const error = data.errors?.[0]?.message || data.data?.metafieldsSet?.userErrors?.[0]?.message;

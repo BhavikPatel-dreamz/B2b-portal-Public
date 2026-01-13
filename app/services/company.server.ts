@@ -324,7 +324,7 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
     orderBy: {
       createdAt: "desc",
     },
-    take: 10,
+    take: 20,
     include: {
       createdByUser: {
         select: {
@@ -335,6 +335,9 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
       },
     },
   });
+
+
+
 
   // Get order statistics
   const [totalOrders, paidOrders, unpaidOrders, pendingOrders] = await Promise.all([
@@ -517,7 +520,7 @@ export async function updateCredit(
     if (admin && updatedCompany.shopifyCompanyId) {
       try {
         await updateCompanyMetafield(admin, updatedCompany.shopifyCompanyId, {
-          namespace: "b2b_portal",
+          namespace: "b2b_credit",
           key: "credit_limit",
           value: credit.toString(),
           type: "number_decimal"
