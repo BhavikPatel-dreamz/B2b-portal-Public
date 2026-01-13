@@ -12,7 +12,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
 
     const { payload, shop, topic } = await authenticate.webhook(request);
-    console.log(`Received ${topic} webhook for ${shop} ${payload }`);
+    console.log(`Received ${topic} webhook for ${shop} ${JSON.stringify(payload)}`);
 
     // If an outdated subscription points edited to this path, ignore gracefully
     if (topic !== "ORDERS_CREATE") {
@@ -120,17 +120,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       try {
         // Validate credit availability for the order
-        const validation = await validateTieredCreditForOrder({
-          companyId: user.companyId,
-          userId: user.id,
-          orderAmount: orderTotal.toNumber(),
-        });
+        const validation = await validateTieredCreditForOrder(
+          user.companyId,
+          user.id,
+          orderTotal.toNumber()
+        );
 
-        if (!validation.success) {
+        if (!validation.canCreate) {
           console.warn(`❌ Credit validation failed for pending B2B order:`, {
             orderId: orderIdNum,
             companyId: user.companyId,
-            reason: validation.error
+            reason: validation.message
           });
 
           // Still create the order but mark it as requiring attention
@@ -145,7 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             remainingBalance,
             paymentStatus: "pending",
             orderStatus: "submitted",
-            notes: `Credit validation failed: ${validation.error}. Order requires manual review.`
+            notes: `Credit validation failed: ${validation.message}. Order requires manual review.`
           });
 
           console.log(`⚠️ B2B order created with credit validation warning`);
@@ -153,13 +153,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         // Validation passed - reserve credit for pending payment
-        await deductTieredCredit({
-          companyId: user.companyId,
-          userId: user.id,
-          amount: orderTotal.toNumber(),
-          orderId: orderGid || `temp-${orderIdNum}`,
-          description: `Credit reserved for pending order ${orderIdNum}`
-        });
+        await deductTieredCredit(
+          user.companyId,
+          user.id,
+          orderGid || `temp-${orderIdNum}`,
+          orderTotal.toNumber(),
+          `Credit reserved for pending order ${orderIdNum}`
+        );
 
         console.log(`✅ Credit reserved for pending B2B order:`, {
           orderId: orderIdNum,

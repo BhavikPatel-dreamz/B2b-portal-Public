@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { deductCredit, restoreCredit } from "../services/tieredCreditService";
 import { getCompanyByUserId } from "../services/user.server";
-import { upsertOrder, getOrderByShopifyIdWithDetails } from "../services/order.server";
+import { upsertOrder, getOrderByShopifyIdWithDetails, deleteOrder } from "../services/order.server";
 import { getStoreByDomain } from "../services/store.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -50,7 +50,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response("OK", { status: 200 });
     }
 
-    console.log(`✅ Found existing B2B draft order: ${existingOrder.orderNumber}`);
+    console.log(`✅ Found existing B2B draft order: ${existingOrder.shopifyOrderId}`);
 
     // Find B2B user by Shopify customer ID using user service
     const b2bUser = await getCompanyByUserId(store.id, `gid://shopify/Customer/${customerId}`);
@@ -61,6 +61,46 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     console.log(`✅ Found B2B company: ${b2bUser.company.name} (ID: ${b2bUser.company.id})`);
+
+    // Check if the draft order status is "completed" - if so, delete the order
+    if (draftOrder.status === "completed") {
+      console.log(`🗑️ Draft order status is "completed" - deleting the order and restoring credit`);
+
+      // Restore any reserved credit before deleting
+      if (existingOrder.creditUsed && parseFloat(existingOrder.creditUsed.toString()) > 0) {
+        try {
+          console.log(`💰 Restoring ${existingOrder.creditUsed} credit for completed draft order`);
+
+          await restoreCredit(
+            b2bUser.company.id,
+            existingOrder.id,
+            existingOrder.creditUsed,
+            b2bUser.id,
+            "cancelled", // Using cancelled as the reason since draft was completed/finalized
+            admin
+          );
+
+          console.log(`✅ Credit restored successfully`);
+        } catch (creditError: any) {
+          console.error(`❌ Failed to restore credit:`, {
+            error: creditError.message,
+            companyId: b2bUser.company.id,
+            orderAmount: existingOrder.creditUsed
+          });
+        }
+      }
+
+      // Delete the B2B order record
+      try {
+        await deleteOrder(existingOrder.id);
+        console.log(`✅ Draft order deleted successfully from B2B system`);
+      } catch (deleteError: any) {
+        console.error(`❌ Failed to delete order:`, deleteError.message);
+        return new Response(`Failed to delete order: ${deleteError.message}`, { status: 500 });
+      }
+
+      return new Response("OK", { status: 200 });
+    }
 
     const newTotalAmount = parseFloat(draftOrder.total_price || "0");
     const previousAmount = existingOrder.orderTotal;
@@ -94,8 +134,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             existingOrder.id, // Use the database order ID
             releaseAmount,
             b2bUser.id,
+            "cancelled",
             admin // Pass admin context for metafield sync
           );
+
+
 
           console.log(`💳 Credit released:`, releaseResult);
         }

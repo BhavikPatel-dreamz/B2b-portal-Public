@@ -43,7 +43,7 @@ export async function calculateUserCredit(userId: string): Promise<UserCreditInf
   // If user has no credit limit set, they have unlimited personal credit
   // (still subject to company limits)
   const hasUserLimit = user.userCreditLimit !== null;
-  const userCreditLimit = user.userCreditLimit || new Decimal(0);
+  const userCreditLimit = user.userCreditLimit ? new Decimal(user.userCreditLimit) : new Decimal(0);
   const userCreditUsed = user.userCreditUsed;
   const userCreditAvailable = hasUserLimit
     ? userCreditLimit.minus(userCreditUsed)
@@ -87,7 +87,7 @@ export async function calculateTieredCreditAvailability(
     },
   });
 
-  const companyUsedCredit = ordersWithBalance._sum.remainingBalance || new Decimal(0);
+  const companyUsedCredit = ordersWithBalance._sum.remainingBalance ? new Decimal(ordersWithBalance._sum.remainingBalance) : new Decimal(0);
 
   const pendingOrders = await prisma.b2BOrder.aggregate({
     where: {
@@ -100,7 +100,7 @@ export async function calculateTieredCreditAvailability(
     },
   });
 
-  const companyPendingCredit = pendingOrders._sum.remainingBalance || new Decimal(0);
+  const companyPendingCredit = pendingOrders._sum.remainingBalance ? new Decimal(pendingOrders._sum.remainingBalance) : new Decimal(0);
   const companyAvailableCredit = company.creditLimit
     .minus(companyUsedCredit)
     .minus(companyPendingCredit);

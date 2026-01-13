@@ -3,7 +3,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
-import { validateTieredCreditForOrder, deductTieredCredit, restoreTieredCredit } from "../services/tieredCreditService";
+import { validateTieredCreditForOrder, restoreTieredCredit } from "../services/tieredCreditService";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { Prisma } from "@prisma/client";
 
@@ -14,7 +14,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log(`🔔 Received ${topic} webhook for ${shop}`);
 
     // If an outdated subscription points to this path, ignore gracefully
-    if (topic !== "ORDERS_UPDATE") {
+    if (topic !== "ORDERS_UPDATED") {
       console.info(`Webhook topic ${topic} hit orders/updated route. Ignoring.`);
       return new Response();
     }
@@ -47,6 +47,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customerGid = `gid://shopify/Customer/${customer.id}`;
     const orderGid = `gid://shopify/Order/${orderIdNum}`;
 
+    {
+      console.log(`🔍 Processing B2B order update for Shopify order ID: ${orderGid}, Customer ID: ${store}`);
+    }
     // Find our existing B2B order
     const existingOrder = await getOrderByShopifyId(store.id, orderGid);
     if (!existingOrder) {

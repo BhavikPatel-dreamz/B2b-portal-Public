@@ -100,7 +100,7 @@ export async function recalculateCompanyCredit(
       },
     });
 
-    const totalCreditAdjustments = creditAdjustments._sum.creditAmount || new Decimal(0);
+    const totalCreditAdjustments = creditAdjustments._sum.creditAmount ? new Decimal(creditAdjustments._sum.creditAmount) : new Decimal(0);
 
     // Available Credit = Credit Limit - Pending Orders + Credit Adjustments
     const availableCredit = company.creditLimit.minus(totalUnpaidAmount).plus(totalCreditAdjustments);

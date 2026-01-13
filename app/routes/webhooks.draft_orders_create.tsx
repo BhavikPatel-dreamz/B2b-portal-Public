@@ -75,6 +75,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       console.log(`💳 Credit reserved successfully for draft order ${draftOrder.name || `#${draftOrder.id}`}`);
 
+
+      console.log(`📝 Upserting draft order ${JSON.stringify(draftOrder)}`);
+
       // Create or update order using upsert function
       const draftOrderData = await upsertOrder({
         shopifyOrderId: draftOrder.id.toString(),

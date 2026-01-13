@@ -2,7 +2,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
-import { deleteUser, getUserByEmail } from "../services/user.server";
+import { deleteUser, getUserByEmail, getUserById } from "../services/user.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("customers/delete webhook received");
@@ -30,20 +30,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Extract customer data from webhook payload
+    console.log("Processing customer deletion for payload:", payload);
     const customer = payload as any;
     const customerId = customer.id;
     const customerEmail = customer.email;
-
-    if (!customerEmail || !customerId) {
+    const adminGraphqlApiId = customer.admin_graphql_api_id;
+    if (!customerId) {
       console.info("Customer has no email or ID; skipping B2B user deletion");
       return new Response();
     }
 
     // Find the existing user by email and shop
-    const existingUser = await getUserByEmail(customerEmail, store.id);
+    const existingUser = await getUserById(adminGraphqlApiId, store.id);
 
     if (!existingUser) {
-      console.info(`No local user found for email ${customerEmail} in store ${shop}; nothing to delete`);
+      console.info(`No local user found for shopify ${adminGraphqlApiId} in store ${shop}; nothing to delete`);
       return new Response();
     }
 
@@ -57,7 +58,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Delete the user from your local database
-    await deleteUser(existingUser.id);
+    await deleteUser(existingUser.id, store.id);
 
     console.log(`✅ Deleted B2B user ${existingUser.id} (${customerEmail}) for Shopify customer ${customerId} from company ${existingUser.companyId || 'N/A'}`);
 

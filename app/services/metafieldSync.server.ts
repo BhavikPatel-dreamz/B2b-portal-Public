@@ -147,7 +147,7 @@ export async function syncCompanyCreditMetafields(
       },
     });
 
-    const creditUsed = usedCredit._sum.remainingBalance || new Decimal(0);
+    const creditUsed = usedCredit._sum.remainingBalance ? new Decimal(usedCredit._sum.remainingBalance) : new Decimal(0);
 
     // Prepare metafields
     const metafields: MetafieldUpdate[] = [

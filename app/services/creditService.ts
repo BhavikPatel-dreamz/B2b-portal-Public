@@ -45,7 +45,7 @@ export async function calculateAvailableCredit(
     },
   });
 
-  const usedCredit = ordersWithBalance._sum.remainingBalance || new Decimal(0);
+  const usedCredit = ordersWithBalance._sum.remainingBalance ? new Decimal(ordersWithBalance._sum.remainingBalance) : new Decimal(0);
 
   // Pending credit is separate - these would be orders in draft state that haven't been confirmed yet
   // For now, we're not tracking true "pending" credit separate from "used" credit

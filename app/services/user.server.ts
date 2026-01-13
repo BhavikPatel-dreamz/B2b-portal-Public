@@ -68,7 +68,7 @@ export async function createUser(data: CreateUserInput) {
 export async function getUserById(id: string, shopId: string) {
   return await prisma.user.findFirst({
     where: {
-      id,
+      shopifyCustomerId: id,
       shopId // Ensure user belongs to the requesting shop
     },
     include: {

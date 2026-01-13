@@ -279,7 +279,7 @@ export async function getCompanyWithCreditSummary(companyId: string) {
     _count: true,
   });
 
-  const pendingCredit = pendingOrders._sum.remainingBalance || new Prisma.Decimal(0);
+  const pendingCredit = pendingOrders._sum.remainingBalance ? new Prisma.Decimal(pendingOrders._sum.remainingBalance) : new Prisma.Decimal(0);
   const usedCredit = company.creditLimit.minus(pendingCredit);
   const availableCredit = company.creditLimit.minus(pendingCredit);
 
