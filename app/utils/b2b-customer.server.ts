@@ -3451,26 +3451,30 @@ async function assignRoleToContacts(
   }
 }
 
+
+type ServiceResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number; message: string };
+  
 // Function to delete a company customer
 export async function deleteCompanyCustomer(
   contactId: string,
   shopName: string,
   accessToken: string
-) {
+): Promise<ServiceResult<{ deletedId: string }>> {
   try {
-    const deleteMutation = `
-      mutation companyContactDelete($companyContactId: ID!) {
-        companyContactDelete(companyContactId: $companyContactId) {
+    const mutation = `
+      mutation companyContactDelete($id: ID!) {
+        companyContactDelete(companyContactId: $id) {
           deletedCompanyContactId
           userErrors {
-            field
             message
           }
         }
       }
     `;
 
-    const response = await fetch(
+    const res = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
       {
         method: "POST",
@@ -3479,42 +3483,56 @@ export async function deleteCompanyCustomer(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({
-          query: deleteMutation,
-          variables: { companyContactId: contactId }
+          query: mutation,
+          variables: { id: contactId },
         }),
       }
     );
 
-    const result = await response.json();
+    const json = await res.json();
 
-    // 🔴 GraphQL errors
-    if (result.errors?.length) {
-      return { error: result.errors[0].message };
+    // 🔴 GraphQL schema errors
+    if (json.errors?.length) {
+      return {
+        ok: false,
+        status: 400,
+        message: json.errors[0].message,
+      };
     }
 
-    const userErrors = result.data?.companyContactDelete?.userErrors;
-    if (userErrors?.length) {
-      return { error: userErrors[0].message };
+    const payload = json.data?.companyContactDelete;
+
+    // 🔴 Shopify business errors
+    if (payload?.userErrors?.length) {
+      return {
+        ok: false,
+        status: 400,
+        message: payload.userErrors[0].message,
+      };
     }
 
-    const deletedId =
-      result.data?.companyContactDelete?.deletedCompanyContactId;
-
-    if (!deletedId) {
-      return { error: "Failed to delete company contact" };
+    if (!payload?.deletedCompanyContactId) {
+      return {
+        ok: false,
+        status: 500,
+        message: "Delete failed unexpectedly",
+      };
     }
 
     return {
-      success: true,
-      deletedId
+      ok: true,
+      data: { deletedId: payload.deletedCompanyContactId },
     };
-  } catch (error) {
-    console.error("Error deleting company customer:", error);
+  } catch (err) {
     return {
-      error: error instanceof Error ? error.message : "Unknown error"
+      ok: false,
+      status: 500,
+      message:
+        err instanceof Error ? err.message : "Internal server error",
     };
   }
 }
+
 
 
 export async function getCompanyContactEmail(
@@ -3525,7 +3543,9 @@ export async function getCompanyContactEmail(
   const query = `
     query getCompanyContact($id: ID!) {
       companyContact(id: $id) {
-        email
+        customer {
+          email
+        }
       }
     }
   `;
@@ -3546,9 +3566,11 @@ export async function getCompanyContactEmail(
   );
 
   const result = await response.json();
+  console.log(result, "CompanyContact email response");
 
-  return result.data?.companyContact?.email || null;
+  return result.data?.companyContact?.customer?.email ?? null;
 }
+
 
 
 // Function to create a company location

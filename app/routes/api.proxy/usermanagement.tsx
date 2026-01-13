@@ -298,84 +298,79 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return Response.json({ success: true, result });
       }
 
-      // case "delete": {
-      //   const { userId } = body;
+     case "delete": {
+  const { userId } = body;
 
-      //   if (!userId) {
-      //     return Response.json(
-      //       { error: "User ID is required for deletion" },
-      //       { status: 400 },
-      //     );
-      //   }
+  if (!userId) {
+    return Response.json(
+      { error: "User ID is required" },
+      { status: 400 }
+    );
+  }
 
-      //   const result = await deleteCompanyCustomer(
-      //     userId,
-      //     shop,
-      //     store.accessToken,
-      //   );
+  // 🔒 Fetch email
+  const contactEmail = await getCompanyContactEmail(
+    userId,
+    shop,
+    store.accessToken
+  );
 
-      //   if (result.error) {
-      //     return Response.json({ error: result.error }, { status: 500 });
-      //   }
+  if (!contactEmail) {
+    return Response.json(
+      { error: "Company contact not found" },
+      { status: 404 }
+    );
+  }
 
-      //   return Response.json({ success: true, deletedId: result.deletedId });
-      // }
-      case "delete": {
-        const { userId } = body;
+  // 🔥 Prevent self delete
+  if (
+    userContext.customerEmail &&
+    contactEmail.toLowerCase() ===
+      userContext.customerEmail.toLowerCase()
+  ) {
+    return Response.json(
+      { error: "You cannot delete your own account" },
+      { status: 403 }
+    );
+  }
 
-        if (!userId) {
-          return Response.json(
-            { error: "User ID is required for deletion" },
-            { status: 400 },
-          );
-        }
+  // ✅ Shopify delete
+  const result = await deleteCompanyCustomer(
+    userId,
+    shop,
+    store.accessToken
+  );
 
-        // 🔒 Fetch contact email
-        const contactEmail = await getCompanyContactEmail(
-          userId,
-          shop,
-          store.accessToken,
-        );
+  if (!result.ok) {
+    return Response.json(
+      { error: result.message },
+      { status: result.status }
+    );
+  }
 
-        if (!contactEmail) {
-          return Response.json(
-            { error: "Company contact not found" },
-            { status: 404 },
-          );
-        }
+  // ✅ Local DB delete (AFTER Shopify)
+  const userData = await prisma.user.findFirst({
+    where: { email: contactEmail },
+  });
 
-        // 🔥 BLOCK SELF DELETE
-        if (
-          userContext.customerEmail &&
-          contactEmail.toLowerCase() === userContext.customerEmail.toLowerCase()
-        ) {
-          return Response.json(
-            {
-              error: "You cannot delete your own account.",
-            },
-            { status: 403 },
-          );
-        }
+  if (!userData) {
+    return Response.json(
+      { error: "User not found in local database" },
+      { status: 404 }
+    );
+  }
 
-        // ✅ Allow delete
-        const result = await deleteCompanyCustomer(
-          userId,
-          shop,
-          store.accessToken,
-        );
-        await prisma.user.delete({
-          where: { id: userId },
-        });
+  await prisma.user.delete({
+    where: { id: userData.id },
+  });
 
-        if (result.error) {
-          return Response.json({ error: result.error }, { status: 500 });
-        }
+  return Response.json({
+    success: true,
+    deletedId: result.data.deletedId,
+    message: "User deleted successfully",
+  });
+}
 
-        return Response.json({
-          success: true,
-          deletedId: result.deletedId,
-        });
-      }
 
       default:
         return Response.json({ error: "Invalid action type" }, { status: 400 });
