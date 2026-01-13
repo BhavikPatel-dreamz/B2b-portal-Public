@@ -53,6 +53,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             customerId: companyInfo.customerId,
             customerName: companyInfo.customerName,
             customerEmail: companyInfo.customerEmail,
+            userCreditLimit: companyInfo.userCreditLimit,
+            userCreditUsed: companyInfo.userCreditUsed,
             companies: companyInfo.companies,
         });
     } catch (error) {

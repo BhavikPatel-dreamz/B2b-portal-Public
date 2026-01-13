@@ -1087,10 +1087,15 @@ export async function getCustomerCompanyInfo(
     }
     const RegistrationData = await prisma.registrationSubmission.findFirst({
         where: {
-          shopifyCustomerId: customerId,
+          email: customer.email,
         },
       });
-
+    
+     const  companyData = await prisma.companyAccount.findFirst({
+        where: {
+          contactEmail: customer.email,
+        },
+      });
     // Process company information
     const companies = companyProfiles.map((profile: any) => {
       const company = profile.company;
@@ -1167,8 +1172,9 @@ export async function getCustomerCompanyInfo(
     return {
       hasCompany: true,
       customerId,
-      customerName: RegistrationData?.contactName || (customer.firstName ? `${customer.firstName} ${customer.lastName || ''}`.trim() : customer.lastName || ''),
+      customerName: RegistrationData?.contactName || (customer.firstName ? `${customer.firstName} ${customer.lastName || ''}`.trim() : customer.firstName || ''),
       customerEmail: customer.email,
+      userCreditLimit: companyData?.creditLimit,  
       companies: companies,
        isAdmin: companies[0]?.hasAllLocationAccess,
        isMainContact: companies[0]?.mainContact?.id === `gid://shopify/Customer/${customerId}`,
@@ -1383,7 +1389,25 @@ export async function getCompanyCustomers(
         locationId: r.node.companyLocation?.id,
         locationName: r.node.companyLocation?.name
       })) || [];
-
+console.log({
+        id: node.id,
+        customerId: cust.id,
+        title: node.title,
+        customer: {
+          id: cust.id,
+          firstName: cust.firstName,
+          lastName: cust.lastName,
+          email: cust.email,
+          phone: cust.phone,
+          // Include roleAssignments in customer object for easy access
+          roleAssignments: node.roleAssignments,
+        },
+        roles: roles.map((r: any) => r.name),
+        roleIds: roles.map((r: any) => r.id),
+        locationIds: roles.map((r: any) => r.locationId).filter(Boolean),
+        locationNames: roles.map((r: any) => r.locationName).filter(Boolean),
+        credit: cust.metafield?.value ? Number(cust.metafield.value) : 0,
+      },"5656565");
       return {
         id: node.id,
         customerId: cust.id,
