@@ -43,8 +43,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         role: "STORE_ADMIN",
       },
     });
-   ;
-
     const storeAdminEmail = userData?.email;
 
     // Check if user has permission to manage users
@@ -129,7 +127,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const registrationMap = new Map(
       registrations.map((r) => [r.shopifyCustomerId, r.contactName]),
     );
- 
+
     // Map to the format expected by the component with locationRoles array
     const users = customersData.customers.map((c: any) => {
       const firstName = c.customer.firstName?.trim();
@@ -137,7 +135,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       const registrationContactName =
         registrationMap.get(`${c.customer.id}`) || "";
-      const name =(  firstName && lastName? `${firstName} ${lastName}` : firstName) || registrationContactName;
+      const name =
+        (firstName && lastName ? `${firstName} ${lastName}` : firstName) ||
+        registrationContactName;
 
       const isThisStoreAdmin =
         userData?.role === "STORE_ADMIN" &&
@@ -153,14 +153,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           roleId: edge.node.role?.id || null,
           locationId: edge.node.companyLocation?.id || null,
         })) || [];
-
+      console.log(c, "666");
       return {
         id: c.id,
         name,
         email: c.customer.email,
         company: customersData.companyName,
         role: c.roles.length > 0 ? c.roles.join(", ") : "",
-        credit: c.credit ?? 0,
+        credit: c.creditLimit ?? 0,
         locations:
           c.locationNames?.length > 0 ? c.locationNames.join(", ") : "",
         locationRoles,
@@ -203,7 +203,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { companyId, store, shop, userContext } =
       await authenticateApiProxyWithPermissions(request);
-    console.log(userContext.customerEmail, "45454454");
+
     requirePermission(
       userContext,
       "canManageUsers",
@@ -223,7 +223,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     switch (actionType) {
       case "create": {
         const { name, email, locationRoles, credit } = body;
-       
 
         if (!name || !email) {
           return Response.json(
@@ -247,7 +246,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             credit: parseFloat(credit) || 0,
           },
         );
-       
 
         // ✅ Handle errors properly
         if (result.error) {
@@ -298,79 +296,85 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return Response.json({ success: true, result });
       }
 
-     case "delete": {
-  const { userId } = body;
+      case "delete": {
+        const { userId } = body;
 
-  if (!userId) {
-    return Response.json(
-      { error: "User ID is required" },
-      { status: 400 }
-    );
-  }
+        if (!userId) {
+          return Response.json(
+            { error: "User ID is required" },
+            { status: 400 },
+          );
+        }
 
-  // 🔒 Fetch email
-  const contactEmail = await getCompanyContactEmail(
-    userId,
-    shop,
-    store.accessToken
-  );
+        // 🔒 Fetch email
+        const contactEmail = await getCompanyContactEmail(
+          userId,
+          shop,
+          store.accessToken,
+        );
 
-  if (!contactEmail) {
-    return Response.json(
-      { error: "Company contact not found" },
-      { status: 404 }
-    );
-  }
+        if (!contactEmail) {
+          return Response.json(
+            { error: "Company contact not found" },
+            { status: 404 },
+          );
+        }
 
-  // 🔥 Prevent self delete
-  if (
-    userContext.customerEmail &&
-    contactEmail.toLowerCase() ===
-      userContext.customerEmail.toLowerCase()
-  ) {
-    return Response.json(
-      { error: "You cannot delete your own account" },
-      { status: 403 }
-    );
-  }
+        // 🔥 Prevent self delete
+        if (
+          userContext.customerEmail &&
+          contactEmail.toLowerCase() === userContext.customerEmail.toLowerCase()
+        ) {
+          return Response.json(
+            { error: "You cannot delete your own account" },
+            { status: 403 },
+          );
+        }
 
-  // ✅ Shopify delete
-  const result = await deleteCompanyCustomer(
-    userId,
-    shop,
-    store.accessToken
-  );
+        // ✅ Shopify delete
+        const result = await deleteCompanyCustomer(
+          userId,
+          shop,
+          store.accessToken,
+        );
 
-  if (!result.ok) {
-    return Response.json(
-      { error: result.message },
-      { status: result.status }
-    );
-  }
+        if (!result.ok) {
+          return Response.json(
+            { error: result.message },
+            { status: result.status },
+          );
+        }
 
-  // ✅ Local DB delete (AFTER Shopify)
-  const userData = await prisma.user.findFirst({
-    where: { email: contactEmail },
-  });
+        // ✅ Local DB delete (AFTER Shopify)
+        const userData = await prisma.user.findFirst({
+          where: { email: contactEmail },
+        });
+        const registration = await prisma.registrationSubmission.findFirst({
+          where: { email: contactEmail },
+        });
+        if (registration) {
+          await prisma.registrationSubmission.delete({
+            where: { id: registration.id },
+          });
+        }
 
-  if (!userData) {
-    return Response.json(
-      { error: "User not found in local database" },
-      { status: 404 }
-    );
-  }
+        if (!userData) {
+          return Response.json(
+            { error: "User not found in local database" },
+            { status: 404 },
+          );
+        }
 
-  await prisma.user.delete({
-    where: { id: userData.id },
-  });
+        await prisma.user.delete({
+          where: { id: userData.id },
+        });
 
-  return Response.json({
-    success: true,
-    deletedId: result.data.deletedId,
-    message: "User deleted successfully",
-  });
-}
-
+        return Response.json({
+          success: true,
+          deletedId: result.data.deletedId,
+          message: "User deleted successfully",
+        });
+      }
 
       default:
         return Response.json({ error: "Invalid action type" }, { status: 400 });
