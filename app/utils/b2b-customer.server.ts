@@ -3461,9 +3461,50 @@ export async function deleteCompanyCustomer(
   contactId: string,
   shopName: string,
   accessToken: string
-): Promise<ServiceResult<{ deletedId: string }>> {
+): Promise<ServiceResult<{ deletedId: string; deletedCustomerId?: string }>> {
   try {
-    const mutation = `
+    // Step 1: Get customer ID before deleting the contact
+    const getCustomerQuery = `
+      query getCompanyContact($id: ID!) {
+        companyContact(id: $id) {
+          id
+          customer {
+            id
+          }
+        }
+      }
+    `;
+
+    const customerResponse = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query: getCustomerQuery,
+          variables: { id: contactId },
+        }),
+      }
+    );
+
+    const customerData = await customerResponse.json();
+    const customerId = customerData.data?.companyContact?.customer?.id;
+
+    if (!customerId) {
+      return {
+        ok: false,
+        status: 404,
+        message: "Customer not found for this contact",
+      };
+    }
+
+    console.log("Found customer:", customerId, "for contact:", contactId);
+
+    // Step 2: Delete the company contact first
+    const deleteContactMutation = `
       mutation companyContactDelete($id: ID!) {
         companyContactDelete(companyContactId: $id) {
           deletedCompanyContactId
@@ -3474,7 +3515,7 @@ export async function deleteCompanyCustomer(
       }
     `;
 
-    const res = await fetch(
+    const contactRes = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
       {
         method: "POST",
@@ -3483,52 +3524,107 @@ export async function deleteCompanyCustomer(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({
-          query: mutation,
+          query: deleteContactMutation,
           variables: { id: contactId },
         }),
       }
     );
 
-    const json = await res.json();
+    const contactJson = await contactRes.json();
 
-    // 🔴 GraphQL schema errors
-    if (json.errors?.length) {
+    if (contactJson.errors?.length) {
       return {
         ok: false,
         status: 400,
-        message: json.errors[0].message,
+        message: contactJson.errors[0].message,
       };
     }
 
-    const payload = json.data?.companyContactDelete;
+    const contactPayload = contactJson.data?.companyContactDelete;
 
-    // 🔴 Shopify business errors
-    if (payload?.userErrors?.length) {
+    if (contactPayload?.userErrors?.length) {
       return {
         ok: false,
         status: 400,
-        message: payload.userErrors[0].message,
+        message: contactPayload.userErrors[0].message,
       };
     }
 
-    if (!payload?.deletedCompanyContactId) {
+    console.log("✅ Deleted company contact:", contactId);
+
+    // Step 3: Delete the underlying Shopify customer
+    const deleteCustomerMutation = `
+      mutation customerDelete($input: CustomerDeleteInput!) {
+        customerDelete(input: $input) {
+          deletedCustomerId
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const customerDeleteRes = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query: deleteCustomerMutation,
+          variables: { 
+            input: { id: customerId }
+          },
+        }),
+      }
+    );
+
+    const customerDeleteJson = await customerDeleteRes.json();
+
+    if (customerDeleteJson.errors?.length) {
+      console.warn("⚠️ Customer delete error:", customerDeleteJson.errors[0].message);
       return {
-        ok: false,
-        status: 500,
-        message: "Delete failed unexpectedly",
+        ok: true,
+        data: { 
+          deletedId: contactPayload.deletedCompanyContactId,
+          deletedCustomerId: null 
+        },
+        message: "Contact deleted but customer deletion failed"
       };
     }
+
+    const customerDeletePayload = customerDeleteJson.data?.customerDelete;
+
+    if (customerDeletePayload?.userErrors?.length) {
+      console.warn("⚠️ Customer delete error:", customerDeletePayload.userErrors[0].message);
+      return {
+        ok: true,
+        data: { 
+          deletedId: contactPayload.deletedCompanyContactId,
+          deletedCustomerId: null 
+        },
+        message: "Contact deleted but customer deletion failed"
+      };
+    }
+
+    console.log("✅ Deleted Shopify customer:", customerId);
 
     return {
       ok: true,
-      data: { deletedId: payload.deletedCompanyContactId },
+      data: { 
+        deletedId: contactPayload.deletedCompanyContactId,
+        deletedCustomerId: customerDeletePayload.deletedCustomerId
+      },
     };
   } catch (err) {
+    console.error("Error in deleteCompanyCustomer:", err);
     return {
       ok: false,
       status: 500,
-      message:
-        err instanceof Error ? err.message : "Internal server error",
+      message: err instanceof Error ? err.message : "Internal server error",
     };
   }
 }
@@ -4608,7 +4704,7 @@ async function createOrUpdateLocalUser({
       userCreditLimit:userCreditLimit || 0,
     });
 
-    console.log(`✅ Created local user: ${newUser.id} for email: ${email},"4454545454`);
+    console.log(`✅ Created local user: ${newUser.id} for email: ${email},`);
   } else {
     // Update existing user with Shopify customer ID and company info if missing
     await prisma.user.update({
