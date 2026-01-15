@@ -461,7 +461,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
 
   // Get company dashboard data from service
-  const dashboardData = await getCompanyDashboardData(companyId, store.id);
+  const dashboardData = await getCompanyDashboardData(
+    companyId,
+    store.id,
+    session.shop,
+    session.accessToken
+  );
 
   if (!dashboardData) {
     throw new Response("Company not found", { status: 404 });
@@ -469,7 +474,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   // Get credit summary
   const creditSummary = await getCreditSummary(companyId);
-
 
   if (!creditSummary) {
     throw new Response("Unable to fetch credit summary", { status: 500 });
@@ -482,11 +486,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         100
       : 0;
 
-  // Calculate available credit properly: Credit Limit - Used Credit
-  // (pendingCredit is now 0 with the updated logic)
-  const availableCredit = Math.max(0,
-    creditSummary.creditLimit.toNumber() -
-    creditSummary.usedCredit.toNumber()
+  const availableCredit = Math.max(
+    0,
+    creditSummary.creditLimit.toNumber() - creditSummary.usedCredit.toNumber()
   );
 
   return Response.json({
@@ -528,8 +530,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       companyRole: user.companyRole,
       status: user.status,
       createdAt: user.createdAt.toISOString(),
+      shopifyCustomer: user.shopifyCustomer,
+      existsInShopify: user.existsInShopify,
     })),
-    totalUsers: dashboardData.totalUsers,
+    totalUsers: dashboardData.totalUsers, // Matched users count
+    totalDbUsers: dashboardData.totalDbUsers, // Total DB users
+    unmatchedUsersCount: dashboardData.unmatchedUsersCount, // Users not in Shopify
   } satisfies LoaderData);
 };
 

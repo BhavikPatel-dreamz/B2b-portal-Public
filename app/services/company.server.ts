@@ -2,6 +2,7 @@ import prisma from "../db.server";
 import { Prisma } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { parseCredit } from "../utils/company.server";
+import { getCompanyCustomers } from "app/utils/b2b-customer.server";
 
 export interface CreateCompanyInput {
   shopId: string;
@@ -279,7 +280,9 @@ export async function getCompanyWithCreditSummary(companyId: string) {
     _count: true,
   });
 
-  const pendingCredit = pendingOrders._sum.remainingBalance ? new Prisma.Decimal(pendingOrders._sum.remainingBalance) : new Prisma.Decimal(0);
+  const pendingCredit = pendingOrders._sum.remainingBalance
+    ? new Prisma.Decimal(pendingOrders._sum.remainingBalance)
+    : new Prisma.Decimal(0);
   const usedCredit = company.creditLimit.minus(pendingCredit);
   const availableCredit = company.creditLimit.minus(pendingCredit);
 
@@ -296,7 +299,12 @@ export async function getCompanyWithCreditSummary(companyId: string) {
 /**
  * Get company dashboard data
  */
-export async function getCompanyDashboardData(companyId: string, shopId: string) {
+export async function getCompanyDashboardData(
+  companyId: string,
+  shopId: string,
+  shop: string,
+  accessToken: string,
+) {
   // Get company
   const company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
@@ -335,10 +343,6 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
       },
     },
   });
-
-
-
-
   // Get order statistics
   const [totalOrders, paidOrders, unpaidOrders, pendingOrders] = await Promise.all([
     prisma.b2BOrder.count({
@@ -366,11 +370,11 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
     }),
   ]);
 
-  // Get users (first 10)
-  const users = await prisma.user.findMany({
+
+  // Get users from database
+  const dbUsers = await prisma.user.findMany({
     where: { companyId },
     orderBy: { createdAt: "desc" },
-    take: 10,
     select: {
       id: true,
       email: true,
@@ -380,13 +384,64 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
       companyRole: true,
       status: true,
       createdAt: true,
+      shopifyCustomerId: true, // Add this if you have it in your schema
     },
   });
 
-  // Get total user count
-  const totalUsers = await prisma.user.count({
-    where: { companyId },
-  });
+  // Get Shopify customers
+  const customersData = await getCompanyCustomers(
+    company.shopifyCompanyId || "",
+    shop,
+    accessToken,
+    {},
+  );
+
+  const shopifyCustomerMap = new Map(
+    customersData?.customers?.map((customer: any) => [
+      customer.customer?.email?.toLowerCase(), // Email is nested in customer.customer.email
+      customer,
+    ]) || [],
+  );
+
+  console.log(
+    "Shopify customer emails:",
+    Array.from(shopifyCustomerMap.keys()),
+  );
+  console.log(shopifyCustomerMap, "545 shopifyCustomerMap");
+
+  // Get all DB user emails for debugging
+  const dbUserEmails = dbUsers.map((u) => u.email.toLowerCase());
+  console.log("DB user emails:", dbUserEmails);
+
+  const matchedUsers = dbUsers
+    .map((user) => {
+      const shopifyCustomer = shopifyCustomerMap.get(user.email.toLowerCase());
+      console.log(
+        `Checking ${user.email.toLowerCase()}:`,
+        shopifyCustomer ? "FOUND" : "NOT FOUND",
+      );
+
+      return {
+        ...user,
+        shopifyCustomer: shopifyCustomer
+          ? {
+              id: shopifyCustomer.id,
+              customerId: shopifyCustomer.customerId,
+              displayName:
+                `${shopifyCustomer.customer?.firstName || ""} ${shopifyCustomer.customer?.lastName || ""}`.trim(),
+              email: shopifyCustomer.customer?.email,
+              roles: shopifyCustomer.roles,
+              locationNames: shopifyCustomer.locationNames,
+            }
+          : null,
+        existsInShopify: !!shopifyCustomer,
+      };
+    })
+    .filter((user) => user.existsInShopify);
+
+  // Get total count of matched users
+  const totalMatchedUsers = matchedUsers.length;
+
 
   return {
     company,
@@ -397,8 +452,8 @@ export async function getCompanyDashboardData(companyId: string, shopId: string)
       unpaid: unpaidOrders,
       pending: pendingOrders,
     },
-    users,
-    totalUsers,
+    users: matchedUsers.slice(0, 10), // Return first 10 matched users
+    totalUsers: totalMatchedUsers, // Return count of matched users
   };
 }
 
@@ -482,7 +537,7 @@ export async function getCompanyOrders(companyId: string, shopId: string) {
  */
 export async function updateCredit(
   form: FormData,
-  admin?: AdminApiContext
+  admin?: AdminApiContext,
 ): Promise<{
   intent: string;
   success: boolean;
@@ -523,7 +578,7 @@ export async function updateCredit(
           namespace: "b2b_credit",
           key: "credit_limit",
           value: credit.toString(),
-          type: "number_decimal"
+          type: "number_decimal",
         });
       } catch (shopifyError) {
         console.error("Failed to sync credit to Shopify:", shopifyError);
@@ -557,7 +612,7 @@ export async function updateCompanyMetafield(
     key: string;
     value: string;
     type: string;
-  }
+  },
 ) {
   const mutation = `
     mutation CompanyMetafieldSet($metafields: [MetafieldsSetInput!]!) {
@@ -597,7 +652,8 @@ export async function updateCompanyMetafield(
   const data = await response.json();
 
   if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
-    const errorMessage = data.errors?.[0]?.message ||
+    const errorMessage =
+      data.errors?.[0]?.message ||
       data.data?.metafieldsSet?.userErrors?.[0]?.message ||
       "Unknown error occurred";
     throw new Error(`Failed to update company metafield: ${errorMessage}`);
@@ -613,7 +669,7 @@ export async function getCompanyMetafield(
   admin: AdminApiContext,
   shopifyCompanyId: string,
   namespace: string,
-  key: string
+  key: string,
 ) {
   const query = `
     query CompanyMetafield($ownerId: ID!, $namespace: String!, $key: String!) {

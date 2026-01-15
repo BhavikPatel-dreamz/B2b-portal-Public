@@ -1389,25 +1389,7 @@ export async function getCompanyCustomers(
         locationId: r.node.companyLocation?.id,
         locationName: r.node.companyLocation?.name
       })) || [];
-console.log({
-        id: node.id,
-        customerId: cust.id,
-        title: node.title,
-        customer: {
-          id: cust.id,
-          firstName: cust.firstName,
-          lastName: cust.lastName,
-          email: cust.email,
-          phone: cust.phone,
-          // Include roleAssignments in customer object for easy access
-          roleAssignments: node.roleAssignments,
-        },
-        roles: roles.map((r: any) => r.name),
-        roleIds: roles.map((r: any) => r.id),
-        locationIds: roles.map((r: any) => r.locationId).filter(Boolean),
-        locationNames: roles.map((r: any) => r.locationName).filter(Boolean),
-        credit: cust.metafield?.value ? Number(cust.metafield.value) : 0,
-      },"5656565");
+
       return {
         id: node.id,
         customerId: cust.id,
