@@ -2,11 +2,12 @@ import { type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import prisma from "../../db.server";
 import { getStoreByDomain } from "../../services/store.server";
 import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
-import { validateB2BCustomerAccess } from "../../utils/proxy.server";
+import { getProxyParams, validateB2BCustomerAccess } from "../../utils/proxy.server";
 
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-    const { customerId, shop } = await validateB2BCustomerAccess(request);
+ const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
+
     const store = await getStoreByDomain(shop);
 
     // Get URL search params for filtering
@@ -26,7 +27,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             
         }
     })
-    console.log(user,"user");
     const where: any = {
         shopId: store?.id,
         receiverId: user?.id,

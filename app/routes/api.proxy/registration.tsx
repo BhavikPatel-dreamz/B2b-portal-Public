@@ -19,7 +19,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     // Get proxy parameters to identify the store
-    const { shop } = getProxyParams(request);
+    const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
 
     if (!shop) {
       return Response.json({
@@ -47,7 +47,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const businessType = formData.get('businessType') as string;
     const website = formData.get('website') as string || null;
     const additionalInfo = formData.get('additionalInfo') as string || null;
-    const customerId = formData.get('customerId') as string || null;
+    // const customerId = formData.get('customerId') as string || null;
 
     console.log("📋 Registration data:", { companyName, contactName, email, phone, businessType });
 
