@@ -145,7 +145,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             remainingBalance,
             paymentStatus: "pending",
             orderStatus: "submitted",
-            notes: `Credit validation failed: ${validation.message}. Order requires manual review.`
+            notes: `Credit validation failed: ${validation.message}. Order requires manual review.`,
+            userId: user.id,
           });
 
           console.log(`⚠️ B2B order created with credit validation warning`);
@@ -184,6 +185,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       remainingBalance,
       paymentStatus,
       orderStatus,
+      userId: user.id,
     });
 
     return new Response();

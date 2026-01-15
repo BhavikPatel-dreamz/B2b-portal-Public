@@ -8,24 +8,25 @@ export interface CreateOrderInput {
   shopifyOrderId?: string | null;
   orderTotal: number | Prisma.Decimal;
   creditUsed: number | Prisma.Decimal;
-  userCreditUsed: number | Prisma.Decimal;  // Add missing field
+  userCreditUsed: number | Prisma.Decimal; // Add missing field
   remainingBalance: number | Prisma.Decimal;
   paymentStatus?: string;
   orderStatus?: string;
-  notes?: string;  // Add optional notes field
+  notes?: string; // Add optional notes field
+  userId?: string;
 }
 
 export interface UpdateOrderInput {
   shopifyOrderId?: string | null;
   orderTotal?: number | Prisma.Decimal;
   creditUsed?: number | Prisma.Decimal;
-  userCreditUsed?: number | Prisma.Decimal;  // Add missing field
+  userCreditUsed?: number | Prisma.Decimal; // Add missing field
   paymentStatus?: string;
   orderStatus?: string;
   paidAmount?: number | Prisma.Decimal;
   remainingBalance?: number | Prisma.Decimal;
   paidAt?: Date | null;
-  notes?: string;  // Add optional notes field
+  notes?: string; // Add optional notes field
   updatedAt?: Date | null;
 }
 
@@ -87,7 +88,7 @@ export async function upsertOrder(data: CreateOrderInput) {
  * Create a new B2B order
  */
 export async function createOrder(data: CreateOrderInput) {
-  return await prisma.b2BOrder.create({
+  const order= await prisma.b2BOrder.create({
     data: {
       companyId: data.companyId,
       createdByUserId: data.createdByUserId,
@@ -95,7 +96,7 @@ export async function createOrder(data: CreateOrderInput) {
       shopifyOrderId: data.shopifyOrderId,
       orderTotal: new Prisma.Decimal(data.orderTotal.toString()),
       creditUsed: new Prisma.Decimal(data.creditUsed.toString()),
-      userCreditUsed: new Prisma.Decimal(data.userCreditUsed.toString()),  // Add missing field
+      userCreditUsed: new Prisma.Decimal(data.userCreditUsed.toString()), // Add missing field
       remainingBalance: new Prisma.Decimal(data.remainingBalance.toString()),
       paidAmount: new Prisma.Decimal(0),
       paymentStatus: data.paymentStatus || "pending",
@@ -108,6 +109,28 @@ export async function createOrder(data: CreateOrderInput) {
       payments: true,
     },
   });
+  const storeAdmin = await prisma.user.findFirst({
+    where: {
+      companyId: order?.companyId,
+      role: "STORE_ADMIN",
+    },
+  })
+  const notificationData: any = {
+    message: `New B2B order created with ID: ${order.id}`,
+    shopId: order?.shopId,
+    activityType: "pending",
+    senderId: order?.createdByUserId,
+    receiverId: storeAdmin?.id,
+    isRead: false,
+    activeAction : order?.orderStatus,
+  };
+
+  
+   await prisma.notification.create({
+    data: notificationData,
+  });
+  return  order 
+
 }
 
 /**

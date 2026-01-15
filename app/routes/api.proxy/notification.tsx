@@ -19,9 +19,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const page = url.searchParams.get("page");
 
     // Build dynamic where clause
+  
+   const user = await prisma.user.findFirst({
+        where: {
+            shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
+            
+        }
+    })
+    console.log(user,"user");
     const where: any = {
         shopId: store?.id,
-        receiverId: customerId
+        receiverId: user?.id,
     };
 
     // Filter by activity type
@@ -59,7 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const unreadCount = await prisma.notification.count({
         where: {
             shopId: store?.id,
-            receiverId: customerId,
+            receiverId: user?.id,
             isRead: false
         }
     });
@@ -73,13 +81,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
      const baseWhere = {
     shopId: store?.id,
-    receiverId: customerId
+    receiverId: user?.id
   };
   // Get APPROVED count based on activityType
     const readCount = await prisma.notification.count({
         where: {
             shopId: store?.id,
-            receiverId: customerId,
+            receiverId: user?.id,
             isRead: true
         }
     });

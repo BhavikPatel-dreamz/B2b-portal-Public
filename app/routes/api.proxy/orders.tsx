@@ -6,6 +6,7 @@ import {
   getAdvancedCompanyOrders,
   getCompanyOrdersCount,
 } from "../../utils/b2b-customer.server";
+import { getProxyParams } from "app/utils/proxy.server";
 
 interface OrderRequestFilters {
   query?: string;
@@ -43,7 +44,7 @@ interface OrderRequestPagination {
 export function buildDateRangeQuery(
   baseQueryParts: string[],
   startDate: Date,
-  endDate: Date
+  endDate: Date,
 ): string {
   return [
     ...baseQueryParts,
@@ -58,11 +59,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    await authenticate.public.appProxy(request);
+    const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
 
     const {
-      customerId,
-      shop,
       filters,
       pagination,
     }: {
@@ -280,7 +279,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // ✅ OPTION 1: Try without location filter first (for debugging)
     const simpleCurrentQuery = `company_id:${extractId(company.companyId)}${
       accessLevel === "location_user" ? ` AND customer_id:${customerId}` : ""
-    } AND created_at:>='${currentMonthStart.toISOString().split('T')[0]}'`;
+    } AND created_at:>='${currentMonthStart.toISOString().split("T")[0]}'`;
 
     console.log("🔍 Simple Query Test:", simpleCurrentQuery);
 
@@ -295,8 +294,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // ✅ OPTION 2: Try with proper formatting
     const formatDateForShopify = (date: Date) => {
       const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
       return `${year}-${month}-${day}`;
     };
 
@@ -347,7 +346,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.log("📊 Queries WITH location filter:", {
         current: currentMonthQueryWithLocation,
         previous: previousMonthQueryWithLocation,
-        locationIds: allowedLocationIds.map(id => extractId(id)),
+        locationIds: allowedLocationIds.map((id) => extractId(id)),
       });
 
       currentMonthCount = await getCompanyOrdersCount(
@@ -398,7 +397,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       debug: {
         ...result._debug,
         restrictedToLocations: allowedLocationIds || "none",
-        restrictedToCustomer: accessLevel === "location_user" ? customerId : "none",
+        restrictedToCustomer:
+          accessLevel === "location_user" ? customerId : "none",
         userAssignedLocations: userAssignedLocationIds.length,
       },
     });
