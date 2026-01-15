@@ -16,6 +16,7 @@ import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
 import { calculateAvailableCredit } from "../services/creditService";
 import { useState } from "react";
+import { getCompanyCustomers } from "app/utils/b2b-customer.server";
 
 type LoaderCompany = {
   id: string;
@@ -113,9 +114,59 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     companies.map(async (company) => {
       const creditInfo = await calculateAvailableCredit(company.id);
       const creditLimitNum = parseFloat(company.creditLimit.toString());
-      const usedCreditNum = creditInfo ? parseFloat(creditInfo.usedCredit.toString()) : 0;
-      const pendingCreditNum = creditInfo ? parseFloat(creditInfo.pendingCredit.toString()) : 0;
-      const creditUsagePercentage = creditLimitNum > 0 ? Math.round((usedCreditNum / creditLimitNum) * 100) : 0;
+      const usedCreditNum = creditInfo
+        ? parseFloat(creditInfo.usedCredit.toString())
+        : 0;
+      const pendingCreditNum = creditInfo
+        ? parseFloat(creditInfo.pendingCredit.toString())
+        : 0;
+      const creditUsagePercentage =
+        creditLimitNum > 0
+          ? Math.round((usedCreditNum / creditLimitNum) * 100)
+          : 0;
+
+      // Get DB users for this company
+      const dbUsers = await prisma.user.findMany({
+        where: { companyId: company.id },
+        select: { email: true },
+      });
+
+      let matchedUserCount = 0;
+      let shopifyUserCount = 0;
+
+      // Only fetch Shopify customers if company has a Shopify ID
+      if (company.shopifyCompanyId) {
+        try {
+          const customersData = await getCompanyCustomers(
+            company.shopifyCompanyId,
+            session.shop,
+            session.accessToken,
+            {}
+          );
+
+          shopifyUserCount = customersData?.customers?.length || 0;
+
+          // Create a map of Shopify customers by email
+          const shopifyCustomerMap = new Map(
+            customersData?.customers?.map((customer: any) => [
+              customer.customer?.email?.toLowerCase(),
+              customer,
+            ]) || []
+          );
+
+          // Count matched users (users that exist in both DB and Shopify)
+          matchedUserCount = dbUsers.filter((user) =>
+            shopifyCustomerMap.has(user.email.toLowerCase())
+          ).length;
+
+        } catch (error) {
+          console.error(
+            `Error fetching Shopify customers for company ${company.id}:`,
+            error
+          );
+          // Continue without Shopify data if there's an error
+        }
+      }
 
       return {
         ...company,
@@ -127,7 +178,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           : company.creditLimit.toString(),
         creditUsagePercentage,
         updatedAt: company.updatedAt.toISOString(),
-        userCount: company._count?.users ?? 0,
+        userCount: matchedUserCount || 0 // Total DB users
       } satisfies LoaderCompany;
     }),
   );
@@ -141,7 +192,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     searchQuery,
   });
 };
-
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const store = await prisma.store.findUnique({
