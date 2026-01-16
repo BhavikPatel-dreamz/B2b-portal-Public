@@ -7,6 +7,7 @@ import {
   getCompanyOrdersCount,
 } from "../../utils/b2b-customer.server";
 import { getProxyParams } from "app/utils/proxy.server";
+import prisma from "app/db.server";
 
 interface OrderRequestFilters {
   query?: string;
@@ -242,20 +243,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
+    const companyData = await prisma.companyAccount.findFirst({
+      where: {
+        shopifyCompanyId: company.companyId,
+      },
+    });
+    const userData = await prisma.user.findFirst({
+      where: {
+        companyId: companyData.id,
+        role: "STORE_ADMIN",
+      },
+    });
+
     const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
       companyId: company.companyId,
-      allowedLocationIds,
+      allowedLocationIds:
+        userData?.role == "STORE_ADMIN" ? undefined : allowedLocationIds,
       filters: queryFilters,
       pagination: pagination || { first: 20 },
     });
 
-    if (result.error) {
+    const groupedOrders = await prisma.b2BOrder.groupBy({
+      by: ["shopifyOrderId"],
+      where: {
+        shopifyOrderId: {
+          in: result.orders?.map((order:any) => order.id),
+        },
+      },
+    });
+    const uniqueShopifyOrderIds = groupedOrders.map((order) => order.shopifyOrderId);
+ const orders = result.orders?.filter((order:any) => uniqueShopifyOrderIds.includes(order.id));
+
+
+    if (orders.error) {
       return Response.json(
-        { error: result.error, accessLevel },
+        { error: orders.error, accessLevel },
         { status: 500 },
       );
     }
-
 
     // 🔢 Fetch SEPARATE queries for month counts (without pagination limit)
     const currentMonthResult = await getAdvancedCompanyOrders(
@@ -294,9 +319,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const ordersPreviousMonth = previousMonthResult.orders?.length || 0;
 
     return Response.json({
-      orders: result.orders,
+      orders: orders,
       pageInfo: result.pageInfo,
-      totalCount: result.totalCount,
+      totalCount: orders.length,
       accessLevel,
       allowedLocationIds: allowedLocationIds?.length || "all",
       userRoles: company.roles,
@@ -304,16 +329,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       currentMonthOrderCount: ordersCurrentMonth,
       previousMonthOrderCount: ordersPreviousMonth,
       monthlyChangePercentage: Math.round(
-              ((ordersCurrentMonth - ordersPreviousMonth) / ordersPreviousMonth) *
-                100,
-            ),
-      debug: {
-        ...result._debug,
-        restrictedToLocations: allowedLocationIds || "none",
-        restrictedToCustomer:
-          accessLevel === "location_user" ? customerId : "none",
-        userAssignedLocations: userAssignedLocationIds.length,
-      },
+        ((ordersCurrentMonth - ordersPreviousMonth) / ordersPreviousMonth) *
+          100,
+      )
+      
     });
   } catch (error) {
     console.error("Proxy error:", error);

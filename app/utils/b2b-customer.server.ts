@@ -2,6 +2,7 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
 import { createUser } from "../services/user.server";
+import { calculateAvailableCredit } from "app/services/creditService";
 
 // Type for GraphQL response
 type GraphQLResponse<T = any> = {
@@ -1168,13 +1169,28 @@ export async function getCustomerCompanyInfo(
         // isMainContact,
       };
     });
+        const creditInfo = await calculateAvailableCredit(companyData.id);
+          const creditLimitNum = parseFloat(companyData.creditLimit.toString());
+          const usedCreditNum = creditInfo
+            ? parseFloat(creditInfo.usedCredit.toString())
+            : 0;
+          const pendingCreditNum = creditInfo
+            ? parseFloat(creditInfo.pendingCredit.toString())
+            : 0;
+          const creditUsagePercentage =
+            creditLimitNum > 0
+              ? Math.round((usedCreditNum / creditLimitNum) * 100)
+              : 0;
 
     return {
       hasCompany: true,
       customerId,
       customerName: RegistrationData?.contactName || (customer.firstName ? `${customer.firstName} ${customer.lastName || ''}`.trim() : customer.firstName || ''),
       customerEmail: customer.email,
-      userCreditLimit: companyData?.creditLimit,  
+      CreditLimit: creditLimitNum,
+      usedCredit: usedCreditNum,
+      pendingCredit: pendingCreditNum,
+      creditUsagePercentage: creditUsagePercentage,
       companies: companies,
        isAdmin: companies[0]?.hasAllLocationAccess,
        isMainContact: companies[0]?.mainContact?.id === `gid://shopify/Customer/${customerId}`,
@@ -4097,55 +4113,6 @@ export async function updateCompanyLocation(
 }
 
 // Function to delete a company location
-// export async function deleteCompanyLocation(
-//   locationId: string,
-//   shopName: string,
-//   accessToken: string
-// ) {
-//   try {
-//     const deleteMutation = `
-//       mutation companyLocationDelete($companyLocationId: ID!) {
-//         companyLocationDelete(companyLocationId: $companyLocationId) {
-//           deletedCompanyLocationId
-//           userErrors {
-//             field
-//             message
-//           }
-//         }
-//       }
-//     `;
-
-//     const response = await fetch(
-//       `https://${shopName}/admin/api/2025-01/graphql.json`,
-//       {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//           "X-Shopify-Access-Token": accessToken,
-//         },
-//         body: JSON.stringify({
-//           query: deleteMutation,
-//           variables: { companyLocationId: locationId }
-//         }),
-//       }
-//     );
-
-//     const result = await response.json();
-//     console.log(result.data.companyLocationDelete.userErrors[0].message,"result.data.companyLocationDelete.userErrors[0].message");
-//     if (result.data?.companyLocationDelete?.userErrors?.length > 0) {
-//       return { error: result.data.companyLocationDelete.userErrors[0] };
-//     }
-
-//     return {
-//       success: true,
-//       deletedId: result.data?.companyLocationDelete?.deletedCompanyLocationId
-//     };
-//   } catch (error) {
-//     console.error("Error deleting company location:", error);
-//     return { error: error instanceof Error ? error.message : 'Unknown error' };
-//   }
-// }
-
 export async function deleteCompanyLocation(
   locationId: string,
   shopName: string,
