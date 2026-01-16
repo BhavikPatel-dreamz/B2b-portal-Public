@@ -14,12 +14,14 @@ import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { sendCompanyAssignmentEmail } from "app/utils/email";
+import { updateCompanyMetafield } from "app/services/company.server";
 
 interface RegistrationSubmission {
   paymentTerm: string;
   id: string;
   companyName: string;
   contactName: string;
+  creditLimit: string;
   email: string;
   phone: string;
   businessType: string;
@@ -53,6 +55,7 @@ interface ActionJson {
     locationId?: string;
     locationName?: string;
     zip?: string | null;
+    creditLimit?: string | null;
     address1?: string | null;
     city?: string | null;
     countryCode?: string | null;
@@ -379,16 +382,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const payload = await response.json();
         const customer = payload?.data?.customers?.nodes?.[0] || null;
-        
+
         const Registration = await prisma.registrationSubmission.findFirst({
           where: { email },
         });
 
-
         const user = await prisma.user.findFirst({
           where: { email },
         });
-        if(!user){
+        if (!user) {
           await prisma.user.create({
             data: {
               email,
@@ -692,6 +694,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyName = (form.companyName as string)?.trim();
         const locationName = (form.locationName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerm as string)?.trim();
+        const creditLimit = (form.creditLimit as string)?.trim();
 
         if (!companyName || !locationName) {
           return Response.json({
@@ -732,17 +735,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const companyId = companyPayload.data.companyCreate.company.id;
 
+        await updateCompanyMetafield(admin, companyId, {
+          namespace: "b2b_credit",
+          key: "credit_limit",
+          value: creditLimit.toString(),
+          type: "number_decimal",
+        });
+
         const companyExists = await prisma.companyAccount.findFirst({
           where: { name: companyName },
         });
         /* Save in Prisma (optional but clean) */
+        let companyData;
         if (!companyExists) {
-          await prisma.companyAccount.create({
+          companyData = await prisma.companyAccount.create({
             data: {
               shopId: store.id,
               name: companyName,
               shopifyCompanyId: companyId,
               paymentTeam: paymentTermsTemplateId || null,
+              creditLimit: Number(creditLimit),
             },
           });
         }
@@ -783,6 +795,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const location =
           locationPayload.data.companyLocationCreate.companyLocation;
 
+        if (companyData) {
+          const user = await prisma.user.findFirst({
+            where: { companyId: companyData.id },
+          });
+          if (user) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                userCreditLimit: creditLimit
+                  ? new Prisma.Decimal(creditLimit)
+                  : undefined,
+              },
+            });
+          }
+        }
         return Response.json({
           intent,
           success: true,
@@ -801,6 +828,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyName = (form.companyName as string)?.trim();
         const locationName = (form.locationName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+        const creditLimit = (form.creditLimit as string)?.trim();
 
         if (!companyId || !locationId || !companyName || !locationName) {
           return Response.json({
@@ -870,6 +898,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const locationPayload = await updateLocationResponse.json();
         const locationErrors = buildUserErrorList(locationPayload);
+
+        if (creditLimit) {
+          await updateCompanyMetafield(admin, companyId, {
+            namespace: "b2b_credit",
+            key: "credit_limit",
+            value: creditLimit.toString(),
+            type: "number_decimal",
+          });
+        }
 
         if (locationErrors.length) {
           return Response.json({
@@ -983,6 +1020,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const contactEmail = (form.contactEmail as string)?.trim() || null;
         const paymentTermsTemplateId =
           (form.paymentTerm as string)?.trim() || null;
+        const creditLimit = (form.creditLimit as string)?.trim() || null;
 
         if (!registrationId || !customerId) {
           return Response.json({
@@ -1021,6 +1059,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 paymentTermsTemplateId !== null
                   ? paymentTermsTemplateId
                   : undefined,
+              creditLimit: creditLimit
+                ? new Prisma.Decimal(creditLimit)
+                : undefined,
             },
             create: {
               shopId: store.id,
@@ -1028,7 +1069,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName || "Company",
               contactName,
               contactEmail,
-              creditLimit: new Prisma.Decimal(0),
+              creditLimit: creditLimit
+                ? new Prisma.Decimal(creditLimit)
+                : undefined,
               paymentTeam: paymentTermsTemplateId,
             },
           });
@@ -1040,7 +1083,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName,
               contactName,
               contactEmail,
-              creditLimit: new Prisma.Decimal(0),
+              creditLimit: creditLimit
+                ? new Prisma.Decimal(creditLimit)
+                : undefined,
               paymentTeam: paymentTermsTemplateId ?? null,
             },
           });
@@ -1058,7 +1103,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               status: "APPROVED",
               isActive: true,
               companyId: companyData.id,
-              userCreditLimit: new Prisma.Decimal(0),
+              userCreditLimit: creditLimit
+                ? new Prisma.Decimal(creditLimit)
+                : undefined,
             },
           });
         }
@@ -1206,6 +1253,7 @@ export default function RegistrationApprovals() {
   const [customerMode, setCustomerMode] = useState<"create" | "update">(
     "create",
   );
+  const [creditLimit, setCreditLimit] = useState(0);
 
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
@@ -1851,6 +1899,29 @@ export default function RegistrationApprovals() {
                       company?.locationName ||
                       `${selected?.companyName || "Company"} HQ`
                     }
+                    required
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#5c5f62",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Credit limit
+                  </span>
+                  <input
+                    name="creditLimit"
+                    defaultValue={company?.creditLimit}
                     required
                     style={{
                       padding: 10,
@@ -2595,6 +2666,48 @@ export default function RegistrationApprovals() {
                           ))}
                         </select>
                       </label>
+
+                      <div>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "#5c5f62",
+                            fontWeight: 500,
+                            marginBottom: 4,
+                            display: "block",
+                          }}
+                        >
+                          Credit limit
+                        </span>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "stretch",
+                            border: "1px solid #c9ccd0",
+                            borderRadius: 8,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <input
+                            name="creditLimit"
+                            type="number"
+                            value={selected.creditLimit}
+                            onChange={(e) =>
+                              setCreditLimit(Number(e.target.value) || 0)
+                            }
+                            required
+                            style={{
+                              padding: 10,
+                              border: "none",
+                              borderLeft: "1px solid #c9ccd0",
+                              borderRight: "1px solid #c9ccd0",
+                              width: 120,
+                              textAlign: "center",
+                              outline: "none",
+                            }}
+                          />
+                        </div>
+                      </div>
                       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                         <s-button
                           type="submit"

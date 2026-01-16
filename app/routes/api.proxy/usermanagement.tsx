@@ -153,7 +153,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           roleId: edge.node.role?.id || null,
           locationId: edge.node.companyLocation?.id || null,
         })) || [];
-      console.log(c, "666");
       return {
         id: c.id,
         name,

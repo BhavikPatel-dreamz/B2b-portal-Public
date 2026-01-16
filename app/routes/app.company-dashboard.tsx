@@ -515,10 +515,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       orderStatus: order.orderStatus,
       creditUsed: order.creditUsed.toNumber(),
       createdAt: order.createdAt.toISOString(),
-      createdBy:
-        [order.createdByUser.firstName, order.createdByUser.lastName]
-          .filter(Boolean)
-          .join(" ") || order.createdByUser.email,
+      createdBy: [order.createdByUser.firstName, order.createdByUser.lastName]
+        .filter(Boolean)
+        .join(" ") || order.createdByUser.email,
     })),
     orderStats: dashboardData.orderStats,
     users: dashboardData.users.map((user) => ({
@@ -533,9 +532,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       shopifyCustomer: user.shopifyCustomer,
       existsInShopify: user.existsInShopify,
     })),
-    totalUsers: dashboardData.totalUsers, // Matched users count
-    totalDbUsers: dashboardData.totalDbUsers, // Total DB users
-    unmatchedUsersCount: dashboardData.unmatchedUsersCount, // Users not in Shopify
+    totalUsers: dashboardData.totalUsers,
+    pendingOrderCount: 0
   } satisfies LoaderData);
 };
 
