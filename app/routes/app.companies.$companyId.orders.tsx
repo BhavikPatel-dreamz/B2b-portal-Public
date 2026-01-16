@@ -41,7 +41,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Store not found", { status: 404 });
   }
 
-  const data = await getCompanyOrders(companyId, store.id);
+  const data = await getCompanyOrders(companyId, store.id,session.accessToken);
 
   if (!data) {
     throw new Response("Company not found", { status: 404 });

@@ -2,7 +2,11 @@ import prisma from "../db.server";
 import { Prisma } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { parseCredit } from "../utils/company.server";
-import { getCompanyCustomers } from "app/utils/b2b-customer.server";
+import {
+  getCompanyCustomers,
+  getCompanyOrderss,
+} from "app/utils/b2b-customer.server";
+
 
 export interface CreateCompanyInput {
   shopId: string;
@@ -323,16 +327,33 @@ export async function getCompanyDashboardData(
     return null;
   }
 
-  // Get recent orders
-  const recentOrders = await prisma.b2BOrder.findMany({
+  const uniqueOrders = await prisma.b2BOrder.groupBy({
+    by: ["shopifyOrderId"],
     where: {
       companyId,
       orderStatus: { not: "cancelled" },
     },
+    _max: {
+      createdAt: true,
+    },
+    orderBy: {
+      _max: {
+        createdAt: "desc",
+      },
+    },
+    take: 20,
+  });
+
+  const recentOrders = await prisma.b2BOrder.findMany({
+    where: {
+      OR: uniqueOrders.map((order) => ({
+        shopifyOrderId: order.shopifyOrderId,
+        createdAt: order._max.createdAt!,
+      })),
+    },
     orderBy: {
       createdAt: "desc",
     },
-    take: 20,
     include: {
       createdByUser: {
         select: {
@@ -343,33 +364,34 @@ export async function getCompanyDashboardData(
       },
     },
   });
-  // Get order statistics
-  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] = await Promise.all([
-    prisma.b2BOrder.count({
-      where: { companyId, orderStatus: { not: "cancelled" } },
-    }),
-    prisma.b2BOrder.count({
-      where: {
-        companyId,
-        paymentStatus: "paid",
-        orderStatus: { not: "cancelled" },
-      },
-    }),
-    prisma.b2BOrder.count({
-      where: {
-        companyId,
-        paymentStatus: { in: ["pending", "partial"] },
-        orderStatus: { not: "cancelled" },
-      },
-    }),
-    prisma.b2BOrder.count({
-      where: {
-        companyId,
-        orderStatus: { in: ["draft", "submitted", "processing"] },
-      },
-    }),
-  ]);
 
+  // Get order statistics
+  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
+    await Promise.all([
+      prisma.b2BOrder.count({
+        where: { companyId, orderStatus: { not: "cancelled" } },
+      }),
+      prisma.b2BOrder.count({
+        where: {
+          companyId,
+          paymentStatus: "paid",
+          orderStatus: { not: "cancelled" },
+        },
+      }),
+      prisma.b2BOrder.count({
+        where: {
+          companyId,
+          paymentStatus: { in: ["pending", "partial"] },
+          orderStatus: { not: "cancelled" },
+        },
+      }),
+      prisma.b2BOrder.count({
+        where: {
+          companyId,
+          orderStatus: { in: ["draft", "submitted", "processing"] },
+        },
+      }),
+    ]);
 
   // Get users from database
   const dbUsers = await prisma.user.findMany({
@@ -403,23 +425,9 @@ export async function getCompanyDashboardData(
     ]) || [],
   );
 
-  console.log(
-    "Shopify customer emails:",
-    Array.from(shopifyCustomerMap.keys()),
-  );
-  console.log(shopifyCustomerMap, "545 shopifyCustomerMap");
-
-  // Get all DB user emails for debugging
-  const dbUserEmails = dbUsers.map((u) => u.email.toLowerCase());
-  console.log("DB user emails:", dbUserEmails);
-
   const matchedUsers = dbUsers
     .map((user) => {
       const shopifyCustomer = shopifyCustomerMap.get(user.email.toLowerCase());
-      console.log(
-        `Checking ${user.email.toLowerCase()}:`,
-        shopifyCustomer ? "FOUND" : "NOT FOUND",
-      );
 
       return {
         ...user,
@@ -496,7 +504,11 @@ export async function getCompanyUsers(companyId: string, shopId: string) {
 /**
  * Get all orders for a company
  */
-export async function getCompanyOrders(companyId: string, shopId: string) {
+export async function getCompanyOrders(
+  companyId: string,
+  shopId: string,
+  accessToken: string,
+) {
   // Verify company belongs to shop
   const company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
@@ -507,10 +519,44 @@ export async function getCompanyOrders(companyId: string, shopId: string) {
     return null;
   }
 
-  const orders = await prisma.b2BOrder.findMany({
+  const store = await prisma.store.findUnique({
+    where: { id: shopId },
+  });
+
+  const companyData = await prisma.companyAccount.findUnique({
+    where: { id: companyId },
+    select: { shopifyCompanyId: true },
+  });
+
+  const ordersData = await getCompanyOrderss(
+    companyData.shopifyCompanyId || "",
+    store?.shopDomain || "",
+    accessToken,
+  );
+
+  const uniqueOrders = await prisma.b2BOrder.groupBy({
+    by: ["shopifyOrderId"],
     where: {
       companyId,
       orderStatus: { not: "cancelled" },
+    },
+    _max: {
+      createdAt: true,
+    },
+    orderBy: {
+      _max: {
+        createdAt: "desc",
+      },
+    },
+    take: 20,
+  });
+
+  const orders = await prisma.b2BOrder.findMany({
+    where: {
+      OR: uniqueOrders.map((order) => ({
+        shopifyOrderId: order.shopifyOrderId,
+        createdAt: order._max.createdAt!,
+      })),
     },
     orderBy: {
       createdAt: "desc",
@@ -525,6 +571,67 @@ export async function getCompanyOrders(companyId: string, shopId: string) {
       },
     },
   });
+
+
+  const existingShopifyOrderIds = new Set(
+    orders.map((order) => order.shopifyOrderId),
+  );
+
+  const newOrders =
+    ordersData.companyOrders?.filter(
+      (shopifyOrder: any) => !existingShopifyOrderIds.has(shopifyOrder.id),
+    ) || [];
+
+  const userData = await prisma.user.findMany({
+    where: {
+      email: {
+        in: newOrders
+          .map((order: any) => order.customer?.email || "")
+          .filter(Boolean),
+      },
+    },
+  });
+
+
+  const emailToUserIdMap = new Map(
+    userData.map((user) => [user.email, user.id]),
+  );
+
+ if (newOrders.length > 0) {
+  for (const shopifyOrder of newOrders) {
+    const customerEmail = shopifyOrder.customer?.email;
+    const userId = customerEmail ? emailToUserIdMap.get(customerEmail) : undefined;
+    
+    try {
+      await prisma.b2BOrder.create({
+        data: {
+          shopifyOrderId: shopifyOrder.id,
+          company: {
+            connect: { id: companyId } 
+          },
+          shop: {
+            connect: { id: shopId }
+          },
+          orderStatus: shopifyOrder.displayFulfillmentStatus || "unfulfilled",
+          orderTotal: parseFloat(shopifyOrder.totalPriceSet?.shopMoney?.amount || "0"),
+          createdAt: new Date(shopifyOrder.createdAt),
+           ...(userId && {
+            createdByUser: {
+              connect: { id: userId }
+            }
+          }),
+          creditUsed: 0,
+          userCreditUsed: 0,
+          remainingBalance: 0,
+        },
+      });
+    } catch (error) {
+      console.error(`Error creating order ${shopifyOrder.id}:`, error);
+    }
+  }
+    console.log(`${newOrders.length} new orders processed`);
+  }
+
 
   return {
     company,

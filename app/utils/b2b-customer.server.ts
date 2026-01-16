@@ -1187,7 +1187,7 @@ export async function getCustomerCompanyInfo(
 }
 
 // Function to get company orders
-export async function getCompanyOrders(
+export async function getCompanyOrderss(
   companyId: string,
   shopName: string,
   accessToken: string
@@ -1202,7 +1202,6 @@ export async function getCompanyOrders(
             edges {
               node {
                 id
-                orderNumber
                 createdAt
                 totalPriceSet {
                   shopMoney {
@@ -1214,9 +1213,6 @@ export async function getCompanyOrders(
                   firstName
                   lastName
                   email
-                }
-                companyLocation {
-                  id
                 }
               }
             }
@@ -4101,6 +4097,55 @@ export async function updateCompanyLocation(
 }
 
 // Function to delete a company location
+// export async function deleteCompanyLocation(
+//   locationId: string,
+//   shopName: string,
+//   accessToken: string
+// ) {
+//   try {
+//     const deleteMutation = `
+//       mutation companyLocationDelete($companyLocationId: ID!) {
+//         companyLocationDelete(companyLocationId: $companyLocationId) {
+//           deletedCompanyLocationId
+//           userErrors {
+//             field
+//             message
+//           }
+//         }
+//       }
+//     `;
+
+//     const response = await fetch(
+//       `https://${shopName}/admin/api/2025-01/graphql.json`,
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-Shopify-Access-Token": accessToken,
+//         },
+//         body: JSON.stringify({
+//           query: deleteMutation,
+//           variables: { companyLocationId: locationId }
+//         }),
+//       }
+//     );
+
+//     const result = await response.json();
+//     console.log(result.data.companyLocationDelete.userErrors[0].message,"result.data.companyLocationDelete.userErrors[0].message");
+//     if (result.data?.companyLocationDelete?.userErrors?.length > 0) {
+//       return { error: result.data.companyLocationDelete.userErrors[0] };
+//     }
+
+//     return {
+//       success: true,
+//       deletedId: result.data?.companyLocationDelete?.deletedCompanyLocationId
+//     };
+//   } catch (error) {
+//     console.error("Error deleting company location:", error);
+//     return { error: error instanceof Error ? error.message : 'Unknown error' };
+//   }
+// }
+
 export async function deleteCompanyLocation(
   locationId: string,
   shopName: string,
@@ -4135,20 +4180,41 @@ export async function deleteCompanyLocation(
     );
 
     const result = await response.json();
+    
+    // Safe error checking
+    const deleteData = result.data?.companyLocationDelete;
+    const userErrors = deleteData?.userErrors;
+    
+    if (userErrors && userErrors.length > 0) {
+      console.log(userErrors[0].message, "Delete error message");
+      return { error: userErrors[0] };
+    }
 
-    if (result.data?.companyLocationDelete?.userErrors?.length > 0) {
-      return { error: result.data.companyLocationDelete.userErrors[0].message };
+    // Check if deletion was successful
+    if (!deleteData?.deletedCompanyLocationId) {
+      return { 
+        error: {
+          field: ['companyLocationId'],
+          message: 'Location deletion failed - no ID returned'
+        }
+      };
     }
 
     return {
       success: true,
-      deletedId: result.data?.companyLocationDelete?.deletedCompanyLocationId
+      deletedId: deleteData.deletedCompanyLocationId
     };
   } catch (error) {
     console.error("Error deleting company location:", error);
-    return { error: error instanceof Error ? error.message : 'Unknown error' };
+    return { 
+      error: {
+        field: ['general'],
+        message: error instanceof Error ? error.message : 'Unknown error'
+      }
+    };
   }
 }
+
 
 export async function checkLocationHasUsers(
   locationId: string,
