@@ -242,7 +242,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    // 📊 Fetch main orders
     const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
       companyId: company.companyId,
       allowedLocationIds,
@@ -257,23 +256,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    // 📅 Calculate current and previous month date ranges
-    const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
 
+    // 🔢 Fetch SEPARATE queries for month counts (without pagination limit)
+    const currentMonthResult = await getAdvancedCompanyOrders(
+      shop,
+      store.accessToken,
+      {
+        companyId: company.companyId,
+        allowedLocationIds,
+        filters: {
+          ...queryFilters,
+          dateRange: {
+            preset: "current_month",
+          },
+        },
+        pagination: { first: 250 }, // Fetch max to get accurate count
+      },
+    );
 
-    const ordersCurrentMonth = result.orders.filter((order: any) => {
-      const orderDate = new Date(order.createdAt);
-      return orderDate >= currentMonthStart && orderDate <= currentMonthEnd;
-    }).length;
+    const previousMonthResult = await getAdvancedCompanyOrders(
+      shop,
+      store.accessToken,
+      {
+        companyId: company.companyId,
+        allowedLocationIds,
+        filters: {
+          ...queryFilters,
+          dateRange: {
+            preset: "last_month",
+          },
+        },
+        pagination: { first: 250 }, // Fetch max to get accurate count
+      },
+    );
 
-    const ordersPreviousMonth = result.orders.filter((order: any) => {
-      const orderDate = new Date(order.createdAt);
-      return orderDate >= previousMonthStart && orderDate <= previousMonthEnd;
-    }).length;
+    const ordersCurrentMonth = currentMonthResult.orders?.length || 0;
+    const ordersPreviousMonth = previousMonthResult.orders?.length || 0;
 
     return Response.json({
       orders: result.orders,
@@ -284,7 +302,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       userRoles: company.roles,
       isMainContact,
       currentMonthOrderCount: ordersCurrentMonth,
-      monthlyChangePercentage: Math.round(ordersCurrentMonth - ordersPreviousMonth) / 100,
+      previousMonthOrderCount: ordersPreviousMonth,
+      monthlyChangePercentage: Math.round(
+              ((ordersCurrentMonth - ordersPreviousMonth) / ordersPreviousMonth) *
+                100,
+            ),
       debug: {
         ...result._debug,
         restrictedToLocations: allowedLocationIds || "none",
