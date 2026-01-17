@@ -1169,8 +1169,8 @@ export async function getCustomerCompanyInfo(
         // isMainContact,
       };
     });
-        const creditInfo = await calculateAvailableCredit(companyData.id);
-          const creditLimitNum = parseFloat(companyData.creditLimit.toString());
+        const creditInfo = await calculateAvailableCredit(companyData?.id || "");
+          const creditLimitNum = parseFloat(companyData?.creditLimit.toString() || "0");
           const usedCreditNum = creditInfo
             ? parseFloat(creditInfo.usedCredit.toString())
             : 0;
@@ -4315,10 +4315,12 @@ export async function getAdvancedCompanyOrders(
           .map(id => `customer_id:${extractId(id)}`)
           .join(' OR ');
         queryParts.push(`(${customerQueries})`);
+        
       } else if (typeof filters.customerId === 'string') {
         const cleanCustomerId = extractId(filters.customerId);
         queryParts.push(`customer_id:${cleanCustomerId}`);
       }
+
     }
 
     // 3. Date Filter with all presets

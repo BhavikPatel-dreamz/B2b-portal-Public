@@ -7,7 +7,6 @@ import {
   getCompanyOrderss,
 } from "app/utils/b2b-customer.server";
 
-
 export interface CreateCompanyInput {
   shopId: string;
   shopifyCompanyId?: string | null;
@@ -366,32 +365,41 @@ export async function getCompanyDashboardData(
   });
 
   // Get order statistics
-  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
+  const [totalOrdersData, paidOrdersData, unpaidOrdersData, pendingOrdersData] =
     await Promise.all([
-      prisma.b2BOrder.count({
+      await prisma.b2BOrder.groupBy({
+        by: ["shopifyOrderId"],
         where: { companyId, orderStatus: { not: "cancelled" } },
       }),
-      prisma.b2BOrder.count({
+      await prisma.b2BOrder.groupBy({
+        by: ["shopifyOrderId"],
         where: {
           companyId,
           paymentStatus: "paid",
           orderStatus: { not: "cancelled" },
         },
       }),
-      prisma.b2BOrder.count({
+      await prisma.b2BOrder.groupBy({
+        by: ["shopifyOrderId"],
         where: {
           companyId,
           paymentStatus: { in: ["pending", "partial"] },
           orderStatus: { not: "cancelled" },
         },
       }),
-      prisma.b2BOrder.count({
+      await prisma.b2BOrder.groupBy({
+        by: ["shopifyOrderId"],
         where: {
           companyId,
-          orderStatus: { in: ["draft", "submitted", "processing"] },
+          paymentStatus: { in: ["draft", "submitted", "processing"] },
         },
       }),
     ]);
+
+  const totalOrders = totalOrdersData.length;
+  const paidOrders = paidOrdersData.length;
+  const unpaidOrders = unpaidOrdersData.length;
+  const pendingOrders = pendingOrdersData.length;
 
   // Get users from database
   const dbUsers = await prisma.user.findMany({
@@ -449,7 +457,6 @@ export async function getCompanyDashboardData(
 
   // Get total count of matched users
   const totalMatchedUsers = matchedUsers.length;
-
 
   return {
     company,
@@ -572,7 +579,6 @@ export async function getCompanyOrders(
     },
   });
 
-
   const existingShopifyOrderIds = new Set(
     orders.map((order) => order.shopifyOrderId),
   );
@@ -592,46 +598,48 @@ export async function getCompanyOrders(
     },
   });
 
-
   const emailToUserIdMap = new Map(
     userData.map((user) => [user.email, user.id]),
   );
 
- if (newOrders.length > 0) {
-  for (const shopifyOrder of newOrders) {
-    const customerEmail = shopifyOrder.customer?.email;
-    const userId = customerEmail ? emailToUserIdMap.get(customerEmail) : undefined;
-    
-    try {
-      await prisma.b2BOrder.create({
-        data: {
-          shopifyOrderId: shopifyOrder.id,
-          company: {
-            connect: { id: companyId } 
+  if (newOrders.length > 0) {
+    for (const shopifyOrder of newOrders) {
+      const customerEmail = shopifyOrder.customer?.email;
+      const userId = customerEmail
+        ? emailToUserIdMap.get(customerEmail)
+        : undefined;
+
+      try {
+        await prisma.b2BOrder.create({
+          data: {
+            shopifyOrderId: shopifyOrder.id,
+            company: {
+              connect: { id: companyId },
+            },
+            shop: {
+              connect: { id: shopId },
+            },
+            orderStatus: shopifyOrder.displayFulfillmentStatus || "unfulfilled",
+            orderTotal: parseFloat(
+              shopifyOrder.totalPriceSet?.shopMoney?.amount || "0",
+            ),
+            createdAt: new Date(shopifyOrder.createdAt),
+            ...(userId && {
+              createdByUser: {
+                connect: { id: userId },
+              },
+            }),
+            creditUsed: 0,
+            userCreditUsed: 0,
+            remainingBalance: 0,
           },
-          shop: {
-            connect: { id: shopId }
-          },
-          orderStatus: shopifyOrder.displayFulfillmentStatus || "unfulfilled",
-          orderTotal: parseFloat(shopifyOrder.totalPriceSet?.shopMoney?.amount || "0"),
-          createdAt: new Date(shopifyOrder.createdAt),
-           ...(userId && {
-            createdByUser: {
-              connect: { id: userId }
-            }
-          }),
-          creditUsed: 0,
-          userCreditUsed: 0,
-          remainingBalance: 0,
-        },
-      });
-    } catch (error) {
-      console.error(`Error creating order ${shopifyOrder.id}:`, error);
+        });
+      } catch (error) {
+        console.error(`Error creating order ${shopifyOrder.id}:`, error);
+      }
     }
-  }
     console.log(`${newOrders.length} new orders processed`);
   }
-
 
   return {
     company,

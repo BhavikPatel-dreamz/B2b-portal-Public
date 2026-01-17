@@ -171,10 +171,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
             case "UPDATE_NOTIFICATION": {
                 const notificationId = formData.get("notificationId") as string;
-                const activityType = formData.get("activityType") as string;
+                // const activityType = formData.get("activityType") as string;
                 const isRead = formData.get("isRead") as 'true' | 'false' ;
 
-                if (!notificationId || !activityType) return { error: "Missing required fields" };
+                if (!notificationId ) return { error: "Missing required fields" };
 
                 // Verify ownership
                 const notification = await prisma.notification.findUnique({
@@ -188,7 +188,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 const updated = await prisma.notification.update({
                     where: { id: notificationId },
                     data: {
-                    activityType,
                     isRead: isRead == 'true'
         },
                 });

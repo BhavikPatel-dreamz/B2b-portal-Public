@@ -4,8 +4,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
+import { Link, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { countCompanies } from "../services/company.server";
@@ -39,13 +38,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // Fetch all the statistics
-  const [totalCompanies, pendingRegistrations, approvedRegistrations, rejectedRegistrations, totalUsers, totalOrders] = await Promise.all([
+
+    const totalOrders = await prisma.b2BOrder.groupBy({
+        by: ["shopifyOrderId"],
+        where: {
+          orderStatus: {
+            not: "cancelled",
+          },
+          shopId: store.id,
+        },
+        _count: {
+          shopifyOrderId: true,
+        },
+      });
+    
+
+
+  const [totalCompanies, pendingRegistrations, approvedRegistrations, rejectedRegistrations, totalUsers] = await Promise.all([
     countCompanies(store.id),
     countRegistrations(store.id, "PENDING"),
     countRegistrations(store.id, "APPROVED"),
     countRegistrations(store.id, "REJECTED"),
     prisma.user.count({ where: { shopId: store.id } }),
-    prisma.b2BOrder.count({ where: { shopId: store.id } }),
   ]);
 
   // Fetch credit statistics
@@ -83,7 +97,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     approvedRegistrations,
     rejectedRegistrations,
     totalUsers,
-    totalOrders,
+    totalOrders:totalOrders.length,
     totalCreditAllowed,
     totalCreditUsed,
     availableCredit,
@@ -348,18 +362,22 @@ export default function Index() {
 
       {/* Quick Actions */}
       <s-section>
-        <s-stack direction="block" gap="base">
-          <s-text variant="headingLg" weight="bold">Quick Actions</s-text>
-          <s-stack direction="inline" gap="base">
-            <s-button url="/app/companies" variant="primary">
-              View All Companies
-            </s-button>
-            <s-button url="/app/registrations" variant="secondary">
-              Review Pending Registrations
-            </s-button>
-          </s-stack>
-        </s-stack>
-      </s-section>
+  <s-stack direction="block" gap="base">
+    <s-text variant="headingLg" weight="bold">Quick Actions</s-text>
+    <s-stack direction="inline" gap="base">
+      <Link to="/app/companies">
+        <s-button variant="primary">
+          View All Companies
+        </s-button>
+      </Link>
+      <Link to="/app/registrations">
+        <s-button variant="secondary">
+          Review Pending Registrations
+        </s-button>
+      </Link>
+    </s-stack>
+  </s-stack>
+</s-section>
     </s-page>
   );
 }

@@ -99,7 +99,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shop,
       store.accessToken,
     );
-
+ 
     let hasB2BInShopify = false;
     let accessMethod = "";
     let additionalInfo: any = {};

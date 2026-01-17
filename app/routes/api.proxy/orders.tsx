@@ -248,6 +248,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopifyCompanyId: company.companyId,
       },
     });
+    
     const userData = await prisma.user.findFirst({
       where: {
         companyId: companyData.id,
@@ -255,25 +256,50 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
-      companyId: company.companyId,
-      allowedLocationIds:
-        userData?.role == "STORE_ADMIN" ? undefined : allowedLocationIds,
-      filters: queryFilters,
-      pagination: pagination || { first: 20 },
-    });
+    // Helper function to determine location filtering
+    const getEffectiveLocationIds = () => 
+      userData?.role === "STORE_ADMIN" ? undefined : allowedLocationIds;
 
-    const groupedOrders = await prisma.b2BOrder.groupBy({
-      by: ["shopifyOrderId"],
-      where: {
-        shopifyOrderId: {
-          in: result.orders?.map((order:any) => order.id),
+    // ✅ FIXED: Helper function to fetch and filter orders
+    const fetchAndFilterOrders = async (
+      filters: any,
+      pagination: any
+    ) => {
+      // Fetch orders from Shopify (already filtered by location in getAdvancedCompanyOrders)
+      const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
+        companyId: company.companyId,
+        allowedLocationIds: getEffectiveLocationIds(),
+        filters,
+        pagination,
+      });
+
+      const groupedOrders = await prisma.b2BOrder.groupBy({
+        by: ["shopifyOrderId"],
+        where: {
+          orderStatus: {
+            not: "cancelled",
+          },
+          companyId: companyData.id,
+          shopifyOrderId: {
+            in: result.orders?.map((order: any) => order.id) || [],
+          },
         },
-      },
-    });
-    const uniqueShopifyOrderIds = groupedOrders.map((order) => order.shopifyOrderId);
- const orders = result.orders?.filter((order:any) => uniqueShopifyOrderIds.includes(order.id));
+      });
 
+      const uniqueShopifyOrderIds = groupedOrders.map((order) => order.shopifyOrderId);
+      const filteredOrders = result.orders?.filter((order: any) =>
+        uniqueShopifyOrderIds.includes(order.id)
+      );
+
+
+      return { result, filteredOrders, count: groupedOrders.length };
+    };
+
+    // Fetch main orders
+    const { result, filteredOrders: orders } = await fetchAndFilterOrders(
+      queryFilters,
+      pagination || { first: 10 }
+    );
 
     if (orders.error) {
       return Response.json(
@@ -283,40 +309,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // 🔢 Fetch SEPARATE queries for month counts (without pagination limit)
-    const currentMonthResult = await getAdvancedCompanyOrders(
-      shop,
-      store.accessToken,
+    const { count: ordersCurrentMonth } = await fetchAndFilterOrders(
       {
-        companyId: company.companyId,
-        allowedLocationIds,
-        filters: {
-          ...queryFilters,
-          dateRange: {
-            preset: "current_month",
-          },
-        },
-        pagination: { first: 250 }, // Fetch max to get accurate count
+        ...queryFilters,
+        dateRange: { preset: "current_month" },
       },
+      { first: 250 }
     );
 
-    const previousMonthResult = await getAdvancedCompanyOrders(
-      shop,
-      store.accessToken,
+    const { count: ordersPreviousMonth } = await fetchAndFilterOrders(
       {
-        companyId: company.companyId,
-        allowedLocationIds,
-        filters: {
-          ...queryFilters,
-          dateRange: {
-            preset: "last_month",
-          },
-        },
-        pagination: { first: 250 }, // Fetch max to get accurate count
+        ...queryFilters,
+        dateRange: { preset: "last_month" },
       },
+      { first: 250 }
     );
-
-    const ordersCurrentMonth = currentMonthResult.orders?.length || 0;
-    const ordersPreviousMonth = previousMonthResult.orders?.length || 0;
 
     return Response.json({
       orders: orders,
@@ -328,11 +335,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       isMainContact,
       currentMonthOrderCount: ordersCurrentMonth,
       previousMonthOrderCount: ordersPreviousMonth,
-      monthlyChangePercentage: Math.round(
-        ((ordersCurrentMonth - ordersPreviousMonth) / ordersPreviousMonth) *
-          100,
-      )
-      
+      monthlyChangePercentage: ordersPreviousMonth > 0 
+        ? Math.round(
+            ((ordersCurrentMonth - ordersPreviousMonth) / ordersPreviousMonth) * 100
+          )
+        : 0,
     });
   } catch (error) {
     console.error("Proxy error:", error);
