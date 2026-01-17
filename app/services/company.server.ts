@@ -326,43 +326,27 @@ export async function getCompanyDashboardData(
     return null;
   }
 
-  const uniqueOrders = await prisma.b2BOrder.groupBy({
-    by: ["shopifyOrderId"],
-    where: {
-      companyId,
-      orderStatus: { not: "cancelled" },
-    },
-    _max: {
-      createdAt: true,
-    },
-    orderBy: {
-      _max: {
-        createdAt: "desc",
-      },
-    },
-    take: 20,
-  });
 
-  const recentOrders = await prisma.b2BOrder.findMany({
-    where: {
-      OR: uniqueOrders.map((order) => ({
-        shopifyOrderId: order.shopifyOrderId,
-        createdAt: order._max.createdAt!,
-      })),
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-    include: {
-      createdByUser: {
-        select: {
-          email: true,
-          firstName: true,
-          lastName: true,
-        },
+   const recentOrders = await prisma.b2BOrder.findMany({
+  where: {
+    companyId,
+    orderStatus: { not: "cancelled" },
+  },
+  distinct: ["shopifyOrderId"],
+  orderBy: {
+    createdAt: "desc",
+  },
+  take: 20,
+  include: {
+    createdByUser: {
+      select: {
+        email: true,
+        firstName: true,
+        lastName: true,
       },
     },
-  });
+  },
+});
 
   // Get order statistics
   const [totalOrdersData, paidOrdersData, unpaidOrdersData, pendingOrdersData] =
@@ -487,7 +471,7 @@ export async function getCompanyUsers(companyId: string, shopId: string) {
   }
 
   const users = await prisma.user.findMany({
-    where: { companyId },
+    where: { companyId,shopId },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -558,26 +542,28 @@ export async function getCompanyOrders(
     take: 20,
   });
 
-  const orders = await prisma.b2BOrder.findMany({
-    where: {
-      OR: uniqueOrders.map((order) => ({
-        shopifyOrderId: order.shopifyOrderId,
-        createdAt: order._max.createdAt!,
-      })),
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-    include: {
-      createdByUser: {
-        select: {
-          email: true,
-          firstName: true,
-          lastName: true,
-        },
+  
+ const orders = await prisma.b2BOrder.findMany({
+  where: {
+    companyId,
+    orderStatus: { not: "cancelled" },
+  },
+  distinct: ["shopifyOrderId"],
+  orderBy: {
+    createdAt: "desc",
+  },
+  take: 20,
+  include: {
+    createdByUser: {
+      select: {
+        email: true,
+        firstName: true,
+        lastName: true,
       },
     },
-  });
+  },
+});
+
 
   const existingShopifyOrderIds = new Set(
     orders.map((order) => order.shopifyOrderId),
@@ -640,6 +626,7 @@ export async function getCompanyOrders(
     }
     console.log(`${newOrders.length} new orders processed`);
   }
+
 
   return {
     company,

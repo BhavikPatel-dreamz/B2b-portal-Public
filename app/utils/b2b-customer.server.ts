@@ -13,7 +13,10 @@ type GraphQLResponse<T = any> = {
 /**
  * Check if a Shopify customer exists by email
  */
-export async function checkCustomerExists(admin: AdminApiContext, email: string) {
+export async function checkCustomerExists(
+  admin: AdminApiContext,
+  email: string,
+) {
   const query = `
     query getCustomer($email: String!) {
       customers(first: 1, query: $email) {
@@ -40,15 +43,15 @@ export async function checkCustomerExists(admin: AdminApiContext, email: string)
   `;
 
   const variables = {
-    email: `email:${email}`
+    email: `email:${email}`,
   };
 
   try {
     const response = await admin.graphql(query, { variables });
-    const data = await response.json() as GraphQLResponse;
+    const data = (await response.json()) as GraphQLResponse;
 
     if (data.errors) {
-      console.error('Shopify GraphQL errors:', data.errors);
+      console.error("Shopify GraphQL errors:", data.errors);
       return { success: false, error: data.errors[0].message };
     }
 
@@ -65,19 +68,19 @@ export async function checkCustomerExists(admin: AdminApiContext, email: string)
           firstName: customer.firstName,
           lastName: customer.lastName,
           phone: customer.phone,
-          metafields: customer.metafields.edges.map((edge: any) => edge.node)
-        }
+          metafields: customer.metafields.edges.map((edge: any) => edge.node),
+        },
       };
     }
 
     return {
       success: true,
       exists: false,
-      customer: null
+      customer: null,
     };
   } catch (error) {
-    console.error('Error checking customer:', error);
-    return { success: false, error: 'Failed to check customer' };
+    console.error("Error checking customer:", error);
+    return { success: false, error: "Failed to check customer" };
   }
 }
 
@@ -102,7 +105,10 @@ type CheckCompanyResult =
     };
 
 export async function checkCompanyExists(
-admin: AdminApiContext, externalId: string, p0: string | undefined): Promise<CheckCompanyResult> {
+  admin: AdminApiContext,
+  externalId: string,
+  p0: string | undefined,
+): Promise<CheckCompanyResult> {
   try {
     const QUERY = `
       query ($query: String!) {
@@ -122,7 +128,7 @@ admin: AdminApiContext, externalId: string, p0: string | undefined): Promise<Che
       },
     });
 
-    const json = await res.json() as GraphQLResponse;
+    const json = (await res.json()) as GraphQLResponse;
 
     if (json.errors?.length) {
       return { success: false, error: json.errors[0].message };
@@ -150,7 +156,7 @@ export async function createShopifyCustomer(
     firstName: string;
     lastName: string;
     phone?: string;
-  }
+  },
 ) {
   const mutation = `
     mutation customerCreate($input: CustomerInput!) {
@@ -174,39 +180,48 @@ export async function createShopifyCustomer(
     input: {
       email: customerData.email,
       firstName: customerData.firstName,
-      lastName: customerData.lastName || '',
-      phone: customerData.phone || ''
-    }
+      lastName: customerData.lastName || "",
+      phone: customerData.phone || "",
+    },
   };
 
   try {
-    console.log('Creating customer with data:', JSON.stringify(variables, null, 2));
+    console.log(
+      "Creating customer with data:",
+      JSON.stringify(variables, null, 2),
+    );
 
     const response = await admin.graphql(mutation, { variables });
-    const data = await response.json() as GraphQLResponse;
+    const data = (await response.json()) as GraphQLResponse;
 
-    console.log('Create Customer Response:', JSON.stringify(data, null, 2));
+    console.log("Create Customer Response:", JSON.stringify(data, null, 2));
 
     // Check for userErrors first
-    if (data.data?.customerCreate?.userErrors && data.data.customerCreate.userErrors.length > 0) {
+    if (
+      data.data?.customerCreate?.userErrors &&
+      data.data.customerCreate.userErrors.length > 0
+    ) {
       const errors = data.data.customerCreate.userErrors;
-      console.error('Shopify User Errors:', errors);
+      console.error("Shopify User Errors:", errors);
       return {
         success: false,
-        error: errors.map((e: any) => `${e.field}: ${e.message}`).join(', ')
+        error: errors.map((e: any) => `${e.field}: ${e.message}`).join(", "),
       };
     }
 
     // Check for GraphQL errors
     if (data.errors) {
-      console.error('Shopify GraphQL errors:', data.errors);
+      console.error("Shopify GraphQL errors:", data.errors);
       return { success: false, error: data.errors[0].message };
     }
 
     const customer = data.data?.customerCreate?.customer;
 
     if (!customer) {
-      return { success: false, error: 'Failed to create customer - no customer returned' };
+      return {
+        success: false,
+        error: "Failed to create customer - no customer returned",
+      };
     }
 
     return {
@@ -216,12 +231,12 @@ export async function createShopifyCustomer(
         email: customer.email || customerData.email,
         firstName: customer.firstName,
         lastName: customer.lastName,
-        phone: customer.phone
-      }
+        phone: customer.phone,
+      },
     };
   } catch (error) {
-    console.error('Error creating customer:', error);
-    return { success: false, error: 'Failed to create customer' };
+    console.error("Error creating customer:", error);
+    return { success: false, error: "Failed to create customer" };
   }
 }
 
@@ -230,8 +245,7 @@ export async function createShopifyCompany(
   companyData: {
     name: string;
     externalId?: string;
-  }
-
+  },
 ) {
   const mutation = `
     mutation companyCreate($input: CompanyCreateInput!) {
@@ -262,7 +276,6 @@ export async function createShopifyCompany(
   const res = await admin.graphql(mutation, { variables });
   const json = await res.json();
 
-
   const errors = json.data?.companyCreate?.userErrors;
   if (errors?.length) {
     return { success: false, error: errors[0].message };
@@ -271,11 +284,10 @@ export async function createShopifyCompany(
   return { success: true, company: json.data.companyCreate.company };
 }
 
-
 export async function assignCompanyToCustomer(
   admin: AdminApiContext,
   customerId: string,
-  companyId: string
+  companyId: string,
 ) {
   try {
     // Step 1: Get or create company location
@@ -295,11 +307,12 @@ export async function assignCompanyToCustomer(
     `;
 
     const locationRes = await admin.graphql(locationQuery, {
-      variables: { companyId }
+      variables: { companyId },
     });
 
     const locationJson = await locationRes.json();
-    let companyLocationId = locationJson.data?.company?.locations?.edges?.[0]?.node?.id;
+    let companyLocationId =
+      locationJson.data?.company?.locations?.edges?.[0]?.node?.id;
 
     // If no location exists, create one
     if (!companyLocationId) {
@@ -322,19 +335,20 @@ export async function assignCompanyToCustomer(
         variables: {
           companyId,
           input: {
-            name: "Main Location"
-          }
-        }
+            name: "Main Location",
+          },
+        },
       });
 
       const createLocationJson = await createLocationRes.json();
-      const createLocationPayload = createLocationJson.data?.companyLocationCreate;
+      const createLocationPayload =
+        createLocationJson.data?.companyLocationCreate;
 
       if (createLocationPayload?.userErrors?.length) {
         return {
           success: false,
           error: createLocationPayload.userErrors[0].message,
-          step: 'createLocation'
+          step: "createLocation",
         };
       }
 
@@ -342,7 +356,7 @@ export async function assignCompanyToCustomer(
     }
 
     // Step 2: Get available roles
-     const companyQuery = `
+    const companyQuery = `
       query getCompany($companyId: ID!) {
         company(id: $companyId) {
           contactRoles(first: 10) {
@@ -358,16 +372,15 @@ export async function assignCompanyToCustomer(
     `;
 
     const companyRes = await admin.graphql(companyQuery, {
-      variables: { companyId }
+      variables: { companyId },
     });
 
     const companyJson = await companyRes.json();
     const roles = companyJson.data?.company?.contactRoles?.edges || [];
 
-
     // Find "Member" role or use the first available role
-    let companyContactRoleId = roles.find((edge: any) =>
-      edge.node.name.toLowerCase() === 'Company Admin'
+    let companyContactRoleId = roles.find(
+      (edge: any) => edge.node.name.toLowerCase() === "Company Admin",
     )?.node?.id;
 
     if (!companyContactRoleId && roles.length > 0) {
@@ -377,8 +390,8 @@ export async function assignCompanyToCustomer(
     if (!companyContactRoleId) {
       return {
         success: false,
-        error: 'No company contact roles available',
-        step: 'getRoles'
+        error: "No company contact roles available",
+        step: "getRoles",
       };
     }
 
@@ -404,7 +417,7 @@ export async function assignCompanyToCustomer(
     `;
 
     const contactRes = await admin.graphql(assignContactMutation, {
-      variables: { companyId, customerId }
+      variables: { companyId, customerId },
     });
 
     const contactJson = await contactRes.json();
@@ -414,7 +427,7 @@ export async function assignCompanyToCustomer(
       return {
         success: false,
         error: contactPayload.userErrors[0].message,
-        step: 'assignContact'
+        step: "assignContact",
       };
     }
 
@@ -455,8 +468,8 @@ export async function assignCompanyToCustomer(
       variables: {
         companyContactId,
         companyContactRoleId,
-        companyLocationId
-      }
+        companyLocationId,
+      },
     });
 
     const roleJson = await roleRes.json();
@@ -466,7 +479,7 @@ export async function assignCompanyToCustomer(
       return {
         success: false,
         error: rolePayload.userErrors[0].message,
-        step: 'assignRole'
+        step: "assignRole",
       };
     }
 
@@ -504,7 +517,7 @@ export async function assignCompanyToCustomer(
     `;
 
     const mainContactRes = await admin.graphql(assignMainContactMutation, {
-      variables: { companyId, companyContactId }
+      variables: { companyId, companyContactId },
     });
 
     const mainContactJson = await mainContactRes.json();
@@ -514,7 +527,7 @@ export async function assignCompanyToCustomer(
       return {
         success: false,
         error: mainContactPayload.userErrors[0].message,
-        step: 'assignMainContact'
+        step: "assignMainContact",
       };
     }
 
@@ -522,15 +535,14 @@ export async function assignCompanyToCustomer(
       success: true,
       companyContactId,
       roleAssignment: rolePayload.companyContactRoleAssignment,
-      company: mainContactPayload.company
+      company: mainContactPayload.company,
     };
-
   } catch (error) {
-    console.error('Error in assignCompanyToCustomer:', error);
+    console.error("Error in assignCompanyToCustomer:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
-      step: 'general'
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+      step: "general",
     };
   }
 }
@@ -540,7 +552,7 @@ export async function assignCompanyToCustomer(
 export async function assignLocationsToCompany(
   admin: AdminApiContext,
   companyId: string,
-  locationIds: string[]
+  locationIds: string[],
 ) {
   const mutation = `
     mutation companyAssignLocations($companyId: ID!, $locationIds: [ID!]!) {
@@ -571,18 +583,17 @@ export async function assignLocationsToCompany(
     const response = await admin.graphql(mutation, {
       variables: {
         companyId,
-        locationIds
-      }
+        locationIds,
+      },
     });
 
-    const data = await response.json() as GraphQLResponse;
-
+    const data = (await response.json()) as GraphQLResponse;
 
     /* USER ERRORS */
     if (data.data?.companyAssignLocations?.userErrors?.length) {
       return {
         success: false,
-        error: data.data.companyAssignLocations.userErrors[0].message
+        error: data.data.companyAssignLocations.userErrors[0].message,
       };
     }
 
@@ -593,19 +604,18 @@ export async function assignLocationsToCompany(
 
     return {
       success: true,
-      company: data.data.companyAssignLocations.company
+      company: data.data.companyAssignLocations.company,
     };
-
   } catch (error) {
-    console.error('Assign Locations Error:', error);
-    return { success: false, error: 'Failed to assign company locations' };
+    console.error("Assign Locations Error:", error);
+    return { success: false, error: "Failed to assign company locations" };
   }
 }
 
 export async function updateCustomerMetafields(
   admin: AdminApiContext,
   customerId: string,
-  metafields: { key: string; value: string }[]
+  metafields: { key: string; value: string }[],
 ) {
   const mutation = `
     mutation customerUpdate($input: CustomerInput!) {
@@ -632,20 +642,20 @@ export async function updateCustomerMetafields(
 
   const input = {
     id: customerId,
-    metafields: metafields.map(mf => ({
-      namespace: 'custom',
+    metafields: metafields.map((mf) => ({
+      namespace: "custom",
       key: mf.key,
       value: mf.value,
-      type: mf.key === 'b2b_locations' ? 'json' : 'single_line_text_field'
-    }))
+      type: mf.key === "b2b_locations" ? "json" : "single_line_text_field",
+    })),
   };
 
   try {
     const response = await admin.graphql(mutation, { variables: { input } });
-    const data = await response.json() as GraphQLResponse;
+    const data = (await response.json()) as GraphQLResponse;
 
     if (data.errors) {
-      console.error('Shopify GraphQL errors:', data.errors);
+      console.error("Shopify GraphQL errors:", data.errors);
       return { success: false, error: data.errors[0].message };
     }
 
@@ -657,11 +667,11 @@ export async function updateCustomerMetafields(
 
     return {
       success: true,
-      customer: result.customer
+      customer: result.customer,
     };
   } catch (error) {
-    console.error('Error updating customer metafields:', error);
-    return { success: false, error: 'Failed to update customer metafields' };
+    console.error("Error updating customer metafields:", error);
+    return { success: false, error: "Failed to update customer metafields" };
   }
 }
 
@@ -671,7 +681,7 @@ export async function updateCustomerMetafields(
  */
 export async function fetchCustomerTags(
   admin: AdminApiContext,
-  customerId: string
+  customerId: string,
 ): Promise<{ success: boolean; tags: string[]; error?: string }> {
   const query = `
     query getCustomer($id: ID!) {
@@ -684,17 +694,17 @@ export async function fetchCustomerTags(
 
   try {
     const response = await admin.graphql(query, {
-      variables: { id: customerId }
+      variables: { id: customerId },
     });
 
-    const data = await response.json() as GraphQLResponse;
+    const data = (await response.json()) as GraphQLResponse;
 
     if (data.errors) {
-      console.error('❌ Shopify GraphQL errors:', data.errors);
+      console.error("❌ Shopify GraphQL errors:", data.errors);
       return {
         success: false,
         tags: [],
-        error: data.errors[0].message
+        error: data.errors[0].message,
       };
     }
 
@@ -703,14 +713,14 @@ export async function fetchCustomerTags(
 
     return {
       success: true,
-      tags
+      tags,
     };
   } catch (error) {
-    console.error('❌ Error fetching customer tags:', error);
+    console.error("❌ Error fetching customer tags:", error);
     return {
       success: false,
       tags: [],
-      error: 'Failed to fetch customer tags'
+      error: "Failed to fetch customer tags",
     };
   }
 }
@@ -725,13 +735,13 @@ export async function fetchCustomerTags(
  */
 export async function checkCustomerHasCompany(
   customerId: string,
-  shopDomain: string
+  shopDomain: string,
 ): Promise<boolean> {
   try {
     // Get the store first
     const store = await getStoreByDomain(shopDomain);
     if (!store) {
-      console.log('⚠️ Store not found');
+      console.log("⚠️ Store not found");
       return false;
     }
 
@@ -741,20 +751,20 @@ export async function checkCustomerHasCompany(
     const user = await prisma.user.findFirst({
       where: {
         shopId: store.id,
-        status: 'APPROVED',
+        status: "APPROVED",
         isActive: true,
       },
     });
 
     if (user) {
-      console.log('✅ Approved user found for store');
+      console.log("✅ Approved user found for store");
       return true;
     }
 
-    console.log('⚠️ No approved users found for this store');
+    console.log("⚠️ No approved users found for this store");
     return false;
   } catch (error) {
-    console.error('❌ Error checking customer in database:', error);
+    console.error("❌ Error checking customer in database:", error);
     // On error, you can choose to allow or deny access
     // For now, we'll allow them through to avoid blocking legitimate users
     return true;
@@ -767,10 +777,11 @@ export async function checkCustomerHasCompany(
  * @returns true if customer has B2B-related tags
  */
 export function hasB2BAccess(tags: string[]): boolean {
-  return tags.some(tag =>
-    tag.toLowerCase() === 'b2b' ||
-    tag.toLowerCase() === 'company' ||
-    tag.toLowerCase().includes('b2b')
+  return tags.some(
+    (tag) =>
+      tag.toLowerCase() === "b2b" ||
+      tag.toLowerCase() === "company" ||
+      tag.toLowerCase().includes("b2b"),
   );
 }
 
@@ -786,7 +797,7 @@ export function hasB2BAccess(tags: string[]): boolean {
  */
 export async function checkCustomerIsB2BInShopify(
   admin: AdminApiContext,
-  customerId: string
+  customerId: string,
 ): Promise<{
   success: boolean;
   hasAccess: boolean;
@@ -816,19 +827,19 @@ export async function checkCustomerIsB2BInShopify(
 
   try {
     const response = await admin.graphql(query, {
-      variables: { id: customerId }
+      variables: { id: customerId },
     });
 
-    const data = await response.json() as GraphQLResponse;
+    const data = (await response.json()) as GraphQLResponse;
 
     if (data.errors) {
-      console.error('❌ Shopify GraphQL errors:', data.errors);
+      console.error("❌ Shopify GraphQL errors:", data.errors);
       return {
         success: false,
         hasAccess: false,
         hasTags: false,
         hasCompanyMetafield: false,
-        error: data.errors[0].message
+        error: data.errors[0].message,
       };
     }
 
@@ -840,7 +851,7 @@ export async function checkCustomerIsB2BInShopify(
         hasAccess: false,
         hasTags: false,
         hasCompanyMetafield: false,
-        error: 'Customer not found'
+        error: "Customer not found",
       };
     }
 
@@ -849,9 +860,10 @@ export async function checkCustomerIsB2BInShopify(
     const hasTags = hasB2BAccess(tags);
 
     // Check for company metafield
-    const metafields = customer.metafields?.edges?.map((edge: any) => edge.node) || [];
-    const companyMetafield = metafields.find((mf: any) =>
-      mf.key === 'b2b_company' || mf.key === 'company'
+    const metafields =
+      customer.metafields?.edges?.map((edge: any) => edge.node) || [];
+    const companyMetafield = metafields.find(
+      (mf: any) => mf.key === "b2b_company" || mf.key === "company",
     );
     const hasCompanyMetafield = !!companyMetafield;
     const company = companyMetafield?.value;
@@ -859,13 +871,13 @@ export async function checkCustomerIsB2BInShopify(
     // Customer has B2B access if they have either B2B tags OR a company metafield
     const hasAccess = hasTags || hasCompanyMetafield;
 
-    console.log('✅ Shopify B2B check:', {
+    console.log("✅ Shopify B2B check:", {
       customerId,
       hasAccess,
       hasTags,
       hasCompanyMetafield,
       tags: tags.length > 0 ? tags : undefined,
-      company
+      company,
     });
 
     return {
@@ -874,16 +886,16 @@ export async function checkCustomerIsB2BInShopify(
       hasTags,
       hasCompanyMetafield,
       tags,
-      company
+      company,
     };
   } catch (error) {
-    console.error('❌ Error checking customer B2B status in Shopify:', error);
+    console.error("❌ Error checking customer B2B status in Shopify:", error);
     return {
       success: false,
       hasAccess: false,
       hasTags: false,
       hasCompanyMetafield: false,
-      error: 'Failed to check customer B2B status'
+      error: "Failed to check customer B2B status",
     };
   }
 }
@@ -901,7 +913,7 @@ export async function checkCustomerIsB2BInShopify(
 export async function checkCustomerIsB2BInShopifyByREST(
   shop: string,
   customerId: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{
   success: boolean;
   hasAccess: boolean;
@@ -916,24 +928,26 @@ export async function checkCustomerIsB2BInShopifyByREST(
     const response = await fetch(
       `https://${shop}/admin/api/2025-01/customers/${customerId}.json?fields=id,tags,metafields`,
       {
-        method: 'GET',
+        method: "GET",
         headers: {
-          'X-Shopify-Access-Token': accessToken,
-          'Content-Type': 'application/json',
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     console.log(`✅ ============etched customer from Shopify:`, response);
 
     if (!response.ok) {
-      console.error(`❌ Failed to fetch customer from Shopify: ${response.status}`);
+      console.error(
+        `❌ Failed to fetch customer from Shopify: ${response.status}`,
+      );
       return {
         success: false,
         hasAccess: false,
         hasTags: false,
         hasCompanyMetafield: false,
-        error: `Failed to fetch customer: ${response.status}`
+        error: `Failed to fetch customer: ${response.status}`,
       };
     }
 
@@ -946,19 +960,24 @@ export async function checkCustomerIsB2BInShopifyByREST(
         hasAccess: false,
         hasTags: false,
         hasCompanyMetafield: false,
-        error: 'Customer not found'
+        error: "Customer not found",
       };
     }
 
     // Check tags for B2B access
-    const tagsString = customer.tags || '';
-    const tags = tagsString.split(',').map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0);
+    const tagsString = customer.tags || "";
+    const tags = tagsString
+      .split(",")
+      .map((tag: string) => tag.trim())
+      .filter((tag: string) => tag.length > 0);
     const hasTags = hasB2BAccess(tags);
 
     // Check for company metafield
     const metafields = customer.metafields || [];
-    const companyMetafield = metafields.find((mf: any) =>
-      (mf.namespace === 'custom' && (mf.key === 'b2b_company' || mf.key === 'company'))
+    const companyMetafield = metafields.find(
+      (mf: any) =>
+        mf.namespace === "custom" &&
+        (mf.key === "b2b_company" || mf.key === "company"),
     );
     const hasCompanyMetafield = !!companyMetafield;
     const company = companyMetafield?.value;
@@ -966,13 +985,13 @@ export async function checkCustomerIsB2BInShopifyByREST(
     // Customer has B2B access if they have either B2B tags OR a company metafield
     const hasAccess = hasTags || hasCompanyMetafield;
 
-    console.log('✅ Shopify B2B check (REST):', {
+    console.log("✅ Shopify B2B check (REST):", {
       customerId,
       hasAccess,
       hasTags,
       hasCompanyMetafield,
       tags: tags.length > 0 ? tags : undefined,
-      company
+      company,
     });
 
     return {
@@ -981,27 +1000,29 @@ export async function checkCustomerIsB2BInShopifyByREST(
       hasTags,
       hasCompanyMetafield,
       tags,
-      company
+      company,
     };
   } catch (error) {
-    console.error('❌ Error checking customer B2B status in Shopify (REST):', error);
+    console.error(
+      "❌ Error checking customer B2B status in Shopify (REST):",
+      error,
+    );
     return {
       success: false,
       hasAccess: false,
       hasTags: false,
       hasCompanyMetafield: false,
-      error: 'Failed to check customer B2B status'
+      error: "Failed to check customer B2B status",
     };
   }
 }
-
 
 // Function to get customer company information with role details
 // Function to get customer company information with role details
 export async function getCustomerCompanyInfo(
   customerId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   try {
     // GraphQL query to fetch customer company contacts with their roles
@@ -1063,12 +1084,12 @@ export async function getCustomerCompanyInfo(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query }),
-      }
+      },
     );
 
     const data = await response.json();
 
-
+  
     if (data.errors) {
       console.error("GraphQL Errors:", data.errors);
       return { hasCompany: false, error: data.errors };
@@ -1087,69 +1108,78 @@ export async function getCustomerCompanyInfo(
       };
     }
     const RegistrationData = await prisma.registrationSubmission.findFirst({
-        where: {
-          email: customer.email,
-        },
-      });
-    
-     const  companyData = await prisma.companyAccount.findFirst({
-        where: {
-          contactEmail: customer.email,
-        },
-      });
+      where: {
+        email: customer.email,
+      },
+    });
+
+    const companyData = await prisma.companyAccount.findFirst({
+      where: {
+        contactEmail: customer.email,
+      },
+    });
     // Process company information
     const companies = companyProfiles.map((profile: any) => {
       const company = profile.company;
 
-      const roleAssignments = profile.roleAssignments?.edges?.map((edge: any) => ({
-        role: edge.node.role.name,
-        locationId: edge.node.companyLocation?.id,
-        locationName: edge.node.companyLocation?.name
-      })) || [];
+      const roleAssignments =
+        profile.roleAssignments?.edges?.map((edge: any) => ({
+          role: edge.node.role.name,
+          locationId: edge.node.companyLocation?.id,
+          locationName: edge.node.companyLocation?.name,
+        })) || [];
 
       const roles = roleAssignments.map((r: any) => r.role);
 
       // Check if this customer is the main contact (company owner)
-      const isMainContact = company.mainContact?.customer?.id === `gid://shopify/Customer/${customerId}`;
+      const isMainContact =
+        company.mainContact?.customer?.id ===
+        `gid://shopify/Customer/${customerId}`;
 
       // Check if user has "Company Admin" role (NOT "Location Admin")
       // Only "Company Admin" (without "Location" prefix) should be considered admin
-      const hasCompanyAdminRole = roles.some(
-        (r: string) => {
-          const roleLower = r.toLowerCase();
-          // Match "company admin" or "admin" but NOT "location admin"
-          return (roleLower === "admin" || roleLower === "company admin") &&
-                 !roleLower.includes("location");
-        }
-      );
+      const hasCompanyAdminRole = roles.some((r: string) => {
+        const roleLower = r.toLowerCase();
+        // Match "company admin" or "admin" but NOT "location admin"
+        return (
+          (roleLower === "admin" || roleLower === "company admin") &&
+          !roleLower.includes("location")
+        );
+      });
 
       // User is admin if they are main contact OR have Company Admin role
       const isAdmin = isMainContact || hasCompanyAdminRole;
 
       // Extract unique location IDs that this user has access to
       const assignedLocationIds = roleAssignments
-        .filter((ra: { locationId: any; }) => ra.locationId)
-        .map((ra: { locationId: string; }) => ra.locationId as string);
+        .filter((ra: { locationId: any }) => ra.locationId)
+        .map((ra: { locationId: string }) => ra.locationId as string);
 
       // Remove duplicates
       const uniqueLocationIds = [...new Set(assignedLocationIds)];
 
       // Group role assignments by location for easier validation
-      const locationRoles = roleAssignments.reduce((acc: any, ra: { locationId: string | number; locationName: any; role: any; }) => {
-        if (ra.locationId) {
-          if (!acc[ra.locationId]) {
-            acc[ra.locationId] = {
-              locationId: ra.locationId,
-              locationName: ra.locationName,
-              roles: []
-            };
+      const locationRoles = roleAssignments.reduce(
+        (
+          acc: any,
+          ra: { locationId: string | number; locationName: any; role: any },
+        ) => {
+          if (ra.locationId) {
+            if (!acc[ra.locationId]) {
+              acc[ra.locationId] = {
+                locationId: ra.locationId,
+                locationName: ra.locationName,
+                roles: [],
+              };
+            }
+            acc[ra.locationId].roles.push(ra.role);
           }
-          acc[ra.locationId].roles.push(ra.role);
-        }
-        return acc;
-      }, {});
+          return acc;
+        },
+        {},
+      );
 
-        return {
+      return {
         companyId: company.id,
         companyName: company.name,
         externalId: company.externalId,
@@ -1169,32 +1199,39 @@ export async function getCustomerCompanyInfo(
         // isMainContact,
       };
     });
-        const creditInfo = await calculateAvailableCredit(companyData?.id || "");
-          const creditLimitNum = parseFloat(companyData?.creditLimit.toString() || "0");
-          const usedCreditNum = creditInfo
-            ? parseFloat(creditInfo.usedCredit.toString())
-            : 0;
-          const pendingCreditNum = creditInfo
-            ? parseFloat(creditInfo.pendingCredit.toString())
-            : 0;
-          const creditUsagePercentage =
-            creditLimitNum > 0
-              ? Math.round((usedCreditNum / creditLimitNum) * 100)
-              : 0;
+    const creditInfo = await calculateAvailableCredit(companyData?.id || "");
+    const creditLimitNum = parseFloat(
+      companyData?.creditLimit.toString() || "0",
+    );
+    const usedCreditNum = creditInfo
+      ? parseFloat(creditInfo.usedCredit.toString())
+      : 0;
+    const pendingCreditNum = creditInfo
+      ? parseFloat(creditInfo.pendingCredit.toString())
+      : 0;
+    const creditUsagePercentage =
+      creditLimitNum > 0
+        ? Math.round((usedCreditNum / creditLimitNum) * 100)
+        : 0;
 
     return {
       hasCompany: true,
       customerId,
-      customerName: RegistrationData?.contactName || (customer.firstName ? `${customer.firstName} ${customer.lastName || ''}`.trim() : customer.firstName || ''),
+      customerName:
+        RegistrationData?.contactName ||
+        (customer.firstName
+          ? `${customer.firstName} ${customer.lastName || ""}`.trim()
+          : customer.firstName || ""),
       customerEmail: customer.email,
       CreditLimit: creditLimitNum,
       usedCredit: usedCreditNum,
       pendingCredit: pendingCreditNum,
       creditUsagePercentage: creditUsagePercentage,
       companies: companies,
-       isAdmin: companies[0]?.hasAllLocationAccess,
-       isMainContact: companies[0]?.mainContact?.id === `gid://shopify/Customer/${customerId}`,
-
+      isAdmin: companies[0]?.hasAllLocationAccess,
+      isMainContact:
+        companies[0]?.mainContact?.id ===
+        `gid://shopify/Customer/${customerId}`,
     };
   } catch (error: any) {
     console.error("Error fetching company info:", error);
@@ -1206,7 +1243,7 @@ export async function getCustomerCompanyInfo(
 export async function getCompanyOrderss(
   companyId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   try {
     const query = `
@@ -1254,7 +1291,7 @@ export async function getCompanyOrderss(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query }),
-      }
+      },
     );
 
     const data = await response.json();
@@ -1271,7 +1308,7 @@ export async function getCompanyOrderss(
     // Group orders by location
     const locationsWithOrders = locations.map((location: any) => {
       const locationOrders = allOrders.filter(
-        (order: any) => order.companyLocation?.id === location.id
+        (order: any) => order.companyLocation?.id === location.id,
       );
       return {
         locationId: location.id,
@@ -1304,15 +1341,21 @@ export async function getCompanyCustomers(
     sortKey?: string; // NAME, CREATED_AT, etc.
     reverse?: boolean;
     query?: string; // Search query
-  } = {}
+  } = {},
 ) {
   try {
-    const { first = 10, after = null, sortKey = "NAME", reverse = false, query: searchQuery = "" } = options;
+    const {
+      first = 10,
+      after = null,
+      sortKey = "NAME",
+      reverse = false,
+      query: searchQuery = "",
+    } = options;
 
     const queryArgs = [
       `first: ${first}`,
       `sortKey: ${sortKey}`,
-      `reverse: ${reverse}`
+      `reverse: ${reverse}`,
     ];
 
     if (after) {
@@ -1328,7 +1371,7 @@ export async function getCompanyCustomers(
         company(id: "${companyId}") {
           id
           name
-          contacts(${queryArgs.join(', ')}) {
+          contacts(${queryArgs.join(", ")}) {
             pageInfo {
               hasNextPage
               endCursor
@@ -1380,7 +1423,7 @@ export async function getCompanyCustomers(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query }),
-      }
+      },
     );
 
     const data = await response.json();
@@ -1395,12 +1438,13 @@ export async function getCompanyCustomers(
       const node = edge.node;
       const cust = node.customer;
 
-      const roles = node.roleAssignments?.edges?.map((r: any) => ({
-        id: r.node.role.id,
-        name: r.node.role.name,
-        locationId: r.node.companyLocation?.id,
-        locationName: r.node.companyLocation?.name
-      })) || [];
+      const roles =
+        node.roleAssignments?.edges?.map((r: any) => ({
+          id: r.node.role.id,
+          name: r.node.role.name,
+          locationId: r.node.companyLocation?.id,
+          locationName: r.node.companyLocation?.name,
+        })) || [];
 
       return {
         id: node.id,
@@ -1427,9 +1471,8 @@ export async function getCompanyCustomers(
       companyId: company.id,
       companyName: company.name,
       customers: contacts,
-      pageInfo: company.contacts.pageInfo
+      pageInfo: company.contacts.pageInfo,
     };
-
   } catch (error: any) {
     console.error("Error fetching company customers:", error);
     return { error: error.message };
@@ -1437,10 +1480,7 @@ export async function getCompanyCustomers(
 }
 
 // Function to fetch available roles for a company
-export async function getCompanyRoles(
-  shopName: string,
-  accessToken: string
-) {
+export async function getCompanyRoles(shopName: string, accessToken: string) {
   try {
     // We can fetch roles via the shop query or assume standard ones.
     // Let's try to fetch roles if possible, but for now we'll return a standard list
@@ -1460,7 +1500,7 @@ export async function getCompanyRoles(
 
     return [
       { name: "Ordering only", value: "ordering_only" },
-      { name: "Location Admin", value: "location_admin" }
+      { name: "Location Admin", value: "location_admin" },
     ];
   } catch (error) {
     return [];
@@ -1473,7 +1513,7 @@ async function assignRoleToCompanyContact(
   roleName: string, // e.g. "Admin"
   companyId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   // 1. Fetch Company Roles to find the ID for the given name
   const rolesQuery = `
@@ -1500,14 +1540,17 @@ async function assignRoleToCompanyContact(
         "X-Shopify-Access-Token": accessToken,
       },
       body: JSON.stringify({ query: rolesQuery }),
-    }
+    },
   );
 
   const rolesData = await rolesResponse.json();
-  const roles = rolesData.data?.company?.roles?.edges?.map((e: any) => e.node) || [];
+  const roles =
+    rolesData.data?.company?.roles?.edges?.map((e: any) => e.node) || [];
 
   // Find role by name (case insensitive)
-  const role = roles.find((r: any) => r.name.toLowerCase() === roleName.toLowerCase());
+  const role = roles.find(
+    (r: any) => r.name.toLowerCase() === roleName.toLowerCase(),
+  );
 
   if (!role) {
     console.error(`Role ${roleName} not found for company ${companyId}`);
@@ -1539,14 +1582,16 @@ async function assignRoleToCompanyContact(
       },
       body: JSON.stringify({
         query: assignMutation,
-        variables: { companyContactId: contactId, roleId: role.id }
+        variables: { companyContactId: contactId, roleId: role.id },
       }),
-    }
+    },
   );
 
   const assignResult = await assignResponse.json();
   if (assignResult.data?.companyContactAssignRole?.userErrors?.length > 0) {
-    return { error: assignResult.data.companyContactAssignRole.userErrors[0].message };
+    return {
+      error: assignResult.data.companyContactAssignRole.userErrors[0].message,
+    };
   }
 
   return { success: true };
@@ -1575,7 +1620,7 @@ async function assignLocationsToCompanyContact(
 
   companyId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   // We need to loop through locations and assign the role for each location
   // First we need the Role ID (we might have fetched it in the previous step, but let's fetch it again or pass it)
@@ -1591,7 +1636,7 @@ async function assignLocationsToCompanyContact(
 async function findCustomerByEmail(
   email: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ customerId?: string; error?: string }> {
   try {
     const findQuery = `
@@ -1616,7 +1661,7 @@ async function findCustomerByEmail(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query: findQuery }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -1644,7 +1689,7 @@ async function createCustomer(
     email: string;
   },
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ customerId?: string; error?: string }> {
   try {
     const customerCreateMutation = `
@@ -1666,7 +1711,7 @@ async function createCustomer(
       firstName: customerData.firstName,
       lastName: customerData.lastName,
       email: customerData.email,
-      tags: ["b2b", "company_user"]
+      tags: ["b2b", "company_user"],
     };
 
     const response = await fetch(
@@ -1679,9 +1724,9 @@ async function createCustomer(
         },
         body: JSON.stringify({
           query: customerCreateMutation,
-          variables: { input: customerInput }
+          variables: { input: customerInput },
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -1714,14 +1759,14 @@ async function getOrCreateCustomer(
     email: string;
   },
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ customerId?: string; error?: string; isNew?: boolean }> {
   try {
     // First, try to find existing customer
     const existingCustomer = await findCustomerByEmail(
       customerData.email,
       shopName,
-      accessToken
+      accessToken,
     );
 
     if (existingCustomer.customerId) {
@@ -1729,7 +1774,11 @@ async function getOrCreateCustomer(
     }
 
     // If not found, create new customer
-    const newCustomer = await createCustomer(customerData, shopName, accessToken);
+    const newCustomer = await createCustomer(
+      customerData,
+      shopName,
+      accessToken,
+    );
 
     if (newCustomer.customerId) {
       return { customerId: newCustomer.customerId, isNew: true };
@@ -1749,7 +1798,7 @@ async function checkCompanyContactExists(
   companyId: string,
   customerId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ exists: boolean; contactId?: string; error?: string }> {
   try {
     const query = `
@@ -1778,19 +1827,24 @@ async function checkCompanyContactExists(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query }),
-      }
+      },
     );
 
     const result = await response.json();
 
     if (result.errors) {
       console.error("GraphQL Errors:", result.errors);
-      return { exists: false, error: result.errors[0]?.message || "GraphQL error" };
+      return {
+        exists: false,
+        error: result.errors[0]?.message || "GraphQL error",
+      };
     }
 
     const contacts = result.data?.company?.contacts?.edges || [];
 
-    console.log(`✅ Checking ${contacts.length} contacts for customer ${customerId}`);
+    console.log(
+      `✅ Checking ${contacts.length} contacts for customer ${customerId}`,
+    );
 
     // Find existing contact by comparing customer IDs
     const existingContact = contacts.find(
@@ -1798,11 +1852,13 @@ async function checkCompanyContactExists(
         const contactCustomerId = edge.node.customer.id;
         console.log(`  Comparing: ${contactCustomerId} === ${customerId}`);
         return contactCustomerId === customerId;
-      }
+      },
     );
 
     if (existingContact) {
-      console.log(`✅ Customer already exists as company contact: ${existingContact.node.id}`);
+      console.log(
+        `✅ Customer already exists as company contact: ${existingContact.node.id}`,
+      );
       return { exists: true, contactId: existingContact.node.id };
     }
 
@@ -1810,7 +1866,10 @@ async function checkCompanyContactExists(
     return { exists: false };
   } catch (error) {
     console.error("Error checking company contact:", error);
-    return { exists: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      exists: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 }
 
@@ -1841,9 +1900,14 @@ export async function createCompanyCustomer(
     firstName: string;
     lastName: string;
     email: string;
-    locationRoles?: Array<{ roleId?: string; roleName?: string; locationId?: string; locationName?: string }>;
+    locationRoles?: Array<{
+      roleId?: string;
+      roleName?: string;
+      locationId?: string;
+      locationName?: string;
+    }>;
     credit: number;
-  }
+  },
 ) {
   try {
     console.log(`🔄 Creating company contact for: ${customerData.email}`);
@@ -1858,16 +1922,20 @@ export async function createCompanyCustomer(
         credit: customerData.credit,
       },
       shopName,
-      accessToken
+      accessToken,
     );
 
     if (!contactResult.contactId) {
-      return { error: contactResult.error || "Failed to create company contact" };
+      return {
+        error: contactResult.error || "Failed to create company contact",
+      };
     }
 
     const contactId = contactResult.contactId;
     const customerId = contactResult.customerId || "";
-    console.log(`✅ Created company contact: ${contactId}, Customer: ${customerId}`);
+    console.log(
+      `✅ Created company contact: ${contactId}, Customer: ${customerId}`,
+    );
 
     // Step 2: Create/update user in local database
     try {
@@ -1878,7 +1946,7 @@ export async function createCompanyCustomer(
         userCreditLimit: customerData.credit,
         shopifyCustomerId: customerId,
         shopifyCompanyId: companyId,
-        shopName
+        shopName,
       });
     } catch (dbError) {
       console.error("❌ Error creating/updating local user:", dbError);
@@ -1893,7 +1961,7 @@ export async function createCompanyCustomer(
         companyId,
         customerData.locationRoles,
         shopName,
-        accessToken
+        accessToken,
       );
 
       if (!roleAssignResult.success) {
@@ -1902,13 +1970,12 @@ export async function createCompanyCustomer(
           success: true,
           customerId,
           contactId,
-          warning: `User created but role assignment failed: ${roleAssignResult.error}`
+          warning: `User created but role assignment failed: ${roleAssignResult.error}`,
         };
       }
     }
 
     return { success: true, customerId, contactId };
-
   } catch (error) {
     console.error("Error creating company customer:", error);
     return { error: error instanceof Error ? error.message : "Unknown error" };
@@ -1918,73 +1985,94 @@ export async function createCompanyCustomer(
 async function assignMultipleRolesAndLocations(
   contactId: string,
   companyId: string,
-  locationRoles: Array<{ roleId?: string; roleName?: string; locationId?: string; locationName?: string }>,
+  locationRoles: Array<{
+    roleId?: string;
+    roleName?: string;
+    locationId?: string;
+    locationName?: string;
+  }>,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Fetch available roles and locations
     const [rolesResult, locationsResult] = await Promise.all([
       fetchCompanyRoles(companyId, shopName, accessToken),
-      fetchCompanyLocations(companyId, shopName, accessToken)
+      fetchCompanyLocations(companyId, shopName, accessToken),
     ]);
 
     if (rolesResult.error || !rolesResult.roles) {
-      return { success: false, error: rolesResult.error || "Failed to fetch roles" };
+      return {
+        success: false,
+        error: rolesResult.error || "Failed to fetch roles",
+      };
     }
 
     if (locationsResult.error || !locationsResult.locations) {
-      return { success: false, error: locationsResult.error || "Failed to fetch locations" };
+      return {
+        success: false,
+        error: locationsResult.error || "Failed to fetch locations",
+      };
     }
 
     const roles = rolesResult.roles;
     const locations = locationsResult.locations;
 
     // Process each role-location combination
-    const assignments = locationRoles.map((lr) => {
-      let roleId = lr.roleId;
-      let locationId = lr.locationId;
+    const assignments = locationRoles
+      .map((lr) => {
+        let roleId = lr.roleId;
+        let locationId = lr.locationId;
 
-      // If roleName provided, find roleId
-      if (!roleId && lr.roleName) {
-        const role = roles.find(
-          (r) => r.name.toLowerCase().trim() === lr.roleName!.toLowerCase().trim()
-        );
-        if (role) {
-          roleId = role.id;
-        } else {
-          console.warn(`⚠️ Role "${lr.roleName}" not found`);
+        // If roleName provided, find roleId
+        if (!roleId && lr.roleName) {
+          const role = roles.find(
+            (r) =>
+              r.name.toLowerCase().trim() === lr.roleName!.toLowerCase().trim(),
+          );
+          if (role) {
+            roleId = role.id;
+          } else {
+            console.warn(`⚠️ Role "${lr.roleName}" not found`);
+            return null;
+          }
+        }
+
+        // If locationName provided, find locationId
+        if (!locationId && lr.locationName) {
+          const location = locations.find(
+            (l) =>
+              l.name.toLowerCase().trim() ===
+              lr.locationName!.toLowerCase().trim(),
+          );
+          if (location) {
+            locationId = location.id;
+          } else {
+            console.warn(`⚠️ Location "${lr.locationName}" not found`);
+            return null;
+          }
+        }
+
+        // Ensure we have at least a roleId
+        if (!roleId) {
+          console.warn(`⚠️ No valid role found for assignment`);
           return null;
         }
-      }
 
-      // If locationName provided, find locationId
-      if (!locationId && lr.locationName) {
-        const location = locations.find(
-          (l) => l.name.toLowerCase().trim() === lr.locationName!.toLowerCase().trim()
-        );
-        if (location) {
-          locationId = location.id;
-        } else {
-          console.warn(`⚠️ Location "${lr.locationName}" not found`);
-          return null;
-        }
-      }
-
-      // Ensure we have at least a roleId
-      if (!roleId) {
-        console.warn(`⚠️ No valid role found for assignment`);
-        return null;
-      }
-
-      return { roleId, locationId };
-    }).filter(Boolean) as Array<{ roleId: string; locationId?: string }>;
+        return { roleId, locationId };
+      })
+      .filter(Boolean) as Array<{ roleId: string; locationId?: string }>;
 
     if (assignments.length === 0) {
-      return { success: false, error: "No valid role-location combinations found" };
+      return {
+        success: false,
+        error: "No valid role-location combinations found",
+      };
     }
 
-    console.log(`🎯 Assigning ${assignments.length} role-location combinations to contact ${contactId}`);
+    console.log(
+      `🎯 Assigning ${assignments.length} role-location combinations to contact ${contactId}`,
+    );
 
     // Execute all assignments in parallel
     const results = await Promise.all(
@@ -1994,9 +2082,9 @@ async function assignMultipleRolesAndLocations(
           assignment.roleId,
           shopName,
           accessToken,
-          assignment.locationId
-        )
-      )
+          assignment.locationId,
+        ),
+      ),
     );
 
     const failed = results.filter((r) => !r.success);
@@ -2004,23 +2092,27 @@ async function assignMultipleRolesAndLocations(
       console.warn(`⚠️ ${failed.length} role assignments failed`);
       return {
         success: true,
-        error: `${failed.length} out of ${assignments.length} assignments failed`
+        error: `${failed.length} out of ${assignments.length} assignments failed`,
       };
     }
 
-    console.log(`✅ Successfully assigned all ${assignments.length} role-location combinations`);
+    console.log(
+      `✅ Successfully assigned all ${assignments.length} role-location combinations`,
+    );
     return { success: true };
-
   } catch (error) {
     console.error("Error in assignMultipleRolesAndLocations:", error);
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 }
 
 async function fetchCompanyRoles(
   companyId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ roles?: Array<{ id: string; name: string }>; error?: string }> {
   try {
     const rolesQuery = `
@@ -2048,9 +2140,9 @@ async function fetchCompanyRoles(
         },
         body: JSON.stringify({
           query: rolesQuery,
-          variables: { companyId }
+          variables: { companyId },
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -2060,9 +2152,10 @@ async function fetchCompanyRoles(
       return { error: result.errors[0]?.message || "GraphQL error" };
     }
 
-    const roles = result.data?.company?.contactRoles?.edges?.map(
-      (e: { node: { id: string; name: string } }) => e.node
-    ) || [];
+    const roles =
+      result.data?.company?.contactRoles?.edges?.map(
+        (e: { node: { id: string; name: string } }) => e.node,
+      ) || [];
 
     console.log(`✅ Fetched ${roles.length} company contact roles`);
     return { roles };
@@ -2075,8 +2168,11 @@ async function fetchCompanyRoles(
 async function fetchCompanyLocations(
   companyId: string,
   shopName: string,
-  accessToken: string
-): Promise<{ locations?: Array<{ id: string; name: string }>; error?: string }> {
+  accessToken: string,
+): Promise<{
+  locations?: Array<{ id: string; name: string }>;
+  error?: string;
+}> {
   const query = `
     query GetCompanyLocations($companyId: ID!) {
       company(id: $companyId) {
@@ -2102,7 +2198,7 @@ async function fetchCompanyLocations(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query, variables: { companyId } }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -2111,9 +2207,8 @@ async function fetchCompanyLocations(
       return { error: result.errors[0].message };
     }
 
-    const locations = result.data?.company?.locations?.edges.map(
-      (e: any) => e.node
-    ) || [];
+    const locations =
+      result.data?.company?.locations?.edges.map((e: any) => e.node) || [];
 
     return { locations };
   } catch (error: any) {
@@ -2126,7 +2221,7 @@ async function assignRoleToContact(
   roleId: string,
   shopName: string,
   accessToken: string,
-  locationId?: string
+  locationId?: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     let assignMutation: string;
@@ -2149,7 +2244,7 @@ async function assignRoleToContact(
       variables = {
         companyContactId: contactId,
         companyContactRoleId: roleId,
-        companyLocationId: locationId
+        companyLocationId: locationId,
       };
     } else {
       assignMutation = `
@@ -2167,11 +2262,13 @@ async function assignRoleToContact(
       `;
       variables = {
         companyContactId: contactId,
-        companyContactRoleId: roleId
+        companyContactRoleId: roleId,
       };
     }
 
-    console.log(`🔄 Assigning role ${roleId} to contact ${contactId}${locationId ? ` at location ${locationId}` : ''}`);
+    console.log(
+      `🔄 Assigning role ${roleId} to contact ${contactId}${locationId ? ` at location ${locationId}` : ""}`,
+    );
 
     const response = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
@@ -2183,9 +2280,9 @@ async function assignRoleToContact(
         },
         body: JSON.stringify({
           query: assignMutation,
-          variables
+          variables,
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -2195,11 +2292,16 @@ async function assignRoleToContact(
       return { success: false, error: errors[0].message };
     }
 
-    console.log(`✅ Assigned role to contact${locationId ? ' at location' : ''}`);
+    console.log(
+      `✅ Assigned role to contact${locationId ? " at location" : ""}`,
+    );
     return { success: true };
   } catch (error) {
     console.error("Error assigning role:", error);
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 }
 
@@ -2212,7 +2314,7 @@ async function createCompanyContact(
     credit: number;
   },
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ contactId?: string; customerId?: string; error?: string }> {
   try {
     const contactCreateMutation = `
@@ -2255,9 +2357,9 @@ async function createCompanyContact(
         },
         body: JSON.stringify({
           query: contactCreateMutation,
-          variables: { companyId, input }
+          variables: { companyId, input },
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -2269,7 +2371,8 @@ async function createCompanyContact(
     }
 
     const contactId = result.data?.companyContactCreate?.companyContact?.id;
-    const customerId = result.data?.companyContactCreate?.companyContact?.customer?.id;
+    const customerId =
+      result.data?.companyContactCreate?.companyContact?.customer?.id;
 
     if (result.data?.companyContactCreate?.userErrors?.length > 0) {
       const errors = result.data.companyContactCreate.userErrors;
@@ -2280,7 +2383,9 @@ async function createCompanyContact(
       return { error: "Failed to create company contact" };
     }
 
-    console.log(`✅ Created company contact: ${contactId}, Customer: ${customerId}`);
+    console.log(
+      `✅ Created company contact: ${contactId}, Customer: ${customerId}`,
+    );
 
     // Step 2: Set credit metafields AFTER contact creation
     if (customerData.credit) {
@@ -2288,16 +2393,18 @@ async function createCompanyContact(
         customerId,
         customerData.credit,
         shopName,
-        accessToken
+        accessToken,
       );
 
       if (!metafieldResult.success) {
-        console.warn(`⚠️ Credit metafield creation failed: ${metafieldResult.error}`);
+        console.warn(
+          `⚠️ Credit metafield creation failed: ${metafieldResult.error}`,
+        );
         // Still return success since contact was created
         return {
           contactId,
           customerId,
-          error: `Contact created but credit metafield failed: ${metafieldResult.error}`
+          error: `Contact created but credit metafield failed: ${metafieldResult.error}`,
         };
       }
 
@@ -2316,7 +2423,7 @@ async function setCustomerCreditMetafields(
   customerId: string,
   credit: number,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Shopify's recommended mutation
@@ -2346,15 +2453,15 @@ async function setCustomerCreditMetafields(
         namespace: "custom",
         key: "credit",
         type: "number_integer",
-        value: credit.toString()
+        value: credit.toString(),
       },
       {
         ownerId: customerId,
         namespace: "custom",
         key: "remaining_credit",
         type: "number_integer",
-        value: credit.toString()
-      }
+        value: credit.toString(),
+      },
     ];
 
     const response = await fetch(
@@ -2367,9 +2474,9 @@ async function setCustomerCreditMetafields(
         },
         body: JSON.stringify({
           query: mutation,
-          variables: { metafields }
+          variables: { metafields },
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -2382,7 +2489,7 @@ async function setCustomerCreditMetafields(
     if (result.data?.metafieldsSet?.userErrors?.length > 0) {
       return {
         success: false,
-        error: result.data.metafieldsSet.userErrors[0].message
+        error: result.data.metafieldsSet.userErrors[0].message,
       };
     }
 
@@ -2390,11 +2497,10 @@ async function setCustomerCreditMetafields(
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error"
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
-
 
 /**
  * Helper: Assign role and locations to company contact
@@ -2405,27 +2511,39 @@ async function assignRoleAndLocations(
   roleName: string,
   locationIds: string[],
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Fetch available roles
-    const rolesResult = await fetchCompanyRoles(companyId, shopName, accessToken);
+    const rolesResult = await fetchCompanyRoles(
+      companyId,
+      shopName,
+      accessToken,
+    );
 
     if (rolesResult.error || !rolesResult.roles) {
-      return { success: false, error: rolesResult.error || "Failed to fetch roles" };
+      return {
+        success: false,
+        error: rolesResult.error || "Failed to fetch roles",
+      };
     }
 
     // Find the role by name
     const role = rolesResult.roles.find(
-      (r) => r.name.toLowerCase().trim() === roleName.toLowerCase().trim()
+      (r) => r.name.toLowerCase().trim() === roleName.toLowerCase().trim(),
     );
 
     if (!role) {
-      console.warn(`⚠️ Role "${roleName}" not found in available roles:`, rolesResult.roles.map(r => r.name));
+      console.warn(
+        `⚠️ Role "${roleName}" not found in available roles:`,
+        rolesResult.roles.map((r) => r.name),
+      );
       return { success: true, error: `Role "${roleName}" not found` };
     }
 
-    console.log(`🎯 Assigning role "${roleName}" (${role.id}) to contact ${contactId}`);
+    console.log(
+      `🎯 Assigning role "${roleName}" (${role.id}) to contact ${contactId}`,
+    );
 
     // Ensure contactId is in GID format
     const contactGid = contactId.startsWith("gid://")
@@ -2434,16 +2552,25 @@ async function assignRoleAndLocations(
 
     // If role assignment for specific locations
     if (locationIds?.length > 0) {
-
       // Fetch location nodes so we can map human name to gid
-      const locationResult = await fetchCompanyLocations(companyId, shopName, accessToken);
+      const locationResult = await fetchCompanyLocations(
+        companyId,
+        shopName,
+        accessToken,
+      );
       if (locationResult.error || !locationResult.locations) {
-        return { success: false, error: locationResult.error || "Failed to fetch locations" };
+        return {
+          success: false,
+          error: locationResult.error || "Failed to fetch locations",
+        };
       }
 
       // Map names to actual GIDs
       const actualLocationIds = locationIds
-        .map((locName) => locationResult.locations?.find((l) => l.name === locName)?.id)
+        .map(
+          (locName) =>
+            locationResult.locations?.find((l) => l.name === locName)?.id,
+        )
         .filter((id) => id !== undefined);
 
       if (actualLocationIds.length === 0) {
@@ -2454,23 +2581,31 @@ async function assignRoleAndLocations(
       // Run parallel role assignments
       const results = await Promise.all(
         actualLocationIds.map((locId) =>
-          assignRoleToContact(contactId, role.id, shopName, accessToken, locId!)
-        )
+          assignRoleToContact(
+            contactId,
+            role.id,
+            shopName,
+            accessToken,
+            locId!,
+          ),
+        ),
       );
 
       const failed = results.filter((r) => !r.success);
       if (failed.length > 0) {
         console.warn(`⚠️ ${failed.length} role assignments failed`);
-        return { success: true, error: `${failed.length} location assignments failed` };
+        return {
+          success: true,
+          error: `${failed.length} location assignments failed`,
+        };
       }
-
     } else {
       // Assign role company-wide (no specific location)
       const assignResult = await assignRoleToContact(
         contactId,
         role.id,
         shopName,
-        accessToken
+        accessToken,
       );
 
       if (!assignResult.success) {
@@ -2481,16 +2616,19 @@ async function assignRoleAndLocations(
     return { success: true };
   } catch (error) {
     console.error("Error in assignRoleAndLocations:", error);
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 }
 export async function getCompanyLocations(
   companyId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   try {
- const query = `
+    const query = `
   query {
     company(id: "${companyId}") {
       id
@@ -2562,86 +2700,101 @@ export async function getCompanyLocations(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query }),
-      }
+      },
     );
     const data = await response.json();
 
-if (data.errors) {
-  console.error("GraphQL Errors:", data.errors);
-  return { error: data.errors };
-}
+    if (data.errors) {
+      console.error("GraphQL Errors:", data.errors);
+      return { error: data.errors };
+    }
 
-const company = data.data.company;
+    const company = data.data.company;
 
-// Get all contacts with their location assignments
-const contacts = company.contacts.edges.map((edge: any) => {
-  const node = edge.node;
-  const locationAssignments = node.roleAssignments?.edges?.map((r: any) => ({
-    locationId: r.node.companyLocation?.id,
-    locationName: r.node.companyLocation?.name,
-    roleName: r.node.role?.name
-  })).filter((la: any) => la.locationId) || [];
+    // Get all contacts with their location assignments
+    const contacts = company.contacts.edges.map((edge: any) => {
+      const node = edge.node;
+      const locationAssignments =
+        node.roleAssignments?.edges
+          ?.map((r: any) => ({
+            locationId: r.node.companyLocation?.id,
+            locationName: r.node.companyLocation?.name,
+            roleName: r.node.role?.name,
+          }))
+          .filter((la: any) => la.locationId) || [];
 
-  return {
-    id: node.id,
-    title: node.title,
-    customer: node.customer,
-    locationAssignments: locationAssignments
-  };
-});
-
-// Count customers per location
-const locationCustomerCount: Record<string, { name: string; count: number; customerIds: string[] }> = {};
-
-contacts.forEach((contact: { locationAssignments: any[]; customer: { id: string; }; }) => {
-  contact.locationAssignments.forEach(assignment => {
-    if (!locationCustomerCount[assignment.locationId]) {
-      locationCustomerCount[assignment.locationId] = {
-        name: assignment.locationName,
-        count: 0,
-        customerIds: []
+      return {
+        id: node.id,
+        title: node.title,
+        customer: node.customer,
+        locationAssignments: locationAssignments,
       };
-    }
+    });
 
-    // Only count unique customers per location
-    if (!locationCustomerCount[assignment.locationId].customerIds.includes(contact.customer.id)) {
-      locationCustomerCount[assignment.locationId].count++;
-      locationCustomerCount[assignment.locationId].customerIds.push(contact.customer.id);
-    }
-  });
-});
+    // Count customers per location
+    const locationCustomerCount: Record<
+      string,
+      { name: string; count: number; customerIds: string[] }
+    > = {};
 
-// Get locations with customer count
-  const locations = company.locations.edges.map((edge: any) => {
-  const location = edge.node;
+    contacts.forEach(
+      (contact: { locationAssignments: any[]; customer: { id: string } }) => {
+        contact.locationAssignments.forEach((assignment) => {
+          if (!locationCustomerCount[assignment.locationId]) {
+            locationCustomerCount[assignment.locationId] = {
+              name: assignment.locationName,
+              count: 0,
+              customerIds: [],
+            };
+          }
 
-  const customerInfo = locationCustomerCount[location.id] || { count: 0, customerIds: [] };
-  const shippingAddress=location.shippingAddress
-    const formattedAddress = shippingAddress
+          // Only count unique customers per location
+          if (
+            !locationCustomerCount[assignment.locationId].customerIds.includes(
+              contact.customer.id,
+            )
+          ) {
+            locationCustomerCount[assignment.locationId].count++;
+            locationCustomerCount[assignment.locationId].customerIds.push(
+              contact.customer.id,
+            );
+          }
+        });
+      },
+    );
+
+    // Get locations with customer count
+    const locations = company.locations.edges.map((edge: any) => {
+      const location = edge.node;
+
+      const customerInfo = locationCustomerCount[location.id] || {
+        count: 0,
+        customerIds: [],
+      };
+      const shippingAddress = location.shippingAddress;
+      const formattedAddress = shippingAddress
         ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
         : "No address provided";
-  return {
-    id: location.id,
-    name: location.name,
-    note: location.note,
-    phone: location.phone,
-    externalId: location.externalId,
-    shippingAddress: location.shippingAddress,
-    billingAddress: location.billingAddress,
-    assignedUsers: customerInfo.count,
-    address: formattedAddress,
-  };
-});
+      return {
+        id: location.id,
+        name: location.name,
+        note: location.note,
+        phone: location.phone,
+        externalId: location.externalId,
+        shippingAddress: location.shippingAddress,
+        billingAddress: location.billingAddress,
+        assignedUsers: customerInfo.count,
+        address: formattedAddress,
+      };
+    });
 
-
-
-return {
-  companyId: company.id,
-  companyName: company.name,
-  contacts: contacts,
-  locations: locations,
-  locationCustomerCount: locationCustomerCount
-};
+    return {
+      companyId: company.id,
+      companyName: company.name,
+      contacts: contacts,
+      locations: locations,
+      locationCustomerCount: locationCustomerCount,
+    };
   } catch (error: any) {
     console.error("Error fetching company locations:", error);
     return { error: error.message };
@@ -2652,7 +2805,7 @@ export async function getCompanyLocationById(
   locationId: string,
   companyId: string,
   shop: string,
-  accessToken: string
+  accessToken: string,
 ) {
   try {
     const query = `
@@ -2719,7 +2872,7 @@ export async function getCompanyLocationById(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query, variables }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -2747,7 +2900,7 @@ export async function getCompanyLocationById(
     }
 
     return {
-      location
+      location,
     };
   } catch (error) {
     console.error("Error fetching company location:", error);
@@ -2767,15 +2920,20 @@ export async function updateCompanyCustomer(
     firstName?: string;
     lastName?: string;
     email?: string;
-    locationRoles?: Array<{ roleId?: string; roleName?: string; locationId?: string; locationName?: string }>;
+    locationRoles?: Array<{
+      roleId?: string;
+      roleName?: string;
+      locationId?: string;
+      locationName?: string;
+    }>;
     credit?: number;
-  }
+  },
 ) {
   try {
     const results: any = {
       success: true,
       updates: {},
-      warnings: []
+      warnings: [],
     };
 
     const makeGraphQLRequest = async (query: string, variables: any) => {
@@ -2788,7 +2946,7 @@ export async function updateCompanyCustomer(
             "X-Shopify-Access-Token": accessToken,
           },
           body: JSON.stringify({ query, variables }),
-        }
+        },
       );
       return await response.json();
     };
@@ -2827,7 +2985,7 @@ export async function updateCompanyCustomer(
           }
         }
       }`,
-      { id: contactGid }
+      { id: contactGid },
     );
 
     console.log("📝 Customer query result:", getCustomerResult);
@@ -2842,16 +3000,16 @@ export async function updateCompanyCustomer(
     }
 
     // Get existing role assignments with full details
-    const existingRoleAssignments = getCustomerResult.data?.companyContact?.roleAssignments?.edges?.map(
-      (edge: any) => ({
-        id: edge.node.id,
-        roleId: edge.node.role?.id,
-        roleName: edge.node.role?.name,
-        locationId: edge.node.companyLocation?.id,
-        locationName: edge.node.companyLocation?.name
-      })
-    ) || [];
-
+    const existingRoleAssignments =
+      getCustomerResult.data?.companyContact?.roleAssignments?.edges?.map(
+        (edge: any) => ({
+          id: edge.node.id,
+          roleId: edge.node.role?.id,
+          roleName: edge.node.role?.name,
+          locationId: edge.node.companyLocation?.id,
+          locationName: edge.node.companyLocation?.name,
+        }),
+      ) || [];
 
     // ---- Update Customer Info ----
     if (
@@ -2873,7 +3031,7 @@ export async function updateCompanyCustomer(
             key: "credit",
             value: customerData.credit.toString(),
             type: "number_integer",
-          }
+          },
         ];
       }
 
@@ -2891,7 +3049,7 @@ export async function updateCompanyCustomer(
             }
           }
         }`,
-        { input: payload }
+        { input: payload },
       );
 
       console.log("📝 Customer update response:", updateResponse);
@@ -2916,7 +3074,7 @@ export async function updateCompanyCustomer(
         existingRoleAssignments,
         customerData.locationRoles,
         shopName,
-        accessToken
+        accessToken,
       );
 
       if (!roleUpdateResult.success) {
@@ -2925,17 +3083,16 @@ export async function updateCompanyCustomer(
 
       results.updates.roleAndLocation = roleUpdateResult.message || "updated";
     }
-    console.log(results,"445454");
+    console.log(results, "445454");
     return results;
   } catch (error) {
     console.error("❌ Error updating customer:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error"
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
-
 
 async function smartRoleUpdate(
   contactId: string,
@@ -2954,7 +3111,7 @@ async function smartRoleUpdate(
     locationName?: string;
   }>,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{
   success: boolean;
   error?: string;
@@ -2969,15 +3126,21 @@ async function smartRoleUpdate(
   try {
     const [rolesResult, locationsResult] = await Promise.all([
       fetchCompanyRoless(companyId, shopName, accessToken),
-      fetchCompanyLocationss(companyId, shopName, accessToken)
+      fetchCompanyLocationss(companyId, shopName, accessToken),
     ]);
 
     if (rolesResult.error || !rolesResult.roles) {
-      return { success: false, error: rolesResult.error || "Failed to fetch roles" };
+      return {
+        success: false,
+        error: rolesResult.error || "Failed to fetch roles",
+      };
     }
 
     if (locationsResult.error || !locationsResult.locations) {
-      return { success: false, error: locationsResult.error || "Failed to fetch locations" };
+      return {
+        success: false,
+        error: locationsResult.error || "Failed to fetch locations",
+      };
     }
 
     const roles = rolesResult.roles;
@@ -2989,11 +3152,13 @@ async function smartRoleUpdate(
         let { roleId, roleName, locationId, locationName } = lr;
 
         // Resolve roleId from roleName if needed
-        if (roleId ||roleName) {
-          const role = roles.find((r) =>
-            roleName && r.name.toLowerCase().trim() === roleName.toLowerCase().trim()
+        if (roleId || roleName) {
+          const role = roles.find(
+            (r) =>
+              roleName &&
+              r.name.toLowerCase().trim() === roleName.toLowerCase().trim(),
           );
-            console.log(role,);
+          console.log(role);
           if (role) {
             roleId = role.id;
             roleName = role.name;
@@ -3005,8 +3170,10 @@ async function smartRoleUpdate(
 
         // Resolve locationId from locationName if needed
         if (!locationId && locationName) {
-          const location = locations.find((l) =>
-            locationName && l.name.toLowerCase().trim() === locationName.toLowerCase().trim()
+          const location = locations.find(
+            (l) =>
+              locationName &&
+              l.name.toLowerCase().trim() === locationName.toLowerCase().trim(),
           );
           if (location) {
             locationId = location.id;
@@ -3019,19 +3186,19 @@ async function smartRoleUpdate(
 
         if (!roleId) return null;
 
-       return {
-        roleId,
-        locationId: locationId || null,  // ✅ Already handles missing location
-        roleName: roleName || "",
-        locationName: locationName || null
-       };
+        return {
+          roleId,
+          locationId: locationId || null, // ✅ Already handles missing location
+          roleName: roleName || "",
+          locationName: locationName || null,
+        };
       })
       .filter(Boolean) as Array<{
-        roleId: string;
-        roleName: string;
-        locationId: string | null;
-        locationName: string | null;
-      }>;
+      roleId: string;
+      roleName: string;
+      locationId: string | null;
+      locationName: string | null;
+    }>;
 
     console.log("🔍 Normalized new roles:", normalizedNewRoles);
     console.log("🔍 Existing assignments:", existingAssignments);
@@ -3051,7 +3218,7 @@ async function smartRoleUpdate(
       if (newRole.locationId) {
         // Find existing assignment with same location
         const existingWithSameLocation = existingAssignments.find(
-          (ex) => (ex.locationId || null) === newRole.locationId
+          (ex) => (ex.locationId || null) === newRole.locationId,
         );
 
         if (existingWithSameLocation) {
@@ -3061,7 +3228,7 @@ async function smartRoleUpdate(
               assignmentId: existingWithSameLocation.id,
               oldRoleId: existingWithSameLocation.roleId!,
               newRoleId: newRole.roleId,
-              locationId: newRole.locationId
+              locationId: newRole.locationId,
             });
           }
           // else: role and location match - no action needed
@@ -3069,13 +3236,14 @@ async function smartRoleUpdate(
           // Location doesn't exist - need to add
           toAdd.push({
             roleId: newRole.roleId,
-            locationId: newRole.locationId || undefined
+            locationId: newRole.locationId || undefined,
           });
         }
       } else {
         // No locationId specified - treat as company-level role
         const alreadyExists = existingAssignments.some(
-          (ex) => newRole.roleId === ex.roleId && (ex.locationId || null) === null
+          (ex) =>
+            newRole.roleId === ex.roleId && (ex.locationId || null) === null,
         );
         if (!alreadyExists) {
           toAdd.push({ roleId: newRole.roleId });
@@ -3085,17 +3253,17 @@ async function smartRoleUpdate(
 
     // Find assignments to remove (not in new roles)
     for (const existing of existingAssignments) {
-      const stillExists = normalizedNewRoles.some(
-        (nr) => {
-          // If new role has location, match by location
-          if (nr.locationId) {
-            return (existing.locationId || null) === nr.locationId;
-          }
-          // Otherwise match by role and location
-          return nr.roleId === existing.roleId &&
-                 (nr.locationId || null) === (existing.locationId || null);
+      const stillExists = normalizedNewRoles.some((nr) => {
+        // If new role has location, match by location
+        if (nr.locationId) {
+          return (existing.locationId || null) === nr.locationId;
         }
-      );
+        // Otherwise match by role and location
+        return (
+          nr.roleId === existing.roleId &&
+          (nr.locationId || null) === (existing.locationId || null)
+        );
+      });
 
       if (!stillExists) {
         toRemove.push(existing.id);
@@ -3109,7 +3277,11 @@ async function smartRoleUpdate(
     // If no changes needed
     if (toRemove.length === 0 && toAdd.length === 0 && toUpdate.length === 0) {
       console.log("✅ Roles are already up to date");
-      return { success: true, message: "no changes needed", normalized: normalizedNewRoles };
+      return {
+        success: true,
+        message: "no changes needed",
+        normalized: normalizedNewRoles,
+      };
     }
 
     // ✅ STEP 1: Remove roles that are no longer needed
@@ -3128,20 +3300,27 @@ async function smartRoleUpdate(
         }`,
         { companyContactId: contactId, roleAssignmentIds: toRemove },
         shopName,
-        accessToken
+        accessToken,
       );
 
       console.log("✅ Removal result:", removeResult);
 
-      if (removeResult.errors || removeResult.data?.companyContactRevokeRoles?.userErrors?.length > 0) {
+      if (
+        removeResult.errors ||
+        removeResult.data?.companyContactRevokeRoles?.userErrors?.length > 0
+      ) {
         const errorMsg = removeResult.errors
           ? removeResult.errors[0].message
           : removeResult.data.companyContactRevokeRoles.userErrors[0].message;
         console.error("❌ Removal failed:", errorMsg);
-        return { success: false, error: `Failed to remove roles: ${errorMsg}`, normalized: normalizedNewRoles };
+        return {
+          success: false,
+          error: `Failed to remove roles: ${errorMsg}`,
+          normalized: normalizedNewRoles,
+        };
       }
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
     // ✅ STEP 2: Update existing roles (remove old + add new for same location)
@@ -3160,12 +3339,18 @@ async function smartRoleUpdate(
               userErrors { field message }
             }
           }`,
-          { companyContactId: contactId, roleAssignmentIds: [update.assignmentId] },
+          {
+            companyContactId: contactId,
+            roleAssignmentIds: [update.assignmentId],
+          },
           shopName,
-          accessToken
+          accessToken,
         );
 
-        if (removeResult.errors || removeResult.data?.companyContactRevokeRoles?.userErrors?.length > 0) {
+        if (
+          removeResult.errors ||
+          removeResult.data?.companyContactRevokeRoles?.userErrors?.length > 0
+        ) {
           const errorMsg = removeResult.errors
             ? removeResult.errors[0].message
             : removeResult.data.companyContactRevokeRoles.userErrors[0].message;
@@ -3173,7 +3358,7 @@ async function smartRoleUpdate(
           continue; // Skip to next update
         }
 
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 300));
 
         // Add new role
         const assignResult = await makeGraphQLRequest(
@@ -3192,23 +3377,30 @@ async function smartRoleUpdate(
           }`,
           {
             companyContactId: contactId,
-            rolesToAssign: [{
-              companyContactRoleId: update.newRoleId,
-              ...(update.locationId && { companyLocationId: update.locationId })
-            }]
+            rolesToAssign: [
+              {
+                companyContactRoleId: update.newRoleId,
+                ...(update.locationId && {
+                  companyLocationId: update.locationId,
+                }),
+              },
+            ],
           },
           shopName,
-          accessToken
+          accessToken,
         );
 
-        if (assignResult.errors || assignResult.data?.companyContactAssignRoles?.userErrors?.length > 0) {
+        if (
+          assignResult.errors ||
+          assignResult.data?.companyContactAssignRoles?.userErrors?.length > 0
+        ) {
           const errorMsg = assignResult.errors
             ? assignResult.errors[0].message
             : assignResult.data.companyContactAssignRoles.userErrors[0].message;
           console.error("❌ Update assignment failed:", errorMsg);
         }
 
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
     }
 
@@ -3216,9 +3408,9 @@ async function smartRoleUpdate(
     if (toAdd.length > 0) {
       console.log("➕ Adding new role assignments...");
 
-      const rolesToAssign = toAdd.map(role => ({
+      const rolesToAssign = toAdd.map((role) => ({
         companyContactRoleId: role.roleId,
-        ...(role.locationId && { companyLocationId: role.locationId })
+        ...(role.locationId && { companyLocationId: role.locationId }),
       }));
 
       const assignResult = await makeGraphQLRequest(
@@ -3237,34 +3429,44 @@ async function smartRoleUpdate(
         }`,
         { companyContactId: contactId, rolesToAssign },
         shopName,
-        accessToken
+        accessToken,
       );
 
       console.log("✅ Assignment result:", assignResult);
 
-      if (assignResult.errors || assignResult.data?.companyContactAssignRoles?.userErrors?.length > 0) {
+      if (
+        assignResult.errors ||
+        assignResult.data?.companyContactAssignRoles?.userErrors?.length > 0
+      ) {
         const errorMsg = assignResult.errors
           ? assignResult.errors[0].message
           : assignResult.data.companyContactAssignRoles.userErrors[0].message;
-        return { success: false, error: `Failed to assign roles: ${errorMsg}`, normalized: normalizedNewRoles };
+        return {
+          success: false,
+          error: `Failed to assign roles: ${errorMsg}`,
+          normalized: normalizedNewRoles,
+        };
       }
     }
 
-    return { success: true, message: "updated", normalized: normalizedNewRoles };
+    return {
+      success: true,
+      message: "updated",
+      normalized: normalizedNewRoles,
+    };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error"
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
-
 
 async function makeGraphQLRequest(
   query: string,
   variables: any,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   const response = await fetch(
     `https://${shopName}/admin/api/2025-01/graphql.json`,
@@ -3275,7 +3477,7 @@ async function makeGraphQLRequest(
         "X-Shopify-Access-Token": accessToken,
       },
       body: JSON.stringify({ query, variables }),
-    }
+    },
   );
   return await response.json();
 }
@@ -3284,7 +3486,7 @@ async function makeGraphQLRequest(
 async function fetchCompanyRoless(
   companyId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<{ roles?: Array<{ id: string; name: string }>; error?: string }> {
   try {
     const rolesQuery = `
@@ -3312,9 +3514,9 @@ async function fetchCompanyRoless(
         },
         body: JSON.stringify({
           query: rolesQuery,
-          variables: { companyId }
+          variables: { companyId },
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -3324,9 +3526,10 @@ async function fetchCompanyRoless(
       return { error: result.errors[0]?.message || "GraphQL error" };
     }
 
-    const roles = result.data?.company?.contactRoles?.edges?.map(
-      (e: { node: { id: string; name: string } }) => e.node
-    ) || [];
+    const roles =
+      result.data?.company?.contactRoles?.edges?.map(
+        (e: { node: { id: string; name: string } }) => e.node,
+      ) || [];
 
     console.log(`✅ Fetched ${roles.length} company contact roles`);
     return { roles };
@@ -3340,8 +3543,11 @@ async function fetchCompanyRoless(
 async function fetchCompanyLocationss(
   companyId: string,
   shopName: string,
-  accessToken: string
-): Promise<{ locations?: Array<{ id: string; name: string }>; error?: string }> {
+  accessToken: string,
+): Promise<{
+  locations?: Array<{ id: string; name: string }>;
+  error?: string;
+}> {
   const query = `
     query GetCompanyLocations($companyId: ID!) {
       company(id: $companyId) {
@@ -3367,7 +3573,7 @@ async function fetchCompanyLocationss(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query, variables: { companyId } }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -3376,9 +3582,8 @@ async function fetchCompanyLocationss(
       return { error: result.errors[0].message };
     }
 
-    const locations = result.data?.company?.locations?.edges.map(
-      (e: any) => e.node
-    ) || [];
+    const locations =
+      result.data?.company?.locations?.edges.map((e: any) => e.node) || [];
 
     return { locations };
   } catch (error: any) {
@@ -3392,7 +3597,7 @@ async function assignRoleToContacts(
   roleId: string,
   shopName: string,
   accessToken: string,
-  locationId?: string
+  locationId?: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     let assignMutation: string;
@@ -3415,7 +3620,7 @@ async function assignRoleToContacts(
       variables = {
         companyContactId: contactId,
         companyContactRoleId: roleId,
-        companyLocationId: locationId
+        companyLocationId: locationId,
       };
     } else {
       assignMutation = `
@@ -3433,11 +3638,13 @@ async function assignRoleToContacts(
       `;
       variables = {
         companyContactId: contactId,
-        companyContactRoleId: roleId
+        companyContactRoleId: roleId,
       };
     }
 
-    console.log(`🔄 Assigning role ${roleId} to contact ${contactId}${locationId ? ` at location ${locationId}` : ''}`);
+    console.log(
+      `🔄 Assigning role ${roleId} to contact ${contactId}${locationId ? ` at location ${locationId}` : ""}`,
+    );
 
     const response = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
@@ -3449,9 +3656,9 @@ async function assignRoleToContacts(
         },
         body: JSON.stringify({
           query: assignMutation,
-          variables
+          variables,
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -3461,24 +3668,28 @@ async function assignRoleToContacts(
       return { success: false, error: errors[0].message };
     }
 
-    console.log(`✅ Assigned role to contact${locationId ? ' at location' : ''}`);
+    console.log(
+      `✅ Assigned role to contact${locationId ? " at location" : ""}`,
+    );
     return { success: true };
   } catch (error) {
     console.error("Error assigning role:", error);
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 }
-
 
 type ServiceResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; message: string };
-  
+
 // Function to delete a company customer
 export async function deleteCompanyCustomer(
   contactId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ): Promise<ServiceResult<{ deletedId: string; deletedCustomerId?: string }>> {
   try {
     // Step 1: Get customer ID before deleting the contact
@@ -3505,7 +3716,7 @@ export async function deleteCompanyCustomer(
           query: getCustomerQuery,
           variables: { id: contactId },
         }),
-      }
+      },
     );
 
     const customerData = await customerResponse.json();
@@ -3545,7 +3756,7 @@ export async function deleteCompanyCustomer(
           query: deleteContactMutation,
           variables: { id: contactId },
         }),
-      }
+      },
     );
 
     const contactJson = await contactRes.json();
@@ -3593,38 +3804,44 @@ export async function deleteCompanyCustomer(
         },
         body: JSON.stringify({
           query: deleteCustomerMutation,
-          variables: { 
-            input: { id: customerId }
+          variables: {
+            input: { id: customerId },
           },
         }),
-      }
+      },
     );
 
     const customerDeleteJson = await customerDeleteRes.json();
 
     if (customerDeleteJson.errors?.length) {
-      console.warn("⚠️ Customer delete error:", customerDeleteJson.errors[0].message);
+      console.warn(
+        "⚠️ Customer delete error:",
+        customerDeleteJson.errors[0].message,
+      );
       return {
         ok: true,
-        data: { 
+        data: {
           deletedId: contactPayload.deletedCompanyContactId,
-          deletedCustomerId: null 
+          deletedCustomerId: null,
         },
-        message: "Contact deleted but customer deletion failed"
+        message: "Contact deleted but customer deletion failed",
       };
     }
 
     const customerDeletePayload = customerDeleteJson.data?.customerDelete;
 
     if (customerDeletePayload?.userErrors?.length) {
-      console.warn("⚠️ Customer delete error:", customerDeletePayload.userErrors[0].message);
+      console.warn(
+        "⚠️ Customer delete error:",
+        customerDeletePayload.userErrors[0].message,
+      );
       return {
         ok: true,
-        data: { 
+        data: {
           deletedId: contactPayload.deletedCompanyContactId,
-          deletedCustomerId: null 
+          deletedCustomerId: null,
         },
-        message: "Contact deleted but customer deletion failed"
+        message: "Contact deleted but customer deletion failed",
       };
     }
 
@@ -3632,9 +3849,9 @@ export async function deleteCompanyCustomer(
 
     return {
       ok: true,
-      data: { 
+      data: {
         deletedId: contactPayload.deletedCompanyContactId,
-        deletedCustomerId: customerDeletePayload.deletedCustomerId
+        deletedCustomerId: customerDeletePayload.deletedCustomerId,
       },
     };
   } catch (err) {
@@ -3647,12 +3864,10 @@ export async function deleteCompanyCustomer(
   }
 }
 
-
-
 export async function getCompanyContactEmail(
   contactId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   const query = `
     query getCompanyContact($id: ID!) {
@@ -3676,7 +3891,7 @@ export async function getCompanyContactEmail(
         query,
         variables: { id: contactId },
       }),
-    }
+    },
   );
 
   const result = await response.json();
@@ -3684,8 +3899,6 @@ export async function getCompanyContactEmail(
 
   return result.data?.companyContact?.customer?.email ?? null;
 }
-
-
 
 // Function to create a company location
 export async function createCompanyLocation(
@@ -3703,7 +3916,7 @@ export async function createCompanyLocation(
     phone?: string;
     externalId?: string;
     note?: string;
-  }
+  },
 ) {
   try {
     const createMutation = `
@@ -3802,11 +4015,11 @@ export async function createCompanyLocation(
         },
         body: JSON.stringify({
           query: createMutation,
-          variables: { companyId, input }
+          variables: { companyId, input },
         }),
-      }
+      },
     );
-    console.log("🚀 ~ createCompanyLocation ~ response:", response)
+    console.log("🚀 ~ createCompanyLocation ~ response:", response);
 
     // Check if response is ok before parsing
     if (!response.ok) {
@@ -3814,7 +4027,7 @@ export async function createCompanyLocation(
       console.error("❌ HTTP Error:", response.status, errorText);
       return {
         error: `HTTP ${response.status}: ${response.statusText}`,
-        details: errorText.substring(0, 200) // First 200 chars of error
+        details: errorText.substring(0, 200), // First 200 chars of error
       };
     }
 
@@ -3824,8 +4037,9 @@ export async function createCompanyLocation(
       const textResponse = await response.text();
       console.error("❌ Non-JSON response:", textResponse.substring(0, 500));
       return {
-        error: "Invalid response from Shopify API - expected JSON but received HTML",
-        details: "This usually means the shop URL or access token is incorrect"
+        error:
+          "Invalid response from Shopify API - expected JSON but received HTML",
+        details: "This usually means the shop URL or access token is incorrect",
       };
     }
 
@@ -3837,7 +4051,7 @@ export async function createCompanyLocation(
       console.error("❌ GraphQL Errors:", result.errors);
       return {
         error: result.errors[0]?.message || "GraphQL error occurred",
-        graphqlErrors: result.errors
+        graphqlErrors: result.errors,
       };
     }
 
@@ -3849,7 +4063,7 @@ export async function createCompanyLocation(
       return {
         error: userErrors[0].message,
         userErrors: userErrors,
-        field: userErrors[0].field
+        field: userErrors[0].field,
       };
     }
 
@@ -3868,14 +4082,15 @@ export async function createCompanyLocation(
     // Provide more specific error messages
     if (error instanceof SyntaxError) {
       return {
-        error: "Invalid response from Shopify - please check your shop URL and access token",
-        technicalError: error.message
+        error:
+          "Invalid response from Shopify - please check your shop URL and access token",
+        technicalError: error.message,
       };
     }
 
     return {
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
-      type: error instanceof Error ? error.constructor.name : 'Unknown'
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+      type: error instanceof Error ? error.constructor.name : "Unknown",
     };
   }
 }
@@ -3895,7 +4110,7 @@ export async function updateCompanyLocation(
     phone?: string;
     externalId?: string;
     note?: string;
-  }
+  },
 ) {
   try {
     let hasErrors = false;
@@ -3960,9 +4175,9 @@ export async function updateCompanyLocation(
           },
           body: JSON.stringify({
             query: updateMutation,
-            variables: { companyLocationId: locationId, input }
+            variables: { companyLocationId: locationId, input },
           }),
-        }
+        },
       );
 
       const result = await response.json();
@@ -3970,7 +4185,11 @@ export async function updateCompanyLocation(
 
       if (result.data?.companyLocationUpdate?.userErrors?.length > 0) {
         hasErrors = true;
-        errors.push(...result.data.companyLocationUpdate.userErrors.map((e: any) => e.message));
+        errors.push(
+          ...result.data.companyLocationUpdate.userErrors.map(
+            (e: any) => e.message,
+          ),
+        );
       }
     }
 
@@ -4011,9 +4230,9 @@ export async function updateCompanyLocation(
           },
           body: JSON.stringify({
             query: queryMutation,
-            variables: { id: locationId }
+            variables: { id: locationId },
           }),
-        }
+        },
       );
 
       const queryResult = await queryResponse.json();
@@ -4030,25 +4249,46 @@ export async function updateCompanyLocation(
         zoneCode?: string;
         countryCode: string;
       } = {
-        address1: locationData.address1 !== undefined ? locationData.address1 : (existingShipping.address1 || ""),
-        city: locationData.city !== undefined ? locationData.city : (existingShipping.city || ""),
-        zip: locationData.zip !== undefined ? locationData.zip : (existingShipping.zip || ""),
-        countryCode: locationData.country !== undefined ? locationData.country : (existingShipping.country || "US"),
+        address1:
+          locationData.address1 !== undefined
+            ? locationData.address1
+            : existingShipping.address1 || "",
+        city:
+          locationData.city !== undefined
+            ? locationData.city
+            : existingShipping.city || "",
+        zip:
+          locationData.zip !== undefined
+            ? locationData.zip
+            : existingShipping.zip || "",
+        countryCode:
+          locationData.country !== undefined
+            ? locationData.country
+            : existingShipping.country || "US",
       };
 
       // Only add address2 if it exists (not empty string)
-      const address2Value = locationData.address2 !== undefined ? locationData.address2 : existingShipping.address2;
+      const address2Value =
+        locationData.address2 !== undefined
+          ? locationData.address2
+          : existingShipping.address2;
       if (address2Value && address2Value.trim() !== "") {
         addressInput.address2 = address2Value;
       }
 
       // Only add zoneCode if it exists and is not empty
-      const provinceValue = locationData.province !== undefined ? locationData.province : existingShipping.province;
+      const provinceValue =
+        locationData.province !== undefined
+          ? locationData.province
+          : existingShipping.province;
       if (provinceValue && provinceValue.trim() !== "") {
         addressInput.zoneCode = provinceValue;
       }
 
-      console.log("📍 Updating address:", JSON.stringify(addressInput, null, 2));
+      console.log(
+        "📍 Updating address:",
+        JSON.stringify(addressInput, null, 2),
+      );
 
       // Update address using companyLocationAssignAddress mutation
       const addressMutation = `
@@ -4083,32 +4323,41 @@ export async function updateCompanyLocation(
             variables: {
               locationId: locationId,
               address: addressInput,
-              addressTypes: ["BILLING", "SHIPPING"]
-            }
+              addressTypes: ["BILLING", "SHIPPING"],
+            },
           }),
-        }
+        },
       );
 
       const addressResult = await addressResponse.json();
-      console.log("📦 Address update result:", JSON.stringify(addressResult, null, 2));
+      console.log(
+        "📦 Address update result:",
+        JSON.stringify(addressResult, null, 2),
+      );
 
-      if (addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0) {
+      if (
+        addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0
+      ) {
         hasErrors = true;
-        errors.push(...addressResult.data.companyLocationAssignAddress.userErrors.map((e: any) => e.message));
+        errors.push(
+          ...addressResult.data.companyLocationAssignAddress.userErrors.map(
+            (e: any) => e.message,
+          ),
+        );
       }
     }
 
     if (hasErrors) {
       return {
         error: errors[0],
-        userErrors: errors
+        userErrors: errors,
       };
     }
 
     return { success: true };
   } catch (error) {
     console.error("Error updating company location:", error);
-    return { error: error instanceof Error ? error.message : 'Unknown error' };
+    return { error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
 
@@ -4116,7 +4365,7 @@ export async function updateCompanyLocation(
 export async function deleteCompanyLocation(
   locationId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   try {
     const deleteMutation = `
@@ -4141,17 +4390,17 @@ export async function deleteCompanyLocation(
         },
         body: JSON.stringify({
           query: deleteMutation,
-          variables: { companyLocationId: locationId }
+          variables: { companyLocationId: locationId },
         }),
-      }
+      },
     );
 
     const result = await response.json();
-    
+
     // Safe error checking
     const deleteData = result.data?.companyLocationDelete;
     const userErrors = deleteData?.userErrors;
-    
+
     if (userErrors && userErrors.length > 0) {
       console.log(userErrors[0].message, "Delete error message");
       return { error: userErrors[0] };
@@ -4159,34 +4408,33 @@ export async function deleteCompanyLocation(
 
     // Check if deletion was successful
     if (!deleteData?.deletedCompanyLocationId) {
-      return { 
+      return {
         error: {
-          field: ['companyLocationId'],
-          message: 'Location deletion failed - no ID returned'
-        }
+          field: ["companyLocationId"],
+          message: "Location deletion failed - no ID returned",
+        },
       };
     }
 
     return {
       success: true,
-      deletedId: deleteData.deletedCompanyLocationId
+      deletedId: deleteData.deletedCompanyLocationId,
     };
   } catch (error) {
     console.error("Error deleting company location:", error);
-    return { 
+    return {
       error: {
-        field: ['general'],
-        message: error instanceof Error ? error.message : 'Unknown error'
-      }
+        field: ["general"],
+        message: error instanceof Error ? error.message : "Unknown error",
+      },
     };
   }
 }
 
-
 export async function checkLocationHasUsers(
   locationId: string,
   shopName: string,
-  accessToken: string
+  accessToken: string,
 ) {
   try {
     const query = `
@@ -4214,7 +4462,7 @@ export async function checkLocationHasUsers(
           "X-Shopify-Access-Token": accessToken,
         },
         body: JSON.stringify({ query }),
-      }
+      },
     );
 
     const data = await response.json();
@@ -4230,10 +4478,10 @@ export async function checkLocationHasUsers(
     return {
       hasUsers: userCount > 0,
       userCount: userCount,
-      locationName: location?.name
+      locationName: location?.name,
     };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : 'Unknown error' };
+    return { error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
 
@@ -4248,7 +4496,13 @@ export async function getAdvancedCompanyOrders(
       locationId?: string;
       customerId?: string | string[];
       dateRange?: {
-        preset?: 'last_week' | 'current_month' | 'last_month' | 'last_3_months' | 'custom' | 'all';
+        preset?:
+          | "last_week"
+          | "current_month"
+          | "last_month"
+          | "last_3_months"
+          | "custom"
+          | "all";
         start?: string;
         end?: string;
       };
@@ -4262,14 +4516,15 @@ export async function getAdvancedCompanyOrders(
       first?: number;
       after?: string;
     };
-  }
+  },
 ) {
   try {
     const { companyId, allowedLocationIds, filters, pagination } = params;
 
+   
     const extractId = (id: string) => {
-      if (!id) return '';
-      return id.split('/').pop() || id;
+      if (!id) return "";
+      return id.split("/").pop() || id;
     };
 
     const cleanCompanyId = extractId(companyId);
@@ -4283,8 +4538,8 @@ export async function getAdvancedCompanyOrders(
     if (filters.locationId) {
       // Check authorization if user has restricted access
       if (allowedLocationIds && allowedLocationIds.length > 0) {
-        const hasAccess = allowedLocationIds.some(id =>
-          extractId(id) === extractId(filters.locationId!)
+        const hasAccess = allowedLocationIds.some(
+          (id) => extractId(id) === extractId(filters.locationId!),
         );
 
         if (!hasAccess) {
@@ -4294,10 +4549,10 @@ export async function getAdvancedCompanyOrders(
               hasNextPage: false,
               hasPreviousPage: false,
               endCursor: null,
-              startCursor: null
+              startCursor: null,
             },
             totalCount: 0,
-            error: "Unauthorized access to location"
+            error: "Unauthorized access to location",
           };
         }
       }
@@ -4312,41 +4567,51 @@ export async function getAdvancedCompanyOrders(
     if (filters.customerId) {
       if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
         const customerQueries = filters.customerId
-          .map(id => `customer_id:${extractId(id)}`)
-          .join(' OR ');
+          .map((id) => `customer_id:${extractId(id)}`)
+          .join(" OR ");
         queryParts.push(`(${customerQueries})`);
-        
-      } else if (typeof filters.customerId === 'string') {
+      } else if (typeof filters.customerId === "string") {
         const cleanCustomerId = extractId(filters.customerId);
         queryParts.push(`customer_id:${cleanCustomerId}`);
       }
-
     }
 
     // 3. Date Filter with all presets
     if (filters.dateRange) {
       const { preset, start, end } = filters.dateRange;
       const now = new Date();
-      let dateQuery = '';
+      let dateQuery = "";
 
-      if (preset === 'last_week') {
+      if (preset === "last_week") {
         const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         dateQuery = `created_at:>=${lastWeek.toISOString()}`;
-
-      } else if (preset === 'current_month') {
+      } else if (preset === "current_month") {
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
         dateQuery = `created_at:>=${firstDay.toISOString()}`;
-
-      } else if (preset === 'last_month') {
-        const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      } else if (preset === "last_month") {
+        const firstDayLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          1,
+        );
+        const lastDayLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          0,
+          23,
+          59,
+          59,
+          999,
+        );
         dateQuery = `created_at:>=${firstDayLastMonth.toISOString()} AND created_at:<=${lastDayLastMonth.toISOString()}`;
-
-      } else if (preset === 'last_3_months') {
-        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+      } else if (preset === "last_3_months") {
+        const threeMonthsAgo = new Date(
+          now.getFullYear(),
+          now.getMonth() - 3,
+          1,
+        );
         dateQuery = `created_at:>=${threeMonthsAgo.toISOString()}`;
-
-      } else if (preset === 'custom' && start && end) {
+      } else if (preset === "custom" && start && end) {
         dateQuery = `created_at:>=${start} AND created_at:<=${end}`;
       }
 
@@ -4366,17 +4631,24 @@ export async function getAdvancedCompanyOrders(
 
     // 5. Search Query
     if (filters.query) {
-      const searchTerms = filters.query.split(' ').filter(term => term.length > 0);
-      const searchQuery = searchTerms.map(term => `name:*${term}* OR email:*${term}*`).join(' OR ');
+      const searchTerms = filters.query
+        .split(" ")
+        .filter((term) => term.length > 0);
+      const searchQuery = searchTerms
+        .map((term) => `name:*${term}* OR email:*${term}*`)
+        .join(" OR ");
       queryParts.push(`(${searchQuery})`);
     }
 
-    const queryString = queryParts.join(' AND ');
+    const queryString = queryParts.join(" AND ");
 
     // Fetch MORE orders when we need to post-filter
     const requestedFirst = pagination.first || 20;
-    const needsPostFiltering = needsLocationPostFilter ||
-                               (allowedLocationIds && allowedLocationIds.length > 0 && !filters.locationId);
+    const needsPostFiltering =
+      needsLocationPostFilter ||
+      (allowedLocationIds &&
+        allowedLocationIds.length > 0 &&
+        !filters.locationId);
 
     const fetchFirst = needsPostFiltering
       ? Math.min(requestedFirst * 3, 250) // Fetch 3x more
@@ -4384,7 +4656,8 @@ export async function getAdvancedCompanyOrders(
 
     const after = pagination.after ? `"${pagination.after}"` : null;
 
-    console.log('🔍 GraphQL Query String:', queryString);
+    console.log(allowedLocationIds,"allowedLocationIds--test");
+    // console.log("🔍 GraphQL Query String:", queryString);
 
     const query = `
       query getOrders($query: String!, $first: Int!, $after: String) {
@@ -4512,10 +4785,10 @@ export async function getAdvancedCompanyOrders(
           variables: {
             query: queryString,
             first: fetchFirst,
-            after
-          }
+            after,
+          },
         }),
-      }
+      },
     );
 
     const data = await response.json();
@@ -4528,30 +4801,35 @@ export async function getAdvancedCompanyOrders(
     const ordersData = data.data?.orders;
 
     // Process orders and extract location information
-    let processedOrders = ordersData?.edges?.map((edge: any) => {
-      const order = edge.node;
+    let processedOrders =
+      ordersData?.edges?.map((edge: any) => {
+        const order = edge.node;
 
-      let locationId = '';
-      let locationName = 'Company Order';
+        let locationId = "";
+        let locationName = "Company Order";
 
-      if (order.purchasingEntity?.location) {
-        locationId = order.purchasingEntity.location.id;
-        locationName = order.purchasingEntity.location.name;
-      } else if (order.billingAddress?.company || order.shippingAddress?.company) {
-        locationName = order.billingAddress?.company || order.shippingAddress?.company;
-      }
+        if (order.purchasingEntity?.location) {
+          locationId = order.purchasingEntity.location.id;
+          locationName = order.purchasingEntity.location.name;
+        } else if (
+          order.billingAddress?.company ||
+          order.shippingAddress?.company
+        ) {
+          locationName =
+            order.billingAddress?.company || order.shippingAddress?.company;
+        }
 
-      return {
-        ...order,
-        locationId,
-        locationName,
-        companyLocation: {
-          id: locationId,
-          name: locationName
-        },
-        cursor: edge.cursor
-      };
-    }) || [];
+        return {
+          ...order,
+          locationId,
+          locationName,
+          companyLocation: {
+            id: locationId,
+            name: locationName,
+          },
+          cursor: edge.cursor,
+        };
+      }) || [];
 
     const originalCount = processedOrders.length;
 
@@ -4562,17 +4840,23 @@ export async function getAdvancedCompanyOrders(
         const matches = orderLocationId === requestedLocationId;
 
         if (!matches) {
-          console.log(`🚫 Location filter: Excluded order ${order.name} (location: ${orderLocationId}, wanted: ${requestedLocationId})`);
+          console.log(
+            `🚫 Location filter: Excluded order ${order.name} (location: ${orderLocationId}, wanted: ${requestedLocationId})`,
+          );
         }
 
         return matches;
       });
 
-      console.log(`✅ Location filter (specific): ${originalCount} → ${processedOrders.length} orders`);
+      console.log(
+        `✅ Location filter (specific): ${originalCount} → ${processedOrders.length} orders`,
+      );
     }
     // POST-FILTER 2: Filter by allowed locations (RBAC)
     else if (allowedLocationIds && allowedLocationIds.length > 0) {
-      const normalizedAllowedIds = allowedLocationIds.map(id => extractId(id));
+      const normalizedAllowedIds = allowedLocationIds.map((id) =>
+        extractId(id),
+      );
 
       processedOrders = processedOrders.filter((order: any) => {
         const orderLocationId = extractId(order.locationId);
@@ -4585,13 +4869,17 @@ export async function getAdvancedCompanyOrders(
         const isAllowed = normalizedAllowedIds.includes(orderLocationId);
 
         if (!isAllowed) {
-          console.log(`🚫 RBAC filter: Excluded order ${order.name} (location: ${orderLocationId})`);
+          console.log(
+            `🚫 RBAC filter: Excluded order ${order.name} (location: ${orderLocationId})`,
+          );
         }
 
         return isAllowed;
       });
 
-      console.log(`✅ RBAC location filter: ${originalCount} → ${processedOrders.length} orders`);
+      console.log(
+        `✅ RBAC location filter: ${originalCount} → ${processedOrders.length} orders`,
+      );
     }
 
     // Slice to requested page size
@@ -4601,14 +4889,16 @@ export async function getAdvancedCompanyOrders(
     return {
       orders: paginatedOrders,
       pageInfo: {
-        hasNextPage: hasMore || (ordersData?.pageInfo?.hasNextPage || false),
+        hasNextPage: hasMore || ordersData?.pageInfo?.hasNextPage || false,
         hasPreviousPage: ordersData?.pageInfo?.hasPreviousPage || false,
-        endCursor: paginatedOrders.length > 0
-          ? paginatedOrders[paginatedOrders.length - 1].cursor
-          : ordersData?.pageInfo?.endCursor || null,
-        startCursor: paginatedOrders.length > 0
-          ? paginatedOrders[0].cursor
-          : ordersData?.pageInfo?.startCursor || null,
+        endCursor:
+          paginatedOrders.length > 0
+            ? paginatedOrders[paginatedOrders.length - 1].cursor
+            : ordersData?.pageInfo?.endCursor || null,
+        startCursor:
+          paginatedOrders.length > 0
+            ? paginatedOrders[0].cursor
+            : ordersData?.pageInfo?.startCursor || null,
       },
       totalCount: paginatedOrders.length,
       _debug: {
@@ -4616,11 +4906,11 @@ export async function getAdvancedCompanyOrders(
         fetched: ordersData?.edges?.length || 0,
         afterFilter: processedOrders.length,
         returned: paginatedOrders.length,
-        locationFilter: requestedLocationId || 'none',
-        allowedLocations: allowedLocationIds?.map(id => extractId(id)) || 'all'
-      }
+        locationFilter: requestedLocationId || "none",
+        allowedLocations:
+          allowedLocationIds?.map((id) => extractId(id)) || "all",
+      },
     };
-
   } catch (error: any) {
     console.error("Error fetching advanced orders:", error);
     return { error: error.message };
@@ -4630,7 +4920,7 @@ export async function getAdvancedCompanyOrders(
 export async function getCompanyOrdersCount(
   shopName: string,
   accessToken: string,
-  queryString: string
+  queryString: string,
 ): Promise<number> {
   const query = `
     query OrdersCount($query: String!) {
@@ -4652,7 +4942,7 @@ export async function getCompanyOrdersCount(
         query,
         variables: { query: queryString },
       }),
-    }
+    },
   );
 
   const data = await response.json();
@@ -4689,7 +4979,7 @@ async function createOrUpdateLocalUser({
   userCreditLimit,
   shopifyCustomerId,
   shopifyCompanyId,
-  shopName
+  shopName,
 }: {
   email: string;
   firstName: string;
@@ -4710,12 +5000,14 @@ async function createOrUpdateLocalUser({
   const companyAccount = await prisma.companyAccount.findFirst({
     where: {
       shopifyCompanyId: shopifyCompanyId,
-      shopId: store.id
-    }
+      shopId: store.id,
+    },
   });
 
   if (!companyAccount) {
-    console.warn(`⚠️ Company account not found for shopifyCompanyId: ${shopifyCompanyId}`);
+    console.warn(
+      `⚠️ Company account not found for shopifyCompanyId: ${shopifyCompanyId}`,
+    );
   }
 
   // Check if user already exists
@@ -4723,9 +5015,9 @@ async function createOrUpdateLocalUser({
     where: {
       shopId_email: {
         email: email,
-        shopId: store.id
-      }
-    }
+        shopId: store.id,
+      },
+    },
   });
 
   if (!existingUser) {
@@ -4742,7 +5034,7 @@ async function createOrUpdateLocalUser({
       companyId: companyAccount?.id || null,
       companyRole: "member", // Default role
       shopifyCustomerId: shopifyCustomerId, // Link to Shopify customer
-      userCreditLimit:userCreditLimit || 0,
+      userCreditLimit: userCreditLimit || 0,
     });
 
     console.log(`✅ Created local user: ${newUser.id} for email: ${email},`);
@@ -4755,11 +5047,13 @@ async function createOrUpdateLocalUser({
         companyId: companyAccount?.id || existingUser.companyId,
         firstName: firstName || existingUser.firstName,
         lastName: lastName || existingUser.lastName,
-        userCreditLimit:userCreditLimit || existingUser.userCreditLimit,
-        status: "APPROVED" // Ensure they're approved
-      }
+        userCreditLimit: userCreditLimit || existingUser.userCreditLimit,
+        status: "APPROVED", // Ensure they're approved
+      },
     });
 
-    console.log(`✅ Updated existing local user: ${existingUser.id} with Shopify customer ID: ${shopifyCustomerId}`);
+    console.log(
+      `✅ Updated existing local user: ${existingUser.id} with Shopify customer ID: ${shopifyCustomerId}`,
+    );
   }
 }
