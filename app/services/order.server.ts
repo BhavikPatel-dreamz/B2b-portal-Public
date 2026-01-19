@@ -117,6 +117,7 @@ export async function createOrder(data: CreateOrderInput) {
   })
   const notificationData: any = {
     message: `New B2B order created with ID: ${order.id}`,
+    title: "New Order Created",
     shopId: order?.shopId,
     activityType: "pending",
     senderId: order?.createdByUserId,

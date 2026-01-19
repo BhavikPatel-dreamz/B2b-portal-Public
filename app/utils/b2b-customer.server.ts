@@ -2627,6 +2627,7 @@ export async function getCompanyLocations(
   shopName: string,
   accessToken: string,
 ) {
+
   try {
     const query = `
   query {
@@ -2710,7 +2711,7 @@ export async function getCompanyLocations(
     }
 
     const company = data.data.company;
-
+      console.log(company,"company");
     // Get all contacts with their location assignments
     const contacts = company.contacts.edges.map((edge: any) => {
       const node = edge.node;
@@ -4019,7 +4020,6 @@ export async function createCompanyLocation(
         }),
       },
     );
-    console.log("🚀 ~ createCompanyLocation ~ response:", response);
 
     // Check if response is ok before parsing
     if (!response.ok) {
@@ -4027,7 +4027,7 @@ export async function createCompanyLocation(
       console.error("❌ HTTP Error:", response.status, errorText);
       return {
         error: `HTTP ${response.status}: ${response.statusText}`,
-        details: errorText.substring(0, 200), // First 200 chars of error
+        details: errorText.substring(0, 200),
       };
     }
 
@@ -4093,6 +4093,439 @@ export async function createCompanyLocation(
       type: error instanceof Error ? error.constructor.name : "Unknown",
     };
   }
+}
+
+
+export async function getCompanyContactRoles(
+  companyId: string,
+  shopName: string,
+  accessToken: string,
+) {
+  try {
+   
+    const numericId = companyId.split("/").pop();
+
+    const query = `
+      query getCompanyRoles {
+        companies(first: 10, query: "id:'${numericId}'") {
+          edges {
+            node {
+              id
+              name
+              contactRoles(first: 10) {
+                nodes {
+                  id
+                  name
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({ query }),
+      },
+    );
+
+    const result = await response.json();
+    console.log("📋 Company Roles:", JSON.stringify(result, null, 2));
+
+    if (result.errors) {
+      return { error: result.errors[0]?.message };
+    }
+
+    const roles =
+      result.data?.companies?.edges?.[0]?.node?.contactRoles?.nodes || [];
+
+    if (roles.length === 0) {
+      return { error: "No roles found for this company" };
+    }
+
+    return {
+      success: true,
+      roles: roles,
+      defaultRoleId: roles.find((r: any) => r.name === "Location admin")?.id || roles[0].id,
+    };
+  } catch (error) {
+    console.error("💥 Error fetching company roles:", error);
+    return {
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}
+
+export async function assignContactToLocation(
+  companyContactId: string,
+  companyContactRoleId: string,
+  companyLocationId: string,
+  shopName: string,
+  accessToken: string,
+) {
+  try {
+    const mutation = `
+      mutation assignRole($companyContactId: ID!, $companyContactRoleId: ID!, $companyLocationId: ID!) {
+        companyContactAssignRole(
+          companyContactId: $companyContactId
+          companyContactRoleId: $companyContactRoleId
+          companyLocationId: $companyLocationId
+        ) {
+          companyContactRoleAssignment {
+            id
+            company {
+              id
+              name
+            }
+            companyContact {
+              id
+            }
+            companyLocation {
+              id
+              name
+            }
+            role {
+              id
+              name
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query: mutation,
+          variables: {
+            companyContactId,
+            companyContactRoleId,
+            companyLocationId,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ HTTP Error:", response.status, errorText);
+      return {
+        error: `HTTP ${response.status}: ${response.statusText}`,
+      };
+    }
+
+    const result = await response.json();
+    console.log("📦 Assign Role Result:", JSON.stringify(result, null, 2));
+
+    if (result.errors) {
+      return {
+        error: result.errors[0]?.message || "GraphQL error occurred",
+        graphqlErrors: result.errors,
+      };
+    }
+
+    if (result.data?.companyContactAssignRole?.userErrors?.length > 0) {
+      const userErrors = result.data.companyContactAssignRole.userErrors;
+      return {
+        error: userErrors[0].message,
+        userErrors: userErrors,
+      };
+    }
+
+    return {
+      success: true,
+      roleAssignment: result.data?.companyContactAssignRole?.companyContactRoleAssignment,
+    };
+  } catch (error) {
+    console.error("💥 Error assigning role:", error);
+    return {
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}
+
+
+export async function findCompanyContactByCustomer(
+  companyId: string,
+  customerId: string,
+  shopName: string,
+  accessToken: string,
+) {
+  try {
+    const numericCompanyId = companyId.split("/").pop();
+
+    const query = `
+      query getCompanyContacts {
+        companies(first: 1, query: "id:'${numericCompanyId}'") {
+          edges {
+            node {
+              id
+              contacts(first: 50) {
+                edges {
+                  node {
+                    id
+                    customer {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({ query }),
+      },
+    );
+
+    const result = await response.json();
+    console.log("🔍 Company Contacts:", JSON.stringify(result, null, 2));
+
+    if (result.errors) {
+      return {
+        error: result.errors[0]?.message || "GraphQL error occurred",
+      };
+    }
+
+    const contacts = result.data?.companies?.edges?.[0]?.node?.contacts?.edges || [];
+    
+    const matchingContact = contacts.find(
+      (edge: any) => edge.node.customer?.id === customerId
+    );
+
+    if (!matchingContact) {
+      return {
+        error: "Company contact not found for this customer",
+        availableContacts: contacts.map((e: any) => e.node.id),
+      };
+    }
+
+    return {
+      success: true,
+      companyContactId: matchingContact.node.id,
+    };
+  } catch (error) {
+    console.error("💥 Error finding company contact:", error);
+    return {
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}
+
+
+export async function assignCustomerAsContact(
+  companyId: string,
+  customerId: string,
+  shopName: string,
+  accessToken: string,
+) {
+  try {
+    const mutation = `
+      mutation assignCustomer($companyId: ID!, $customerId: ID!) {
+        companyAssignCustomerAsContact(
+          companyId: $companyId
+          customerId: $customerId
+        ) {
+          companyContact {
+            id
+            customer {
+              id
+              email
+              firstName
+              lastName
+            }
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query: mutation,
+          variables: { companyId, customerId },
+        }),
+      },
+    );
+
+    const result = await response.json();
+    console.log("👤 Assign Customer Result:", JSON.stringify(result, null, 2));
+
+    if (result.errors) {
+      return {
+        error: result.errors[0]?.message || "GraphQL error occurred",
+        graphqlErrors: result.errors,
+      };
+    }
+
+    if (result.data?.companyAssignCustomerAsContact?.userErrors?.length > 0) {
+      const userErrors = result.data.companyAssignCustomerAsContact.userErrors;
+      return {
+        error: userErrors[0].message,
+        userErrors: userErrors,
+      };
+    }
+
+    return {
+      success: true,
+      companyContactId: result.data?.companyAssignCustomerAsContact?.companyContact?.id,
+      companyContact: result.data?.companyAssignCustomerAsContact?.companyContact,
+    };
+  } catch (error) {
+    console.error("💥 Error assigning customer as contact:", error);
+    return {
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}
+
+
+export async function createLocationAndAssignToContact(
+  companyId: string,
+  customerId: string, 
+  shopName: string,
+  accessToken: string,
+  locationData: {
+    name: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    province?: string;
+    zip?: string;
+    country?: string;
+    phone?: string;
+    externalId?: string;
+    note?: string;
+  },
+) {
+  console.log("🚀 Starting complete workflow...");
+
+  
+  const locationResult = await createCompanyLocation(
+    companyId,
+    shopName,
+    accessToken,
+    locationData,
+  );
+
+  if (!locationResult.success || !locationResult.locationId) {
+    return {
+      error: "Failed to create location",
+      details: locationResult.error,
+    };
+  }
+  console.log("✅ Location created:", locationResult.locationId);
+  let companyContactId: string;
+  const findResult = await findCompanyContactByCustomer(
+    companyId,
+    customerId,
+    shopName,
+    accessToken,
+  );
+
+  if (findResult.success && findResult.companyContactId) {
+
+    companyContactId = findResult.companyContactId;
+    console.log("✅ Found existing Company Contact:", companyContactId);
+  } else {
+    const contactResult = await assignCustomerAsContact(
+      companyId,
+      customerId,
+      shopName,
+      accessToken,
+    );
+
+    if (!contactResult.success || !contactResult.companyContactId) {
+      return {
+        warning: "Location created but failed to create company contact",
+        locationId: locationResult.locationId,
+        contactError: contactResult.error,
+      };
+    }
+
+    companyContactId = contactResult.companyContactId;
+    console.log("✅ Company Contact created:", companyContactId);
+  }
+
+  const rolesResult = await getCompanyContactRoles(
+    companyId,
+    shopName,
+    accessToken,
+  );
+
+  if (!rolesResult.success || !rolesResult.defaultRoleId) {
+    return {
+      warning: "Location and contact created but failed to fetch roles",
+      locationId: locationResult.locationId,  
+      companyContactId: companyContactId,
+      rolesError: rolesResult.error,
+    };
+  }
+  const assignResult = await assignContactToLocation(
+    companyContactId,
+    rolesResult.defaultRoleId,
+    locationResult.locationId,
+    shopName,
+    accessToken,
+  );
+
+  if (!assignResult.success) {
+    return {
+      warning: "Location and contact created but failed to assign",
+      locationId: locationResult.locationId,
+      companyContactId: companyContactId,
+      availableRoles: rolesResult.roles,
+      assignError: assignResult.error,
+    };
+  }
+
+  console.log("✅ Contact assigned to location successfully!");
+
+  return {
+    success: true,
+    locationId: locationResult.locationId,
+    companyContactId: companyContactId,
+    roleAssignment: assignResult.roleAssignment,
+    usedRoleId: rolesResult.defaultRoleId,
+    availableRoles: rolesResult.roles,
+  };
 }
 
 export async function updateCompanyLocation(
@@ -4656,7 +5089,7 @@ export async function getAdvancedCompanyOrders(
 
     const after = pagination.after ? `"${pagination.after}"` : null;
 
-    console.log(allowedLocationIds,"allowedLocationIds--test");
+   
     // console.log("🔍 GraphQL Query String:", queryString);
 
     const query = `

@@ -26,7 +26,9 @@ interface TieredCreditAvailability {
 /**
  * Calculate user-specific credit usage and availability
  */
-export async function calculateUserCredit(userId: string): Promise<UserCreditInfo | null> {
+export async function calculateUserCredit(
+  userId: string,
+): Promise<UserCreditInfo | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -43,7 +45,9 @@ export async function calculateUserCredit(userId: string): Promise<UserCreditInf
   // If user has no credit limit set, they have unlimited personal credit
   // (still subject to company limits)
   const hasUserLimit = user.userCreditLimit !== null;
-  const userCreditLimit = user.userCreditLimit ? new Decimal(user.userCreditLimit) : new Decimal(0);
+  const userCreditLimit = user.userCreditLimit
+    ? new Decimal(user.userCreditLimit)
+    : new Decimal(0);
   const userCreditUsed = user.userCreditUsed;
   const userCreditAvailable = hasUserLimit
     ? userCreditLimit.minus(userCreditUsed)
@@ -63,7 +67,7 @@ export async function calculateUserCredit(userId: string): Promise<UserCreditInf
  */
 export async function calculateTieredCreditAvailability(
   companyId: string,
-  userId: string
+  userId: string,
 ): Promise<TieredCreditAvailability | null> {
   // Get company credit info (reusing existing function)
   const company = await prisma.companyAccount.findUnique({
@@ -87,7 +91,9 @@ export async function calculateTieredCreditAvailability(
     },
   });
 
-  const companyUsedCredit = ordersWithBalance._sum.remainingBalance ? new Decimal(ordersWithBalance._sum.remainingBalance) : new Decimal(0);
+  const companyUsedCredit = ordersWithBalance._sum.remainingBalance
+    ? new Decimal(ordersWithBalance._sum.remainingBalance)
+    : new Decimal(0);
 
   const pendingOrders = await prisma.b2BOrder.aggregate({
     where: {
@@ -100,7 +106,9 @@ export async function calculateTieredCreditAvailability(
     },
   });
 
-  const companyPendingCredit = pendingOrders._sum.remainingBalance ? new Decimal(pendingOrders._sum.remainingBalance) : new Decimal(0);
+  const companyPendingCredit = pendingOrders._sum.remainingBalance
+    ? new Decimal(pendingOrders._sum.remainingBalance)
+    : new Decimal(0);
   const companyAvailableCredit = company.creditLimit
     .minus(companyUsedCredit)
     .minus(companyPendingCredit);
@@ -130,7 +138,7 @@ export async function calculateTieredCreditAvailability(
 export async function validateTieredCreditForOrder(
   companyId: string,
   userId: string,
-  orderAmount: number | Decimal
+  orderAmount: number | Decimal,
 ): Promise<{
   canCreate: boolean;
   limitingFactor: "company" | "user" | "none";
@@ -159,7 +167,10 @@ export async function validateTieredCreditForOrder(
   }
 
   // Check user credit if they have a limit set
-  if (creditInfo.user.hasUserLimit && creditInfo.user.userCreditAvailable.lessThan(orderAmountDecimal)) {
+  if (
+    creditInfo.user.hasUserLimit &&
+    creditInfo.user.userCreditAvailable.lessThan(orderAmountDecimal)
+  ) {
     return {
       canCreate: false,
       limitingFactor: "user",
@@ -184,7 +195,7 @@ export async function deductTieredCredit(
   userId: string,
   orderId: string,
   amount: number | Decimal,
-  transactionType: string = "order_created"
+  transactionType: string = "order_created",
 ): Promise<void> {
   const amountDecimal = new Decimal(amount);
 
@@ -222,20 +233,30 @@ export async function deductTieredCredit(
   }
 
   // Update order with credit tracking
-  await prisma.b2BOrder.update({
-    where: { id: orderId },
-    data: {
-      creditUsed: amountDecimal,
-      userCreditUsed: creditInfo.user.hasUserLimit ? amountDecimal : new Decimal(0),
-      remainingBalance: amountDecimal,
-    },
+  const order = await prisma.b2BOrder.findFirst({
+    where: { shopifyOrderId: orderId },
   });
+  if (order) {
+    await prisma.b2BOrder.update({
+      where: { id: order.id },
+      data: {
+        creditUsed: amountDecimal,
+        userCreditUsed: creditInfo.user.hasUserLimit
+          ? amountDecimal
+          : new Decimal(0),
+        remainingBalance: amountDecimal,
+      },
+    });
+  }
 
   // **Auto-sync metafields for checkout extension**
   try {
     await autoSyncCreditMetafields(companyId, userId);
   } catch (syncError) {
-    console.warn("Failed to sync credit metafields after deduction:", syncError);
+    console.warn(
+      "Failed to sync credit metafields after deduction:",
+      syncError,
+    );
     // Don't fail the transaction if metafield sync fails
   }
 }
@@ -248,7 +269,7 @@ export async function restoreTieredCredit(
   userId: string,
   orderId: string,
   amount: number | Decimal,
-  reason: "cancelled" | "refunded" = "cancelled"
+  reason: "cancelled" | "refunded" = "cancelled",
 ): Promise<void> {
   const amountDecimal = new Decimal(amount);
 
@@ -274,7 +295,8 @@ export async function restoreTieredCredit(
       companyId,
       userId,
       orderId,
-      transactionType: reason === "cancelled" ? "order_cancelled" : "payment_received",
+      transactionType:
+        reason === "cancelled" ? "order_cancelled" : "payment_received",
       creditAmount: amountDecimal, // Positive for restoration
       previousBalance: creditInfo.company.availableCredit,
       newBalance: creditInfo.company.availableCredit.plus(amountDecimal),
@@ -317,7 +339,10 @@ export async function getUserCreditSummary(userId: string) {
     return null;
   }
 
-  const tieredCreditInfo = await calculateTieredCreditAvailability(user.companyId!, user.id);
+  const tieredCreditInfo = await calculateTieredCreditAvailability(
+    user.companyId!,
+    user.id,
+  );
 
   if (!tieredCreditInfo) {
     return null;
@@ -366,7 +391,7 @@ export async function getUserCreditSummary(userId: string) {
 export async function setUserCreditLimit(
   userId: string,
   creditLimit: number | Decimal | null,
-  setByUserId: string
+  setByUserId: string,
 ): Promise<{ success: boolean; message: string }> {
   const limitDecimal = creditLimit !== null ? new Decimal(creditLimit) : null;
 

@@ -6,122 +6,68 @@ import { getProxyParams, validateB2BCustomerAccess } from "../../utils/proxy.ser
 
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
- const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
-
-    const store = await getStoreByDomain(shop);
-
-    // Get URL search params for filtering
-    const url = new URL(request.url);
-    const activityType = url.searchParams.get("activityType");
-    const senderId = url.searchParams.get("senderId");
-    const search = url.searchParams.get("search");
-    const isRead = url.searchParams.get("isRead");
-    const limit = url.searchParams.get("limit");
-    const page = url.searchParams.get("page");
-
-    // Build dynamic where clause
+  const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
+  const store = await getStoreByDomain(shop);
+  const url = new URL(request.url);
   
-   const user = await prisma.user.findFirst({
-        where: {
-            shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
-            
-        }
-    })
-    const where: any = {
-        shopId: store?.id,
-        receiverId: user?.id,
-    };
+  // Extract query params
+  const { activityType, senderId, search, isRead, limit, page } = Object.fromEntries(url.searchParams);
+  
+  const user = await prisma.user.findFirst({
+    where: { shopifyCustomerId: `gid://shopify/Customer/${customerId}` }
+  });
 
-    // Filter by activity type
-    if (activityType) {
-        where.activityType = activityType;
-    }
+  // Build where clause
+  const where: any = { shopId: store?.id, receiverId: user?.id };
+  if (activityType) where.activityType = activityType;
+  if (senderId) where.senderId = senderId;
+  if (isRead) where.isRead = isRead === 'true';
+  if (search) where.message = { contains: search, mode: 'insensitive' };
 
-    // Filter by sender
-    if (senderId) {
-        where.senderId = senderId;
-    }
+  // Pagination
+  const pageSize = parseInt(limit || '10');
+  const currentPage = parseInt(page || '1');
+  const skip = (currentPage - 1) * pageSize;
 
-    // Filter by isRead status
-    if (isRead !== null && isRead !== undefined) {
-        where.isRead = isRead == 'true';
-    }
+  // Parallel queries
+  const [notifications, totalCount, unreadCount, readCount] = await Promise.all([
+    prisma.notification.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: pageSize,
+      skip
+    }),
+    prisma.notification.count({ where }),
+    prisma.notification.count({ where: { ...where, isRead: false } }),
+    prisma.notification.count({ where: { ...where, isRead: true } })
+  ]);
 
-    // Search in message
-    if (search) {
-        where.message = {
-            contains: search,
-            mode: 'insensitive'
-        };
-    }
+  // Fetch users
+  const userIds = [...new Set(notifications.flatMap(n => [n.senderId, n.receiverId]).filter(Boolean))];
+  const users = await prisma.user.findMany({ where: { id: { in: userIds } } });
+  const userMap = new Map(users.map(u => [u.id, `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
 
-    // Pagination
-    const pageSize = limit ? parseInt(limit) : 10;
-    const currentPage = page ? parseInt(page) : 1;
-    const skip = (currentPage - 1) * pageSize;
+  const notificationsdata = notifications.map(n => ({
+    ...n,
+    senderName: userMap.get(n.senderId),
+    receiverName: userMap.get(n.receiverId)
+  }));
 
-    // Get total count for pagination
-    const totalCount = await prisma.notification.count({ where });
-
-    // Get UNREAD count (always show this regardless of filter)
-    const unreadCount = await prisma.notification.count({
-        where: {
-            shopId: store?.id,
-            receiverId: user?.id,
-            isRead: false
-        }
-    });
-
-    const notifications = await prisma.notification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        take: pageSize,
-        skip: skip,
-    });
-
-     const baseWhere = {
-    shopId: store?.id,
-    receiverId: user?.id
+  return {
+    notificationsdata,
+    unreadCount,
+    readCount,
+    totalCount,
+    pagination: {
+      total: totalCount,
+      page: currentPage,
+      pageSize,
+      totalPages: Math.ceil(totalCount / pageSize)
+    },
+    filters: { activityType, receiverId: customerId, senderId, search, isRead }
   };
-  // Get APPROVED count based on activityType
-    const readCount = await prisma.notification.count({
-        where: {
-            shopId: store?.id,
-            receiverId: user?.id,
-            isRead: true
-        }
-    });
-    const notificationsdata = notifications.map((notification) => ({
-        id: notification.id,
-        message: notification.message,
-        senderId: notification.senderId,
-        receiverId: notification.receiverId,
-        shopId: notification.shopId,
-        activityType: notification.activityType,
-        isRead: notification.isRead,
-        createdAt: notification.createdAt,
-    }));
-
-    return ({
-        notificationsdata: notificationsdata || [],
-        unreadCount: unreadCount,
-        readCount: readCount ,
-        totalCount: totalCount,
-        pagination: {
-            total: totalCount,
-            page: currentPage,
-            pageSize: pageSize,
-            totalPages: Math.ceil(totalCount / pageSize)
-        },
-        filters: {
-            activityType,
-            receiverId: customerId,
-            senderId,
-            search,
-            isRead: isRead
-        }
-    });
 };
+
 export const action = async ({ request }: ActionFunctionArgs) => {
 
     const formData = await request.formData();
@@ -145,6 +91,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 const receiverId = formData.get("receiverId") as string | undefined;
                 const senderId = formData.get("senderId") as string | undefined;
                 const activeAction = formData.get("activeAction") as string | undefined;
+                
 
 
                  if (!receiverId  && !senderId) return { error: "At least one receiver or sender is required" };
@@ -156,7 +103,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     activityType: 'pending',
                     adminReceiverId,
                     isRead: false,
-                    activeAction
+                    activeAction,
+                    title
                 };
 
                 if (receiverId) notificationData.receiverId = receiverId;

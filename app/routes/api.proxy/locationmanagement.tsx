@@ -7,6 +7,7 @@ import {
   updateCompanyLocation,
   deleteCompanyLocation,
   checkLocationHasUsers,
+  createLocationAndAssignToContact,
 } from "../../utils/b2b-customer.server";
 
 /**
@@ -116,8 +117,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
-        const result = await createCompanyLocation(
+        const result = await createLocationAndAssignToContact(
           companyId,
+         `gid://shopify/Customer/${userContext.customerId}`,
           shop,
           store.accessToken,
           {

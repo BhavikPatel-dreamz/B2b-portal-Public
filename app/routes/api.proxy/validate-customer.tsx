@@ -153,6 +153,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           hasB2BAccess: true,
           logo: store.logo,
           email: store.contactEmail,
+          storeName: store.shopName,
+          themeColor: store.themeColor,
           customerId: loggedInCustomerId,
           customerName,
           customerStatus: isApprovedViaRegistration ? registration.status : user?.status,
