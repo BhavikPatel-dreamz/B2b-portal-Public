@@ -1182,16 +1182,6 @@ const formatDate = (value?: string | null) => {
   return date.toLocaleString();
 };
 
-const formatCredit = (value?: string | null) => {
-  if (!value) return "$0.00";
-  const num = Number(value);
-  if (Number.isNaN(num)) return value;
-  return num.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  });
-};
 
 function StepBadge({
   label,
@@ -1472,8 +1462,8 @@ export default function RegistrationApprovals() {
     <s-page heading="Registration submissions">
       {/* Quick Action Buttons */}
       <s-section heading="">
-        {submissions.length === 0 ? (
-          <s-empty-state heading="No submissions yet" />
+        {submissions.filter((submission) => submission.status === "PENDING").length === 0  ? (
+          <s-paragraph>There are no pending submissions yet.</s-paragraph>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table
