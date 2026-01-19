@@ -234,6 +234,7 @@ model Notification {
   receiverId         String?
   adminReceiverId    String?
   senderId           String?
+  title              String?
   message            String
   activityType       String?
   activeAction       String?  // URL for the action/product
