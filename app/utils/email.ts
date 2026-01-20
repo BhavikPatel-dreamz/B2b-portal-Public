@@ -1,3 +1,4 @@
+import prisma from "app/db.server";
 import axios from "axios";
 
 interface EmailParams {
@@ -54,6 +55,7 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
 }
 
 export async function sendRegistrationEmail(
+  store: string,
   companyId: string,
   contactEmail: string,
   storeOwnerName: string,
@@ -61,13 +63,33 @@ export async function sendRegistrationEmail(
   companyName: string,
   contactName: string,
 ) {
-  const { html, text } = generateRegistrationTemplate(
-    companyId,
-    companyName || 'Company Name',
-    contactName || 'Contact Name',
-    email,
-    storeOwnerName || 'Store Owner',
+  const StoreData = await prisma.store.findUnique({
+    where: {
+      id: store,
+    },
+  });
+
+  if (!StoreData?.companyWelcomeEmailTemplate) {
+    throw new Error('Company welcome email template not found');
+  }
+
+  const templateVariables = {
+    companyName: companyName || 'Company Name',
+    storeOwnerName: storeOwnerName || 'Store Owner',
+    contactName: contactName || 'Contact Name',
+    email: email,
+    companyId: companyId,
+  };
+
+  const processedTemplate = replaceTemplateVariables(
+    StoreData.companyWelcomeEmailTemplate,
+    templateVariables
   );
+
+
+  const html = convertToHtmlEmail(processedTemplate);
+  console.log(html,"html");
+  const text = stripHtmlTags(processedTemplate);
 
   return sendEmail({
     to: contactEmail,
@@ -76,6 +98,130 @@ export async function sendRegistrationEmail(
     text,
   });
 }
+
+function replaceTemplateVariables(
+  template: string,
+  variables: Record<string, string>
+): string {
+  let processedTemplate = template;
+
+  Object.entries(variables).forEach(([key, value]) => {
+    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+    processedTemplate = processedTemplate.replace(regex, value);
+  });
+
+  return processedTemplate;
+}
+
+
+function convertToHtmlEmail(content: string): string {
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Company Inquiry</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      background-color: #f4f6f8; 
+      color: #333; 
+      margin: 0;
+      padding: 0;
+    }
+    .container { 
+      max-width: 600px; 
+      margin: 0 auto; 
+      padding: 20px; 
+    }
+    .header { 
+      background-color: #0d6efd; 
+      padding: 20px; 
+      text-align: center; 
+      color: #fff; 
+      border-radius: 8px 8px 0 0; 
+    }
+    .content { 
+      background-color: #ffffff; 
+      padding: 30px; 
+      border: 1px solid #dee2e6; 
+      line-height: 1.6;
+    }
+    .footer { 
+      background-color: #f8f9fa; 
+      padding: 15px; 
+      text-align: center; 
+      font-size: 12px; 
+      color: #6c757d; 
+      border-radius: 0 0 8px 8px; 
+    }
+    .btn { 
+      display: inline-block; 
+      padding: 12px 24px; 
+      background-color: #0d6efd; 
+      color: #fff !important; 
+      text-decoration: none; 
+      border-radius: 4px; 
+      margin: 20px 0; 
+    }
+    .btn:hover { 
+      background-color: #0b5ed7; 
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Company Inquiry</h1>
+    </div>
+
+    <div class="content">
+      ${formatContentAsHtml(content)}
+      
+      <p style="text-align: center;">
+        <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/registrations" class="btn">
+          View B2B Page
+        </a>
+      </p>
+    </div>
+
+    <div class="footer">
+      <p>This email was sent to notify you about a new company inquiry.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  return html;
+}
+
+
+function formatContentAsHtml(content: string): string {
+  return content
+    .split('\n')
+    .map(line => {
+      line = line.trim();
+      if (!line) return '<br />';
+      
+      if (line.startsWith('•')) {
+        return `<p style="margin: 5px 0; padding-left: 20px;">${line}</p>`;
+      }
+      
+      return `<p style="margin: 10px 0;">${line}</p>`;
+    })
+    .join('');
+}
+
+
+function stripHtmlTags(content: string): string {
+  return content
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 
 function generateRegistrationTemplate(
   companyId: string,

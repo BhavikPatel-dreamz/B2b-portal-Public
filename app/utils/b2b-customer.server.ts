@@ -2711,7 +2711,6 @@ export async function getCompanyLocations(
     }
 
     const company = data.data.company;
-      console.log(company,"company");
     // Get all contacts with their location assignments
     const contacts = company.contacts.edges.map((edge: any) => {
       const node = edge.node;

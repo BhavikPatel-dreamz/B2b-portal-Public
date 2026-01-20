@@ -91,9 +91,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 const receiverId = formData.get("receiverId") as string | undefined;
                 const senderId = formData.get("senderId") as string | undefined;
                 const activeAction = formData.get("activeAction") as string | undefined;
+                const title = formData.get("title") as string | undefined;
                 
-
-
                  if (!receiverId  && !senderId) return { error: "At least one receiver or sender is required" };
                 if (!message) return { error: "Message is required" };
 

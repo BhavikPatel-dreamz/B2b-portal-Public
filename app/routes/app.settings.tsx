@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -8,7 +8,9 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { updateStore } from "../services/store.server";
+import { getStoreByDomain, updateStore } from "../services/store.server";
+import { createUser, getUserByEmail } from "app/services/user.server";
+import { getCompaniesByShop } from "app/services/company.server";
 
 interface LoaderData {
   storeMissing: boolean;
@@ -75,6 +77,114 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const formData = await request.formData();
+  const intent = formData.get("intent") as string;
+
+  if (intent === "delete") {
+    try {
+      const { payload, shop, topic } = await authenticate.webhook(request);
+      console.log(`Received ${topic} webhook for ${shop}`);
+
+      // If an outdated subscription points to this path, ignore gracefully
+      if (topic !== "CUSTOMERS_CREATE") {
+        console.info(
+          `Webhook topic ${topic} hit customers/create route. Ignoring.`,
+        );
+        return new Response();
+      }
+
+      // Basic validation
+      if (!payload || !shop) {
+        return new Response("Invalid webhook payload", { status: 400 });
+      }
+
+      // Load store by shop domain
+      const store = await getStoreByDomain(shop);
+      if (!store) {
+        console.warn(
+          `Store not found for domain ${shop} — skipping customer sync`,
+        );
+        return new Response();
+      }
+
+      // Extract customer data from webhook payload
+      const customer = payload as any;
+      const customerId = customer.id;
+      const customerEmail = customer.email;
+      const firstName = customer.first_name;
+      const lastName = customer.last_name;
+      const customerTags = customer.tags || "";
+      const credit = customer.credit || 0;
+
+      if (!customerEmail || !customerId) {
+        console.info("Customer has no email or ID; skipping B2B user creation");
+        return new Response();
+      }
+
+      // Convert numeric Shopify customer ID to GraphQL GID
+      const customerGid = `gid://shopify/Customer/${customerId}`;
+
+      // Check if user already exists
+      const existingUser = await getUserByEmail(customerEmail, store.id);
+      if (existingUser) {
+        console.info(
+          `User with email ${customerEmail} already exists; skipping creation`,
+        );
+        return new Response();
+      }
+
+      let assignedCompany = null;
+
+      // Check if customer has B2B-related tags (you can customize this logic)
+      const isB2BCustomer =
+        customerTags.toLowerCase().includes("b2b") ||
+        customerTags.toLowerCase().includes("business") ||
+        customerTags.toLowerCase().includes("company");
+
+      if (!isB2BCustomer) {
+        console.info(
+          `Customer ${customerEmail} does not have B2B tags; skipping B2B user creation`,
+        );
+        return new Response();
+      }
+
+      // Try to get the first available company for this store
+      const companies = await getCompaniesByShop(store.id, { take: 1 });
+
+      if (companies.length === 0) {
+        console.warn(
+          `No companies found for store ${shop}; cannot assign user to company`,
+        );
+        // You might want to create a registration submission instead
+        return new Response();
+      }
+
+      assignedCompany = companies[0];
+
+      // Create the user in your local database
+      const newUser = await createUser({
+        email: customerEmail,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        password: "", // Placeholder password for B2B users created via Shopify
+        role: "STORE_USER",
+        status: "PENDING", // Set to pending so they need approval
+        shopId: store.id,
+        companyId: assignedCompany.id,
+        companyRole: "member",
+        shopifyCustomerId: customerGid,
+        userCreditLimit: credit,
+      });
+
+      console.log(
+        `Created B2B user ${newUser.id} for Shopify customer ${customerId} and assigned to company ${assignedCompany.name}`,
+      );
+      return new Response();
+    } catch (error) {
+      console.error("Error processing customers/create webhook:", error);
+      return new Response("Internal server error", { status: 500 });
+    }
+  }
+
   const logoRaw = (formData.get("logo") as string | null)?.trim() || "";
   const shopName = (formData.get("shopName") as string | null)?.trim() || "";
   const submissionEmailRaw =
@@ -84,17 +194,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const themeColorRaw =
     (formData.get("themeColor") as string | null)?.trim() || "";
   const companyWelcomeEmailTemplate =
-    (formData.get("companyWelcomeEmailTemplate") as string | null)?.trim() || "";
+    (formData.get("companyWelcomeEmailTemplate") as string | null)?.trim() ||
+    "";
   const companyWelcomeEmailEnabled =
     (formData.get("companyWelcomeEmailEnabled") as string | null) === "on";
 
   const errors: string[] = [];
 
   const submissionEmail = submissionEmailRaw || null;
-  if (
-    submissionEmail &&
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submissionEmail)
-  ) {
+  if (submissionEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submissionEmail)) {
     errors.push("Enter a valid registration notification email address.");
   }
 
@@ -131,29 +239,92 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SettingsPage() {
-  const { store, storeMissing } = useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<typeof loader>();
+  const { storeMissing } = loaderData;
+
+  // TypeScript now knows if storeMissing is false, store exists
+  if (loaderData.storeMissing) {
+    return (
+      <s-page heading="Store settings">
+        <s-section>
+          <s-banner tone="critical" title="Store not found">
+            <s-paragraph>
+              The current shop is missing from the database. Please reinstall
+              the app to continue.
+            </s-paragraph>
+          </s-banner>
+        </s-section>
+      </s-page>
+    );
+  }
+
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  const variables = [
+    { var: "{{companyName}}", desc: "Applying company's name" },
+    { var: "{{contactName}}", desc: "Contact person's name" },
+    { var: "{{email}}", desc: "Contact email address" },
+    { var: "{{storeOwnerName}}", desc: "Store owner's name" },
+    { var: "{{shopName}}", desc: "Shopify store's name" },
+  ];
+
+  const insertVariable = (variable: any) => {
+    const textarea = document.getElementById("companyWelcomeEmailTemplate");
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = textarea.value;
+      const before = text.substring(0, start);
+      const after = text.substring(end);
+      textarea.value = before + variable + after;
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = start + variable.length;
+    }
+    setShowDropdown(false);
+  };
+
+  const { store } = loaderData;
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+
   const fetcher = useFetcher<ActionResponse>();
+  const deleteFetcher = useFetcher<ActionResponse>();
 
   const isSaving = fetcher.state !== "idle";
+  const isDeleting = deleteFetcher.state !== "idle";
+
+  const handleDelete = () => {
+    deleteFetcher.submit({ intent: "delete" }, { method: "post" });
+  };
+
+  // Show success message and close modal after successful deletion
+  useEffect(() => {
+    if (deleteFetcher.data?.success) {
+      setShowDeleteModal(false);
+      setConfirmText("");
+    }
+  }, [deleteFetcher.data]);
 
   const feedback = useMemo(() => {
-    if (!fetcher.data) return null;
-    if (!fetcher.data.success && fetcher.data.errors?.length) {
+    const data = fetcher.data || deleteFetcher.data;
+    if (!data) return null;
+
+    if (!data.success && data.errors?.length) {
       return {
         tone: "critical" as const,
-        title: "Could not save settings",
-        messages: fetcher.data.errors,
+        title: "Error",
+        messages: data.errors,
       };
     }
-    if (fetcher.data.success && fetcher.data.message) {
+    if (data.success && data.message) {
       return {
         tone: "success" as const,
-        title: fetcher.data.message,
+        title: data.message,
         messages: [],
       };
     }
     return null;
-  }, [fetcher.data]);
+  }, [fetcher.data, deleteFetcher.data]);
 
   if (storeMissing) {
     return (
@@ -191,8 +362,7 @@ export default function SettingsPage() {
 
         <s-card>
           <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
-
-<div style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "grid", gap: 6 }}>
               <label htmlFor="name" style={{ fontWeight: 600, fontSize: 14 }}>
                 Store name
               </label>
@@ -221,10 +391,7 @@ export default function SettingsPage() {
               <s-text tone="subdued" variant="bodySm">
                 Store name shown across emails or customer views.
               </s-text>
-
-
             </div>
-
             <div style={{ display: "grid", gap: 6 }}>
               <label htmlFor="logo" style={{ fontWeight: 600, fontSize: 14 }}>
                 Logo URL
@@ -289,7 +456,6 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
-
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="submissionEmail"
@@ -323,7 +489,6 @@ export default function SettingsPage() {
                 Email address that receives new B2B registration submissions.
               </s-text>
             </div>
-
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="contactEmail"
@@ -357,7 +522,6 @@ export default function SettingsPage() {
                 Shared contact inbox for customers and notifications.
               </s-text>
             </div>
-
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="companyWelcomeEmailEnabled"
@@ -381,10 +545,10 @@ export default function SettingsPage() {
                 </label>
               </div>
               <s-text tone="subdued" variant="bodySm">
-                Enable to receive email notifications whenever companies are synced from Shopify B2B.
+                Enable to receive email notifications whenever companies are
+                synced from Shopify B2B.
               </s-text>
             </div>
-
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="themeColor"
@@ -407,7 +571,9 @@ export default function SettingsPage() {
                     background: "#fff",
                   }}
                   onChange={(e) => {
-                    const textInput = document.getElementById("themeColorText") as HTMLInputElement | null;
+                    const textInput = document.getElementById(
+                      "themeColorText",
+                    ) as HTMLInputElement | null;
                     if (textInput) {
                       textInput.value = e.target.value;
                     }
@@ -427,8 +593,13 @@ export default function SettingsPage() {
                     e.target.style.boxShadow = "none";
                   }}
                   onChange={(e) => {
-                    const colorInput = document.getElementById("themeColor") as HTMLInputElement | null;
-                    if (colorInput && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(e.target.value)) {
+                    const colorInput = document.getElementById(
+                      "themeColor",
+                    ) as HTMLInputElement | null;
+                    if (
+                      colorInput &&
+                      /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(e.target.value)
+                    ) {
                       colorInput.value = e.target.value;
                     }
                   }}
@@ -445,21 +616,21 @@ export default function SettingsPage() {
                 />
               </div>
               <s-text tone="subdued" variant="bodySm">
-                Primary accent color used across storefront surfaces. Accepts hex values.
+                Primary accent color used across storefront surfaces. Accepts
+                hex values.
               </s-text>
             </div>
-
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="companyWelcomeEmailTemplate"
                 style={{ fontWeight: 600, fontSize: 14 }}
               >
-                Company welcome email notes
+                Company welcome email Template
               </label>
+
               <textarea
                 id="companyWelcomeEmailTemplate"
                 name="companyWelcomeEmailTemplate"
-                defaultValue={store?.companyWelcomeEmailTemplate || ""}
                 placeholder="Add any custom notes or instructions for company welcome emails..."
                 style={{
                   padding: "10px 12px",
@@ -480,17 +651,348 @@ export default function SettingsPage() {
                   e.currentTarget.style.boxShadow = "none";
                 }}
               />
-              <s-text tone="subdued" variant="bodySm">
-                Optional custom message to include in company welcome emails. Supports plain text.
-              </s-text>
-            </div>
 
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#6d7175" }}>
+                  Optional custom message to include in company welcome emails.
+                </div>
+
+                <div style={{ position: "relative" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowDropdown(!showDropdown)}
+                    style={{
+                      padding: "6px 12px",
+                      background: showDropdown ? "#f1f2f3" : "transparent",
+                      color: "#202223",
+                      border: "1px solid #c9cccf",
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!showDropdown)
+                        e.currentTarget.style.background = "#f6f6f7";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!showDropdown)
+                        e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    Available variables
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M3 4.5L6 7.5L9 4.5"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+
+                  {showDropdown && (
+                    <>
+                      <div
+                        style={{
+                          position: "fixed",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          zIndex: 999,
+                        }}
+                        onClick={() => setShowDropdown(false)}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 4px)",
+                          right: 0,
+                          background: "#fff",
+                          border: "1px solid #c9cccf",
+                          borderRadius: 8,
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                          minWidth: 320,
+                          zIndex: 1000,
+                          padding: 8,
+                        }}
+                      >
+                        <div style={{ display: "grid", gap: 4 }}>
+                          {variables.map(({ var: variable, desc }) => (
+                            <button
+                              key={variable}
+                              type="button"
+                              onClick={() => insertVariable(variable)}
+                              style={{
+                                padding: "8px 10px",
+                                background: "#fff",
+                                border: "1px solid #c9cccf",
+                                borderRadius: 6,
+                                textAlign: "left",
+                                cursor: "pointer",
+                                fontSize: 13,
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "#f1f2f3";
+                                e.currentTarget.style.borderColor = "#005bd3";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "#fff";
+                                e.currentTarget.style.borderColor = "#c9cccf";
+                              }}
+                            >
+                              <code
+                                style={{
+                                  background: "#e3f2fd",
+                                  padding: "2px 6px",
+                                  borderRadius: 4,
+                                  fontSize: 12,
+                                  color: "#0066cc",
+                                  fontFamily: "monospace",
+                                }}
+                              >
+                                {variable}
+                              </code>
+                              <span
+                                style={{
+                                  color: "#6d7175",
+                                  fontSize: 12,
+                                  marginLeft: 8,
+                                }}
+                              >
+                                {desc}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <s-button type="submit" variant="primary" {...(isSaving ? { loading: true } : {})}>
+              <s-button
+                type="submit"
+                variant="primary"
+                {...(isSaving ? { loading: true } : {})}
+              >
                 Save settings
               </s-button>
             </div>
           </fetcher.Form>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>
+              Delete App Data
+            </h2>
+
+            <div
+              style={{
+                background: "#fef2f2",
+                border: "1px solid #fca5a5",
+                borderRadius: 8,
+                padding: 24,
+              }}
+            >
+              <p
+                style={{
+                  fontSize: 14,
+                  color: "#1f2937",
+                  marginBottom: 16,
+                  lineHeight: 1.5,
+                }}
+              >
+                This will permanently delete all{" "}
+                <strong style={{ color: "#dc2626" }}>B2B portal data</strong>{" "}
+                for this store, including companies, registrations, users,
+                credit information, and app settings.
+              </p>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: 16,
+                  marginBottom: 16,
+                }}
+              >
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: 20,
+                    fontSize: 14,
+                    color: "#374151",
+                  }}
+                >
+                  <li style={{ marginBottom: 4 }}>Companies & contacts</li>
+                  <li style={{ marginBottom: 4 }}>Registrations & approvals</li>
+                  <li style={{ marginBottom: 4 }}>Users & permissions</li>
+                </ul>
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: 20,
+                    fontSize: 14,
+                    color: "#374151",
+                  }}
+                >
+                  <li style={{ marginBottom: 4 }}>Locations</li>
+                  <li style={{ marginBottom: 4 }}>Wishlist items</li>
+                  <li style={{ marginBottom: 4 }}>
+                    Store B2B settings (logo, colors, emails)
+                  </li>
+                </ul>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: 12,
+                  background: "#fee2e2",
+                  borderRadius: 6,
+                  marginBottom: 20,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 18,
+                    color: "#dc2626",
+                    fontWeight: "bold",
+                    flexShrink: 0,
+                  }}
+                >
+                  ⚠
+                </span>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 14,
+                    color: "#7f1d1d",
+                    fontWeight: 600,
+                  }}
+                >
+                  This action cannot be undone.
+                </p>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  style={{
+                    padding: "10px 16px",
+                    background: "#dc2626",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#b91c1c";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#dc2626";
+                  }}
+                >
+                  Delete App Data
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Delete confirmation modal */}
+          {showDeleteModal && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: "rgba(0, 0, 0, 0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1000,
+              }}
+              onClick={() => setShowDeleteModal(false)}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  borderRadius: 12,
+                  padding: 24,
+                  maxWidth: 500,
+                  width: "90%",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>
+                  Confirm Deletion
+                </h3>
+                <p style={{ fontSize: 14, color: "#374151", marginBottom: 24 }}>
+                  Are you sure you want to permanently delete all B2B portal
+                  data? This action cannot be undone.
+                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <button
+                    onClick={() => setShowDeleteModal(false)}
+                    style={{
+                      padding: "10px 16px",
+                      background: "#fff",
+                      color: "#374151",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    style={{
+                      padding: "10px 16px",
+                      background: "#dc2626",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Delete Permanently
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </s-card>
       </s-section>
     </s-page>
