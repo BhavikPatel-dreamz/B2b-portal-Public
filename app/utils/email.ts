@@ -55,7 +55,7 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
 }
 
 export async function sendRegistrationEmail(
-  store: string,
+  storeId: string,
   companyId: string,
   contactEmail: string,
   storeOwnerName: string,
@@ -65,30 +65,29 @@ export async function sendRegistrationEmail(
 ) {
   const StoreData = await prisma.store.findUnique({
     where: {
-      id: store,
+      id: storeId,
     },
   });
 
   if (!StoreData?.companyWelcomeEmailTemplate) {
-    throw new Error('Company welcome email template not found');
+    throw new Error("Company welcome email template not found");
   }
 
   const templateVariables = {
-    companyName: companyName || 'Company Name',
-    storeOwnerName: storeOwnerName || 'Store Owner',
-    contactName: contactName || 'Contact Name',
+    companyName: companyName || "Company Name",
+    storeOwnerName: storeOwnerName || "Store Owner",
+    contactName: contactName || "Contact Name",
     email: email,
     companyId: companyId,
   };
 
   const processedTemplate = replaceTemplateVariables(
     StoreData.companyWelcomeEmailTemplate,
-    templateVariables
+    templateVariables,
   );
 
-
   const html = convertToHtmlEmail(processedTemplate);
-  console.log(html,"html");
+  console.log(html, "html");
   const text = stripHtmlTags(processedTemplate);
 
   return sendEmail({
@@ -101,18 +100,17 @@ export async function sendRegistrationEmail(
 
 function replaceTemplateVariables(
   template: string,
-  variables: Record<string, string>
+  variables: Record<string, string>,
 ): string {
   let processedTemplate = template;
 
   Object.entries(variables).forEach(([key, value]) => {
-    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+    const regex = new RegExp(`{{\\s*${key}\\s*}}`, "g");
     processedTemplate = processedTemplate.replace(regex, value);
   });
 
   return processedTemplate;
 }
-
 
 function convertToHtmlEmail(content: string): string {
   const html = `
@@ -197,31 +195,28 @@ function convertToHtmlEmail(content: string): string {
   return html;
 }
 
-
 function formatContentAsHtml(content: string): string {
   return content
-    .split('\n')
-    .map(line => {
+    .split("\n")
+    .map((line) => {
       line = line.trim();
-      if (!line) return '<br />';
-      
-      if (line.startsWith('•')) {
+      if (!line) return "<br />";
+
+      if (line.startsWith("•")) {
         return `<p style="margin: 5px 0; padding-left: 20px;">${line}</p>`;
       }
-      
+
       return `<p style="margin: 10px 0;">${line}</p>`;
     })
-    .join('');
+    .join("");
 }
-
 
 function stripHtmlTags(content: string): string {
   return content
-    .replace(/<[^>]*>/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
-
 
 function generateRegistrationTemplate(
   companyId: string,
@@ -322,18 +317,18 @@ This email was sent to notify you about a new company inquiry.
 
 export async function sendCompanyAssignmentEmail(
   shopName: string,
-  storeOwnerName:string,
+  storeOwnerName: string,
   email: string,
   companyName: string,
   contactName: string,
   note?: string,
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
-    shopName || 'Shop Name',
-    storeOwnerName || 'Store Owner',
-    companyName || 'Company Name',
-    contactName || 'Contact Name',
-    note || 'important note: ',
+    shopName || "Shop Name",
+    storeOwnerName || "Store Owner",
+    companyName || "Company Name",
+    contactName || "Contact Name",
+    note || "important note: ",
   );
 
   return sendEmail({
@@ -346,7 +341,7 @@ export async function sendCompanyAssignmentEmail(
 
 function generateCompanyAssignmentTemplate(
   shopName: string,
-  storeOwnerName:string,
+  storeOwnerName: string,
   companyName: string,
   contactName: string,
   note?: string,
@@ -405,7 +400,7 @@ function generateCompanyAssignmentTemplate(
       </p>
 
       <p style="text-align;">
-        <b>Note:</b> ${note || ''}
+        <b>Note:</b> ${note || ""}
       </p>
 
       <p>

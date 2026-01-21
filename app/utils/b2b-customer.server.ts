@@ -3682,7 +3682,7 @@ async function assignRoleToContacts(
 }
 
 type ServiceResult<T> =
-  | { ok: true; data: T }
+  | { ok: true; data: T; message?: string }
   | { ok: false; status: number; message: string };
 
 // Function to delete a company customer
@@ -3822,7 +3822,7 @@ export async function deleteCompanyCustomer(
         ok: true,
         data: {
           deletedId: contactPayload.deletedCompanyContactId,
-          deletedCustomerId: null,
+          deletedCustomerId: undefined,
         },
         message: "Contact deleted but customer deletion failed",
       };
@@ -3839,7 +3839,7 @@ export async function deleteCompanyCustomer(
         ok: true,
         data: {
           deletedId: contactPayload.deletedCompanyContactId,
-          deletedCustomerId: null,
+          deletedCustomerId: undefined,
         },
         message: "Contact deleted but customer deletion failed",
       };

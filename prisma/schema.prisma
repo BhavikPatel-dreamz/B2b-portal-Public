@@ -236,6 +236,7 @@ model Notification {
   senderId           String?
   title              String?
   message            String
+  title              String?
   activityType       String?
   activeAction       String?  // URL for the action/product
   isRead             Boolean   @default(false)
