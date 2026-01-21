@@ -23,6 +23,8 @@ interface LoaderData {
     themeColor: string;
     companyWelcomeEmailTemplate?: string;
     companyWelcomeEmailEnabled?: boolean;
+    privacyPolicylink?: string;
+    privacyPolicyContent?: string;
   };
 }
 
@@ -57,6 +59,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         themeColor: store.themeColor || "",
         companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
         companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
+        privacyPolicylink: store.privacyPolicylink || "",
+        privacyPolicyContent: store.privacyPolicyContent || "",
       },
     } satisfies LoaderData,
     { status: 200 },
@@ -216,6 +220,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     errors.push("Theme color must be a hex value like #0d6efd or #123.");
   }
 
+  const privacyPolicylink = formData.get("privacyPolicyLink") as string | null;
+  if (privacyPolicylink && !/^https?:\/\/[^\s]+$/.test(privacyPolicylink)) {
+    errors.push("Privacy policy link must be a valid URL.");
+  }
+
+  const privacyPolicyContent = formData.get("privacyPolicyContent") as string | null;
+  if (privacyPolicyContent && !/^<p>.*<\/p>$/.test(privacyPolicyContent)) {
+    errors.push("Privacy policy content must be a valid HTML paragraph.");
+  }
+
   if (errors.length > 0) {
     return Response.json({ success: false, errors }, { status: 400 });
   }
@@ -230,6 +244,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     themeColor,
     companyWelcomeEmailTemplate: companyWelcomeEmailTemplate || null,
     companyWelcomeEmailEnabled,
+    privacyPolicylink,
+    privacyPolicyContent,
   });
 
   return Response.json(
@@ -238,7 +254,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   );
 };
 
-function ToolbarButton({ onClick, title, children }:any) {
+function ToolbarButton({ onClick, title, children }: any) {
   return (
     <button
       type="button"
@@ -407,6 +423,24 @@ export default function SettingsPage() {
     return null;
   }, [fetcher.data, deleteFetcher.data]);
 
+
+  useEffect(() => {
+  if (editorRef.current) {
+    editorRef.current.innerHTML = store?.companyWelcomeEmailTemplate || "";
+    if (hiddenInputRef.current) {
+      hiddenInputRef.current.value = store?.companyWelcomeEmailTemplate || "";
+    }
+  }
+  
+  // Update privacy policy initialization with correct field names
+  if (privacyEditorRef.current) {
+    privacyEditorRef.current.innerHTML = store?.privacyPolicyContent || "";
+    if (privacyHiddenInputRef.current) {
+      privacyHiddenInputRef.current.value = store?.privacyPolicyContent || "";
+    }
+  }
+}, [store?.companyWelcomeEmailTemplate, store?.privacyPolicyContent]);
+
   if (storeMissing) {
     return (
       <s-page heading="Store settings">
@@ -421,6 +455,42 @@ export default function SettingsPage() {
       </s-page>
     );
   }
+
+  // Add these with your other refs
+const privacyEditorRef = useRef(null);
+const privacyHiddenInputRef = useRef(null);
+
+// Add this format function
+const formatPrivacy = (command, value = null) => {
+  document.execCommand(command, false, value);
+  privacyEditorRef.current?.focus();
+};
+
+// Add this input handler
+const handlePrivacyInput = () => {
+  if (privacyEditorRef.current && privacyHiddenInputRef.current) {
+    const htmlContent = privacyEditorRef.current.innerHTML;
+    privacyHiddenInputRef.current.value = htmlContent;
+  }
+};
+
+// Update your existing useEffect to include privacy policy
+useEffect(() => {
+  if (editorRef.current) {
+    editorRef.current.innerHTML = store?.companyWelcomeEmailTemplate || "";
+    if (hiddenInputRef.current) {
+      hiddenInputRef.current.value = store?.companyWelcomeEmailTemplate || "";
+    }
+  }
+  
+  // Add privacy policy initialization
+  if (privacyEditorRef.current) {
+    privacyEditorRef.current.innerHTML = store?.privacyPolicyContent || "";
+    if (privacyHiddenInputRef.current) {
+      privacyHiddenInputRef.current.value = store?.privacyPolicyContent || "";
+    }
+  }
+}, [store?.companyWelcomeEmailTemplate, store?.privacyPolicyContent]);
 
   return (
     <s-page heading="Store settings">
@@ -956,6 +1026,160 @@ export default function SettingsPage() {
                   )}
                 </div>
               </div>
+            </div>
+            {/* Add this after the companyWelcomeEmailTemplate section and before the Save button */}
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label
+                htmlFor="privacyPolicyUrl"
+                style={{ fontWeight: 600, fontSize: 14 }}
+              >
+                Privacy Policy
+              </label>
+
+              <input
+                id="privacyPolicyUrl"
+                name="privacyPolicyUrl"
+                type="url"
+                defaultValue={store?.privacyPolicylink}
+                placeholder="https://www.example.com/privacy"
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9cccf",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = "#005bd3";
+                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = "#c9cccf";
+                  e.target.style.boxShadow = "none";
+                }}
+              />
+
+              <s-text tone="subdued" variant="bodySm">
+                or use custom privacy policy text instead
+              </s-text>
+
+              {/* Privacy Policy Rich Text Editor */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 4,
+                  padding: 8,
+                  background: "#f6f6f7",
+                  border: "1px solid #c9cccf",
+                  borderRadius: "8px 8px 0 0",
+                  flexWrap: "wrap",
+                }}
+              >
+                <ToolbarButton
+                  onClick={() => formatPrivacy("bold")}
+                  title="Bold"
+                >
+                  <strong>B</strong>
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => formatPrivacy("italic")}
+                  title="Italic"
+                >
+                  <em>I</em>
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => formatPrivacy("underline")}
+                  title="Underline"
+                >
+                  <u>U</u>
+                </ToolbarButton>
+
+                <div
+                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                />
+
+                <ToolbarButton
+                  onClick={() => formatPrivacy("insertUnorderedList")}
+                  title="Bullet List"
+                >
+                  ≡
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => formatPrivacy("insertOrderedList")}
+                  title="Numbered List"
+                >
+                  ≣
+                </ToolbarButton>
+
+                <div
+                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                />
+
+                <ToolbarButton
+                  onClick={() => formatPrivacy("justifyLeft")}
+                  title="Align Left"
+                >
+                  ⫴
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => formatPrivacy("justifyCenter")}
+                  title="Align Center"
+                >
+                  ≡
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => formatPrivacy("justifyRight")}
+                  title="Align Right"
+                >
+                  ⫵
+                </ToolbarButton>
+
+                <div
+                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                />
+
+                <ToolbarButton
+                  onClick={() => formatPrivacy("removeFormat")}
+                  title="Clear Formatting"
+                >
+                  ✕
+                </ToolbarButton>
+              </div>
+
+              <div
+                ref={privacyEditorRef}
+                contentEditable
+                onInput={handlePrivacyInput}
+                style={{
+                  padding: "10px 12px",
+                  border: "1px solid #c9cccf",
+                  borderTop: "none",
+                  borderRadius: "0 0 8px 8px",
+                  fontSize: 14,
+                  outline: "none",
+                  minHeight: 120,
+                  maxHeight: 400,
+                  overflowY: "auto",
+                  background: "#fff",
+                  lineHeight: 1.5,
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "#005bd3";
+                  e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "#c9cccf";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              />
+
+              <input
+                ref={privacyHiddenInputRef}
+                type="hidden"
+                name="privacyPolicyText"
+                id="privacyPolicyText"
+              />
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>

@@ -33,6 +33,7 @@ export default [
     route("usermanagement", "routes/api.proxy/usermanagement.tsx"),
     route("validate-customer", "routes/api.proxy/validate-customer.tsx"),
     route("wishlist", "routes/api.proxy/wishlist.tsx"),
+    route("privacy-policy", "routes/api.proxy/privacy-policy.tsx"),
   ]),
 
   // App routes

@@ -18,6 +18,8 @@ export interface UpdateStoreInput {
   companyWelcomeEmailEnabled?: boolean;
   contactEmail?: string | null;
   themeColor?: string | null;
+  privacyPolicylink?: string | null;
+  privacyPolicyContent?: string | null;
 }
 
 /**
