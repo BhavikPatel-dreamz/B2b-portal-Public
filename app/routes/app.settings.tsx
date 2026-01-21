@@ -625,12 +625,13 @@ export default function SettingsPage() {
                 htmlFor="companyWelcomeEmailTemplate"
                 style={{ fontWeight: 600, fontSize: 14 }}
               >
-                Company welcome email Template
+               New Company Registration Email Template
               </label>
 
               <textarea
                 id="companyWelcomeEmailTemplate"
                 name="companyWelcomeEmailTemplate"
+                defaultValue={store?.companyWelcomeEmailTemplate || ""}
                 placeholder="Add any custom notes or instructions for company welcome emails..."
                 style={{
                   padding: "10px 12px",
@@ -660,7 +661,7 @@ export default function SettingsPage() {
                 }}
               >
                 <div style={{ fontSize: 12, color: "#6d7175" }}>
-                  Optional custom message to include in company welcome emails.
+                   This email is sent to the store owner when a new company submits a B2B registration request.
                 </div>
 
                 <div style={{ position: "relative" }}>
