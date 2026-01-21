@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -238,6 +238,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   );
 };
 
+function ToolbarButton({ onClick, title, children }:any) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        padding: "6px 10px",
+        background: "#fff",
+        border: "1px solid #c9cccf",
+        borderRadius: 6,
+        cursor: "pointer",
+        fontSize: 14,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: 32,
+        height: 32,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "#f1f2f3";
+        e.currentTarget.style.borderColor = "#005bd3";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "#fff";
+        e.currentTarget.style.borderColor = "#c9cccf";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function SettingsPage() {
   const loaderData = useLoaderData<typeof loader>();
   const { storeMissing } = loaderData;
@@ -268,20 +301,55 @@ export default function SettingsPage() {
     { var: "{{shopName}}", desc: "Shopify store's name" },
   ];
 
-  const insertVariable = (variable: any) => {
-    const textarea = document.getElementById("companyWelcomeEmailTemplate");
-    if (textarea) {
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const text = textarea.value;
-      const before = text.substring(0, start);
-      const after = text.substring(end);
-      textarea.value = before + variable + after;
-      textarea.focus();
-      textarea.selectionStart = textarea.selectionEnd = start + variable.length;
+  const insertVariable = (variable: string) => {
+    if (editorRef.current) {
+      // Get the current selection
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) return;
+
+      // Insert the variable at cursor position
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+
+      const textNode = document.createTextNode(variable);
+      range.insertNode(textNode);
+
+      // Move cursor after the inserted variable
+      range.setStartAfter(textNode);
+      range.setEndAfter(textNode);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      // Update the hidden input
+      handleInput();
+
+      editorRef.current.focus();
     }
     setShowDropdown(false);
   };
+  const [content, setContent] = useState("");
+
+  const editorRef = useRef(null);
+  const hiddenInputRef = useRef(null);
+
+  const format = (command, value = null) => {
+    document.execCommand(command, false, value);
+    editorRef.current?.focus();
+  };
+
+  const handleInput = () => {
+    if (editorRef.current && hiddenInputRef.current) {
+      const htmlContent = editorRef.current.innerHTML;
+      setContent(htmlContent);
+      hiddenInputRef.current.value = htmlContent;
+    }
+  };
+  useEffect(() => {
+    // Set initial content if needed
+    if (editorRef.current && !content) {
+      editorRef.current.innerHTML = "";
+    }
+  }, []);
 
   const { store } = loaderData;
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -304,6 +372,19 @@ export default function SettingsPage() {
       setConfirmText("");
     }
   }, [deleteFetcher.data]);
+
+  // Update the useEffect to set the initial content
+  useEffect(() => {
+    if (editorRef.current) {
+      // Set the initial content from store data
+      editorRef.current.innerHTML = store?.companyWelcomeEmailTemplate || "";
+
+      // Also update the hidden input
+      if (hiddenInputRef.current) {
+        hiddenInputRef.current.value = store?.companyWelcomeEmailTemplate || "";
+      }
+    }
+  }, [store?.companyWelcomeEmailTemplate]);
 
   const feedback = useMemo(() => {
     const data = fetcher.data || deleteFetcher.data;
@@ -625,23 +706,104 @@ export default function SettingsPage() {
                 htmlFor="companyWelcomeEmailTemplate"
                 style={{ fontWeight: 600, fontSize: 14 }}
               >
-               New Company Registration Email Template
+                New Company Registration Email Template
               </label>
 
-              <textarea
-                id="companyWelcomeEmailTemplate"
-                name="companyWelcomeEmailTemplate"
+              {/* Formatting Toolbar */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 4,
+                  padding: 8,
+                  background: "#f6f6f7",
+                  border: "1px solid #c9cccf",
+                  borderRadius: "8px 8px 0 0",
+                  flexWrap: "wrap",
+                }}
+              >
+                <ToolbarButton onClick={() => format("bold")} title="Bold">
+                  <strong>B</strong>
+                </ToolbarButton>
+                <ToolbarButton onClick={() => format("italic")} title="Italic">
+                  <em>I</em>
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => format("underline")}
+                  title="Underline"
+                >
+                  <u>U</u>
+                </ToolbarButton>
+
+                <div
+                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                />
+
+                <ToolbarButton
+                  onClick={() => format("insertUnorderedList")}
+                  title="Bullet List"
+                >
+                  ≡
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => format("insertOrderedList")}
+                  title="Numbered List"
+                >
+                  ≣
+                </ToolbarButton>
+
+                <div
+                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                />
+
+                <ToolbarButton
+                  onClick={() => format("justifyLeft")}
+                  title="Align Left"
+                >
+                  ⫴
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => format("justifyCenter")}
+                  title="Align Center"
+                >
+                  ≡
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={() => format("justifyRight")}
+                  title="Align Right"
+                >
+                  ⫵
+                </ToolbarButton>
+
+                <div
+                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                />
+
+                <ToolbarButton
+                  onClick={() => format("removeFormat")}
+                  title="Clear Formatting"
+                >
+                  ✕
+                </ToolbarButton>
+              </div>
+
+              {/* Rich Text Editor */}
+              <div
+                ref={editorRef}
+                contentEditable
                 defaultValue={store?.companyWelcomeEmailTemplate || ""}
-                placeholder="Add any custom notes or instructions for company welcome emails..."
+                onInput={handleInput}
                 style={{
                   padding: "10px 12px",
-                  borderRadius: 8,
                   border: "1px solid #c9cccf",
+                  borderTop: "none",
+                  borderRadius: "0 0 8px 8px",
                   fontSize: 14,
                   outline: "none",
-                  fontFamily: "monospace",
                   minHeight: 120,
-                  resize: "vertical",
+                  maxHeight: 400,
+                  overflowY: "auto",
+                  background: "#fff",
+                  lineHeight: 1.5,
                 }}
                 onFocus={(e) => {
                   e.currentTarget.style.borderColor = "#005bd3";
@@ -653,6 +815,14 @@ export default function SettingsPage() {
                 }}
               />
 
+              {/* Hidden input to submit with form */}
+              <input
+                ref={hiddenInputRef}
+                type="hidden"
+                name="companyWelcomeEmailTemplate"
+                id="companyWelcomeEmailTemplate"
+              />
+
               <div
                 style={{
                   display: "flex",
@@ -661,7 +831,8 @@ export default function SettingsPage() {
                 }}
               >
                 <div style={{ fontSize: 12, color: "#6d7175" }}>
-                   This email is sent to the store owner when a new company submits a B2B registration request.
+                  This email is sent to the store owner when a new company
+                  submits a B2B registration request.
                 </div>
 
                 <div style={{ position: "relative" }}>
@@ -786,7 +957,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-            
+
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <s-button
                 type="submit"
