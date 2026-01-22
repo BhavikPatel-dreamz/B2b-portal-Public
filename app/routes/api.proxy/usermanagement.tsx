@@ -162,6 +162,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         credit: c.creditLimit ?? 0,
         locations:
           c.locationNames?.length > 0 ? c.locationNames.join(", ") : "",
+        isGlobalAdmin: isThisStoreAdmin == true ? true : false,
         locationRoles,
         reports: {
           activity: {

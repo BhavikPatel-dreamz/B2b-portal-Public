@@ -27,15 +27,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       { status: 200 },
     );
   } catch (error) {
-    console.error("❌ Error validating customer:", error);
+    console.error("❌ Error fetching privacy policy:", error);
     return Response.json(
       {
-        isLoggedIn: false,
-        hasB2BAccess: false,
-        customerId: null,
-        redirectTo: "/apps/b2b-portal/registration",
-        message: "Error validating customer access",
-        error: error instanceof Error ? error.message : "Unknown error",
+       message: "Error fetching privacy policy",
+       error: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     );

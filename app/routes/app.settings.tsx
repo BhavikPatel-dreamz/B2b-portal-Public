@@ -202,6 +202,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     "";
   const companyWelcomeEmailEnabled =
     (formData.get("companyWelcomeEmailEnabled") as string | null) === "on";
+  
+  // Fix: Get privacy policy fields properly
+  const privacyPolicylink = 
+    (formData.get("privacyPolicylink") as string | null)?.trim() || null;
+  const privacyPolicyContent = 
+    (formData.get("privacyPolicyContent") as string | null)?.trim() || null;
 
   const errors: string[] = [];
 
@@ -220,23 +226,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     errors.push("Theme color must be a hex value like #0d6efd or #123.");
   }
 
-  const privacyPolicylink = formData.get("privacyPolicyLink") as string | null;
   if (privacyPolicylink && !/^https?:\/\/[^\s]+$/.test(privacyPolicylink)) {
     errors.push("Privacy policy link must be a valid URL.");
   }
 
-  const privacyPolicyContent = formData.get("privacyPolicyContent") as string | null;
-  if (privacyPolicyContent && !/^<p>.*<\/p>$/.test(privacyPolicyContent)) {
-    errors.push("Privacy policy content must be a valid HTML paragraph.");
-  }
-
+ 
   if (errors.length > 0) {
     return Response.json({ success: false, errors }, { status: 400 });
   }
 
   const logo = logoRaw || null;
 
-  await updateStore(store.id, {
+  const updatedStore = await updateStore(store.id, {
     logo,
     shopName,
     submissionEmail,
@@ -247,6 +248,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     privacyPolicylink,
     privacyPolicyContent,
   });
+  
 
   return Response.json(
     { success: true, message: "Settings saved" } satisfies ActionResponse,
@@ -254,38 +256,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   );
 };
 
-function ToolbarButton({ onClick, title, children }: any) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      style={{
-        padding: "6px 10px",
-        background: "#fff",
-        border: "1px solid #c9cccf",
-        borderRadius: 6,
-        cursor: "pointer",
-        fontSize: 14,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        minWidth: 32,
-        height: 32,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "#f1f2f3";
-        e.currentTarget.style.borderColor = "#005bd3";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "#fff";
-        e.currentTarget.style.borderColor = "#c9cccf";
-      }}
-    >
-      {children}
-    </button>
-  );
-}
+// ToolbarButton component
+const ToolbarButton = ({ onClick, title, children }: any) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title}
+    style={{
+      padding: "6px 10px",
+      background: "#fff",
+      border: "1px solid #c9cccf",
+      borderRadius: 6,
+      cursor: "pointer",
+      fontSize: 14,
+      minWidth: 32,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.background = "#f1f2f3";
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.background = "#fff";
+    }}
+  >
+    {children}
+  </button>
+);
 
 export default function SettingsPage() {
   const loaderData = useLoaderData<typeof loader>();
@@ -308,7 +306,24 @@ export default function SettingsPage() {
   }
 
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [content, setContent] = useState("");
 
+  // Refs
+  const editorRef = useRef<HTMLDivElement>(null);
+  const hiddenInputRef = useRef<HTMLInputElement>(null);
+  const privacyEditorRef = useRef<HTMLDivElement>(null);
+  const privacyHiddenInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetchers
+  const fetcher = useFetcher<ActionResponse>();
+  const deleteFetcher = useFetcher<ActionResponse>();
+
+  const isSaving = fetcher.state !== "idle";
+  const isDeleting = deleteFetcher.state !== "idle";
+
+  // Variables for email template
   const variables = [
     { var: "{{companyName}}", desc: "Applying company's name" },
     { var: "{{contactName}}", desc: "Contact person's name" },
@@ -317,38 +332,8 @@ export default function SettingsPage() {
     { var: "{{shopName}}", desc: "Shopify store's name" },
   ];
 
-  const insertVariable = (variable: string) => {
-    if (editorRef.current) {
-      // Get the current selection
-      const selection = window.getSelection();
-      if (!selection || !selection.rangeCount) return;
-
-      // Insert the variable at cursor position
-      const range = selection.getRangeAt(0);
-      range.deleteContents();
-
-      const textNode = document.createTextNode(variable);
-      range.insertNode(textNode);
-
-      // Move cursor after the inserted variable
-      range.setStartAfter(textNode);
-      range.setEndAfter(textNode);
-      selection.removeAllRanges();
-      selection.addRange(range);
-
-      // Update the hidden input
-      handleInput();
-
-      editorRef.current.focus();
-    }
-    setShowDropdown(false);
-  };
-  const [content, setContent] = useState("");
-
-  const editorRef = useRef(null);
-  const hiddenInputRef = useRef(null);
-
-  const format = (command, value = null) => {
+  // Email editor functions
+  const format = (command: string, value: string | null = null) => {
     document.execCommand(command, false, value);
     editorRef.current?.focus();
   };
@@ -360,28 +345,66 @@ export default function SettingsPage() {
       hiddenInputRef.current.value = htmlContent;
     }
   };
-  useEffect(() => {
-    // Set initial content if needed
-    if (editorRef.current && !content) {
-      editorRef.current.innerHTML = "";
+
+  const insertVariable = (variable: string) => {
+    if (editorRef.current) {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) return;
+
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+
+      const textNode = document.createTextNode(variable);
+      range.insertNode(textNode);
+
+      range.setStartAfter(textNode);
+      range.setEndAfter(textNode);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      handleInput();
+      editorRef.current.focus();
     }
-  }, []);
+    setShowDropdown(false);
+  };
 
-  const { store } = loaderData;
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
+  const formatPrivacy = (command: string, value: string | null = null) => {
+    document.execCommand(command, false, value);
+    privacyEditorRef.current?.focus();
+  };
 
-  const fetcher = useFetcher<ActionResponse>();
-  const deleteFetcher = useFetcher<ActionResponse>();
+  const handlePrivacyInput = () => {
+    if (privacyEditorRef.current && privacyHiddenInputRef.current) {
+      const htmlContent = privacyEditorRef.current.innerHTML;
+      privacyHiddenInputRef.current.value = htmlContent;
+    }
+  };
 
-  const isSaving = fetcher.state !== "idle";
-  const isDeleting = deleteFetcher.state !== "idle";
-
+  // Delete handler
   const handleDelete = () => {
     deleteFetcher.submit({ intent: "delete" }, { method: "post" });
   };
 
-  // Show success message and close modal after successful deletion
+  // Initialize editor content from store data
+  useEffect(() => {
+    if (!storeMissing && loaderData.store) {
+      if (editorRef.current) {
+        editorRef.current.innerHTML = loaderData.store.companyWelcomeEmailTemplate || "";
+        if (hiddenInputRef.current) {
+          hiddenInputRef.current.value = loaderData.store.companyWelcomeEmailTemplate || "";
+        }
+      }
+
+      if (privacyEditorRef.current) {
+        privacyEditorRef.current.innerHTML = loaderData.store.privacyPolicyContent || "";
+        if (privacyHiddenInputRef.current) {
+          privacyHiddenInputRef.current.value = loaderData.store.privacyPolicyContent || "";
+        }
+      }
+    }
+  }, [loaderData.store?.companyWelcomeEmailTemplate, loaderData.store?.privacyPolicyContent, storeMissing]);
+
+  // Close modal after successful deletion
   useEffect(() => {
     if (deleteFetcher.data?.success) {
       setShowDeleteModal(false);
@@ -389,19 +412,7 @@ export default function SettingsPage() {
     }
   }, [deleteFetcher.data]);
 
-  // Update the useEffect to set the initial content
-  useEffect(() => {
-    if (editorRef.current) {
-      // Set the initial content from store data
-      editorRef.current.innerHTML = store?.companyWelcomeEmailTemplate || "";
-
-      // Also update the hidden input
-      if (hiddenInputRef.current) {
-        hiddenInputRef.current.value = store?.companyWelcomeEmailTemplate || "";
-      }
-    }
-  }, [store?.companyWelcomeEmailTemplate]);
-
+  // Feedback message
   const feedback = useMemo(() => {
     const data = fetcher.data || deleteFetcher.data;
     if (!data) return null;
@@ -423,24 +434,7 @@ export default function SettingsPage() {
     return null;
   }, [fetcher.data, deleteFetcher.data]);
 
-
-  useEffect(() => {
-  if (editorRef.current) {
-    editorRef.current.innerHTML = store?.companyWelcomeEmailTemplate || "";
-    if (hiddenInputRef.current) {
-      hiddenInputRef.current.value = store?.companyWelcomeEmailTemplate || "";
-    }
-  }
-  
-  // Update privacy policy initialization with correct field names
-  if (privacyEditorRef.current) {
-    privacyEditorRef.current.innerHTML = store?.privacyPolicyContent || "";
-    if (privacyHiddenInputRef.current) {
-      privacyHiddenInputRef.current.value = store?.privacyPolicyContent || "";
-    }
-  }
-}, [store?.companyWelcomeEmailTemplate, store?.privacyPolicyContent]);
-
+  // Early return if store is missing
   if (storeMissing) {
     return (
       <s-page heading="Store settings">
@@ -456,41 +450,7 @@ export default function SettingsPage() {
     );
   }
 
-  // Add these with your other refs
-const privacyEditorRef = useRef(null);
-const privacyHiddenInputRef = useRef(null);
-
-// Add this format function
-const formatPrivacy = (command, value = null) => {
-  document.execCommand(command, false, value);
-  privacyEditorRef.current?.focus();
-};
-
-// Add this input handler
-const handlePrivacyInput = () => {
-  if (privacyEditorRef.current && privacyHiddenInputRef.current) {
-    const htmlContent = privacyEditorRef.current.innerHTML;
-    privacyHiddenInputRef.current.value = htmlContent;
-  }
-};
-
-// Update your existing useEffect to include privacy policy
-useEffect(() => {
-  if (editorRef.current) {
-    editorRef.current.innerHTML = store?.companyWelcomeEmailTemplate || "";
-    if (hiddenInputRef.current) {
-      hiddenInputRef.current.value = store?.companyWelcomeEmailTemplate || "";
-    }
-  }
-  
-  // Add privacy policy initialization
-  if (privacyEditorRef.current) {
-    privacyEditorRef.current.innerHTML = store?.privacyPolicyContent || "";
-    if (privacyHiddenInputRef.current) {
-      privacyHiddenInputRef.current.value = store?.privacyPolicyContent || "";
-    }
-  }
-}, [store?.companyWelcomeEmailTemplate, store?.privacyPolicyContent]);
+  const { store } = loaderData;
 
   return (
     <s-page heading="Store settings">
@@ -513,8 +473,9 @@ useEffect(() => {
 
         <s-card>
           <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
+            {/* Store Name */}
             <div style={{ display: "grid", gap: 6 }}>
-              <label htmlFor="name" style={{ fontWeight: 600, fontSize: 14 }}>
+              <label htmlFor="shopName" style={{ fontWeight: 600, fontSize: 14 }}>
                 Store name
               </label>
               <input
@@ -543,6 +504,8 @@ useEffect(() => {
                 Store name shown across emails or customer views.
               </s-text>
             </div>
+
+            {/* Logo URL */}
             <div style={{ display: "grid", gap: 6 }}>
               <label htmlFor="logo" style={{ fontWeight: 600, fontSize: 14 }}>
                 Logo URL
@@ -607,6 +570,8 @@ useEffect(() => {
                 </div>
               )}
             </div>
+
+            {/* Registration Email */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="submissionEmail"
@@ -640,6 +605,8 @@ useEffect(() => {
                 Email address that receives new B2B registration submissions.
               </s-text>
             </div>
+
+            {/* Contact Email */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="contactEmail"
@@ -673,6 +640,8 @@ useEffect(() => {
                 Shared contact inbox for customers and notifications.
               </s-text>
             </div>
+
+            {/* Company Sync Notifications */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="companyWelcomeEmailEnabled"
@@ -700,6 +669,8 @@ useEffect(() => {
                 synced from Shopify B2B.
               </s-text>
             </div>
+
+            {/* Theme Color */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="themeColor"
@@ -735,6 +706,15 @@ useEffect(() => {
                   name="themeColor"
                   type="text"
                   defaultValue={store?.themeColor || ""}
+                  placeholder="#005bd3"
+                  style={{
+                    flex: 1,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #c9cccf",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
                   onFocus={(e) => {
                     e.target.style.borderColor = "#005bd3";
                     e.target.style.boxShadow = "0 0 0 1px #005bd3";
@@ -754,16 +734,6 @@ useEffect(() => {
                       colorInput.value = e.target.value;
                     }
                   }}
-                  // name="themeColor"
-                  placeholder="#005bd3"
-                  style={{
-                    flex: 1,
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #c9cccf",
-                    fontSize: 14,
-                    outline: "none",
-                  }}
                 />
               </div>
               <s-text tone="subdued" variant="bodySm">
@@ -771,6 +741,8 @@ useEffect(() => {
                 hex values.
               </s-text>
             </div>
+
+            {/* Email Template Editor */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="companyWelcomeEmailTemplate"
@@ -860,7 +832,6 @@ useEffect(() => {
               <div
                 ref={editorRef}
                 contentEditable
-                defaultValue={store?.companyWelcomeEmailTemplate || ""}
                 onInput={handleInput}
                 style={{
                   padding: "10px 12px",
@@ -885,7 +856,6 @@ useEffect(() => {
                 }}
               />
 
-              {/* Hidden input to submit with form */}
               <input
                 ref={hiddenInputRef}
                 type="hidden"
@@ -1027,19 +997,19 @@ useEffect(() => {
                 </div>
               </div>
             </div>
-            {/* Add this after the companyWelcomeEmailTemplate section and before the Save button */}
 
+            {/* Privacy Policy Section */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
-                htmlFor="privacyPolicyUrl"
+                htmlFor="privacyPolicylink"
                 style={{ fontWeight: 600, fontSize: 14 }}
               >
                 Privacy Policy
               </label>
 
               <input
-                id="privacyPolicyUrl"
-                name="privacyPolicyUrl"
+                id="privacyPolicylink"
+                name="privacyPolicylink"
                 type="url"
                 defaultValue={store?.privacyPolicylink}
                 placeholder="https://www.example.com/privacy"
@@ -1177,11 +1147,12 @@ useEffect(() => {
               <input
                 ref={privacyHiddenInputRef}
                 type="hidden"
-                name="privacyPolicyText"
-                id="privacyPolicyText"
+                name="privacyPolicyContent"
+                id="privacyPolicyContent"
               />
             </div>
 
+            {/* Save Button */}
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <s-button
                 type="submit"
@@ -1192,7 +1163,9 @@ useEffect(() => {
               </s-button>
             </div>
           </fetcher.Form>
-          <div>
+
+          {/* Delete App Data Section */}
+          <div style={{ marginTop: 32 }}>
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>
               Delete App Data
             </h2>
@@ -1291,30 +1264,36 @@ useEffect(() => {
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button
                   onClick={() => setShowDeleteModal(true)}
+                  disabled={isDeleting}
                   style={{
                     padding: "10px 16px",
-                    background: "#dc2626",
+                    background: isDeleting ? "#f87171" : "#dc2626",
                     color: "#fff",
                     border: "none",
                     borderRadius: 8,
                     fontSize: 14,
                     fontWeight: 600,
-                    cursor: "pointer",
+                    cursor: isDeleting ? "not-allowed" : "pointer",
+                    opacity: isDeleting ? 0.6 : 1,
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "#b91c1c";
+                    if (!isDeleting) {
+                      e.currentTarget.style.background = "#b91c1c";
+                    }
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "#dc2626";
+                    if (!isDeleting) {
+                      e.currentTarget.style.background = "#dc2626";
+                    }
                   }}
                 >
-                  Delete App Data
+                  {isDeleting ? "Deleting..." : "Delete App Data"}
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Delete confirmation modal */}
+          {/* Delete Confirmation Modal */}
           {showDeleteModal && (
             <div
               style={{
@@ -1357,6 +1336,7 @@ useEffect(() => {
                 >
                   <button
                     onClick={() => setShowDeleteModal(false)}
+                    disabled={isDeleting}
                     style={{
                       padding: "10px 16px",
                       background: "#fff",
@@ -1365,25 +1345,28 @@ useEffect(() => {
                       borderRadius: 8,
                       fontSize: 14,
                       fontWeight: 600,
-                      cursor: "pointer",
+                      cursor: isDeleting ? "not-allowed" : "pointer",
+                      opacity: isDeleting ? 0.6 : 1,
                     }}
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleDelete}
+                    disabled={isDeleting}
                     style={{
                       padding: "10px 16px",
-                      background: "#dc2626",
+                      background: isDeleting ? "#f87171" : "#dc2626",
                       color: "#fff",
                       border: "none",
                       borderRadius: 8,
                       fontSize: 14,
                       fontWeight: 600,
-                      cursor: "pointer",
+                      cursor: isDeleting ? "not-allowed" : "pointer",
+                      opacity: isDeleting ? 0.6 : 1,
                     }}
                   >
-                    Delete Permanently
+                    {isDeleting ? "Deleting..." : "Delete Permanently"}
                   </button>
                 </div>
               </div>
