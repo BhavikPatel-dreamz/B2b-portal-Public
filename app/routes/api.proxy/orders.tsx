@@ -287,7 +287,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Fetch main orders
     const { result, filteredOrders: orders } = await fetchAndFilterOrders(
       queryFilters,
-      pagination || { first: 10 }
+      pagination || { first: 20 }
     );
 
     if (orders.error) {
@@ -303,7 +303,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ...queryFilters,
         dateRange: { preset: "current_month" },
       },
-      { first: 250 }
+      { first: 20 }
     );
 
     const { count: ordersPreviousMonth } = await fetchAndFilterOrders(
@@ -311,7 +311,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ...queryFilters,
         dateRange: { preset: "last_month" },
       },
-      { first: 250 }
+      { first: 20 }
     );
 
     return Response.json({

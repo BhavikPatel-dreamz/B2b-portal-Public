@@ -5142,7 +5142,7 @@ export async function getAdvancedCompanyOrders(
               }
               note
               tags
-              lineItems(first: 10) {
+              lineItems(first: 20) {
                 edges {
                   node {
                     id
@@ -5314,25 +5314,25 @@ export async function getAdvancedCompanyOrders(
       );
     }
 
-    // Slice to requested page size
-    const paginatedOrders = processedOrders.slice(0, requestedFirst);
-    const hasMore = processedOrders.length > requestedFirst;
+const paginatedOrders = processedOrders.slice(0, requestedFirst);
 
-    return {
-      orders: paginatedOrders,
-      pageInfo: {
-        hasNextPage: hasMore || ordersData?.pageInfo?.hasNextPage || false,
-        hasPreviousPage: ordersData?.pageInfo?.hasPreviousPage || false,
-        endCursor:
-          paginatedOrders.length > 0
-            ? paginatedOrders[paginatedOrders.length - 1].cursor
-            : ordersData?.pageInfo?.endCursor || null,
-        startCursor:
-          paginatedOrders.length > 0
-            ? paginatedOrders[0].cursor
-            : ordersData?.pageInfo?.startCursor || null,
-      },
-      totalCount: paginatedOrders.length,
+const hasMoreFilteredOrders = processedOrders.length > requestedFirst;
+
+return {
+  orders: paginatedOrders,
+  pageInfo: {
+    hasNextPage: hasMoreFilteredOrders,
+    hasPreviousPage: ordersData?.pageInfo?.hasPreviousPage || false,
+    endCursor:
+      paginatedOrders.length > 0
+        ? paginatedOrders[paginatedOrders.length - 1].cursor
+        : null,
+    startCursor:
+      paginatedOrders.length > 0
+        ? paginatedOrders[0].cursor
+        : null,
+  },
+  totalCount: paginatedOrders.length,
       _debug: {
         queryString,
         fetched: ordersData?.edges?.length || 0,
