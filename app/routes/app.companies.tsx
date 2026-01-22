@@ -70,7 +70,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Build where clause with search
   const whereClause = {
     shopId: store.id,
-    isDisable: false,
     ...(searchQuery && {
       OR: [
         { name: { contains: searchQuery, mode: "insensitive" as const } },
@@ -426,11 +425,6 @@ export default function CompaniesPage() {
                   >
                     Used Credit
                   </th>
-                  {/* <th
-                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
-                  >
-                    Pending Credit
-                  </th> */}
                   <th
                     style={{ textAlign: "left", padding: "8px", width: "8%" }}
                   >
@@ -452,7 +446,10 @@ export default function CompaniesPage() {
                 {companies.map((company) => (
                   <tr
                     key={company.id}
-                    style={{ borderTop: "1px solid #e3e3e3" }}
+                    style={{ 
+                      borderTop: "1px solid #e3e3e3",
+                      backgroundColor: company.isDisable ? "#ffebee" : "transparent"
+                    }}
                   >
                     <td style={{ padding: "8px" }}>
                       {company.name}
@@ -485,9 +482,6 @@ export default function CompaniesPage() {
                     <td style={{ padding: "8px", color: "#d72c0d", fontWeight: 500 }}>
                       {formatCredit(company.usedCredit)}
                     </td>
-                    {/* <td style={{ padding: "8px", color: "#b98900" }}>
-                      {formatCredit(company.pendingCredit)}
-                    </td> */}
                     <td
                       style={{
                         padding: "8px",
@@ -511,15 +505,12 @@ export default function CompaniesPage() {
                     >
                       {company.creditUsagePercentage}%
                     </td>
-                    {/* <td style={{ padding: "8px" }}>
-                      {new Date(company.updatedAt).toLocaleString()}
-                    </td> */}
                     <td
                       style={{
                         padding: "8px",
                         minWidth: 200,
                         display: "flex",
-                        gap: 8, // 👈 space between buttons
+                        gap: 8,
                         alignItems: "center",
                       }}
                     >
@@ -530,7 +521,7 @@ export default function CompaniesPage() {
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          minWidth: 60, // 👈 same size
+                          minWidth: 60,
                           padding: "6px 12px",
                           borderRadius: 6,
                           border: "1px solid #c9ccd0",
@@ -584,7 +575,6 @@ export default function CompaniesPage() {
             <div style={{ display: "flex", gap: 8 }}>
               {Array.from({ length: totalPages }, (_, i) => i + 1).map(
                 (pageNum) => {
-                  // Show first page, last page, current page, and pages around current
                   const showPage =
                     pageNum === 1 ||
                     pageNum === totalPages ||
@@ -657,7 +647,6 @@ export default function CompaniesPage() {
     </s-page>
   );
 }
-
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };

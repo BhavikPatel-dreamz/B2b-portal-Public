@@ -70,7 +70,7 @@ interface CompanyAccount {
   contactName: string | null;
   contactEmail: string | null;
   creditLimit: string;
-  paymentTerm: string | null;
+  paymentTerms: string | null;
   updatedAt: string;
 }
 
@@ -691,20 +691,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       case "createCompany": {
+        /* 0️⃣ Read & validate form data */
         const companyName = (form.companyName as string)?.trim();
-        const locationName = (form.locationName as string)?.trim();
-        const paymentTermsTemplateId = (form.paymentTerm as string)?.trim();
+        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
         const creditLimit = (form.creditLimit as string)?.trim();
 
-        if (!companyName || !locationName) {
+        if (!companyName) {
           return Response.json({
             intent,
             success: false,
-            errors: ["Company name and location name are required"],
+            errors: ["Company name is required"],
           });
         }
 
-        /* 1️⃣ Create Company */
+        /* 1️⃣ Create Company (Shopify AUTO creates 1 location) */
         const createCompanyResponse = await admin.graphql(
           `#graphql
     mutation CompanyCreate($input: CompanyCreateInput!) {
@@ -735,81 +735,117 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const companyId = companyPayload.data.companyCreate.company.id;
 
-        await updateCompanyMetafield(admin, companyId, {
-          namespace: "b2b_credit",
-          key: "credit_limit",
-          value: creditLimit.toString(),
-          type: "number_decimal",
+        /* 2️⃣ Update company metafield (credit limit) */
+        if (creditLimit) {
+          await updateCompanyMetafield(admin, companyId, {
+            namespace: "b2b_credit",
+            key: "credit_limit",
+            value: creditLimit.toString(),
+            type: "number_decimal",
+          });
+        }
+
+        /* 3️⃣ Save company in Prisma (ONLY company data) */
+        let companyData = await prisma.companyAccount.findFirst({
+          where: { shopifyCompanyId: companyId },
         });
 
-        const companyExists = await prisma.companyAccount.findFirst({
-          where: { name: companyName },
-        });
-        /* Save in Prisma (optional but clean) */
-        let companyData;
-        if (!companyExists) {
+        if (!companyData) {
           companyData = await prisma.companyAccount.create({
             data: {
               shopId: store.id,
               name: companyName,
               shopifyCompanyId: companyId,
-              paymentTeam: paymentTermsTemplateId || null,
-              creditLimit: Number(creditLimit),
+              paymentTerm: paymentTermsTemplateId || null,
+              creditLimit: creditLimit ? Number(creditLimit) : null,
             },
           });
         }
 
-        /* 2️⃣ Create Location (ONLY name + payment terms) */
-        const locationInput: any = {
-          name: locationName,
-        };
-
-        if (paymentTermsTemplateId) {
-          locationInput.buyerExperienceConfiguration = {
-            paymentTermsTemplateId,
-          };
-        }
-
-        const createLocationResponse = await admin.graphql(
+        /* 4️⃣ Fetch AUTO-created company location */
+        const locationQueryResponse = await admin.graphql(
           `#graphql
-    mutation CompanyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
-      companyLocationCreate(companyId: $companyId, input: $input) {
-        companyLocation { id name }
-        userErrors { field message }
+    query GetCompanyLocation($companyId: ID!) {
+      company(id: $companyId) {
+        locations(first: 1) {
+          nodes {
+            id
+            name
+          }
+        }
       }
     }`,
-          { variables: { companyId, input: locationInput } },
+          { variables: { companyId } },
         );
 
-        const locationPayload = await createLocationResponse.json();
-        const locationErrors = buildUserErrorList(locationPayload);
+        const locationPayload = await locationQueryResponse.json();
+        const location = locationPayload?.data?.company?.locations?.nodes?.[0];
 
-        if (locationErrors.length) {
+        if (!location) {
           return Response.json({
             intent,
             success: false,
-            errors: locationErrors,
+            errors: ["Company location not found"],
           });
         }
 
-        const location =
-          locationPayload.data.companyLocationCreate.companyLocation;
+        /* 5️⃣ Assign payment terms to EXISTING location */
+        if (paymentTermsTemplateId) {
+          const updateLocationResponse = await admin.graphql(
+            `#graphql
+    mutation UpdateCompanyLocation(
+      $companyLocationId: ID!
+      $paymentTermsTemplateId: ID!
+    ) {
+      companyLocationUpdate(
+        companyLocationId: $companyLocationId
+        input: {
+          buyerExperienceConfiguration: {
+            paymentTermsTemplateId: $paymentTermsTemplateId
+          }
+        }
+      ) {
+        companyLocation { id }
+        userErrors { field message }
+      }
+    }`,
+            {
+              variables: {
+                companyLocationId: location.id,
+                paymentTermsTemplateId,
+              },
+            },
+          );
 
-        if (companyData) {
+          const updateLocationPayload = await updateLocationResponse.json();
+          const locationErrors = buildUserErrorList(updateLocationPayload);
+
+          if (locationErrors.length) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: locationErrors,
+            });
+          }
+        }
+
+        /* 6️⃣ Update user credit limit (optional logic) */
+        if (companyData && creditLimit) {
           const user = await prisma.user.findFirst({
             where: { companyId: companyData.id },
           });
+
           if (user) {
             await prisma.user.update({
               where: { id: user.id },
               data: {
-                userCreditLimit: creditLimit
-                  ? new Prisma.Decimal(creditLimit)
-                  : undefined,
+                userCreditLimit: new Prisma.Decimal(creditLimit),
               },
             });
           }
         }
+
+        /* 7️⃣ Final response */
         return Response.json({
           intent,
           success: true,
@@ -822,23 +858,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: "Company created successfully",
         });
       }
+
       case "updateCompany": {
+        /* 0️⃣ Read & validate form data */
         const companyId = (form.companyId as string)?.trim();
-        const locationId = (form.locationId as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
-        const locationName = (form.locationName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
         const creditLimit = (form.creditLimit as string)?.trim();
 
-        if (!companyId || !locationId || !companyName || !locationName) {
+        if (!companyId || !companyName) {
           return Response.json({
             intent,
             success: false,
-            errors: ["Company name and location name are required"],
+            errors: ["Company ID and company name are required"],
           });
         }
 
-        /* 1️⃣ Update Company Name */
+        /* 1️⃣ Update Company name in Shopify */
         const updateCompanyResponse = await admin.graphql(
           `#graphql
     mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
@@ -866,39 +902,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        /* 2️⃣ Update Location Name + Payment Terms */
-        const locationInput: any = {
-          name: locationName,
-        };
-
-        if (paymentTermsTemplateId) {
-          locationInput.buyerExperienceConfiguration = {
-            paymentTermsTemplateId,
-          };
-        }
-
-        const updateLocationResponse = await admin.graphql(
-          `#graphql
-    mutation CompanyLocationUpdate(
-      $companyLocationId: ID!
-      $input: CompanyLocationUpdateInput!
-    ) {
-      companyLocationUpdate(companyLocationId: $companyLocationId, input: $input) {
-        companyLocation { id name }
-        userErrors { field message }
-      }
-    }`,
-          {
-            variables: {
-              companyLocationId: locationId,
-              input: locationInput,
-            },
-          },
-        );
-
-        const locationPayload = await updateLocationResponse.json();
-        const locationErrors = buildUserErrorList(locationPayload);
-
+        /* 2️⃣ Update Credit Limit metafield */
         if (creditLimit) {
           await updateCompanyMetafield(admin, companyId, {
             namespace: "b2b_credit",
@@ -908,24 +912,116 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        if (locationErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: locationErrors,
+        /* 3️⃣ Update company in Prisma */
+        const companyExists = await prisma.companyAccount.findFirst({
+          where: { shopifyCompanyId: companyId },
+        });
+
+        if (companyExists) {
+          await prisma.companyAccount.update({
+            where: { id: companyExists.id },
+            data: {
+              name: companyName,
+              paymentTerm: paymentTermsTemplateId || null,
+              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+            },
           });
         }
 
+        /* 4️⃣ Fetch EXISTING (auto-created) company location */
+        const locationQueryResponse = await admin.graphql(
+          `#graphql
+    query GetCompanyLocation($companyId: ID!) {
+      company(id: $companyId) {
+        locations(first: 1) {
+          nodes {
+            id
+            name
+          }
+        }
+      }
+    }`,
+          { variables: { companyId } },
+        );
+
+        const locationPayload = await locationQueryResponse.json();
+        const location = locationPayload?.data?.company?.locations?.nodes?.[0];
+
+        if (!location) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company location not found"],
+          });
+        }
+
+        /* 5️⃣ Update payment terms on EXISTING location */
+        if (paymentTermsTemplateId) {
+          const updateLocationResponse = await admin.graphql(
+            `#graphql
+      mutation UpdateCompanyLocation(
+        $companyLocationId: ID!
+        $paymentTermsTemplateId: ID!
+      ) {
+        companyLocationUpdate(
+          companyLocationId: $companyLocationId
+          input: {
+            buyerExperienceConfiguration: {
+              paymentTermsTemplateId: $paymentTermsTemplateId
+            }
+          }
+        ) {
+          companyLocation { id }
+          userErrors { field message }
+        }
+      }`,
+            {
+              variables: {
+                companyLocationId: location.id,
+                paymentTermsTemplateId,
+              },
+            },
+          );
+
+          const updateLocationPayload = await updateLocationResponse.json();
+          const locationErrors = buildUserErrorList(updateLocationPayload);
+
+          if (locationErrors.length) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: locationErrors,
+            });
+          }
+        }
+
+        /* 6️⃣ Update user credit limit */
+        if (companyExists && creditLimit) {
+          const user = await prisma.user.findFirst({
+            where: { companyId: companyExists.id },
+          });
+
+          if (user) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                userCreditLimit: new Prisma.Decimal(creditLimit),
+              },
+            });
+          }
+        }
+
+        /* 7️⃣ Final response */
         return Response.json({
           intent,
           success: true,
           company: {
             id: companyId,
             name: companyName,
-            locationId,
-            locationName,
+            locationId: location.id,
+            locationName: location.name,
           },
-          message: "Company and location updated successfully",
+          message: "Company updated successfully",
         });
       }
 
@@ -1055,7 +1151,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName ?? undefined,
               contactName: contactName ?? undefined,
               contactEmail: contactEmail ?? undefined,
-              paymentTeam:
+              paymentTerm:
                 paymentTermsTemplateId !== null
                   ? paymentTermsTemplateId
                   : undefined,
@@ -1072,7 +1168,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               creditLimit: creditLimit
                 ? new Prisma.Decimal(creditLimit)
                 : undefined,
-              paymentTeam: paymentTermsTemplateId,
+              paymentTerm: paymentTermsTemplateId,
             },
           });
         } else if (companyName) {
@@ -1086,7 +1182,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               creditLimit: creditLimit
                 ? new Prisma.Decimal(creditLimit)
                 : undefined,
-              paymentTeam: paymentTermsTemplateId ?? null,
+              paymentTerm: paymentTermsTemplateId ?? null,
             },
           });
         }
@@ -1181,7 +1277,6 @@ const formatDate = (value?: string | null) => {
   const date = new Date(value);
   return date.toLocaleString();
 };
-
 
 function StepBadge({
   label,
@@ -1462,7 +1557,8 @@ export default function RegistrationApprovals() {
     <s-page heading="Registration submissions">
       {/* Quick Action Buttons */}
       <s-section heading="">
-        {submissions.filter((submission) => submission.status === "PENDING").length === 0  ? (
+        {submissions.filter((submission) => submission.status === "PENDING")
+          .length === 0 ? (
           <s-paragraph>There are no pending submissions yet.</s-paragraph>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -1871,32 +1967,7 @@ export default function RegistrationApprovals() {
                   </label>
                 )}
 
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "#5c5f62",
-                      fontWeight: 500,
-                    }}
-                  >
-                    Location name *
-                  </span>
-                  <input
-                    name="locationName"
-                    defaultValue={
-                      company?.locationName ||
-                      `${selected?.companyName || "Company"} HQ`
-                    }
-                    required
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                    }}
-                  />
-                </label>
+              
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -2473,34 +2544,6 @@ export default function RegistrationApprovals() {
                               }}
                             />
                           </label>
-
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
-                              Location name *
-                            </span>
-                            <input
-                              name="locationName"
-                              defaultValue={company?.locationName || ""}
-                              required
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
-                            />
-                          </label>
                           <label
                             style={{
                               display: "flex",
@@ -2587,34 +2630,6 @@ export default function RegistrationApprovals() {
                         <input
                           name="companyName"
                           defaultValue={selected.companyName}
-                          required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
-                        />
-                      </label>
-
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Location name *
-                        </span>
-                        <input
-                          name="locationName"
-                          defaultValue={`${selected.companyName} HQ`}
                           required
                           style={{
                             padding: 10,

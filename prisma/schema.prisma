@@ -59,6 +59,8 @@ model Store {
   scope         String?
   logo          String?
   submissionEmail String?
+  privacyPolicylink String?
+  privacyPolicyContent String?
   companyWelcomeEmailTemplate String?  // Custom template for company sync emails
   companyWelcomeEmailEnabled Boolean   @default(true)  // Enable/disable company sync notifications
   isActive      Boolean   @default(true)
@@ -141,6 +143,8 @@ model RegistrationSubmission {
   businessType    String
   website         String?
   additionalInfo  String?
+  isPrivacyPolicy Boolean @default(false)
+  isDisable       Boolean @default(false) 
 
   // Store relationship
   shopId          String
@@ -177,7 +181,7 @@ model CompanyAccount {
   contactEmail     String?
 
   creditLimit      Decimal  @default(0) @db.Decimal(14, 2)
-  paymentTeam      String?
+  paymentTerm      String?
   isDisable        Boolean?  @default(false)
 
   users            User[]               @relation("CompanyUsers")

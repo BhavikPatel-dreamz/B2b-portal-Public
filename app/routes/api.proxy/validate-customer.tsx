@@ -73,7 +73,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       prisma.registrationSubmission.findFirst({
         where: {
           OR: [
-            { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
+            {
+              shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}`,
+            },
             { shopifyCustomerId: loggedInCustomerId },
           ],
         },
@@ -81,7 +83,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       prisma.user.findFirst({
         where: {
           OR: [
-            { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
+            {
+              shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}`,
+            },
             { shopifyCustomerId: loggedInCustomerId },
           ],
           shopId: store.id,
@@ -130,7 +134,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }
 
-    // STEP 6: Determine access based on B2B status, registration, and user records
+    // STEP 6: Check if user is disabled FIRST (before any other checks)
+    if (registration?.isDisable === true) {
+      const customerName =
+        registration?.contactName ||
+        (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
+
+      return Response.json({
+        isLoggedIn: true,
+        hasB2BAccess: false,
+        customerId: loggedInCustomerId,
+        customerName,
+        isDisabled: registration?.isDisable,
+        customerStatus: registration?.status || user?.status || null,
+        redirectTo: "/apps/b2b-portal/registration",
+        message:
+          "Your company account has been deactivated. Please contact the support team.",
+        alreadySubmitted: true,
+      });
+    }
+
+    // STEP 7: Determine access based on B2B status, registration, and user records
     if (hasB2BInShopify) {
       // User is part of a company in Shopify
 
@@ -139,14 +163,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const isApprovedViaUser = user?.status === "APPROVED" && user.isActive;
 
       if (isApprovedViaRegistration || isApprovedViaUser) {
-        // User has approved access - grant access
-        console.log("✅ Customer approved - granting access", {
-          viaRegistration: isApprovedViaRegistration,
-          viaUser: isApprovedViaUser
-        });
-
-        const customerName = registration?.contactName ||
-                           (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '');
+        const customerName =
+          registration?.contactName ||
+          (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
         return Response.json({
           isLoggedIn: true,
@@ -157,24 +176,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           themeColor: store.themeColor,
           customerId: loggedInCustomerId,
           customerName,
-          customerStatus: isApprovedViaRegistration ? registration.status : user?.status,
+          customerStatus: isApprovedViaRegistration
+            ? registration.status
+            : user?.status,
           accessMethod,
           ...additionalInfo,
           message: "Access granted",
         });
       }
 
-      // Check if user exists but is not approved
+      // EXISTS BUT NOT APPROVED
       if (registration || user) {
         const status = registration?.status || user?.status;
-        const customerName = registration?.contactName ||
-                           (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '');
-
-        console.log("⏳ Customer exists but not approved", {
-          registrationStatus: registration?.status,
-          userStatus: user?.status,
-          userActive: user?.isActive
-        });
+        const customerName =
+          registration?.contactName ||
+          (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
         return Response.json({
           isLoggedIn: true,
@@ -189,7 +205,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
 
       // No registration and no user record - redirect to register
-      console.log("⚠️ Customer has B2B in Shopify but not registered in our database");
+      console.log(
+        "⚠️ Customer has B2B in Shopify but not registered in our database",
+      );
       return Response.json({
         isLoggedIn: true,
         hasB2BAccess: false,
@@ -205,8 +223,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (registration || user) {
         // Has registration or user record but no B2B access in Shopify
         const status = registration?.status || user?.status;
-        const customerName = registration?.contactName ||
-                           (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '');
+        const customerName =
+          registration?.contactName ||
+          (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
+
+        let message =
+          "Your account has already been submitted and is under review";
+
+        if (status === "APPROVED") {
+          message =
+            "Your account is approved, but B2B access is not yet configured in Shopify.";
+        } else if (status === "REJECTED") {
+          message =
+            "Your account has been rejected. Please contact the support team.";
+        }
 
         return Response.json({
           isLoggedIn: true,
@@ -215,9 +245,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           customerId: loggedInCustomerId,
           customerName,
           redirectTo: "/apps/b2b-portal/registration",
-          message: status === "APPROVED"
-            ? "Your account is approved but B2B access not configured in Shopify"
-            : status === 'REJECTED' ? "Your account has been rejected. Please contact support team." : "Your account has already been submitted and is under review",
+          message,
           alreadySubmitted: true,
         });
       } else {

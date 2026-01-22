@@ -3,7 +3,10 @@ import { Link, useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCreditSummary } from "../services/creditService";
-import { getCompanyDashboardData, updateCredit } from "../services/company.server";
+import {
+  getCompanyDashboardData,
+  updateCredit,
+} from "../services/company.server";
 import { redirect } from "@remix-run/node";
 import {
   parseForm,
@@ -11,8 +14,13 @@ import {
   syncShopifyUsers,
 } from "../utils/company.server";
 import { useEffect, useState } from "react";
-import { getCompanyOrdersCount } from "app/utils/b2b-customer.server";
-import { recalculateCompanyCredit, previewCreditRecalculation } from "../services/creditRecalculation.server";
+import {
+  getCompanyOrdersCount,
+} from "app/utils/b2b-customer.server";
+import {
+  recalculateCompanyCredit,
+  previewCreditRecalculation,
+} from "../services/creditRecalculation.server";
 
 type LoaderData = {
   company: {
@@ -22,6 +30,7 @@ type LoaderData = {
     contactName: string | null;
     contactEmail: string | null;
     shopifyCompanyId: string | null;
+    isDisable: boolean;
   };
   creditLimit: number;
   availableCredit: number;
@@ -60,10 +69,46 @@ type LoaderData = {
   totalUsers: number;
 };
 
+const buildUserErrorList = (payload: any): string[] => {
+  const errors: string[] = [];
+
+  /* 1️⃣ Top-level GraphQL errors */
+  if (Array.isArray(payload?.errors)) {
+    for (const err of payload.errors) {
+      if (typeof err === "string") {
+        errors.push(err);
+      } else if (err?.message) {
+        errors.push(err.message);
+      }
+    }
+  }
+
+  /* 2️⃣ Shopify userErrors (generic, mutation-agnostic) */
+  const data = payload?.data;
+  if (data && typeof data === "object") {
+    for (const key of Object.keys(data)) {
+      const node = data[key];
+      if (Array.isArray(node?.userErrors) && node.userErrors.length) {
+        for (const err of node.userErrors) {
+          if (err?.message) {
+            errors.push(err.message);
+          } else if (Array.isArray(err?.field)) {
+            errors.push(err.field.join("."));
+          } else {
+            errors.push("Unknown error");
+          }
+        }
+      }
+    }
+  }
+
+  return errors;
+};
+
 async function fetchOrdersCount(
   shopName: string,
   accessToken: string,
-  queryString: string
+  queryString: string,
 ): Promise<number> {
   const query = `
     query OrdersCount($query: String!) {
@@ -85,7 +130,7 @@ async function fetchOrdersCount(
         query,
         variables: { query: queryString },
       }),
-    }
+    },
   );
 
   const data = await response.json();
@@ -101,19 +146,26 @@ async function fetchOrdersCount(
 export async function getCompanyOrderStats(
   shopName: string,
   accessToken: string,
-  baseQuery: string
+  baseQuery: string,
 ) {
   const [total, paid, unpaid, pending] = await Promise.all([
     fetchOrdersCount(shopName, accessToken, baseQuery),
-    fetchOrdersCount(shopName, accessToken, `${baseQuery} financial_status:paid`),
-    fetchOrdersCount(shopName, accessToken, `${baseQuery} financial_status:unpaid`),
     fetchOrdersCount(
       shopName,
       accessToken,
-      `${baseQuery} financial_status:pending`
+      `${baseQuery} financial_status:paid`,
+    ),
+    fetchOrdersCount(
+      shopName,
+      accessToken,
+      `${baseQuery} financial_status:unpaid`,
+    ),
+    fetchOrdersCount(
+      shopName,
+      accessToken,
+      `${baseQuery} financial_status:pending`,
     ),
   ]);
-
 
   return {
     total,
@@ -122,7 +174,6 @@ export async function getCompanyOrderStats(
     pending,
   };
 }
-
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -149,12 +200,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const result = await updateCredit(formData, admin);
       return Response.json(result);
     }
-    case "updatePaymentTeam": {
-      const id = (form.id as string)?.trim();
-      const paymentTermsTemplateId =
-        (form.paymentTermsTemplateId as string)?.trim() || null;
+    case "updatepaymentTerm": {
+      const companyId = (form.id as string)?.trim();
+      const paymentTermsTemplateId = (form.paymentTerm as string)?.trim();
 
-      if (!id) {
+      if (!companyId) {
         return Response.json({
           intent,
           success: false,
@@ -165,19 +215,93 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return Response.json({
           intent,
           success: false,
-          errors: ["Payment team is required"],
+          errors: ["Payment terms is required"],
         });
       }
 
+      /* 1️⃣ Fetch ALL company locations from Shopify */
+      const locationsResponse = await admin.graphql(
+        `#graphql
+    query GetCompanyLocations($companyId: ID!) {
+      company(id: $companyId) {
+        locations(first: 50) {
+          nodes {
+            id
+            name
+          }
+        }
+      }
+    }`,
+        {
+          variables: { companyId },
+        },
+      );
+
+      const locationsPayload = await locationsResponse.json();
+      const locations = locationsPayload?.data?.company?.locations?.nodes || [];
+
+      if (!locations.length) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["No company locations found"],
+        });
+      }
+
+      /* 2️⃣ Assign payment terms to EACH location */
+      for (const location of locations) {
+        const updateLocationResponse = await admin.graphql(
+          `#graphql
+      mutation UpdateCompanyLocation(
+        $companyLocationId: ID!
+        $paymentTermsTemplateId: ID!
+      ) {
+        companyLocationUpdate(
+          companyLocationId: $companyLocationId
+          input: {
+            buyerExperienceConfiguration: {
+              paymentTermsTemplateId: $paymentTermsTemplateId
+            }
+          }
+        ) {
+          companyLocation { id }
+          userErrors { field message }
+        }
+      }`,
+          {
+            variables: {
+              companyLocationId: location.id,
+              paymentTermsTemplateId,
+            },
+          },
+        );
+
+        const updatePayload = await updateLocationResponse.json();
+        const errors = buildUserErrorList(updatePayload);
+
+        if (errors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors,
+          });
+        }
+      }
+
+      /* 3️⃣ Sync payment terms in Prisma */
+      const companyData = await prisma.companyAccount.findFirst({
+        where: { shopifyCompanyId: companyId },
+      });
       await prisma.companyAccount.update({
-        where: { id },
-        data: { paymentTeam: paymentTermsTemplateId },
+        where: { id: companyData.id },
+        data: { paymentTerm: paymentTermsTemplateId },
       });
 
+      /* 4️⃣ Success response */
       return Response.json({
         intent,
         success: true,
-        message: "Payment team updated",
+        message: "Payment terms updated for all company locations",
       });
     }
 
@@ -301,57 +425,116 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           errors: ["Registration data not found"],
         });
       }
-      await prisma.registrationSubmission.delete({
+      await prisma.registrationSubmission.update({
         where: { id: registrationData.id },
+        data: { isDisabled: true },
       });
-      const userData = await prisma.user.findFirst({
+      const userData = await prisma.user.findMany({
         where: { companyId: companyData.id },
       });
-      if (!userData) {
+      if (!userData.length) {
         return Response.json({
           intent,
           success: false,
           errors: ["User data not found"],
         });
       }
-      await prisma.user.update({
-        where: { id: userData.id },
+      await prisma.user.updateMany({
+        where: { id: {
+          in: userData.map((user) => user.id),
+        }
+         },
         data: { isActive: false },
       });
-
-      return redirect("/app/companies");
+      return Response.json({
+        intent,
+        success: true,
+        message: "Company deactivated",
+      });
     }
-   case "orderCount": {
-  const query = (form.query as string)?.trim();
+     case "reActivateCompany": {
+      const id = (form.id as string)?.trim();
 
-  if (!query) {
-    return Response.json({
-      intent,
-      success: false,
-      errors: ["Query is required"],
-    });
-  }
+      if (!id) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Company id is required"],
+        });
+      }
 
-  if (!session.accessToken) {
-    return Response.json({
-      intent,
-      success: false,
-      errors: ["Access token is required"],
-    });
-  }
+      const companyData = await prisma.companyAccount.update({
+        where: { id },
+        data: { isDisable: false },
+      });
+      const registrationData = await prisma.registrationSubmission.findFirst({
+        where: { companyName: companyData.name },
+      });
+      if (!registrationData) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Registration data not found"],
+        });
+      }
+      await prisma.registrationSubmission.update({
+        where: { id: registrationData.id },
+        data: { isDisabled: false },
+      });
+      const userData = await prisma.user.findMany({
+        where: { companyId: companyData.id },
+      });
+      if (!userData.length) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["User data not found"],
+        });
+      }
+      await prisma.user.updateMany({
+        where: { id: {
+          in: userData.map((user) => user.id),
+        }
+         },
+        data: { isActive: true },
+      });
+      return Response.json({
+        intent,
+        success: true,
+        message: "Company reactivated",
+      });
+    }
+    case "orderCount": {
+      const query = (form.query as string)?.trim();
 
-  const orderStats = await getCompanyOrdersCount(
-    session.shop,
-    session.accessToken,
-    query
-  );
+      if (!query) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Query is required"],
+        });
+      }
 
-  return Response.json({
-    intent,
-    success: true,
-    orderStats,
-  });
-}
+      if (!session.accessToken) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Access token is required"],
+        });
+      }
+
+      const orderStats = await getCompanyOrdersCount(
+        session.shop,
+        session.accessToken,
+        query,
+      );
+
+      return Response.json({
+        intent,
+        success: true,
+        orderStats,
+      });
+    }
 
     case "recalculateCredit": {
       const companyId = (form.companyId as string)?.trim();
@@ -365,7 +548,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       try {
-        console.log(`🔄 Starting credit recalculation for company ${companyId}`);
+        console.log(
+          `🔄 Starting credit recalculation for company ${companyId}`,
+        );
 
         const result = await recalculateCompanyCredit(companyId, admin);
 
@@ -393,7 +578,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return Response.json({
           intent,
           success: false,
-          errors: [`Failed to recalculate credit: ${error instanceof Error ? error.message : 'Unknown error'}`],
+          errors: [
+            `Failed to recalculate credit: ${error instanceof Error ? error.message : "Unknown error"}`,
+          ],
         });
       }
     }
@@ -430,7 +617,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return Response.json({
           intent,
           success: false,
-          errors: [`Failed to preview recalculation: ${error instanceof Error ? error.message : 'Unknown error'}`],
+          errors: [
+            `Failed to preview recalculation: ${error instanceof Error ? error.message : "Unknown error"}`,
+          ],
         });
       }
     }
@@ -465,7 +654,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     companyId,
     store.id,
     session.shop,
-    session.accessToken
+    session.accessToken,
   );
 
   if (!dashboardData) {
@@ -488,7 +677,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   const availableCredit = Math.max(
     0,
-    creditSummary.creditLimit.toNumber() - creditSummary.usedCredit.toNumber()
+    creditSummary.creditLimit.toNumber() - creditSummary.usedCredit.toNumber(),
   );
 
   return Response.json({
@@ -498,7 +687,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       contactName: dashboardData.company.contactName,
       contactEmail: dashboardData.company.contactEmail,
       shopifyCompanyId: dashboardData.company.shopifyCompanyId,
-      paymentTermsTemplateId: dashboardData.company.paymentTeam || "",
+      paymentTermsTemplateId: dashboardData.company.paymentTerm || "",
+      isDisable: dashboardData.company.isDisable,
     },
     creditLimit: creditSummary.creditLimit.toNumber(),
     availableCredit: availableCredit,
@@ -515,9 +705,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       orderStatus: order.orderStatus,
       creditUsed: order.creditUsed.toNumber(),
       createdAt: order.createdAt.toISOString(),
-      createdBy: [order.createdByUser.firstName, order.createdByUser.lastName]
-        .filter(Boolean)
-        .join(" ") || order.createdByUser.email,
+      createdBy:
+        [order.createdByUser.firstName, order.createdByUser.lastName]
+          .filter(Boolean)
+          .join(" ") || order.createdByUser.email,
     })),
     orderStats: dashboardData.orderStats,
     users: dashboardData.users.map((user) => ({
@@ -533,7 +724,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       existsInShopify: user.existsInShopify,
     })),
     totalUsers: dashboardData.totalUsers,
-    pendingOrderCount: 0
+    pendingOrderCount: 0,
   } satisfies LoaderData);
 };
 
@@ -626,15 +817,19 @@ export default function CompanyDashboard() {
     setIsEditingCredit(false);
   };
 
-  const handlePaymentTermsUpdate = () => {
-    const formData = new FormData();
-    formData.append("intent", "updatePaymentTeam");
-    formData.append("id", data.company.id);
-    formData.append("paymentTermsTemplateId", selectedPaymentTerms);
+ const handlePaymentTermsUpdate = () => {
+  const formData = new FormData();
+  formData.append("intent", "updatepaymentTerm");
+   formData.append("id", data.company.shopifyCompanyId);
 
-    fetcher.submit(formData, { method: "POST" });
-    setIsEditingPaymentTerms(false);
-  };
+
+  // ✅ FIXED KEY
+  formData.append("paymentTerm", selectedPaymentTerms);
+
+  fetcher.submit(formData, { method: "POST" });
+  setIsEditingPaymentTerms(false);
+};
+
 
   const handleCancelPaymentTermsEdit = () => {
     setSelectedPaymentTerms(data.company.paymentTermsTemplateId || "");
@@ -642,16 +837,38 @@ export default function CompanyDashboard() {
   };
 
   // Payment terms options
-  const paymentTermsOptions = [
-    { value: "", label: "No payment terms" },
-    { value: "due_on_fulfillment", label: "Due on fulfillment" },
-    { value: "net_7", label: "Net 7" },
-    { value: "net_15", label: "Net 15" },
-    { value: "net_30", label: "Net 30" },
-    { value: "net_45", label: "Net 45" },
-    { value: "net_60", label: "Net 60" },
-    { value: "net_90", label: "Net 90" },
-  ];
+const paymentTermsOptions = [
+  { value: "", label: "No payment terms" },
+  {
+    value: "gid://shopify/PaymentTermsTemplate/1",
+    label: "Due on fulfillment",
+  },
+  {
+    value: "gid://shopify/PaymentTermsTemplate/2",
+    label: "Net 7",
+  },
+  {
+    value: "gid://shopify/PaymentTermsTemplate/3",
+    label: "Net 15",
+  },
+  {
+    value: "gid://shopify/PaymentTermsTemplate/4",
+    label: "Net 30",
+  },
+   {
+    value: "gid://shopify/PaymentTermsTemplate/5",
+    label: "Net 45",
+  },
+   {
+    value: "gid://shopify/PaymentTermsTemplate/6",
+    label: "Net 60",
+  },
+   {
+    value: "gid://shopify/PaymentTermsTemplate/7",
+    label: "Net 90",
+  },
+];
+
 
   const getPaymentTermsLabel = (value: string) => {
     const option = paymentTermsOptions.find((opt) => opt.value === value);
@@ -693,10 +910,26 @@ export default function CompanyDashboard() {
   }, [updateFetcher.state]);
 
   useEffect(() => {
-    if (recalculateFetcher.state === "idle" && recalculateFetcher.data) {
-      const response = recalculateFetcher.data as ActionResponse & { data?: Record<string, unknown> };
+  if (
+    fetcher.data?.intent === "updatepaymentTerm" &&
+    fetcher.data?.success
+  ) {
+    window.location.reload();
+  }
+}, [fetcher.data]);
 
-      if (response.intent === "previewRecalculation" && response.success && response.data) {
+
+  useEffect(() => {
+    if (recalculateFetcher.state === "idle" && recalculateFetcher.data) {
+      const response = recalculateFetcher.data as ActionResponse & {
+        data?: Record<string, unknown>;
+      };
+
+      if (
+        response.intent === "previewRecalculation" &&
+        response.success &&
+        response.data
+      ) {
         setRecalculationPreview(response.data as typeof recalculationPreview);
       } else if (response.intent === "recalculateCredit") {
         setIsRecalculating(false);
@@ -705,11 +938,13 @@ export default function CompanyDashboard() {
 
         if (response.success) {
           // Optionally show success message or reload the page
-          console.log('✅ Credit recalculation completed successfully');
+          console.log("✅ Credit recalculation completed successfully");
           window.location.reload(); // Reload to see updated data
         } else {
-          console.error('❌ Credit recalculation failed:', response.errors);
-          alert(`Failed to recalculate credit: ${response.errors?.[0] || 'Unknown error'}`);
+          console.error("❌ Credit recalculation failed:", response.errors);
+          alert(
+            `Failed to recalculate credit: ${response.errors?.[0] || "Unknown error"}`,
+          );
         }
       }
     }
@@ -732,173 +967,103 @@ export default function CompanyDashboard() {
       </div>
 
       {/* Payment Terms Edit Modal */}
-      {isEditingPaymentTerms && (
+    {isEditingPaymentTerms && (
+  <div
+    style={{
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: "rgba(0, 0, 0, 0.5)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 1000,
+    }}
+    onClick={handleCancelPaymentTermsEdit} // click outside closes
+  >
+    <section
+      onClick={(e) => e.stopPropagation()} // ✅ VERY IMPORTANT
+      style={{
+        backgroundColor: "white",
+        borderRadius: 8,
+        padding: 24,
+        width: "90%",
+        maxWidth: 500,
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+      }}
+      role="dialog"
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+          Edit payment terms
+        </h2>
         <button
+          onClick={handleCancelPaymentTermsEdit}
           style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
+            background: "none",
             border: "none",
-            padding: 0,
+            fontSize: 20,
             cursor: "pointer",
           }}
-          aria-label="Close modal"
-          onClick={handleCancelPaymentTermsEdit}
-          onKeyDown={(e) => {
-            if (e.key === "Escape" || e.key === "Enter") {
-              handleCancelPaymentTermsEdit();
-            }
+        >
+          ×
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        <label style={{ fontSize: 13, fontWeight: 500 }}>
+          Set payment terms
+        </label>
+        <select
+          value={selectedPaymentTerms}
+          onChange={(e) => setSelectedPaymentTerms(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "8px 12px",
+            marginTop: 6,
           }}
         >
-          <section
-            style={{
-              backgroundColor: "white",
-              borderRadius: 8,
-              padding: 24,
-              width: "90%",
-              maxWidth: 500,
-              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
-            }}
-            role="dialog"
-            aria-labelledby="payment-terms-modal-title"
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 20,
-              }}
-            >
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }} id="payment-terms-modal-title">
-                Edit payment terms
-              </h2>
-              <button
-                onClick={handleCancelPaymentTermsEdit}
-                style={{
-                  background: "none",
-                  border: "none",
-                  fontSize: 20,
-                  cursor: "pointer",
-                  color: "#5c5f62",
-                }}
-              >
-                ×
-              </button>
-            </div>
+          {paymentTermsOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  marginBottom: 8,
-                  color: "#202223",
-                }}
-              >
-                Set payment terms for {data.company.name}
-              </label>
-              <select
-                value={selectedPaymentTerms}
-                onChange={(e) => setSelectedPaymentTerms(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  fontSize: 13,
-                  border: "1px solid #c9ccd0",
-                  borderRadius: 6,
-                  backgroundColor: "white",
-                  cursor: "pointer",
-                }}
-              >
-                {paymentTermsOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div
-              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
-            >
-              <button
-                onClick={handleCancelPaymentTermsEdit}
-                style={{
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  border: "1px solid #c9ccd0",
-                  borderRadius: 6,
-                  backgroundColor: "white",
-                  cursor: "pointer",
-                  color: "#202223",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handlePaymentTermsUpdate}
-                disabled={fetcher.state === "submitting"}
-                style={{
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  border: "none",
-                  borderRadius: 6,
-                  backgroundColor: "#008060",
-                  color: "white",
-                  cursor:
-                    fetcher.state === "submitting" ? "not-allowed" : "pointer",
-                  opacity: fetcher.state === "submitting" ? 0.6 : 1,
-                }}
-              >
-                {fetcher.state === "submitting" ? "Saving..." : "Save"}
-              </button>
-            </div>
-
-            {fetcher.data?.intent === "updatePaymentTeam" &&
-              fetcher.data?.success && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: 8,
-                    fontSize: 12,
-                    color: "#008060",
-                    backgroundColor: "#d4f3e6",
-                    borderRadius: 4,
-                  }}
-                >
-                  ✓ Payment terms updated successfully
-                </div>
-              )}
-            {fetcher.data?.intent === "updatePaymentTeam" &&
-              !fetcher.data?.success && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: 8,
-                    fontSize: 12,
-                    color: "#d72c0d",
-                    backgroundColor: "#ffd9d9",
-                    borderRadius: 4,
-                  }}
-                >
-                  {fetcher.data?.errors?.[0] ||
-                    "Failed to update payment terms"}
-                </div>
-              )}
-          </section>
+{isEditingPaymentTerms && (
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button onClick={handleCancelPaymentTermsEdit}>
+          Cancel
         </button>
-      )}
+        <button
+          onClick={handlePaymentTermsUpdate}
+          disabled={fetcher.state === "submitting"}
+          style={{
+            backgroundColor: "#008060",
+            color: "white",
+            padding: "8px 16px",
+            borderRadius: 6,
+          }}
+        >
+          {fetcher.state === "submitting" ? "Saving..." : "Save"}
+        </button>
+      </div>
+)}
+    </section>
+
+  </div>
+)}
+
 
       {/* Company Information Section */}
       <s-section heading="Company Information">
@@ -1169,7 +1334,7 @@ export default function CompanyDashboard() {
                 </div>
               )}
             </div>
-            <updateFetcher.Form
+            {/* <updateFetcher.Form
               method="post"
               onSubmit={() => setDeactivatingId(data.company.id)}
             >
@@ -1198,6 +1363,43 @@ export default function CompanyDashboard() {
                 {deactivatingId === data.company.id
                   ? "Deactivating..."
                   : "Deactivate"}
+              </button>
+            </updateFetcher.Form> */}
+            <updateFetcher.Form
+              method="post"
+              onSubmit={() => setDeactivatingId(data.company.id)}
+            >
+              <input 
+                type="hidden" 
+                name="intent" 
+                value={data.company.isDisable  ? "reActivateCompany" : "deactivateCompany"} 
+              />
+              <input type="hidden" name="id" value={data.company.id} />
+
+              <button
+                type="submit"
+                disabled={deactivatingId === data.company.id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: 100,
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  border: data.company.isDisable ? "1px solid #008060" : "1px solid #d72c0d",
+                  backgroundColor: "white",
+                  color: data.company.isDisable ? "#008060" : "#d72c0d",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: deactivatingId === data.company.id ? "not-allowed" : "pointer",
+                  opacity: deactivatingId === data.company.id ? 0.6 : 1,
+                }}
+              >
+                {deactivatingId === data.company.id
+                  ? "Processing..."
+                  : data.company.isDisable
+                    ? "Reactivate"
+                    : "Deactivate"}
               </button>
             </updateFetcher.Form>
           </div>
@@ -1289,7 +1491,13 @@ export default function CompanyDashboard() {
           </div>
 
           {/* Recalculate Credit Button */}
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #e0e0e0" }}>
+          <div
+            style={{
+              marginTop: 16,
+              paddingTop: 16,
+              borderTop: "1px solid #e0e0e0",
+            }}
+          >
             <button
               onClick={handleShowRecalculateModal}
               disabled={recalculateFetcher.state === "submitting"}
@@ -1301,7 +1509,10 @@ export default function CompanyDashboard() {
                 borderRadius: 4,
                 fontSize: 13,
                 fontWeight: 500,
-                cursor: recalculateFetcher.state === "submitting" ? "not-allowed" : "pointer",
+                cursor:
+                  recalculateFetcher.state === "submitting"
+                    ? "not-allowed"
+                    : "pointer",
                 opacity: recalculateFetcher.state === "submitting" ? 0.6 : 1,
                 display: "flex",
                 alignItems: "center",
@@ -1323,13 +1534,12 @@ export default function CompanyDashboard() {
                   Loading...
                 </>
               ) : (
-                <>
-                  🔄 Recalculate Credit
-                </>
+                <>🔄 Recalculate Credit</>
               )}
             </button>
             <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 8 }}>
-              Recalculates credit based on current unpaid orders and updates transaction history
+              Recalculates credit based on current unpaid orders and updates
+              transaction history
             </div>
           </div>
         </s-section>
@@ -1604,7 +1814,7 @@ export default function CompanyDashboard() {
                       {formatCurrency(tx.paidAmount)}
                     </td>
 
-                     <td
+                    <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
                       {formatCurrency(tx.creditUsed)}
@@ -1679,7 +1889,10 @@ export default function CompanyDashboard() {
                 marginBottom: 20,
               }}
             >
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }} id="recalculate-modal-title">
+              <h3
+                style={{ margin: 0, fontSize: 18, fontWeight: 600 }}
+                id="recalculate-modal-title"
+              >
                 🔄 Recalculate Credit
               </h3>
               <button
@@ -1700,101 +1913,181 @@ export default function CompanyDashboard() {
               <>
                 <div style={{ marginBottom: 16 }}>
                   <p style={{ margin: 0, marginBottom: 12, color: "#5c5f62" }}>
-                    This will recalculate the credit for <strong>{recalculationPreview.companyName}</strong> based on current unpaid orders.
+                    This will recalculate the credit for{" "}
+                    <strong>{recalculationPreview.companyName}</strong> based on
+                    current unpaid orders.
                   </p>
 
-                  <div style={{
-                    backgroundColor: "#f8f9fa",
-                    padding: 16,
-                    borderRadius: 6,
-                    marginBottom: 16
-                  }}>
-                    <h4 style={{ margin: 0, marginBottom: 12, fontSize: 14 }}>Preview Summary:</h4>
+                  <div
+                    style={{
+                      backgroundColor: "#f8f9fa",
+                      padding: 16,
+                      borderRadius: 6,
+                      marginBottom: 16,
+                    }}
+                  >
+                    <h4 style={{ margin: 0, marginBottom: 12, fontSize: 14 }}>
+                      Preview Summary:
+                    </h4>
                     <div style={{ display: "grid", gap: 8, fontSize: 13 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                        }}
+                      >
                         <span>Credit Limit:</span>
-                        <span>{formatCurrency(typeof recalculationPreview.creditLimit === 'object' && recalculationPreview.creditLimit?.toNumber ? recalculationPreview.creditLimit.toNumber() : (recalculationPreview.creditLimit as number) ?? 0)}</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>Unpaid Orders:</span>
-                        <span style={{ fontWeight: 600, color: "#d72c0d" }}>{recalculationPreview.unpaidOrdersCount}</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>Total Unpaid Amount:</span>
-                        <span style={{ fontWeight: 600, color: "#d72c0d" }}>
-                          {formatCurrency(typeof recalculationPreview.unpaidOrdersTotal === 'object' && recalculationPreview.unpaidOrdersTotal?.toNumber ? recalculationPreview.unpaidOrdersTotal.toNumber() : (recalculationPreview.unpaidOrdersTotal as number) ?? 0)}
+                        <span>
+                          {formatCurrency(
+                            typeof recalculationPreview.creditLimit ===
+                              "object" &&
+                              recalculationPreview.creditLimit?.toNumber
+                              ? recalculationPreview.creditLimit.toNumber()
+                              : ((recalculationPreview.creditLimit as number) ??
+                                  0),
+                          )}
                         </span>
                       </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <span>Unpaid Orders:</span>
+                        <span style={{ fontWeight: 600, color: "#d72c0d" }}>
+                          {recalculationPreview.unpaidOrdersCount}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <span>Total Unpaid Amount:</span>
+                        <span style={{ fontWeight: 600, color: "#d72c0d" }}>
+                          {formatCurrency(
+                            typeof recalculationPreview.unpaidOrdersTotal ===
+                              "object" &&
+                              recalculationPreview.unpaidOrdersTotal?.toNumber
+                              ? recalculationPreview.unpaidOrdersTotal.toNumber()
+                              : ((recalculationPreview.unpaidOrdersTotal as number) ??
+                                  0),
+                          )}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                        }}
+                      >
                         <span>Current Transactions:</span>
-                        <span>{recalculationPreview.currentTransactionsCount}</span>
+                        <span>
+                          {recalculationPreview.currentTransactionsCount}
+                        </span>
                       </div>
                     </div>
                   </div>
 
                   {recalculationPreview.unpaidOrders.length > 0 && (
                     <div style={{ marginBottom: 16 }}>
-                      <h4 style={{ margin: 0, marginBottom: 12, fontSize: 14 }}>Unpaid Orders ({recalculationPreview.unpaidOrders.length}):</h4>
-                      <div style={{
-                        maxHeight: 200,
-                        overflow: "auto",
-                        border: "1px solid #e0e0e0",
-                        borderRadius: 4
-                      }}>
-                        {recalculationPreview.unpaidOrders.map((order: {
-                          id: string;
-                          shopifyOrderId?: string;
-                          remainingBalance: number;
-                          createdBy?: string;
-                          createdAt?: string;
-                        }, index: number) => (
-                          <div
-                            key={order.id}
-                            style={{
-                              padding: 12,
-                              borderBottom: index < recalculationPreview.unpaidOrders.length - 1 ? "1px solid #e0e0e0" : "none",
-                              fontSize: 12,
-                            }}
-                          >
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                              <span style={{ fontWeight: 500 }}>
-                                Order #{order.shopifyOrderId || order.id.slice(-8)}
-                              </span>
-                              <span style={{ fontWeight: 600 }}>
-                                {formatCurrency(order.remainingBalance)}
-                              </span>
+                      <h4 style={{ margin: 0, marginBottom: 12, fontSize: 14 }}>
+                        Unpaid Orders (
+                        {recalculationPreview.unpaidOrders.length}):
+                      </h4>
+                      <div
+                        style={{
+                          maxHeight: 200,
+                          overflow: "auto",
+                          border: "1px solid #e0e0e0",
+                          borderRadius: 4,
+                        }}
+                      >
+                        {recalculationPreview.unpaidOrders.map(
+                          (
+                            order: {
+                              id: string;
+                              shopifyOrderId?: string;
+                              remainingBalance: number;
+                              createdBy?: string;
+                              createdAt?: string;
+                            },
+                            index: number,
+                          ) => (
+                            <div
+                              key={order.id}
+                              style={{
+                                padding: 12,
+                                borderBottom:
+                                  index <
+                                  recalculationPreview.unpaidOrders.length - 1
+                                    ? "1px solid #e0e0e0"
+                                    : "none",
+                                fontSize: 12,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  marginBottom: 4,
+                                }}
+                              >
+                                <span style={{ fontWeight: 500 }}>
+                                  Order #
+                                  {order.shopifyOrderId || order.id.slice(-8)}
+                                </span>
+                                <span style={{ fontWeight: 600 }}>
+                                  {formatCurrency(order.remainingBalance)}
+                                </span>
+                              </div>
+                              <div style={{ color: "#5c5f62" }}>
+                                {order.createdBy && order.createdAt && (
+                                  <>
+                                    Created by {order.createdBy} on{" "}
+                                    {formatDate(order.createdAt)}
+                                  </>
+                                )}
+                              </div>
                             </div>
-                            <div style={{ color: "#5c5f62" }}>
-                              {order.createdBy && order.createdAt && (
-                                <>
-                                  Created by {order.createdBy} on {formatDate(order.createdAt)}
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                          ),
+                        )}
                       </div>
                     </div>
                   )}
 
-                  <div style={{
-                    padding: 12,
-                    backgroundColor: "#fff3cd",
-                    border: "1px solid #ffeaa7",
-                    borderRadius: 4,
-                    marginBottom: 20,
-                    fontSize: 13
-                  }}>
+                  <div
+                    style={{
+                      padding: 12,
+                      backgroundColor: "#fff3cd",
+                      border: "1px solid #ffeaa7",
+                      borderRadius: 4,
+                      marginBottom: 20,
+                      fontSize: 13,
+                    }}
+                  >
                     <strong>⚠️ Warning:</strong> This action will:
                     <ul style={{ margin: "8px 0 0 16px", paddingLeft: 0 }}>
-                      <li>Delete existing credit transactions for these orders</li>
-                      <li>Create new credit transactions based on current order amounts</li>
+                      <li>
+                        Delete existing credit transactions for these orders
+                      </li>
+                      <li>
+                        Create new credit transactions based on current order
+                        amounts
+                      </li>
                       <li>Update company credit usage in Shopify metafields</li>
                     </ul>
                   </div>
 
-
-                  <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      justifyContent: "flex-end",
+                    }}
+                  >
                     <button
                       onClick={handleCancelRecalculate}
                       disabled={isRecalculating}
@@ -1815,7 +2108,9 @@ export default function CompanyDashboard() {
                       disabled={isRecalculating}
                       style={{
                         padding: "10px 16px",
-                        backgroundColor: isRecalculating ? "#cccccc" : "#d72c0d",
+                        backgroundColor: isRecalculating
+                          ? "#cccccc"
+                          : "#d72c0d",
                         color: "white",
                         border: "none",
                         borderRadius: 4,
@@ -1846,7 +2141,7 @@ export default function CompanyDashboard() {
                       )}
                     </button>
                   </div>
-              </div>
+                </div>
               </>
             ) : (
               <div style={{ textAlign: "center", padding: 20 }}>
@@ -1861,7 +2156,9 @@ export default function CompanyDashboard() {
                     margin: "0 auto 16px",
                   }}
                 />
-                <p style={{ margin: 0, color: "#5c5f62" }}>Loading preview...</p>
+                <p style={{ margin: 0, color: "#5c5f62" }}>
+                  Loading preview...
+                </p>
               </div>
             )}
           </section>
