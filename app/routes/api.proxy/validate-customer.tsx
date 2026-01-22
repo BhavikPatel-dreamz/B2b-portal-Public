@@ -145,7 +145,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         hasB2BAccess: false,
         customerId: loggedInCustomerId,
         customerName,
-        isDisabled: registration?.isDisable,
+        isDisable: registration?.isDisable,
         customerStatus: registration?.status || user?.status || null,
         redirectTo: "/apps/b2b-portal/registration",
         message:

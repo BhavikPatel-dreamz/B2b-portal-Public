@@ -427,7 +427,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
       await prisma.registrationSubmission.update({
         where: { id: registrationData.id },
-        data: { isDisabled: true },
+        data: { isDisable: true },
       });
       const userData = await prisma.user.findMany({
         where: { companyId: companyData.id },
@@ -479,7 +479,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
       await prisma.registrationSubmission.update({
         where: { id: registrationData.id },
-        data: { isDisabled: false },
+        data: { isDisable: false },
       });
       const userData = await prisma.user.findMany({
         where: { companyId: companyData.id },
