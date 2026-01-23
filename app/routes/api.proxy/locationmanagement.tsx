@@ -110,16 +110,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           note,
         } = body;
 
-        if (!name) {
-          return Response.json(
-            { error: "Location name is required" },
-            { status: 400 },
-          );
+        const validations = [
+          { condition: !name, message: "Location name is required" },
+          {
+            condition: !address1,
+            message: "At least one address field is required",
+          },
+          { condition: !phone, message: "Phone number is required" },
+          { condition: phone?.length !== 10, message: "Phone number must be 10 digits" },
+          { condition: !externalId, message: "External ID is required" },
+          {
+            condition: !city && !province && !zip && !country,
+            message: "At least one address field is required",
+          },
+        ];
+
+        for (const v of validations) {
+          if (v.condition) {
+            return Response.json({ error: v.message }, { status: 400 });
+          }
         }
 
         const result = await createLocationAndAssignToContact(
           companyId,
-         `gid://shopify/Customer/${userContext.customerId}`,
+          `gid://shopify/Customer/${userContext.customerId}`,
           shop,
           store.accessToken,
           {
