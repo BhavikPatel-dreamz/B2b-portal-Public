@@ -4446,7 +4446,7 @@ export async function createLocationAndAssignToContact(
 
   if (!locationResult.success || !locationResult.locationId) {
     return {
-      error: "Failed to create location",
+      error: locationResult.error,
       details: locationResult.error,
     };
   }

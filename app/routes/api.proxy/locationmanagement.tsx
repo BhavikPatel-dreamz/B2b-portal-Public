@@ -3,7 +3,6 @@ import { authenticateApiProxyWithPermissions } from "../../utils/proxy.server";
 import { requirePermission } from "../../utils/permissions.server";
 import {
   getCompanyLocations,
-  createCompanyLocation,
   updateCompanyLocation,
   deleteCompanyLocation,
   checkLocationHasUsers,
@@ -114,15 +113,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           { condition: !name, message: "Location name is required" },
           {
             condition: !address1,
-            message: "At least one address field is required",
+            message: "Address field is required",
           },
           { condition: !phone, message: "Phone number is required" },
-          { condition: phone?.length !== 10, message: "Phone number must be 10 digits" },
           { condition: !externalId, message: "External ID is required" },
           {
-            condition: !city && !province && !zip && !country,
-            message: "At least one address field is required",
+            condition: !city ,
+            message: "City field is required",
           },
+          {
+            condition: !country,
+            message: "Country field is required",
+          },
+          {
+            condition: !zip,
+            message: "Zip field is required",
+          },
+
         ];
 
         for (const v of validations) {
