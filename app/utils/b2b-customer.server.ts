@@ -4094,6 +4094,51 @@ export async function createCompanyLocation(
   }
 }
 
+export async function checkLocationExists(
+  companyId: string,
+  shopName: string,
+  accessToken: string,
+  locationName: string,
+) {
+  const query = `
+    query getCompanyLocations($companyId: ID!) {
+      company(id: $companyId) {
+        locations(first: 100) {
+          nodes {
+            name
+          }
+        }
+      }
+    }
+  `;
+
+  const response = await fetch(
+    `https://${shopName}/admin/api/2025-01/graphql.json`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": accessToken,
+      },
+      body: JSON.stringify({
+        query,
+        variables: { companyId },
+      }),
+    },
+  );
+
+  const result = await response.json();
+
+  const locations =
+    result?.data?.company?.locations?.nodes || [];
+
+  return locations.some(
+    (loc: { name: string }) =>
+      loc.name.trim().toLowerCase() ===
+      locationName.trim().toLowerCase(),
+  );
+}
+
 
 export async function getCompanyContactRoles(
   companyId: string,

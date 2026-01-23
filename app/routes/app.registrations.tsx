@@ -2894,41 +2894,6 @@ export default function RegistrationApprovals() {
                   }}
                 >
                   <h4 style={{ marginTop: 0 }}>Complete Approval</h4>
-                  {/* <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Review and add any notes before completing the approval.
-                  </p>
-
-                  <div style={{ marginTop: 12 }}>
-                    <label
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "#5c5f62",
-                          fontWeight: 500,
-                        }}
-                      >
-                        Review notes (optional)
-                      </span>
-                      <textarea
-                        value={reviewNotes}
-                        onChange={(e) => setReviewNotes(e.target.value)}
-                        placeholder="Add any notes about this approval"
-                        style={{
-                          minHeight: 80,
-                          padding: 10,
-                          borderRadius: 8,
-                          border: "1px solid #c9ccd0",
-                        }}
-                      />
-                    </label>
-                  </div> */}
-
                   <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                     <s-button
                       variant="primary"

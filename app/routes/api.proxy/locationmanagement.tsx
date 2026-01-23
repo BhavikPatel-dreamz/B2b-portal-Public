@@ -7,6 +7,7 @@ import {
   deleteCompanyLocation,
   checkLocationHasUsers,
   createLocationAndAssignToContact,
+  checkLocationExists,
 } from "../../utils/b2b-customer.server";
 
 /**
@@ -118,7 +119,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           { condition: !phone, message: "Phone number is required" },
           { condition: !externalId, message: "External ID is required" },
           {
-            condition: !city ,
+            condition: !city,
             message: "City field is required",
           },
           {
@@ -129,13 +130,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             condition: !zip,
             message: "Zip field is required",
           },
-
         ];
 
         for (const v of validations) {
           if (v.condition) {
             return Response.json({ error: v.message }, { status: 400 });
           }
+        }
+
+        const alreadyExists = await checkLocationExists(
+          companyId,
+          shop,
+          store.accessToken,
+          name,
+        );
+
+        if (alreadyExists) {
+          return Response.json({
+            success: false,
+            error: "Already exist this location in this company",
+          });
         }
 
         const result = await createLocationAndAssignToContact(
