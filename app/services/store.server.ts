@@ -112,8 +112,12 @@ export async function uninstallStore(shopDomain: string) {
 /**
  * Delete store and all associated users
  */
-export async function deleteStore(id: string) {
-  return await prisma.store.delete({
-    where: { id },
+export async function deleteStore(shopDomain: string) {
+  console.log(`Deleting store: ${shopDomain}`);
+  return await prisma.store.update({
+    where: { shopDomain },
+    data: {
+      deletedAt: new Date(),
+    },
   });
 }

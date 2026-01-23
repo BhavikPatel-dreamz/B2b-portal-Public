@@ -8,7 +8,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { getStoreByDomain, uninstallStore, updateStore } from "../services/store.server";
+import { deleteStore, getStoreByDomain, updateStore } from "../services/store.server";
 import { createUser, getUserByEmail } from "app/services/user.server";
 import { getCompaniesByShop } from "app/services/company.server";
 
@@ -87,10 +87,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       const shop = session.shop;
 
-     if (session) {
-        await prisma.session.deleteMany({ where: { shop } });
-      }
-
       // Delete user sessions first
       const users = await prisma.user.findMany({ where: { shopId: store.id } });
       if (users.length > 0) {
@@ -121,7 +117,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.user.deleteMany({ where: { shopId: store.id } });
 
       // Mark store as uninstalled
-      await uninstallStore(shop);
+      await deleteStore(shop);
 
       console.log(`Successfully uninstalled store: ${shop}`);
     
