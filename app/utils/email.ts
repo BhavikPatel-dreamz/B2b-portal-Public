@@ -72,6 +72,7 @@ export async function sendRegistrationEmail(
   if (!StoreData?.companyWelcomeEmailTemplate) {
     throw new Error("Company welcome email template not found");
   }
+  console.log(StoreData?.shopDomain, "StoreData?.shopDomain");
 
   const templateVariables = {
     companyName: companyName || "Company Name",
@@ -79,6 +80,7 @@ export async function sendRegistrationEmail(
     contactName: contactName || "Contact Name",
     email: email,
     companyId: companyId,
+    shopDomain: StoreData?.shopDomain || "store.com",
   };
 
   const processedTemplate = replaceTemplateVariables(
@@ -86,8 +88,9 @@ export async function sendRegistrationEmail(
     templateVariables,
   );
 
-  const html = convertToHtmlEmail(processedTemplate);
-  console.log(html, "html");
+  // FIXED: Pass shopDomain to convertToHtmlEmail
+  const html = convertToHtmlEmail(processedTemplate, StoreData?.shopDomain || "store.com");
+
   const text = stripHtmlTags(processedTemplate);
 
   return sendEmail({
@@ -112,7 +115,9 @@ function replaceTemplateVariables(
   return processedTemplate;
 }
 
-function convertToHtmlEmail(content: string): string {
+
+function convertToHtmlEmail(content: string, shopDomain: string): string {
+  const shopDomaindata = shopDomain.split(".")[0];
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -178,7 +183,7 @@ function convertToHtmlEmail(content: string): string {
       ${formatContentAsHtml(content)}
       
       <p style="text-align: center;">
-        <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/registrations" class="btn">
+        <a href="https://admin.shopify.com/store/${shopDomaindata}/apps/b2b-portal-public-1/app/registrations" class="btn">
           View B2B Page
         </a>
       </p>
@@ -218,102 +223,7 @@ function stripHtmlTags(content: string): string {
     .trim();
 }
 
-function generateRegistrationTemplate(
-  companyId: string,
-  companyName: string,
-  contactName: string,
-  email: string,
-  storeOwnerName: string,
-) {
-  const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Company Inquiry</title>
-  <style>
-    body { font-family: Arial, sans-serif; background-color: #f4f6f8; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background-color: #0d6efd; padding: 20px; text-align: center; color: #fff; border-radius: 8px 8px 0 0; }
-    .content { background-color: #ffffff; padding: 30px; border: 1px solid #dee2e6; }
-    .footer { background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d; border-radius: 0 0 8px 8px; }
-    .btn { display: inline-block; padding: 12px 24px; background-color: #0d6efd; color: #fff; text-decoration: none; border-radius: 4px; margin: 20px 0; }
-    .btn:hover { background-color: #0b5ed7; }
-    .highlight { background-color: #e7f1ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Company Inquiry</h1>
-    </div>
 
-    <div class="content">
-      <p>Hello <strong>${storeOwnerName}</strong>,</p>
-
-      <p>
-        We are pleased to inform you that a new company inquiry has been successfully
-        received on the platform by <strong>${companyName}</strong>.
-      </p>
-
-      <div class="highlight">
-        <p><strong>Company Name:</strong> ${companyName}</p>
-        <p><strong>Inquired By:</strong> ${contactName}</p>
-        <p><strong>Contact Email:</strong> ${email}</p>
-      </div>
-
-      <p>
-        You can now log in to your dashboard to review company details,
-        manage access, and monitor analytics.
-      </p>
-
-      <p style="text-align: center;">
-        <a href="https://admin.shopify.com/store/findash-shipping-1/apps/b2b-portal-public-1/app/registrations" class="btn">
-          View B2B Page
-        </a>
-      </p>
-
-      <p>
-        If you have any questions or need assistance, please feel free to
-        contact our support team.
-      </p>
-
-      <p>
-        Best regards,<br />
-        <strong>${contactName}</strong>
-      </p>
-    </div>
-  </div>
-</body>
-</html>
-`;
-
-  const text = `
- Company Inquiry: ${companyName}
-
-Hello ${storeOwnerName},
-
-A new company inquiry has been received on the platform.
-
-Company Name: ${companyName}
-Inquired By: ${contactName}
-Contact Email: ${email}
-
-You can now log in to your dashboard to review company details and manage access.
-
-If you have any questions or need assistance, please contact our support team.
-
-
-Best regards,
-${contactName}
-
----
-This email was sent to notify you about a new company inquiry.
-`;
-
-  return { html, text };
-}
 
 export async function sendCompanyAssignmentEmail(
   shopName: string,

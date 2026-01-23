@@ -390,7 +390,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const user = await prisma.user.findFirst({
           where: { email },
         });
-        if (!user) {
+        if (!user && Registration) {
           await prisma.user.create({
             data: {
               email,

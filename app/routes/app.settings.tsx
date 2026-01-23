@@ -8,7 +8,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { getStoreByDomain, updateStore } from "../services/store.server";
+import { getStoreByDomain, uninstallStore, updateStore } from "../services/store.server";
 import { createUser, getUserByEmail } from "app/services/user.server";
 import { getCompaniesByShop } from "app/services/company.server";
 
@@ -85,10 +85,71 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "delete") {
     try {
+      const shop = session.shop;
+
+     if (session) {
+        await prisma.session.deleteMany({ where: { shop } });
+      }
+
+      // Delete user sessions first
+      const users = await prisma.user.findMany({ where: { shopId: store.id } });
+      if (users.length > 0) {
+        const userIds = users.map(u => u.id);
+        await prisma.userSession.deleteMany({ where: { userId: { in: userIds } } });
+      }
+
+      // Delete order payments
+      const orders = await prisma.b2BOrder.findMany({ where: { shopId: store.id } });
+      if (orders.length > 0) {
+        const orderIds = orders.map(o => o.id);
+        await prisma.orderPayment.deleteMany({ where: { orderId: { in: orderIds } } });
+      }
+
+      // Delete credit transactions
+      const companyAccounts = await prisma.companyAccount.findMany({ where: { shopId: store.id } });
+      if (companyAccounts.length > 0) {
+        const companyIds = companyAccounts.map(c => c.id);
+        await prisma.creditTransaction.deleteMany({ where: { companyId: { in: companyIds } } });
+      }
+
+      // Delete main records
+      await prisma.wishlist.deleteMany({ where: { shop } });
+      await prisma.notification.deleteMany({ where: { shopId: store.id } });
+      await prisma.b2BOrder.deleteMany({ where: { shopId: store.id } });
+      await prisma.companyAccount.deleteMany({ where: { shopId: store.id } });
+      await prisma.registrationSubmission.deleteMany({ where: { shopId: store.id } });
+      await prisma.user.deleteMany({ where: { shopId: store.id } });
+
+      // Mark store as uninstalled
+      await uninstallStore(shop);
+
+      console.log(`Successfully uninstalled store: ${shop}`);
+    
+      return Response.json(
+        {
+          success: true,
+          message: "All B2B portal data has been successfully deleted",
+        } satisfies ActionResponse,
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error deleting store data:", error);
+      return Response.json(
+        {
+          success: false,
+          errors: ["Failed to delete store data. Please try again."],
+        } satisfies ActionResponse,
+        { status: 500 },
+      );
+    }
+  }
+
+  // Handle webhook intent (customers/create)
+  if (intent === "webhook") {
+    try {
       const { payload, shop, topic } = await authenticate.webhook(request);
       console.log(`Received ${topic} webhook for ${shop}`);
 
-      // If an outdated subscription points to this path, ignore gracefully
       if (topic !== "CUSTOMERS_CREATE") {
         console.info(
           `Webhook topic ${topic} hit customers/create route. Ignoring.`,
@@ -96,12 +157,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response();
       }
 
-      // Basic validation
       if (!payload || !shop) {
         return new Response("Invalid webhook payload", { status: 400 });
       }
 
-      // Load store by shop domain
       const store = await getStoreByDomain(shop);
       if (!store) {
         console.warn(
@@ -110,7 +169,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response();
       }
 
-      // Extract customer data from webhook payload
       const customer = payload as any;
       const customerId = customer.id;
       const customerEmail = customer.email;
@@ -124,10 +182,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response();
       }
 
-      // Convert numeric Shopify customer ID to GraphQL GID
       const customerGid = `gid://shopify/Customer/${customerId}`;
 
-      // Check if user already exists
       const existingUser = await getUserByEmail(customerEmail, store.id);
       if (existingUser) {
         console.info(
@@ -138,7 +194,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       let assignedCompany = null;
 
-      // Check if customer has B2B-related tags (you can customize this logic)
       const isB2BCustomer =
         customerTags.toLowerCase().includes("b2b") ||
         customerTags.toLowerCase().includes("business") ||
@@ -151,27 +206,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response();
       }
 
-      // Try to get the first available company for this store
       const companies = await getCompaniesByShop(store.id, { take: 1 });
 
       if (companies.length === 0) {
         console.warn(
           `No companies found for store ${shop}; cannot assign user to company`,
         );
-        // You might want to create a registration submission instead
         return new Response();
       }
 
       assignedCompany = companies[0];
 
-      // Create the user in your local database
       const newUser = await createUser({
         email: customerEmail,
         firstName: firstName || null,
         lastName: lastName || null,
-        password: "", // Placeholder password for B2B users created via Shopify
+        password: "",
         role: "STORE_USER",
-        status: "PENDING", // Set to pending so they need approval
+        status: "PENDING",
         shopId: store.id,
         companyId: assignedCompany.id,
         companyRole: "member",
@@ -189,6 +241,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
+  // Handle settings update
   const logoRaw = (formData.get("logo") as string | null)?.trim() || "";
   const shopName = (formData.get("shopName") as string | null)?.trim() || "";
   const submissionEmailRaw =
@@ -202,11 +255,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     "";
   const companyWelcomeEmailEnabled =
     (formData.get("companyWelcomeEmailEnabled") as string | null) === "on";
-  
-  // Fix: Get privacy policy fields properly
-  const privacyPolicylink = 
+
+  const privacyPolicylink =
     (formData.get("privacyPolicylink") as string | null)?.trim() || null;
-  const privacyPolicyContent = 
+  const privacyPolicyContent =
     (formData.get("privacyPolicyContent") as string | null)?.trim() || null;
 
   const errors: string[] = [];
@@ -230,14 +282,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     errors.push("Privacy policy link must be a valid URL.");
   }
 
- 
   if (errors.length > 0) {
     return Response.json({ success: false, errors }, { status: 400 });
   }
 
   const logo = logoRaw || null;
 
-  const updatedStore = await updateStore(store.id, {
+  await updateStore(store.id, {
     logo,
     shopName,
     submissionEmail,
@@ -248,15 +299,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     privacyPolicylink,
     privacyPolicyContent,
   });
-  
 
   return Response.json(
     { success: true, message: "Settings saved" } satisfies ActionResponse,
     { status: 200 },
   );
 };
-
-// ToolbarButton component
 const ToolbarButton = ({ onClick, title, children }: any) => (
   <button
     type="button"
@@ -380,40 +428,53 @@ export default function SettingsPage() {
     }
   };
 
-  // Delete handler
-  const handleDelete = () => {
-    deleteFetcher.submit({ intent: "delete" }, { method: "post" });
-  };
+const handleDelete = () => {
+  deleteFetcher.submit({ intent: "delete" }, { method: "post" });
+};
+
+// Update the useEffect for successful deletion
+useEffect(() => {
+  if (deleteFetcher.data?.success) {
+    setShowDeleteModal(false);
+    setConfirmText("");
+    
+    // Optional: Reload the page to show fresh state
+    setTimeout(() => {
+      window.location.reload();
+    }, 2000);
+  }
+}, [deleteFetcher.data]);
 
   // Initialize editor content from store data
   useEffect(() => {
     if (!storeMissing && loaderData.store) {
       if (editorRef.current) {
-        editorRef.current.innerHTML = loaderData.store.companyWelcomeEmailTemplate || "";
+        editorRef.current.innerHTML =
+          loaderData.store.companyWelcomeEmailTemplate || "";
         if (hiddenInputRef.current) {
-          hiddenInputRef.current.value = loaderData.store.companyWelcomeEmailTemplate || "";
+          hiddenInputRef.current.value =
+            loaderData.store.companyWelcomeEmailTemplate || "";
         }
       }
 
       if (privacyEditorRef.current) {
-        privacyEditorRef.current.innerHTML = loaderData.store.privacyPolicyContent || "";
+        privacyEditorRef.current.innerHTML =
+          loaderData.store.privacyPolicyContent || "";
         if (privacyHiddenInputRef.current) {
-          privacyHiddenInputRef.current.value = loaderData.store.privacyPolicyContent || "";
+          privacyHiddenInputRef.current.value =
+            loaderData.store.privacyPolicyContent || "";
         }
       }
     }
-  }, [loaderData.store?.companyWelcomeEmailTemplate, loaderData.store?.privacyPolicyContent, storeMissing]);
+  }, [
+    loaderData.store?.companyWelcomeEmailTemplate,
+    loaderData.store?.privacyPolicyContent,
+    storeMissing,
+  ]);
 
-  // Close modal after successful deletion
-  useEffect(() => {
-    if (deleteFetcher.data?.success) {
-      setShowDeleteModal(false);
-      setConfirmText("");
-    }
-  }, [deleteFetcher.data]);
 
-  // Feedback message
-  const feedback = useMemo(() => {
+  // Feeprismaack message
+  const feeprismaack = useMemo(() => {
     const data = fetcher.data || deleteFetcher.data;
     if (!data) return null;
 
@@ -455,15 +516,15 @@ export default function SettingsPage() {
   return (
     <s-page heading="Store settings">
       <s-section heading="Branding & notifications">
-        {feedback && (
+        {feeprismaack && (
           <s-banner
-            tone={feedback.tone}
-            title={feedback.title}
+            tone={feeprismaack.tone}
+            title={feeprismaack.title}
             style={{ marginBottom: 12 }}
           >
-            {feedback.messages.length > 0 && (
+            {feeprismaack.messages.length > 0 && (
               <s-unordered-list>
-                {feedback.messages.map((msg) => (
+                {feeprismaack.messages.map((msg) => (
                   <s-list-item key={msg}>{msg}</s-list-item>
                 ))}
               </s-unordered-list>
@@ -475,7 +536,10 @@ export default function SettingsPage() {
           <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
             {/* Store Name */}
             <div style={{ display: "grid", gap: 6 }}>
-              <label htmlFor="shopName" style={{ fontWeight: 600, fontSize: 14 }}>
+              <label
+                htmlFor="shopName"
+                style={{ fontWeight: 600, fontSize: 14 }}
+              >
                 Store name
               </label>
               <input
@@ -1308,7 +1372,7 @@ export default function SettingsPage() {
                 justifyContent: "center",
                 zIndex: 1000,
               }}
-              onClick={() => setShowDeleteModal(false)}
+              onClick={() => !isDeleting && setShowDeleteModal(false)}
             >
               <div
                 style={{
@@ -1320,13 +1384,80 @@ export default function SettingsPage() {
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>
-                  Confirm Deletion
+                <h3
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 600,
+                    marginBottom: 12,
+                    color: "#dc2626",
+                  }}
+                >
+                  ⚠️ Confirm Deletion
                 </h3>
-                <p style={{ fontSize: 14, color: "#374151", marginBottom: 24 }}>
-                  Are you sure you want to permanently delete all B2B portal
-                  data? This action cannot be undone.
+                <p
+                  style={{
+                    fontSize: 14,
+                    color: "#374151",
+                    marginBottom: 16,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  You are about to{" "}
+                  <strong>permanently delete all B2B portal data</strong> for
+                  this store. This includes:
                 </p>
+
+                <ul
+                  style={{
+                    fontSize: 14,
+                    color: "#374151",
+                    marginBottom: 24,
+                    paddingLeft: 20,
+                    lineHeight: 1.8,
+                  }}
+                >
+                  <li>All companies and their contacts</li>
+                  <li>All registration submissions</li>
+                  <li>All users and their sessions</li>
+                  <li>All orders and payment records</li>
+                  <li>All credit accounts and transactions</li>
+                  <li>All locations and wishlist items</li>
+                  <li>All store B2B settings</li>
+                </ul>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: 12,
+                    background: "#fee2e2",
+                    borderRadius: 6,
+                    marginBottom: 20,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 18,
+                      color: "#dc2626",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    ⚠
+                  </span>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 13,
+                      color: "#7f1d1d",
+                      fontWeight: 600,
+                    }}
+                  >
+                    This action is <strong>irreversible</strong>. All data will
+                    be permanently lost.
+                  </p>
+                </div>
+
                 <div
                   style={{
                     display: "flex",
@@ -1341,12 +1472,22 @@ export default function SettingsPage() {
                       padding: "10px 16px",
                       background: "#fff",
                       color: "#374151",
-                      border: "1px solid #d1d5db",
+                      border: "1px solid #d1d5prisma",
                       borderRadius: 8,
                       fontSize: 14,
                       fontWeight: 600,
                       cursor: isDeleting ? "not-allowed" : "pointer",
                       opacity: isDeleting ? 0.6 : 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#f9fafb";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#fff";
+                      }
                     }}
                   >
                     Cancel
@@ -1365,8 +1506,20 @@ export default function SettingsPage() {
                       cursor: isDeleting ? "not-allowed" : "pointer",
                       opacity: isDeleting ? 0.6 : 1,
                     }}
+                    onMouseEnter={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#b91c1c";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#dc2626";
+                      }
+                    }}
                   >
-                    {isDeleting ? "Deleting..." : "Delete Permanently"}
+                    {isDeleting
+                      ? "Deleting all data..."
+                      : "Yes, Delete Everything"}
                   </button>
                 </div>
               </div>
