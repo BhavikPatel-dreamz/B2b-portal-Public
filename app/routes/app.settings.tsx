@@ -8,7 +8,11 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { deleteStore, getStoreByDomain, updateStore } from "../services/store.server";
+import {
+  deleteStore,
+  getStoreByDomain,
+  updateStore,
+} from "../services/store.server";
 import { createUser, getUserByEmail } from "app/services/user.server";
 import { getCompaniesByShop } from "app/services/company.server";
 
@@ -90,22 +94,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Delete user sessions first
       const users = await prisma.user.findMany({ where: { shopId: store.id } });
       if (users.length > 0) {
-        const userIds = users.map(u => u.id);
-        await prisma.userSession.deleteMany({ where: { userId: { in: userIds } } });
+        const userIds = users.map((u) => u.id);
+        await prisma.userSession.deleteMany({
+          where: { userId: { in: userIds } },
+        });
       }
 
       // Delete order payments
-      const orders = await prisma.b2BOrder.findMany({ where: { shopId: store.id } });
+      const orders = await prisma.b2BOrder.findMany({
+        where: { shopId: store.id },
+      });
       if (orders.length > 0) {
-        const orderIds = orders.map(o => o.id);
-        await prisma.orderPayment.deleteMany({ where: { orderId: { in: orderIds } } });
+        const orderIds = orders.map((o) => o.id);
+        await prisma.orderPayment.deleteMany({
+          where: { orderId: { in: orderIds } },
+        });
       }
 
       // Delete credit transactions
-      const companyAccounts = await prisma.companyAccount.findMany({ where: { shopId: store.id } });
+      const companyAccounts = await prisma.companyAccount.findMany({
+        where: { shopId: store.id },
+      });
       if (companyAccounts.length > 0) {
-        const companyIds = companyAccounts.map(c => c.id);
-        await prisma.creditTransaction.deleteMany({ where: { companyId: { in: companyIds } } });
+        const companyIds = companyAccounts.map((c) => c.id);
+        await prisma.creditTransaction.deleteMany({
+          where: { companyId: { in: companyIds } },
+        });
       }
 
       // Delete main records
@@ -113,14 +127,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.notification.deleteMany({ where: { shopId: store.id } });
       await prisma.b2BOrder.deleteMany({ where: { shopId: store.id } });
       await prisma.companyAccount.deleteMany({ where: { shopId: store.id } });
-      await prisma.registrationSubmission.deleteMany({ where: { shopId: store.id } });
+      await prisma.registrationSubmission.deleteMany({
+        where: { shopId: store.id },
+      });
       await prisma.user.deleteMany({ where: { shopId: store.id } });
 
       // Mark store as uninstalled
       await deleteStore(shop);
 
       console.log(`Successfully uninstalled store: ${shop}`);
-    
+
       return Response.json(
         {
           success: true,
@@ -329,9 +345,81 @@ const ToolbarButton = ({ onClick, title, children }: any) => (
   </button>
 );
 
+const EMAIL_PLACEHOLDER = `Hello {{storeOwnerName}},
+
+A new company has submitted a B2B registration request on {{shopName}}.`;
+
+const PRIVACY_PLACEHOLDER = `Privacy Policy
+
+This privacy policy describes how we collect, use, and protect your personal information.`;
+
 export default function SettingsPage() {
   const loaderData = useLoaderData<typeof loader>();
   const { storeMissing } = loaderData;
+
+  const [emailHasContent, setEmailHasContent] = useState(false);
+  const [privacyHasContent, setPrivacyHasContent] = useState(false);
+
+  // Update handleInput function
+  const handleInput = () => {
+    if (editorRef.current && hiddenInputRef.current) {
+      const htmlContent = editorRef.current.innerHTML;
+      const textContent = editorRef.current.innerText.trim();
+
+      // Check if there's actual content
+      const hasContent = textContent.length > 0;
+      setEmailHasContent(hasContent);
+
+      setContent(htmlContent);
+      hiddenInputRef.current.value = hasContent ? htmlContent : "";
+    }
+  };
+
+  // Update handlePrivacyInput function
+  const handlePrivacyInput = () => {
+    if (privacyEditorRef.current && privacyHiddenInputRef.current) {
+      const htmlContent = privacyEditorRef.current.innerHTML;
+      const textContent = privacyEditorRef.current.innerText.trim();
+
+      // Check if there's actual content
+      const hasContent = textContent.length > 0;
+      setPrivacyHasContent(hasContent);
+
+      privacyHiddenInputRef.current.value = hasContent ? htmlContent : "";
+    }
+  };
+
+  // Update useEffect for initialization
+  useEffect(() => {
+    if (!storeMissing && loaderData.store) {
+      if (editorRef.current) {
+        const emailTemplate =
+          loaderData.store.companyWelcomeEmailTemplate || "";
+        editorRef.current.innerHTML = emailTemplate;
+        setEmailHasContent(emailTemplate.trim().length > 0);
+
+        if (hiddenInputRef.current) {
+          hiddenInputRef.current.value = emailTemplate;
+        }
+      }
+
+      if (privacyEditorRef.current) {
+        const privacyContent = loaderData.store.privacyPolicyContent || "";
+        privacyEditorRef.current.innerHTML = privacyContent;
+        setPrivacyHasContent(privacyContent.trim().length > 0);
+
+        if (privacyHiddenInputRef.current) {
+          privacyHiddenInputRef.current.value = privacyContent;
+        }
+      }
+    }
+  }, [
+    loaderData.store?.companyWelcomeEmailTemplate,
+    loaderData.store?.privacyPolicyContent,
+    storeMissing,
+  ]);
+
+  // Update the useEffect for initialization
 
   // TypeScript now knows if storeMissing is false, store exists
   if (loaderData.storeMissing) {
@@ -382,13 +470,6 @@ export default function SettingsPage() {
     editorRef.current?.focus();
   };
 
-  const handleInput = () => {
-    if (editorRef.current && hiddenInputRef.current) {
-      const htmlContent = editorRef.current.innerHTML;
-      setContent(htmlContent);
-      hiddenInputRef.current.value = htmlContent;
-    }
-  };
 
   const insertVariable = (variable: string) => {
     if (editorRef.current) {
@@ -417,57 +498,26 @@ export default function SettingsPage() {
     privacyEditorRef.current?.focus();
   };
 
-  const handlePrivacyInput = () => {
-    if (privacyEditorRef.current && privacyHiddenInputRef.current) {
-      const htmlContent = privacyEditorRef.current.innerHTML;
-      privacyHiddenInputRef.current.value = htmlContent;
-    }
+
+
+  const handleDelete = () => {
+    deleteFetcher.submit({ intent: "delete" }, { method: "post" });
   };
 
-const handleDelete = () => {
-  deleteFetcher.submit({ intent: "delete" }, { method: "post" });
-};
-
-// Update the useEffect for successful deletion
-useEffect(() => {
-  if (deleteFetcher.data?.success) {
-    setShowDeleteModal(false);
-    setConfirmText("");
-    
-    // Optional: Reload the page to show fresh state
-    setTimeout(() => {
-      window.location.reload();
-    }, 2000);
-  }
-}, [deleteFetcher.data]);
-
-  // Initialize editor content from store data
+  // Update the useEffect for successful deletion
   useEffect(() => {
-    if (!storeMissing && loaderData.store) {
-      if (editorRef.current) {
-        editorRef.current.innerHTML =
-          loaderData.store.companyWelcomeEmailTemplate || "";
-        if (hiddenInputRef.current) {
-          hiddenInputRef.current.value =
-            loaderData.store.companyWelcomeEmailTemplate || "";
-        }
-      }
+    if (deleteFetcher.data?.success) {
+      setShowDeleteModal(false);
+      setConfirmText("");
 
-      if (privacyEditorRef.current) {
-        privacyEditorRef.current.innerHTML =
-          loaderData.store.privacyPolicyContent || "";
-        if (privacyHiddenInputRef.current) {
-          privacyHiddenInputRef.current.value =
-            loaderData.store.privacyPolicyContent || "";
-        }
-      }
+      // Optional: Reload the page to show fresh state
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
     }
-  }, [
-    loaderData.store?.companyWelcomeEmailTemplate,
-    loaderData.store?.privacyPolicyContent,
-    storeMissing,
-  ]);
+  }, [deleteFetcher.data]);
 
+ 
 
   // Feeprismaack message
   const feeprismaack = useMemo(() => {
@@ -564,7 +614,6 @@ useEffect(() => {
                 Store name shown across emails or customer views.
               </s-text>
             </div>
-
             {/* Logo URL */}
             <div style={{ display: "grid", gap: 6 }}>
               <label htmlFor="logo" style={{ fontWeight: 600, fontSize: 14 }}>
@@ -630,7 +679,6 @@ useEffect(() => {
                 </div>
               )}
             </div>
-
             {/* Registration Email */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
@@ -665,7 +713,6 @@ useEffect(() => {
                 Email address that receives new B2B registration submissions.
               </s-text>
             </div>
-
             {/* Contact Email */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
@@ -700,7 +747,6 @@ useEffect(() => {
                 Shared contact inbox for customers and notifications.
               </s-text>
             </div>
-
             {/* Company Sync Notifications */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
@@ -729,7 +775,6 @@ useEffect(() => {
                 synced from Shopify B2B.
               </s-text>
             </div>
-
             {/* Theme Color */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
@@ -801,8 +846,7 @@ useEffect(() => {
                 hex values.
               </s-text>
             </div>
-
-            {/* Email Template Editor */}
+            // Email Template Editor with Placeholder
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="companyWelcomeEmailTemplate"
@@ -888,33 +932,55 @@ useEffect(() => {
                 </ToolbarButton>
               </div>
 
-              {/* Rich Text Editor */}
-              <div
-                ref={editorRef}
-                contentEditable
-                onInput={handleInput}
-                style={{
-                  padding: "10px 12px",
-                  border: "1px solid #c9cccf",
-                  borderTop: "none",
-                  borderRadius: "0 0 8px 8px",
-                  fontSize: 14,
-                  outline: "none",
-                  minHeight: 120,
-                  maxHeight: 400,
-                  overflowY: "auto",
-                  background: "#fff",
-                  lineHeight: 1.5,
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#005bd3";
-                  e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "#c9cccf";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
+              {/* Rich Text Editor with Placeholder */}
+              <div style={{ position: "relative" }}>
+                {/* Placeholder Text - Only visible when empty */}
+                {!emailHasContent && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      left: 12,
+                      right: 12,
+                      color: "#8c9196",
+                      fontSize: 14,
+                      pointerEvents: "none",
+                      lineHeight: 1.6,
+                      whiteSpace: "pre-wrap",
+                      userSelect: "none",
+                    }}
+                  >
+                    {EMAIL_PLACEHOLDER}
+                  </div>
+                )}
+
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  onInput={handleInput}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = "#005bd3";
+                    e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = "#c9cccf";
+                    e.currentTarget.style.boxShadow = "none";
+                  }}
+                  style={{
+                    padding: "10px 12px",
+                    border: "1px solid #c9cccf",
+                    borderTop: "none",
+                    borderRadius: "0 0 8px 8px",
+                    fontSize: 14,
+                    outline: "none",
+                    minHeight: 120,
+                    maxHeight: 400,
+                    overflowY: "auto",
+                    background: "#fff",
+                    lineHeight: 1.6,
+                  }}
+                />
+              </div>
 
               <input
                 ref={hiddenInputRef}
@@ -928,9 +994,18 @@ useEffect(() => {
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 12,
                 }}
               >
-                <div style={{ fontSize: 12, color: "#6d7175" }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#6d7175",
+                    flex: 1,
+                    minWidth: 200,
+                  }}
+                >
                   This email is sent to the store owner when a new company
                   submits a B2B registration request.
                 </div>
@@ -1057,8 +1132,7 @@ useEffect(() => {
                 </div>
               </div>
             </div>
-
-            {/* Privacy Policy Section */}
+            {/* Privacy Policy Section with Placeholder */}
             <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="privacyPolicylink"
@@ -1094,7 +1168,7 @@ useEffect(() => {
                 or use custom privacy policy text instead
               </s-text>
 
-              {/* Privacy Policy Rich Text Editor */}
+              {/* Privacy Policy Rich Text Editor Toolbar */}
               <div
                 style={{
                   display: "flex",
@@ -1177,32 +1251,55 @@ useEffect(() => {
                 </ToolbarButton>
               </div>
 
-              <div
-                ref={privacyEditorRef}
-                contentEditable
-                onInput={handlePrivacyInput}
-                style={{
-                  padding: "10px 12px",
-                  border: "1px solid #c9cccf",
-                  borderTop: "none",
-                  borderRadius: "0 0 8px 8px",
-                  fontSize: 14,
-                  outline: "none",
-                  minHeight: 120,
-                  maxHeight: 400,
-                  overflowY: "auto",
-                  background: "#fff",
-                  lineHeight: 1.5,
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#005bd3";
-                  e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "#c9cccf";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
+              {/* Privacy Policy Editor with Placeholder */}
+              <div style={{ position: "relative" }}>
+                {/* Placeholder Text - Only visible when empty */}
+                {!privacyHasContent && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      left: 12,
+                      right: 12,
+                      color: "#8c9196",
+                      fontSize: 14,
+                      pointerEvents: "none",
+                      lineHeight: 1.6,
+                      whiteSpace: "pre-wrap",
+                      userSelect: "none",
+                    }}
+                  >
+                    {PRIVACY_PLACEHOLDER}
+                  </div>
+                )}
+
+                <div
+                  ref={privacyEditorRef}
+                  contentEditable
+                  onInput={handlePrivacyInput}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = "#005bd3";
+                    e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = "#c9cccf";
+                    e.currentTarget.style.boxShadow = "none";
+                  }}
+                  style={{
+                    padding: "10px 12px",
+                    border: "1px solid #c9cccf",
+                    borderTop: "none",
+                    borderRadius: "0 0 8px 8px",
+                    fontSize: 14,
+                    outline: "none",
+                    minHeight: 120,
+                    maxHeight: 400,
+                    overflowY: "auto",
+                    background: "#fff",
+                    lineHeight: 1.6,
+                  }}
+                />
+              </div>
 
               <input
                 ref={privacyHiddenInputRef}
@@ -1211,7 +1308,6 @@ useEffect(() => {
                 id="privacyPolicyContent"
               />
             </div>
-
             {/* Save Button */}
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <s-button
@@ -1362,11 +1458,12 @@ useEffect(() => {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                background: "rgba(0, 0, 0, 0.5)",
+                background: "rgba(0, 0, 0, 0.6)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                zIndex: 1000,
+                zIndex: 10000, // Increased z-index
+                padding: 16,
               }}
               onClick={() => !isDeleting && setShowDeleteModal(false)}
             >
@@ -1376,7 +1473,13 @@ useEffect(() => {
                   borderRadius: 12,
                   padding: 24,
                   maxWidth: 500,
-                  width: "90%",
+                  width: "100%",
+                  maxHeight: "90vh",
+                  overflowY: "auto",
+                  boxShadow:
+                    "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                  position: "relative",
+                  zIndex: 10001,
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -1468,12 +1571,13 @@ useEffect(() => {
                       padding: "10px 16px",
                       background: "#fff",
                       color: "#374151",
-                      border: "1px solid #d1d5prisma",
+                      border: "1px solid #d1d5db",
                       borderRadius: 8,
                       fontSize: 14,
                       fontWeight: 600,
                       cursor: isDeleting ? "not-allowed" : "pointer",
                       opacity: isDeleting ? 0.6 : 1,
+                      transition: "all 0.2s",
                     }}
                     onMouseEnter={(e) => {
                       if (!isDeleting) {
@@ -1501,6 +1605,7 @@ useEffect(() => {
                       fontWeight: 600,
                       cursor: isDeleting ? "not-allowed" : "pointer",
                       opacity: isDeleting ? 0.6 : 1,
+                      transition: "all 0.2s",
                     }}
                     onMouseEnter={(e) => {
                       if (!isDeleting) {
