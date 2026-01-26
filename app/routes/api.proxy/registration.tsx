@@ -114,15 +114,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Try to send email notification (optional - don't fail if email not configured)
     if (store.submissionEmail) {
-      const emailResult = await sendRegistrationEmail(
+         const emailResult = await sendRegistrationEmail(
         store.id,
         companyDetail?.id || '',
         store.submissionEmail,
-        store.storeOwnerName,
+        store.storeOwnerName || '',
         email,
         companyName,
         contactName,
       );
+
 
       if (emailResult.success) {
         console.log("✅ Registration email sent successfully");

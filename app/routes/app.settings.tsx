@@ -354,7 +354,7 @@ const PRIVACY_PLACEHOLDER = `Privacy Policy
 This privacy policy describes how we collect, use, and protect your personal information.`;
 
 export default function SettingsPage() {
-  const loaderData = useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<LoaderData>();
   const { storeMissing } = loaderData;
 
   const [emailHasContent, setEmailHasContent] = useState(false);
@@ -426,7 +426,7 @@ export default function SettingsPage() {
     return (
       <s-page heading="Store settings">
         <s-section>
-          <s-banner tone="critical" title="Store not found">
+          <s-banner tone="critical" heading="Store not found">
             <s-paragraph>
               The current shop is missing from the database. Please reinstall
               the app to continue.
@@ -465,7 +465,7 @@ export default function SettingsPage() {
   ];
 
   // Email editor functions
-  const format = (command: string, value: string | null = null) => {
+  const format = (command: string, value?: string) => {
     document.execCommand(command, false, value);
     editorRef.current?.focus();
   };
@@ -493,7 +493,7 @@ export default function SettingsPage() {
     setShowDropdown(false);
   };
 
-  const formatPrivacy = (command: string, value: string | null = null) => {
+  const formatPrivacy = (command: string, value?: string) => {
     document.execCommand(command, false, value);
     privacyEditorRef.current?.focus();
   };
@@ -546,7 +546,7 @@ export default function SettingsPage() {
     return (
       <s-page heading="Store settings">
         <s-section>
-          <s-banner tone="critical" title="Store not found">
+          <s-banner tone="critical" heading="Store not found">
             <s-paragraph>
               The current shop is missing from the database. Please reinstall
               the app to continue.
@@ -563,22 +563,23 @@ export default function SettingsPage() {
     <s-page heading="Store settings">
       <s-section heading="Branding & notifications">
         {feeprismaack && (
-          <s-banner
-            tone={feeprismaack.tone}
-            title={feeprismaack.title}
-            style={{ marginBottom: 12 }}
-          >
-            {feeprismaack.messages.length > 0 && (
-              <s-unordered-list>
-                {feeprismaack.messages.map((msg) => (
-                  <s-list-item key={msg}>{msg}</s-list-item>
-                ))}
-              </s-unordered-list>
-            )}
-          </s-banner>
+          <div style={{ marginBottom: 12 }}>
+            <s-banner
+              tone={feeprismaack.tone}
+              heading={feeprismaack.title}
+            >
+              {feeprismaack.messages.length > 0 && (
+                <s-unordered-list>
+                  {feeprismaack.messages.map((msg) => (
+                    <s-list-item key={msg}>{msg}</s-list-item>
+                  ))}
+                </s-unordered-list>
+              )}
+            </s-banner>
+          </div>
         )}
 
-        <s-card>
+        <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.04)", padding: 24, marginBottom: 24 }}>
           <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
             {/* Store Name */}
             <div style={{ display: "grid", gap: 6 }}>
@@ -610,7 +611,7 @@ export default function SettingsPage() {
                   e.target.style.boxShadow = "none";
                 }}
               />
-              <s-text tone="subdued" variant="bodySm">
+              <s-text tone="neutral">
                 Store name shown across emails or customer views.
               </s-text>
             </div>
@@ -641,7 +642,7 @@ export default function SettingsPage() {
                   e.target.style.boxShadow = "none";
                 }}
               />
-              <s-text tone="subdued" variant="bodySm">
+              <s-text tone="neutral">
                 Storefront logo URL shown across emails or customer views.
               </s-text>
 
@@ -673,7 +674,7 @@ export default function SettingsPage() {
                       style={{ maxWidth: "100%", maxHeight: "100%" }}
                     />
                   </div>
-                  <s-text tone="subdued" variant="bodySm">
+                  <s-text tone="neutral">
                     Preview of the stored logo.
                   </s-text>
                 </div>
@@ -709,7 +710,7 @@ export default function SettingsPage() {
                   e.target.style.boxShadow = "none";
                 }}
               />
-              <s-text tone="subdued" variant="bodySm">
+              <s-text tone="neutral">
                 Email address that receives new B2B registration submissions.
               </s-text>
             </div>
@@ -743,7 +744,7 @@ export default function SettingsPage() {
                   e.target.style.boxShadow = "none";
                 }}
               />
-              <s-text tone="subdued" variant="bodySm">
+              <s-text tone="neutral">
                 Shared contact inbox for customers and notifications.
               </s-text>
             </div>
@@ -770,7 +771,7 @@ export default function SettingsPage() {
                   Send email notifications when companies are synced
                 </label>
               </div>
-              <s-text tone="subdued" variant="bodySm">
+              <s-text tone="neutral">
                 Enable to receive email notifications whenever companies are
                 synced from Shopify B2B.
               </s-text>
@@ -841,7 +842,7 @@ export default function SettingsPage() {
                   }}
                 />
               </div>
-              <s-text tone="subdued" variant="bodySm">
+              <s-text tone="neutral">
                 Primary accent color used across storefront surfaces. Accepts
                 hex values.
               </s-text>
@@ -1164,7 +1165,7 @@ export default function SettingsPage() {
                 }}
               />
 
-              <s-text tone="subdued" variant="bodySm">
+              <s-text tone="neutral">
                 or use custom privacy policy text instead
               </s-text>
 
@@ -1626,7 +1627,7 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
-        </s-card>
+        </div>
       </s-section>
     </s-page>
   );

@@ -7,6 +7,10 @@ import { getProxyParams, validateB2BCustomerAccess } from "../../utils/proxy.ser
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
+
+  if (!shop) {
+    return new Response("Missing shop domain", { status: 400 });
+  }
   const store = await getStoreByDomain(shop);
   const url = new URL(request.url);
   
@@ -43,14 +47,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   // Fetch users
-  const userIds = [...new Set(notifications.flatMap(n => [n.senderId, n.receiverId]).filter(Boolean))];
-  const users = await prisma.user.findMany({ where: { id: { in: userIds } } });
+  const userIds = [...new Set(notifications.flatMap(n => [n.senderId, n.receiverId]).filter((id): id is string => !!id))];
+   const users = await prisma.user.findMany({ where: { id: { in: userIds } } });
   const userMap = new Map(users.map(u => [u.id, `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
 
   const notificationsdata = notifications.map(n => ({
     ...n,
-    senderName: userMap.get(n.senderId),
-    receiverName: userMap.get(n.receiverId)
+    senderName: n.senderId ? userMap.get(n.senderId) ?? null : null,
+    receiverName: n.receiverId ? userMap.get(n.receiverId) ?? null : null
   }));
 
   return {

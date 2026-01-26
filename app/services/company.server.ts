@@ -24,6 +24,18 @@ export interface UpdateCompanyInput {
   creditLimit?: number | Prisma.Decimal;
 }
 
+export interface ShopifyCustomer {
+  id: string;
+  customerId: string;
+  customer?: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+  };
+  roles?: string[];
+  locationNames?: string[];
+}
+
 export interface CreateCreditTransactionInput {
   companyId: string;
   orderId?: string | null;
@@ -410,9 +422,9 @@ export async function getCompanyDashboardData(
     {},
   );
 
-  const shopifyCustomerMap = new Map(
-    customersData?.customers?.map((customer: any) => [
-      customer.customer?.email?.toLowerCase(), // Email is nested in customer.customer.email
+  const shopifyCustomerMap = new Map<string, ShopifyCustomer>(
+    customersData?.customers?.map((customer: ShopifyCustomer) => [
+      customer.customer?.email?.toLowerCase() || "",
       customer,
     ]) || [],
   );
@@ -518,13 +530,14 @@ export async function getCompanyOrders(
     where: { id: companyId },
     select: { shopifyCompanyId: true },
   });
-
-  const ordersData = await getCompanyOrderss(
-    companyData.shopifyCompanyId || "",
-    store?.shopDomain || "",
-    accessToken,
-  );
-
+  let ordersData;
+  if (companyData) {
+    ordersData = await getCompanyOrders(
+      companyData.shopifyCompanyId || "",
+      store?.shopDomain || "",
+      accessToken,
+    );
+  }
   const uniqueOrders = await prisma.b2BOrder.groupBy({
     by: ["shopifyOrderId"],
     where: {
@@ -568,7 +581,7 @@ export async function getCompanyOrders(
   );
 
   const newOrders =
-    ordersData.companyOrders?.filter(
+    ordersData?.companyOrders.filter(
       (shopifyOrder: any) => !existingShopifyOrderIds.has(shopifyOrder.id),
     ) || [];
 

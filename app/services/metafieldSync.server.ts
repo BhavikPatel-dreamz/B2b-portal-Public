@@ -49,7 +49,7 @@ export async function syncCustomerCreditMetafields(
       {
         namespace: 'b2b_credit',
         key: 'company_id',
-        value: user.companyId,
+        value: user.companyId || '',
         type: 'single_line_text_field',
       },
       {
@@ -218,7 +218,14 @@ export async function syncAllCreditMetafields(
   customerId: string,
   userId: string
 ) {
+
   try {
+    if (!shop) {
+      return Response.json({
+        success: false,
+        error: 'Invalid shop domain',
+      });
+    }
     const { admin } = await authenticate.admin(shop);
 
     // Get user to find company
@@ -238,11 +245,24 @@ export async function syncAllCreditMetafields(
       userId
     );
 
+    if (!customerResult.success) {
+      return {
+        success: false,
+        error: customerResult.error,
+        customer: customerResult,
+        company: { success: false },
+      };
+    }
     // Sync company metafields
-    const companyResult = await syncCompanyCreditMetafields(
-      admin,
-      user.companyId
-    );
+    let companyResult;
+    if (user.companyId) {
+      companyResult = await syncCompanyCreditMetafields(admin, user.companyId);
+    } else {
+      companyResult = {
+        success: true,
+        message: 'User not associated with a company, skipping company sync.',
+      };
+    }
 
     return {
       success: customerResult.success && companyResult.success,
@@ -290,12 +310,11 @@ export async function autoSyncCreditMetafields(
       where: { id: companyId },
       select: {
         shop: {
-          select: { domain: true }
+          select: { shopDomain: true }
         }
       },
     });
-
-    if (!company?.shop?.domain) {
+    if (!company?.shop?.shopDomain) {
       throw new Error('Company shop not found');
     }
 
@@ -305,7 +324,7 @@ export async function autoSyncCreditMetafields(
     for (const user of users) {
       if (user.shopifyCustomerId) {
         const result = await syncAllCreditMetafields(
-          company.shop.domain,
+          company.shop.shopDomain,
           user.shopifyCustomerId,
           user.id
         );

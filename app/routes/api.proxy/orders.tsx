@@ -248,7 +248,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
     
-
+     if (!companyData) {
+      return Response.json(
+        { error: "Company account not found in B2B portal" },
+        { status: 404 },
+      );
+    }
+    
     // ✅ FIXED: Helper function to fetch and filter orders
     const fetchAndFilterOrders = async (
       filters: any,

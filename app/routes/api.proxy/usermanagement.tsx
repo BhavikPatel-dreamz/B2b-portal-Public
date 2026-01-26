@@ -37,6 +37,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
     });
 
+    if (!companyData) {
+      return Response.json(
+        { error: "Company not found" },
+        { status: 404 },
+      );
+    }
     const userData = await prisma.user.findFirst({
       where: {
         companyId: companyData.id,

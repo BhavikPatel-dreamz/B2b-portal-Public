@@ -515,6 +515,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const firstName = (form.firstName as string)?.trim();
         const lastName = (form.lastName as string)?.trim();
         const phone = (form.phone as string)?.trim() || undefined;
+        const companyName = (form.companyName as string)?.trim();
+        const businessType = (form.businessType as string)?.trim();
 
         if (!customerId || !email || !firstName) {
           return Response.json({
@@ -579,6 +581,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               phone: phone || "",
               status: "PENDING",
               shopifyCustomerId: customerId || null,
+              companyName: companyName || "",
+              businessType: businessType || "",
+              shopId: store.id,
             },
           });
         }
@@ -757,7 +762,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName,
               shopifyCompanyId: companyId,
               paymentTerm: paymentTermsTemplateId || null,
-              creditLimit: creditLimit ? Number(creditLimit) : null,
+              creditLimit: creditLimit ? Number(creditLimit) : undefined,
             },
           });
         }
@@ -1075,12 +1080,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         await sendCompanyAssignmentEmail(
-          store.shopName,
-          store.storeOwnerName,
+          store.shopName || "Shop Name",
+          store.storeOwnerName || "Store Owner",
           email,
           companyName,
           contactName,
-          note, // ✅ Passing note as first parameter
+          note || "", // ✅ Passing note as first parameter
         );
 
         const registerData = await prisma.registrationSubmission.findFirst({
@@ -1186,11 +1191,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
-        const user = await prisma.user.findFirst({
-          where: { email: companyData.contactEmail },
-        });
+        let user = null;
+        if (companyData && companyData.contactEmail) {
+          user = await prisma.user.findFirst({
+            where: { email: companyData.contactEmail },
+          });
+        }
 
-        if (user || companyData) {
+        if (user && companyData) {
           await prisma.user.update({
             where: { id: user.id },
             data: {
@@ -1354,6 +1362,15 @@ export default function RegistrationApprovals() {
   const assignRef = useRef<HTMLDivElement>(null);
   const emailRef = useRef<HTMLDivElement>(null);
   const completeRef = useRef<HTMLDivElement>(null);
+
+  type StepName =
+    | "check"
+    | "createCustomer"
+    | "updateCompany"
+    | "createCompany"
+    | "assign"
+    | "email"
+    | "complete";
 
   const goToStep = (
     stepName: StepName,
@@ -1542,7 +1559,8 @@ export default function RegistrationApprovals() {
     return (
       <s-page heading="Registrations">
         <s-section>
-          <s-banner tone="critical" title="Store not found">
+          <s-banner tone="critical">
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Store not found</div>
             <s-paragraph>
               The current shop does not exist in the database. Please reinstall
               the app.
@@ -1603,7 +1621,7 @@ export default function RegistrationApprovals() {
                               ? "success"
                               : submission.status === "REJECTED"
                                 ? "critical"
-                                : "attention"
+                                : "warning"
                           }
                         >
                           {submission.status}
@@ -1616,7 +1634,6 @@ export default function RegistrationApprovals() {
                         {submission.status === "PENDING" ? (
                           <>
                             <s-button
-                              size="slim"
                               onClick={() => startApproval(submission)}
                               {...(isFlowLoading &&
                               selected?.id === submission.id
@@ -1625,18 +1642,18 @@ export default function RegistrationApprovals() {
                             >
                               Approve
                             </s-button>
-                            <s-button
-                              tone="critical"
-                              variant="tertiary"
-                              size="slim"
-                              onClick={() => rejectSubmission(submission)}
-                              style={{ marginLeft: 8 }}
-                              {...(isRejecting && selected?.id === submission.id
-                                ? { loading: true }
-                                : {})}
-                            >
-                              Reject
-                            </s-button>
+                            <span style={{ marginLeft: 8 }}>
+                              <s-button
+                                tone="critical"
+                                variant="tertiary"
+                                onClick={() => rejectSubmission(submission)}
+                                {...(isRejecting && selected?.id === submission.id
+                                  ? { loading: true }
+                                  : {})}
+                              >
+                                Reject
+                              </s-button>
+                            </span>
                           </>
                         ) : (
                           <span style={{ color: "#5c5f62", fontSize: 14 }}>
@@ -1831,17 +1848,15 @@ export default function RegistrationApprovals() {
               </form>
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (
-                  <s-banner
-                    tone="critical"
-                    title="Error"
-                    style={{ marginTop: 16 }}
-                  >
-                    <s-unordered-list>
-                      {flowFetcher.data.errors.map((err) => (
-                        <s-list-item key={err}>{err}</s-list-item>
-                      ))}
-                    </s-unordered-list>
-                  </s-banner>
+                  <div style={{ marginTop: 16 }}>
+                    <s-banner tone="critical">
+                      <s-unordered-list>
+                        {flowFetcher.data.errors.map((err) => (
+                          <s-list-item key={err}>{err}</s-list-item>
+                        ))}
+                      </s-unordered-list>
+                    </s-banner>
+                  </div>
                 )}
             </div>
           </div>
@@ -1982,7 +1997,7 @@ export default function RegistrationApprovals() {
                   </span>
                   <input
                     name="creditLimit"
-                    defaultValue={company?.creditLimit}
+                    defaultValue={company?.creditLimit ?? ""}
                     required
                     style={{
                       padding: 10,
@@ -2016,17 +2031,15 @@ export default function RegistrationApprovals() {
 
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (
-                  <s-banner
-                    tone="critical"
-                    title="Error"
-                    style={{ marginTop: 16 }}
-                  >
-                    <s-unordered-list>
-                      {flowFetcher.data.errors.map((err) => (
-                        <s-list-item key={err}>{err}</s-list-item>
-                      ))}
-                    </s-unordered-list>
-                  </s-banner>
+                  <div style={{ marginTop: 16 }}>
+                    <s-banner tone="critical">
+                      <s-unordered-list>
+                        {flowFetcher.data.errors.map((err) => (
+                          <s-list-item key={err}>{err}</s-list-item>
+                        ))}
+                      </s-unordered-list>
+                    </s-banner>
+                  </div>
                 )}
             </div>
           </div>
@@ -2136,14 +2149,15 @@ export default function RegistrationApprovals() {
 
                   {isFlowLoading &&
                   flowFetcher.data?.intent === "checkCustomer" ? (
-                    <s-banner tone="info" title="Checking...">
+                    <s-banner tone="info">
                       <s-text>
                         Please wait while we search for existing customer.
                       </s-text>
                     </s-banner>
                   ) : customer ? (
                     <>
-                      <s-banner tone="success" title="Customer found">
+                      <s-banner tone="success">
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Customer found</div>
                         <s-text>
                           {customer.firstName || ""} {customer.lastName || ""} ·{" "}
                           {customer.email}
@@ -2165,7 +2179,8 @@ export default function RegistrationApprovals() {
                     </>
                   ) : (
                     <>
-                      <s-banner tone="attention" title="No customer found">
+                      <s-banner tone="warning">
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>No customer found</div>
                         <s-text>
                           No existing customer found. You'll need to create one.
                         </s-text>
@@ -2185,7 +2200,8 @@ export default function RegistrationApprovals() {
                 <div>
                   {customer ? (
                     <>
-                      <s-banner tone="info" title="Customer exists">
+                      <s-banner tone="info">
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Customer exists</div>
                         <s-text>
                           {customer.firstName} {customer.lastName} ·{" "}
                           {customer.email}
@@ -2233,7 +2249,7 @@ export default function RegistrationApprovals() {
                           <span>First Name *</span>
                           <input
                             name="firstName"
-                            defaultValue={customer.firstName}
+                            defaultValue={customer.firstName ?? ""}
                             required
                             style={{
                               padding: 10,
@@ -2252,7 +2268,7 @@ export default function RegistrationApprovals() {
                           <span>Last Name</span>
                           <input
                             name="lastName"
-                            defaultValue={customer.lastName}
+                            defaultValue={customer.lastName ?? ""}
                             style={{
                               padding: 10,
                               borderRadius: 8,
@@ -2270,7 +2286,7 @@ export default function RegistrationApprovals() {
                           <span>Phone</span>
                           <input
                             name="phone"
-                            defaultValue={customer.phone}
+                            defaultValue={customer.phone ?? ""}
                             style={{
                               padding: 10,
                               borderRadius: 8,
@@ -2464,7 +2480,7 @@ export default function RegistrationApprovals() {
 
                   {company ? (
                     <>
-                      <s-banner tone="success" title="Company exists">
+                      <s-banner tone="success">
                         <s-text>
                           {company.name} ·{" "}
                           {company.locationName || "Main location"}
@@ -2751,7 +2767,7 @@ export default function RegistrationApprovals() {
                   </p>
 
                   <div style={{ marginTop: 12 }}>
-                    <s-banner tone="info" title="Ready to assign">
+                    <s-banner tone="info">
                       <s-text>
                         Customer: {selected?.contactName}
                         <br />
@@ -2805,7 +2821,7 @@ export default function RegistrationApprovals() {
                   </p>
 
                   <div style={{ marginTop: 12 }}>
-                    <s-banner tone="info" title="Email details">
+                    <s-banner tone="info">
                       <s-text>
                         To: {selected.email}
                         <br />
@@ -2924,17 +2940,18 @@ export default function RegistrationApprovals() {
               {/* Error Display */}
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (
-                  <s-banner
-                    tone="critical"
-                    title="Something went wrong"
-                    style={{ marginTop: 16 }}
-                  >
-                    <s-unordered-list>
-                      {flowFetcher.data.errors.map((err) => (
-                        <s-list-item key={err}>{err}</s-list-item>
-                      ))}
-                    </s-unordered-list>
-                  </s-banner>
+                  <div style={{ marginTop: 16 }}>
+                    <s-banner tone="critical">
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                        Something went wrong
+                      </div>
+                      <s-unordered-list>
+                        {flowFetcher.data.errors.map((err) => (
+                          <s-list-item key={err}>{err}</s-list-item>
+                        ))}
+                      </s-unordered-list>
+                    </s-banner>
+                  </div>
                 )}
             </div>
           </div>

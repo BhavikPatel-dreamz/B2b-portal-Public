@@ -251,12 +251,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
           });
 
-          console.log(`💰 Partial payment processed:`, {
-            orderTotal: totalPriceStr,
-            paidAmount: paidAmount.toString(),
-            creditUsed: unpaidAmount.toString(), // Unpaid amount charged to credit
-            companyRemainingBalance: companyRemainingBalance.toString()
-          });
 
         } else {
           // Other status changes - update all relevant order details

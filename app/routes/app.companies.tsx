@@ -31,6 +31,7 @@ type LoaderCompany = {
   creditUsagePercentage: number;
   updatedAt: string;
   userCount: number;
+  isDisable: boolean;
 };
 
 interface ActionResponse {
@@ -47,14 +48,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shopDomain: session.shop },
   });
 
-  if (!store) {
+   if (!store) {
     return Response.json(
       {
-        companies: [],
+        companies: [] as LoaderCompany[],
         storeMissing: true,
         totalCount: 0,
         currentPage: 1,
         totalPages: 0,
+        searchQuery: "",
       },
       { status: 404 },
     );
@@ -133,6 +135,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       let matchedUserCount = 0;
       let shopifyUserCount = 0;
 
+    if (!session.accessToken) {
+            throw new Response("Session access token not found", { status: 404 });
+          }
+
       // Only fetch Shopify customers if company has a Shopify ID
       if (company.shopifyCompanyId) {
         try {
@@ -140,7 +146,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             company.shopifyCompanyId,
             session.shop,
             session.accessToken,
-            {}
+            {},
           );
 
           shopifyUserCount = customersData?.customers?.length || 0;
@@ -150,18 +156,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             customersData?.customers?.map((customer: any) => [
               customer.customer?.email?.toLowerCase(),
               customer,
-            ]) || []
+            ]) || [],
           );
 
           // Count matched users (users that exist in both DB and Shopify)
           matchedUserCount = dbUsers.filter((user) =>
-            shopifyCustomerMap.has(user.email.toLowerCase())
+            shopifyCustomerMap.has(user.email.toLowerCase()),
           ).length;
-
         } catch (error) {
           console.error(
             `Error fetching Shopify customers for company ${company.id}:`,
-            error
+            error,
           );
           // Continue without Shopify data if there's an error
         }
@@ -177,7 +182,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           : company.creditLimit.toString(),
         creditUsagePercentage,
         updatedAt: company.updatedAt.toISOString(),
-        userCount: matchedUserCount || 0 // Total DB users
+        userCount: matchedUserCount || 0, // Total DB users
+        isDisable: company.isDisable || false,
       } satisfies LoaderCompany;
     }),
   );
@@ -303,7 +309,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function CompaniesPage() {
-  const {
+ const {
     companies,
     storeMissing,
     totalCount,
@@ -322,9 +328,10 @@ export default function CompaniesPage() {
 
   if (storeMissing) {
     return (
-      <s-page heading="Companies">
+       <s-page heading="Companies">
         <s-section>
-          <s-banner tone="critical" title="Store not found">
+          <s-banner tone="critical">
+            <s-heading>Store not found</s-heading>
             <s-paragraph>
               The current shop does not exist in the database. Please reinstall
               the app.
@@ -443,12 +450,14 @@ export default function CompaniesPage() {
                 </tr>
               </thead>
               <tbody>
-                {companies.map((company) => (
+                {companies.map((company:LoaderCompany) => (
                   <tr
                     key={company.id}
-                    style={{ 
+                    style={{
                       borderTop: "1px solid #e3e3e3",
-                      backgroundColor: company.isDisable ? "#ffebee" : "transparent"
+                      backgroundColor: company.isDisable
+                        ? "#ffebee"
+                        : "transparent",
                     }}
                   >
                     <td style={{ padding: "8px" }}>
@@ -479,7 +488,13 @@ export default function CompaniesPage() {
                     <td style={{ padding: "8px" }}>
                       {formatCredit(company.creditLimit)}
                     </td>
-                    <td style={{ padding: "8px", color: "#d72c0d", fontWeight: 500 }}>
+                    <td
+                      style={{
+                        padding: "8px",
+                        color: "#d72c0d",
+                        fontWeight: 500,
+                      }}
+                    >
                       {formatCredit(company.usedCredit)}
                     </td>
                     <td
@@ -498,9 +513,13 @@ export default function CompaniesPage() {
                     <td
                       style={{
                         padding: "8px",
-                        color: company.creditUsagePercentage >= 90 ? "#d72c0d" :
-                               company.creditUsagePercentage >= 70 ? "#b98900" : "#008060",
-                        fontWeight: 500
+                        color:
+                          company.creditUsagePercentage >= 90
+                            ? "#d72c0d"
+                            : company.creditUsagePercentage >= 70
+                              ? "#b98900"
+                              : "#008060",
+                        fontWeight: 500,
                       }}
                     >
                       {company.creditUsagePercentage}%
@@ -646,7 +665,8 @@ export default function CompaniesPage() {
       </s-section>
     </s-page>
   );
-}
+};
+
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };

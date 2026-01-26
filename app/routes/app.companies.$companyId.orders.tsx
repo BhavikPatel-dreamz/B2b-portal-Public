@@ -40,6 +40,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!store) {
     throw new Response("Store not found", { status: 404 });
   }
+  if(!session.accessToken){
+    throw new Response("Session access token not found", { status: 404 });
+  }
 
   const data = await getCompanyOrders(companyId, store.id,session.accessToken);
 

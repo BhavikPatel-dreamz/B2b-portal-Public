@@ -177,8 +177,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             {
               error: result.error,
               details: result.details,
-              userErrors: result.userErrors,
-              field: result.field,
             },
             { status: 400 }, // Changed from 500 to 400 for better error handling
           );

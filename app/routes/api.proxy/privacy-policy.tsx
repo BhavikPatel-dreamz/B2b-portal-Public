@@ -8,6 +8,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get proxy parameters
     const { shop, loggedInCustomerId } = getProxyParams(request);
 
+    if (!shop) {
+      return Response.json(
+        { error: "Shop domain is required" },
+        { status: 401 },
+      );
+    }
+
     const store = await getStoreByDomain(shop);
     if (!store) {
       return Response.json(

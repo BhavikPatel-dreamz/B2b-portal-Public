@@ -45,14 +45,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Release any reserved credit
-    if (existingOrder.creditUsed && existingOrder.creditUsed > 0) {
+    if (existingOrder.creditUsed && Number(existingOrder.creditUsed) > 0) {
       try {
-        const refundResult = await restoreCredit({
-          companyId: existingOrder.companyId,
-          orderAmount: parseFloat(existingOrder.creditUsed.toString()),
-          orderId: existingOrder.shopifyOrderId,
-          description: "Draft order deleted",
-        });
+        const refundResult = await restoreCredit(
+          existingOrder.companyId,
+          existingOrder.shopifyOrderId || "",
+          parseFloat(existingOrder.creditUsed.toString()),
+          existingOrder.createdByUserId,
+          "cancelled"
+        );
 
         console.log(`💳 Credit refunded:`, refundResult);
       } catch (creditError: any) {

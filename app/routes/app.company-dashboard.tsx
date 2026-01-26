@@ -14,9 +14,7 @@ import {
   syncShopifyUsers,
 } from "../utils/company.server";
 import { useEffect, useState } from "react";
-import {
-  getCompanyOrdersCount,
-} from "app/utils/b2b-customer.server";
+import { getCompanyOrdersCount } from "app/utils/b2b-customer.server";
 import {
   recalculateCompanyCredit,
   previewCreditRecalculation,
@@ -292,10 +290,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const companyData = await prisma.companyAccount.findFirst({
         where: { shopifyCompanyId: companyId },
       });
+      if (companyData) {
       await prisma.companyAccount.update({
         where: { id: companyData.id },
         data: { paymentTerm: paymentTermsTemplateId },
       });
+    }
 
       /* 4️⃣ Success response */
       return Response.json({
@@ -410,6 +410,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           errors: ["Company id is required"],
         });
       }
+      const orderData = await prisma.b2BOrder.findMany({
+        where: {
+          companyId: id,
+          orderStatus: { in: ["unfulfilled"] },
+          paymentStatus: { in: ["pending", "unpaid"] },
+        },
+      });
+      if (orderData.length > 0) {
+       
+        return Response.json({
+          intent,
+          success: false,
+          errors: [
+            "You can't deactivate this company because it has pending orders",
+          ],
+        });
+      }
 
       const companyData = await prisma.companyAccount.update({
         where: { id },
@@ -440,19 +457,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
       await prisma.user.updateMany({
-        where: { id: {
-          in: userData.map((user) => user.id),
-        }
-         },
+        where: {
+          id: {
+            in: userData.map((user) => user.id),
+          },
+        },
         data: { isActive: false },
       });
+
       return Response.json({
         intent,
         success: true,
         message: "Company deactivated",
       });
     }
-     case "reActivateCompany": {
+    case "reActivateCompany": {
       const id = (form.id as string)?.trim();
 
       if (!id) {
@@ -492,10 +511,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
       await prisma.user.updateMany({
-        where: { id: {
-          in: userData.map((user) => user.id),
-        }
-         },
+        where: {
+          id: {
+            in: userData.map((user) => user.id),
+          },
+        },
         data: { isActive: true },
       });
       return Response.json({
@@ -649,6 +669,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Store not found", { status: 404 });
   }
 
+    if (!session.accessToken) {
+    throw new Response("Access token is required", { status: 401 });
+  }
+
   // Get company dashboard data from service
   const dashboardData = await getCompanyDashboardData(
     companyId,
@@ -688,7 +712,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       contactEmail: dashboardData.company.contactEmail,
       shopifyCompanyId: dashboardData.company.shopifyCompanyId,
       paymentTermsTemplateId: dashboardData.company.paymentTerm || "",
-      isDisable: dashboardData.company.isDisable,
+      isDisable: dashboardData.company.isDisable ?? false,
     },
     creditLimit: creditSummary.creditLimit.toNumber(),
     availableCredit: availableCredit,
@@ -793,6 +817,25 @@ export default function CompanyDashboard() {
     currentTransactionsCount?: number;
   } | null>(null);
   const recalculateFetcher = useFetcher<ActionResponse>();
+  // const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
+
+  // Update the useEffect to handle fetcher data
+  useEffect(() => {
+    if (updateFetcher.data) {
+      if (
+        updateFetcher.data.intent === "deactivateCompany" ||
+        updateFetcher.data.intent === "reActivateCompany"
+      ) {
+        if (!updateFetcher.data.success && updateFetcher.data.errors) {
+          setDeactivateError(updateFetcher.data.errors[0]);
+        } else if (updateFetcher.data.success) {
+          setDeactivateError(null);
+        }
+        setDeactivatingId(null);
+      }
+    }
+  }, [updateFetcher.data]);
 
   const creditStatus = getCreditStatusColor(data.creditPercentageUsed);
   const creditStatusColor =
@@ -817,19 +860,19 @@ export default function CompanyDashboard() {
     setIsEditingCredit(false);
   };
 
- const handlePaymentTermsUpdate = () => {
-  const formData = new FormData();
-  formData.append("intent", "updatepaymentTerm");
-   formData.append("id", data.company.shopifyCompanyId);
+  const handlePaymentTermsUpdate = () => {
+    const formData = new FormData();
+    formData.append("intent", "updatepaymentTerm");
+    if (data.company.shopifyCompanyId) {
+      formData.append("id", data.company.shopifyCompanyId);
+    }
 
+    // ✅ FIXED KEY
+    formData.append("paymentTerm", selectedPaymentTerms);
 
-  // ✅ FIXED KEY
-  formData.append("paymentTerm", selectedPaymentTerms);
-
-  fetcher.submit(formData, { method: "POST" });
-  setIsEditingPaymentTerms(false);
-};
-
+    fetcher.submit(formData, { method: "POST" });
+    setIsEditingPaymentTerms(false);
+  };
 
   const handleCancelPaymentTermsEdit = () => {
     setSelectedPaymentTerms(data.company.paymentTermsTemplateId || "");
@@ -837,38 +880,37 @@ export default function CompanyDashboard() {
   };
 
   // Payment terms options
-const paymentTermsOptions = [
-  { value: "", label: "No payment terms" },
-  {
-    value: "gid://shopify/PaymentTermsTemplate/1",
-    label: "Due on fulfillment",
-  },
-  {
-    value: "gid://shopify/PaymentTermsTemplate/2",
-    label: "Net 7",
-  },
-  {
-    value: "gid://shopify/PaymentTermsTemplate/3",
-    label: "Net 15",
-  },
-  {
-    value: "gid://shopify/PaymentTermsTemplate/4",
-    label: "Net 30",
-  },
-   {
-    value: "gid://shopify/PaymentTermsTemplate/5",
-    label: "Net 45",
-  },
-   {
-    value: "gid://shopify/PaymentTermsTemplate/6",
-    label: "Net 60",
-  },
-   {
-    value: "gid://shopify/PaymentTermsTemplate/7",
-    label: "Net 90",
-  },
-];
-
+  const paymentTermsOptions = [
+    { value: "", label: "No payment terms" },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/1",
+      label: "Due on fulfillment",
+    },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/2",
+      label: "Net 7",
+    },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/3",
+      label: "Net 15",
+    },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/4",
+      label: "Net 30",
+    },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/5",
+      label: "Net 45",
+    },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/6",
+      label: "Net 60",
+    },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/7",
+      label: "Net 90",
+    },
+  ];
 
   const getPaymentTermsLabel = (value: string) => {
     const option = paymentTermsOptions.find((opt) => opt.value === value);
@@ -910,14 +952,10 @@ const paymentTermsOptions = [
   }, [updateFetcher.state]);
 
   useEffect(() => {
-  if (
-    fetcher.data?.intent === "updatepaymentTerm" &&
-    fetcher.data?.success
-  ) {
-    window.location.reload();
-  }
-}, [fetcher.data]);
-
+    if (fetcher.data?.intent === "updatepaymentTerm" && fetcher.data?.success) {
+      window.location.reload();
+    }
+  }, [fetcher.data]);
 
   useEffect(() => {
     if (recalculateFetcher.state === "idle" && recalculateFetcher.data) {
@@ -967,103 +1005,101 @@ const paymentTermsOptions = [
       </div>
 
       {/* Payment Terms Edit Modal */}
-    {isEditingPaymentTerms && (
-  <div
-    style={{
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: "rgba(0, 0, 0, 0.5)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 1000,
-    }}
-    onClick={handleCancelPaymentTermsEdit} // click outside closes
-  >
-    <section
-      onClick={(e) => e.stopPropagation()} // ✅ VERY IMPORTANT
-      style={{
-        backgroundColor: "white",
-        borderRadius: 8,
-        padding: 24,
-        width: "90%",
-        maxWidth: 500,
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
-      }}
-      role="dialog"
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 20,
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-          Edit payment terms
-        </h2>
-        <button
-          onClick={handleCancelPaymentTermsEdit}
+      {isEditingPaymentTerms && (
+        <div
           style={{
-            background: "none",
-            border: "none",
-            fontSize: 20,
-            cursor: "pointer",
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
           }}
+          onClick={handleCancelPaymentTermsEdit} // click outside closes
         >
-          ×
-        </button>
-      </div>
+          <section
+            onClick={(e) => e.stopPropagation()} // ✅ VERY IMPORTANT
+            style={{
+              backgroundColor: "white",
+              borderRadius: 8,
+              padding: 24,
+              width: "90%",
+              maxWidth: 500,
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+            }}
+            role="dialog"
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 20,
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+                Edit payment terms
+              </h2>
+              <button
+                onClick={handleCancelPaymentTermsEdit}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 20,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
 
-      <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 13, fontWeight: 500 }}>
-          Set payment terms
-        </label>
-        <select
-          value={selectedPaymentTerms}
-          onChange={(e) => setSelectedPaymentTerms(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "8px 12px",
-            marginTop: 6,
-          }}
-        >
-          {paymentTermsOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 13, fontWeight: 500 }}>
+                Set payment terms
+              </label>
+              <select
+                value={selectedPaymentTerms}
+                onChange={(e) => setSelectedPaymentTerms(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  marginTop: 6,
+                }}
+              >
+                {paymentTermsOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-{isEditingPaymentTerms && (
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button onClick={handleCancelPaymentTermsEdit}>
-          Cancel
-        </button>
-        <button
-          onClick={handlePaymentTermsUpdate}
-          disabled={fetcher.state === "submitting"}
-          style={{
-            backgroundColor: "#008060",
-            color: "white",
-            padding: "8px 16px",
-            borderRadius: 6,
-          }}
-        >
-          {fetcher.state === "submitting" ? "Saving..." : "Save"}
-        </button>
-      </div>
-)}
-    </section>
-
-  </div>
-)}
-
+            {isEditingPaymentTerms && (
+              <div
+                style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+              >
+                <button onClick={handleCancelPaymentTermsEdit}>Cancel</button>
+                <button
+                  onClick={handlePaymentTermsUpdate}
+                  disabled={fetcher.state === "submitting"}
+                  style={{
+                    backgroundColor: "#008060",
+                    color: "white",
+                    padding: "8px 16px",
+                    borderRadius: 6,
+                  }}
+                >
+                  {fetcher.state === "submitting" ? "Saving..." : "Save"}
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
 
       {/* Company Information Section */}
       <s-section heading="Company Information">
@@ -1334,76 +1370,77 @@ const paymentTermsOptions = [
                 </div>
               )}
             </div>
-            {/* <updateFetcher.Form
-              method="post"
-              onSubmit={() => setDeactivatingId(data.company.id)}
-            >
-              <input type="hidden" name="intent" value="deactivateCompany" />
-              <input type="hidden" name="id" value={data.company.id} />
-
-              <button
-                type="submit"
-                disabled={deactivatingId === data.company.id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minWidth: 100,
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  border: "1px solid #d72c0d",
-                  backgroundColor: "white",
-                  color: "#d72c0d",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  opacity: deactivatingId === data.company.id ? 0.6 : 1,
+            {/* Deactivate / Reactivate Button */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <updateFetcher.Form
+                method="post"
+                onSubmit={() => {
+                  setDeactivatingId(data.company.id);
+                  setDeactivateError(null); // Clear previous errors
                 }}
               >
-                {deactivatingId === data.company.id
-                  ? "Deactivating..."
-                  : "Deactivate"}
-              </button>
-            </updateFetcher.Form> */}
-            <updateFetcher.Form
-              method="post"
-              onSubmit={() => setDeactivatingId(data.company.id)}
-            >
-              <input 
-                type="hidden" 
-                name="intent" 
-                value={data.company.isDisable  ? "reActivateCompany" : "deactivateCompany"} 
-              />
-              <input type="hidden" name="id" value={data.company.id} />
+                <input
+                  type="hidden"
+                  name="intent"
+                  value={
+                    data.company.isDisable
+                      ? "reActivateCompany"
+                      : "deactivateCompany"
+                  }
+                />
+                <input type="hidden" name="id" value={data.company.id} />
 
-              <button
-                type="submit"
-                disabled={deactivatingId === data.company.id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minWidth: 100,
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  border: data.company.isDisable ? "1px solid #008060" : "1px solid #d72c0d",
-                  backgroundColor: "white",
-                  color: data.company.isDisable ? "#008060" : "#d72c0d",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: deactivatingId === data.company.id ? "not-allowed" : "pointer",
-                  opacity: deactivatingId === data.company.id ? 0.6 : 1,
-                }}
-              >
-                {deactivatingId === data.company.id
-                  ? "Processing..."
-                  : data.company.isDisable
-                    ? "Reactivate"
-                    : "Deactivate"}
-              </button>
-            </updateFetcher.Form>
+                <button
+                  type="submit"
+                  disabled={deactivatingId === data.company.id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: 100,
+                    padding: "6px 14px",
+                    borderRadius: 6,
+                    border: data.company.isDisable
+                      ? "1px solid #008060"
+                      : "1px solid #d72c0d",
+                    backgroundColor: "white",
+                    color: data.company.isDisable ? "#008060" : "#d72c0d",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor:
+                      deactivatingId === data.company.id
+                        ? "not-allowed"
+                        : "pointer",
+                    opacity: deactivatingId === data.company.id ? 0.6 : 1,
+                  }}
+                >
+                  {deactivatingId === data.company.id
+                    ? "Processing..."
+                    : data.company.isDisable
+                      ? "Reactivate"
+                      : "Deactivate"}
+                </button>
+              </updateFetcher.Form>
+
+              {/* Error message display */}
+            </div>
           </div>
         </div>
+        {deactivateError && deactivatingId === null && (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              backgroundColor: "#fef1f1",
+              border: "1px solid #fda29b",
+              color: "#d72c0d",
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            {deactivateError}
+          </div>
+        )}
       </s-section>
 
       {/* Top Row: Company Info, Credit Status, Order Summary */}
@@ -1825,9 +1862,9 @@ const paymentTermsOptions = [
                     >
                       {formatCurrency(tx.remainingBalance)}
                     </td>
-                    <td style={{ padding: 12, fontSize: 13 }}>
+                    {/* <td style={{ padding: 12, fontSize: 13 }}>
                       {tx.notes || "—"}
-                    </td>
+                    </td> */}
                   </tr>
                 ))}
               </tbody>
