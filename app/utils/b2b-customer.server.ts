@@ -5,7 +5,7 @@ import { createUser } from "../services/user.server";
 import { calculateAvailableCredit } from "app/services/creditService";
 
 // Type for GraphQL response
-type GraphQLResponse<T = any> = {
+type GraphQLResponse<T = unknown> = {
   data?: T;
   errors?: Array<{ message: string }>;
 };
@@ -68,7 +68,7 @@ export async function checkCustomerExists(
           firstName: customer.firstName,
           lastName: customer.lastName,
           phone: customer.phone,
-          metafields: customer.metafields.edges.map((edge: any) => edge.node),
+          metafields: customer.metafields.edges.map((edge: { node: { namespace: string; key: string; value: string } }) => edge.node),
         },
       };
     }
@@ -107,7 +107,6 @@ type CheckCompanyResult =
 export async function checkCompanyExists(
   admin: AdminApiContext,
   externalId: string,
-  p0: string | undefined,
 ): Promise<CheckCompanyResult> {
   try {
     const QUERY = `
@@ -205,7 +204,7 @@ export async function createShopifyCustomer(
       console.error("Shopify User Errors:", errors);
       return {
         success: false,
-        error: errors.map((e: any) => `${e.field}: ${e.message}`).join(", "),
+        error: errors.map((e: { field: string; message: string }) => `${e.field}: ${e.message}`).join(", "),
       };
     }
 
@@ -380,7 +379,7 @@ export async function assignCompanyToCustomer(
 
     // Find "Member" role or use the first available role
     let companyContactRoleId = roles.find(
-      (edge: any) => edge.node.name.toLowerCase() === "Company Admin",
+      (edge: { node: { name: string; id: string } }) => edge.node.name.toLowerCase() === "Company Admin",
     )?.node?.id;
 
     if (!companyContactRoleId && roles.length > 0) {
@@ -861,9 +860,9 @@ export async function checkCustomerIsB2BInShopify(
 
     // Check for company metafield
     const metafields =
-      customer.metafields?.edges?.map((edge: any) => edge.node) || [];
+      customer.metafields?.edges?.map((edge: { node: { key: string; value: string } }) => edge.node) || [];
     const companyMetafield = metafields.find(
-      (mf: any) => mf.key === "b2b_company" || mf.key === "company",
+      (mf: { key: string }) => mf.key === "b2b_company" || mf.key === "company",
     );
     const hasCompanyMetafield = !!companyMetafield;
     const company = companyMetafield?.value;
@@ -975,7 +974,7 @@ export async function checkCustomerIsB2BInShopifyByREST(
     // Check for company metafield
     const metafields = customer.metafields || [];
     const companyMetafield = metafields.find(
-      (mf: any) =>
+      (mf: { namespace: string; key: string; value: string }) =>
         mf.namespace === "custom" &&
         (mf.key === "b2b_company" || mf.key === "company"),
     );
@@ -1119,17 +1118,17 @@ export async function getCustomerCompanyInfo(
       },
     });
     // Process company information
-    const companies = companyProfiles.map((profile: any) => {
+    const companies = companyProfiles.map((profile: { company: { id: string | number; name: string; mainContact: { customer: { id: string | number } } }; roleAssignments: { edges: Array<{ node: { role: { name: string }; companyLocation: { id: string | number; name: string } } }> } }) => {
       const company = profile.company;
 
       const roleAssignments =
-        profile.roleAssignments?.edges?.map((edge: any) => ({
+        profile.roleAssignments?.edges?.map((edge: { node: { role: { name: string }; companyLocation: { id: string | number; name: string } } }) => ({
           role: edge.node.role.name,
           locationId: edge.node.companyLocation?.id,
           locationName: edge.node.companyLocation?.name,
         })) || [];
 
-      const roles = roleAssignments.map((r: any) => r.role);
+      const roles = roleAssignments.map((r: { role: string }) => r.role);
 
       // Check if this customer is the main contact (company owner)
       const isMainContact =
@@ -1152,7 +1151,7 @@ export async function getCustomerCompanyInfo(
 
       // Extract unique location IDs that this user has access to
       const assignedLocationIds = roleAssignments
-        .filter((ra: { locationId: any }) => ra.locationId)
+        .filter((ra: { locationId: string | number }) => ra.locationId)
         .map((ra: { locationId: string }) => ra.locationId as string);
 
       // Remove duplicates
@@ -1161,8 +1160,8 @@ export async function getCustomerCompanyInfo(
       // Group role assignments by location for easier validation
       const locationRoles = roleAssignments.reduce(
         (
-          acc: any,
-          ra: { locationId: string | number; locationName: any; role: any },
+          acc: Record<string, { locationId: string; locationName: string; roles: string[] }>,
+          ra: { locationId: string | number; locationName: string; role: string },
         ) => {
           if (ra.locationId) {
             if (!acc[ra.locationId]) {
@@ -1233,7 +1232,7 @@ export async function getCustomerCompanyInfo(
         companies[0]?.mainContact?.id ===
         `gid://shopify/Customer/${customerId}`,
     };
-  } catch (error: any) {
+  } catch (error: { message: string }) {
     console.error("Error fetching company info:", error);
     return { hasCompany: false, error: error.message };
   }
@@ -1302,13 +1301,14 @@ export async function getCompanyOrderss(
     }
 
     const company = data.data.company;
-    const allOrders = company.orders.edges.map((o: any) => o.node);
-    const locations = company.locations.edges.map((l: any) => l.node);
+    const allOrders = company.orders.edges.map((o: { node: { id: string; createdAt: string; totalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; customer: { firstName: string; lastName: string; email: string } } }) => o.node);
+    const locations = company.locations.edges.map((l: { node: { id: string; name: string; shippingAddress: { address1: string; city: string; province: string; zip: string } } }) => l.node);
 
     // Group orders by location
-    const locationsWithOrders = locations.map((location: any) => {
+    const locationsWithOrders = locations.map((location: { id: string; name: string }) => {
       const locationOrders = allOrders.filter(
-        (order: any) => order.companyLocation?.id === location.id,
+        (order: { companyLocation: { id: string } }) =>
+          order.companyLocation?.id === location.id,
       );
       return {
         locationId: location.id,
@@ -1324,7 +1324,7 @@ export async function getCompanyOrderss(
       companyOrders: allOrders,
       locations: locationsWithOrders,
     };
-  } catch (error: any) {
+  } catch (error: { message: string }) {
     console.error("Error fetching company orders:", error);
     return { error: error.message };
   }
@@ -1434,12 +1434,12 @@ export async function getCompanyCustomers(
     }
 
     const company = data.data.company;
-    const contacts = company.contacts.edges.map((edge: any) => {
+    const contacts = company.contacts.edges.map((edge: { node: { id: string; title: string; customer: { id: string; firstName: string; lastName: string; email: string; phone: string; metafield: { value: string; type: string } } } }) => {
       const node = edge.node;
       const cust = node.customer;
 
       const roles =
-        node.roleAssignments?.edges?.map((r: any) => ({
+        node.roleAssignments?.edges?.map((r: { node: { role: { id: string; name: string }; companyLocation: { id: string; name: string } } }) => ({
           id: r.node.role.id,
           name: r.node.role.name,
           locationId: r.node.companyLocation?.id,
@@ -1459,10 +1459,10 @@ export async function getCompanyCustomers(
           // Include roleAssignments in customer object for easy access
           roleAssignments: node.roleAssignments,
         },
-        roles: roles.map((r: any) => r.name),
-        roleIds: roles.map((r: any) => r.id),
-        locationIds: roles.map((r: any) => r.locationId).filter(Boolean),
-        locationNames: roles.map((r: any) => r.locationName).filter(Boolean),
+        roles: roles.map((r: { name: string }) => r.name),
+        roleIds: roles.map((r: { id: string }) => r.id),
+        locationIds: roles.map((r: { locationId: string }) => r.locationId).filter(Boolean),
+        locationNames: roles.map((r: { locationName: string }) => r.locationName).filter(Boolean),
         credit: cust.metafield?.value ? Number(cust.metafield.value) : 0,
       };
     });
@@ -1473,14 +1473,14 @@ export async function getCompanyCustomers(
       customers: contacts,
       pageInfo: company.contacts.pageInfo,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching company customers:", error);
-    return { error: error.message };
+    return { error: error instanceof Error ? error.message : "Unknown error" }; 
   }
 }
 
 // Function to fetch available roles for a company
-export async function getCompanyRoles(shopName: string, accessToken: string) {
+export async function getCompanyRoles() {
   try {
     // We can fetch roles via the shop query or assume standard ones.
     // Let's try to fetch roles if possible, but for now we'll return a standard list
@@ -1545,11 +1545,11 @@ async function assignRoleToCompanyContact(
 
   const rolesData = await rolesResponse.json();
   const roles =
-    rolesData.data?.company?.roles?.edges?.map((e: any) => e.node) || [];
+    rolesData.data?.company?.roles?.edges?.map((e: { node: { id: string; name: string } }) => e.node) || [];
 
   // Find role by name (case insensitive)
   const role = roles.find(
-    (r: any) => r.name.toLowerCase() === roleName.toLowerCase(),
+    (r: { name: string }) => r.name.toLowerCase() === roleName.toLowerCase(),
   );
 
   if (!role) {
@@ -2208,10 +2208,10 @@ async function fetchCompanyLocations(
     }
 
     const locations =
-      result.data?.company?.locations?.edges.map((e: any) => e.node) || [];
+      result.data?.company?.locations?.edges.map((e: { node: { id: string; name: string } }) => e.node) || [];
 
     return { locations };
-  } catch (error: any) {
+  } catch (error: { message: string }) {
     return { error: error.message };
   }
 }
@@ -2545,11 +2545,6 @@ async function assignRoleAndLocations(
       `🎯 Assigning role "${roleName}" (${role.id}) to contact ${contactId}`,
     );
 
-    // Ensure contactId is in GID format
-    const contactGid = contactId.startsWith("gid://")
-      ? contactId
-      : `gid://shopify/CompanyContact/${contactId}`;
-
     // If role assignment for specific locations
     if (locationIds?.length > 0) {
       // Fetch location nodes so we can map human name to gid
@@ -2712,16 +2707,16 @@ export async function getCompanyLocations(
 
     const company = data.data.company;
     // Get all contacts with their location assignments
-    const contacts = company.contacts.edges.map((edge: any) => {
+    const contacts = company.contacts.edges.map((edge: { node: { id: string; title: string; customer: { id: string }; roleAssignments: { edges: Array<{ node: { companyLocation: { id: string; name: string }; role: { name: string } } }> } } }) => {
       const node = edge.node;
       const locationAssignments =
         node.roleAssignments?.edges
-          ?.map((r: any) => ({
+          ?.map((r: { node: { companyLocation: { id: string; name: string }; role: { name: string } } }) => ({
             locationId: r.node.companyLocation?.id,
             locationName: r.node.companyLocation?.name,
             roleName: r.node.role?.name,
           }))
-          .filter((la: any) => la.locationId) || [];
+          .filter((la: { locationId: string }) => la.locationId) || [];
 
       return {
         id: node.id,
@@ -2738,7 +2733,7 @@ export async function getCompanyLocations(
     > = {};
 
     contacts.forEach(
-      (contact: { locationAssignments: any[]; customer: { id: string } }) => {
+      (contact: { locationAssignments: { locationId: string; locationName: string }[]; customer: { id: string } }) => {
         contact.locationAssignments.forEach((assignment) => {
           if (!locationCustomerCount[assignment.locationId]) {
             locationCustomerCount[assignment.locationId] = {
@@ -2764,7 +2759,7 @@ export async function getCompanyLocations(
     );
 
     // Get locations with customer count
-    const locations = company.locations.edges.map((edge: any) => {
+    const locations = company.locations.edges.map((edge: { node: { id: string; name: string; shippingAddress: { address1: string; city: string; province: string; zip: string } } }) => {
       const location = edge.node;
 
       const customerInfo = locationCustomerCount[location.id] || {
@@ -2795,7 +2790,7 @@ export async function getCompanyLocations(
       locations: locations,
       locationCustomerCount: locationCustomerCount,
     };
-  } catch (error: any) {
+  } catch (error: { message: string }) {
     console.error("Error fetching company locations:", error);
     return { error: error.message };
   }
@@ -2930,13 +2925,13 @@ export async function updateCompanyCustomer(
   },
 ) {
   try {
-    const results: any = {
+    const results: Record<string, unknown> = {
       success: true,
       updates: {},
       warnings: [],
     };
 
-    const makeGraphQLRequest = async (query: string, variables: any) => {
+    const makeGraphQLRequest = async (query: string, variables: Record<string, unknown>) => {
       const response = await fetch(
         `https://${shopName}/admin/api/2025-01/graphql.json`,
         {
@@ -3002,7 +2997,7 @@ export async function updateCompanyCustomer(
     // Get existing role assignments with full details
     const existingRoleAssignments =
       getCustomerResult.data?.companyContact?.roleAssignments?.edges?.map(
-        (edge: any) => ({
+        (edge: { node: { id: string; role: { id: string; name: string }; companyLocation: { id: string; name: string } } }) => ({
           id: edge.node.id,
           roleId: edge.node.role?.id,
           roleName: edge.node.role?.name,
@@ -3018,7 +3013,7 @@ export async function updateCompanyCustomer(
       customerData.lastName ||
       customerData.credit !== undefined
     ) {
-      const payload: any = { id: customerId };
+      const payload: Record<string, unknown> = { id: customerId };
 
       if (customerData.email) payload.email = customerData.email;
       if (customerData.firstName) payload.firstName = customerData.firstName;
@@ -3163,11 +3158,7 @@ async function smartRoleUpdate(
             roleId = role.id;
             roleName = role.name;
           } else return null;
-        } else if (roleId) {
-          const role = roles.find((r) => r.id === roleId);
-          roleName = role?.name || roleName;
-        }
-
+        } 
         // Resolve locationId from locationName if needed
         if (!locationId && locationName) {
           const location = locations.find(
@@ -3464,7 +3455,7 @@ async function smartRoleUpdate(
 
 async function makeGraphQLRequest(
   query: string,
-  variables: any,
+  variables: Record<string, unknown>,
   shopName: string,
   accessToken: string,
 ) {
@@ -3583,11 +3574,11 @@ async function fetchCompanyLocationss(
     }
 
     const locations =
-      result.data?.company?.locations?.edges.map((e: any) => e.node) || [];
+      result.data?.company?.locations?.edges.map((e: { node: { id: string; name: string } }) => e.node) || [];
 
     return { locations };
-  } catch (error: any) {
-    return { error: error.message };
+  } catch (error: unknown) {
+    return { error: error instanceof Error ? error.message : "Unknown error" }; 
   }
 }
 
@@ -4197,7 +4188,7 @@ export async function getCompanyContactRoles(
     return {
       success: true,
       roles: roles,
-      defaultRoleId: roles.find((r: any) => r.name === "Location admin")?.id || roles[0].id,
+      defaultRoleId: roles.find((r: { name: string }) => r.name === "Location admin")?.id || roles[0].id,
     };
   } catch (error) {
     console.error("💥 Error fetching company roles:", error);
@@ -4361,13 +4352,13 @@ export async function findCompanyContactByCustomer(
     const contacts = result.data?.companies?.edges?.[0]?.node?.contacts?.edges || [];
     
     const matchingContact = contacts.find(
-      (edge: any) => edge.node.customer?.id === customerId
+      (edge: { node: { customer: { id: string } } }) => edge.node.customer?.id === customerId
     );
 
     if (!matchingContact) {
       return {
         error: "Company contact not found for this customer",
-        availableContacts: contacts.map((e: any) => e.node.id),
+        availableContacts: contacts.map((e: { node: { id: string } }) => e.node.id),
       };
     }
 
@@ -4664,7 +4655,7 @@ export async function updateCompanyLocation(
         hasErrors = true;
         errors.push(
           ...result.data.companyLocationUpdate.userErrors.map(
-            (e: any) => e.message,
+            (e: { message: string }) => e.message,
           ),
         );
       }
@@ -4818,7 +4809,7 @@ export async function updateCompanyLocation(
         hasErrors = true;
         errors.push(
           ...addressResult.data.companyLocationAssignAddress.userErrors.map(
-            (e: any) => e.message,
+            (e: { message: string }) => e.message,
           ),
         );
       }
@@ -4908,6 +4899,7 @@ export async function deleteCompanyLocation(
   }
 }
 
+
 export async function checkLocationHasUsers(
   locationId: string,
   shopName: string,
@@ -4961,6 +4953,24 @@ export async function checkLocationHasUsers(
     return { error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
+interface OrderNode {
+  id: string;
+  name: string;
+  createdAt: string;
+  purchasingEntity: {
+    id: string;
+    email: string;
+  };
+  location: {
+    id: string;
+    name: string;
+  } | null;
+  financialStatus: string;
+  fulfillmentStatus: string;
+}
+
+
+
 
 // Function to get advanced company orders with filtering and pagination
 export async function getAdvancedCompanyOrders(
@@ -5279,7 +5289,7 @@ export async function getAdvancedCompanyOrders(
 
     // Process orders and extract location information
     let processedOrders =
-      ordersData?.edges?.map((edge: any) => {
+      ordersData?.edges?.map((edge: { node: OrderNode }) => {
         const order = edge.node;
 
         let locationId = "";
@@ -5312,8 +5322,8 @@ export async function getAdvancedCompanyOrders(
 
     // POST-FILTER 1: Filter by requested specific location
     if (needsLocationPostFilter && requestedLocationId) {
-      processedOrders = processedOrders.filter((order: any) => {
-        const orderLocationId = extractId(order.locationId);
+      processedOrders = processedOrders.filter((order: OrderNode) => {
+        const orderLocationId = extractId(order.location?.id || "");
         const matches = orderLocationId === requestedLocationId;
 
         if (!matches) {
@@ -5335,7 +5345,7 @@ export async function getAdvancedCompanyOrders(
         extractId(id),
       );
 
-      processedOrders = processedOrders.filter((order: any) => {
+      processedOrders = processedOrders.filter((order: OrderNode) => {
         const orderLocationId = extractId(order.locationId);
 
         if (!orderLocationId) {
@@ -5388,9 +5398,9 @@ return {
           allowedLocationIds?.map((id) => extractId(id)) || "all",
       },
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error fetching advanced orders:", error);
-    return { error: error.message };
+    return { error: error instanceof Error ? error.message : "Unknown error occurred" };
   }
 }
 

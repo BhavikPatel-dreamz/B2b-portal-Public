@@ -37,7 +37,7 @@ interface RegistrationSubmission {
 }
 
 interface ActionJson {
-  existsInDb: any;
+  existsInDb: boolean;
   intent: string;
   success: boolean;
   message?: string;
@@ -83,7 +83,7 @@ const buildUserErrorList = (payload: any) => {
   const errors: string[] = [];
   if (payload?.errors?.length) {
     errors.push(
-      ...payload.errors.map((err: any) =>
+      ...payload.errors.map((err: { message: string }) =>
         typeof err === "string" ? err : err.message || "Unknown error",
       ),
     );
@@ -100,7 +100,8 @@ const buildUserErrorList = (payload: any) => {
   if (userErrors.length) {
     errors.push(
       ...userErrors.map(
-        (err: any) => err?.message || (err?.field || []).join(".") || "Error",
+        (err: { message: string; field?: string[] }) =>
+          err?.message || (err?.field || []).join(".") || "Error",
       ),
     );
   }
@@ -207,9 +208,10 @@ export async function assignCompanyToCustomer(
     const companyJson = await companyRes.json();
     const roles = companyJson.data?.company?.contactRoles?.edges || [];
 
-    let companyContactRoleId =
+    const companyContactRoleId =
       roles.find(
-        (edge: any) => edge.node.name.toLowerCase() === "company admin",
+        (edge: { node: { name: string } }) =>
+          edge.node.name.toLowerCase() === "company admin",
       )?.node?.id || roles[0]?.node?.id;
 
     if (!companyContactRoleId) {
@@ -1296,26 +1298,50 @@ function StepBadge({
   onClick: () => void;
 }) {
   return (
+    // <div
+    //   onClick={onClick}
+    //   style={{
+    //     padding: "6px 14px",
+    //     borderRadius: 20,
+    //     cursor: "pointer",
+    //     background: active ? "#1f2937" : "#e5e7eb",
+    //     color: active ? "#ffffff" : "#111827",
+    //     fontSize: 13,
+    //     fontWeight: 500,
+    //     userSelect: "none",
+    //   }}
+    // >
+    //   {label}
+    // </div>
     <div
-      onClick={onClick}
-      style={{
-        padding: "6px 14px",
-        borderRadius: 20,
-        cursor: "pointer",
-        background: active ? "#1f2937" : "#e5e7eb",
-        color: active ? "#ffffff" : "#111827",
-        fontSize: 13,
-        fontWeight: 500,
-        userSelect: "none",
-      }}
-    >
-      {label}
-    </div>
+  onClick={onClick}
+  onKeyDown={(e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick?.(e);
+    }
+  }}
+  role="button"
+  tabIndex={0}
+  aria-pressed={active}
+  style={{
+    padding: "6px 14px",
+    borderRadius: 20,
+    cursor: "pointer",
+    background: active ? "#1f2937" : "#e5e7eb",
+    color: active ? "#ffffff" : "#111827",
+    fontSize: 13,
+    fontWeight: 500,
+    userSelect: "none",
+  }}
+>
+  {label}
+</div>
   );
 }
 
 export default function RegistrationApprovals() {
-  const { submissions, companies, storeMissing, paymentTermsTemplates } =
+  const { submissions, storeMissing, paymentTermsTemplates } =
     useLoaderData<{
       submissions: RegistrationSubmission[];
       companies: CompanyAccount[];
@@ -1495,7 +1521,7 @@ export default function RegistrationApprovals() {
       revalidator.revalidate();
       shopify.toast.show?.("Registration approved");
     }
-  }, [flowFetcher.data, shopify, revalidator]);
+  }, [flowFetcher, shopify, revalidator, selected]);
 
   useEffect(() => {
     if (rejectFetcher.data?.success) {
@@ -2182,7 +2208,7 @@ export default function RegistrationApprovals() {
                       <s-banner tone="warning">
                         <div style={{ fontWeight: 600, marginBottom: 4 }}>No customer found</div>
                         <s-text>
-                          No existing customer found. You'll need to create one.
+                          No existing customer found. You Will need to create one.
                         </s-text>
                       </s-banner>
                       <div style={{ marginTop: 12 }}>

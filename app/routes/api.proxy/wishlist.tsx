@@ -156,7 +156,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           const productData = await response.json();
           const product = productData?.data?.product;
           const variant = product?.variants?.edges?.find(
-            (v: { node: { id: any } }) => v.node.id === item.variantId,
+            (v: { node: { id: string } }) => v.node.id === item.variantId,
           )?.node;
 
           // Check if item already exists

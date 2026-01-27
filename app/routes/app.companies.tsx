@@ -15,7 +15,6 @@ import {
 import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
 import { calculateAvailableCredit } from "../services/creditService";
-import { useState } from "react";
 import { getCompanyCustomers } from "app/utils/b2b-customer.server";
 
 type LoaderCompany = {
@@ -121,6 +120,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const pendingCreditNum = creditInfo
         ? parseFloat(creditInfo.pendingCredit.toString())
         : 0;
+        console.log(pendingCreditNum);
       const creditUsagePercentage =
         creditLimitNum > 0
           ? Math.round((usedCreditNum / creditLimitNum) * 100)
@@ -153,7 +153,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
           // Create a map of Shopify customers by email
           const shopifyCustomerMap = new Map(
-            customersData?.customers?.map((customer: any) => [
+            customersData?.customers?.map((customer: { customer: { email?: string } }) => [
               customer.customer?.email?.toLowerCase(),
               customer,
             ]) || [],
@@ -318,7 +318,6 @@ export default function CompaniesPage() {
     searchQuery,
   } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
 
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
@@ -664,8 +663,8 @@ export default function CompaniesPage() {
         )}
       </s-section>
     </s-page>
-  );
-};
+  )
+}
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);

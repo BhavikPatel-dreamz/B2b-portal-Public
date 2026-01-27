@@ -1,6 +1,9 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
 import { syncCompanyCreditMetafields } from "./metafieldSync.server";
+import {
+  AdminApiContext,
+} from "@shopify/shopify-app-react-router/server";
 
 
 interface CreditAvailability {
@@ -111,7 +114,7 @@ export async function deductCredit(
   orderId: string,
   amount: number | Decimal,
   userId: string,
-  admin?: any // Optional admin context for metafield sync
+  admin?: AdminApiContext // Optional admin context for metafield sync
 ): Promise<CreditDeductionResult> {
   const amountDecimal = new Decimal(amount);
 
@@ -212,7 +215,7 @@ export async function restoreCredit(
   amount: number | Decimal,
   userId: string,
   reason: "cancelled" | "refunded" = "cancelled",
-  admin?: any // Optional admin context for metafield sync
+  admin?: AdminApiContext // Optional admin context for metafield sync
 ): Promise<void> {
   const amountDecimal = new Decimal(amount);
 
@@ -279,10 +282,11 @@ export async function updatePendingCredit(companyId: string): Promise<{
     (sum, order) => sum.plus(order.remainingBalance),
     new Decimal(0)
   );
+  console.log(totalPending.toString());
 
   return {
-    totalPending: new Decimal(0), // Pending is always 0 with current logic
-    orderCount: 0, // No separate pending orders
+    totalPending,
+    orderCount: unpaidOrders.length,
   };
 }
 

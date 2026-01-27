@@ -1,10 +1,23 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 // Type for GraphQL response
-type GraphQLResponse<T = any> = {
+type GraphQLResponse<T = unknown> = {
   data?: T;
   errors?: Array<{ message: string }>;
 };
+
+interface ShopifyLocationNode {
+  id: string;
+  name: string;
+  address: {
+    address1: string;
+    city: string;
+    province: string;
+    country: string;
+  };
+  isActive: boolean;
+}
+
 
 /**
  * Get all Shopify locations
@@ -40,7 +53,7 @@ export async function getShopifyLocations(admin: AdminApiContext) {
       return { success: false, error: data.errors[0].message, locations: [] };
     }
 
-    const locations = data.data?.locations?.edges.map((edge: any) => ({
+    const locations = data.data?.locations?.edges.map((edge: { node: ShopifyLocationNode }) => ({
       id: edge.node.id,
       name: edge.node.name,
       address: edge.node.address,

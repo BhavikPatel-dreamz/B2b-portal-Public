@@ -5,12 +5,17 @@ import { restoreCredit } from "../services/tieredCreditService";
 import { getUserById } from "../services/user.server";
 import { getOrderByShopifyIdWithDetails } from "../services/order.server";
 
+interface ShopifyDraftOrder {
+  id: string;
+  name: string;
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { topic, shop, session, payload } = await authenticate.webhook(request);
   console.log(`📝 Draft Order Deleted webhook received for shop: ${shop}`);
 
   try {
-    const draftOrder = payload as any;
+    const draftOrder = payload as ShopifyDraftOrder;
     console.log(`Draft Order Deletion Details:`, {
       id: draftOrder.id,
       name: draftOrder.name,
@@ -56,8 +61,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         console.log(`💳 Credit refunded:`, refundResult);
-      } catch (creditError: any) {
-        console.error(`❌ Credit refund failed:`, creditError.message);
+      } catch (creditError: unknown) {
+        console.error(`❌ Credit refund failed:`, (creditError as Error).message);
         // Continue with deletion even if credit refund fails
       }
     }
@@ -80,10 +85,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       status: deletedOrder.orderStatus,
     });
 
-  } catch (error: any) {
-    console.error(`❌ Error processing draft order deletion webhook:`, error.message);
-    console.error(error.stack);
-    return new Response(`Error: ${error.message}`, { status: 200 }); // Return 200 to prevent retries
+  } catch (error: unknown) {
+    console.error(`❌ Error processing draft order deletion webhook:`, (error as Error).message);
+    console.error((error as Error).stack);
+    return new Response(`Error: ${(error as Error).message}`, { status: 200 }); // Return 200 to prevent retries
   }
 
   return new Response("OK", { status: 200 });

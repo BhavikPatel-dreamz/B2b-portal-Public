@@ -115,7 +115,7 @@ export async function createOrder(data: CreateOrderInput) {
       role: "STORE_ADMIN",
     },
   })
-  const notificationData: any = {
+  const notificationData = { 
     message: `New B2B order created with ID: ${order.id}`,
     title: "New Order Created",
     shopId: order?.shopId,
@@ -123,14 +123,13 @@ export async function createOrder(data: CreateOrderInput) {
     senderId: order?.createdByUserId,
     receiverId: storeAdmin?.id,
     isRead: false,
-    activeAction : order?.orderStatus,
+    activeAction: order?.orderStatus,
   };
 
-  
-   await prisma.notification.create({
+  await prisma.notification.create({
     data: notificationData,
   });
-  return  order 
+  return order;
 
 }
 

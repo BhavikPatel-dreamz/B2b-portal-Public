@@ -1,6 +1,5 @@
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { Decimal } from "@prisma/client/runtime/library";
 import { calculateAvailableCredit } from "./tieredCreditService";
 
 /**
@@ -14,14 +13,20 @@ interface MetafieldUpdate {
   value: string;
   type: string;
 }
+interface AdminApiContext {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, string> },
+  ) => Promise<Response>;
+}
 
 /**
  * Create or update customer metafields for credit information
  */
 export async function syncCustomerCreditMetafields(
-  admin: any,
+  admin: AdminApiContext,
   customerId: string,
-  userId: string
+  userId: string,
 ) {
   try {
     // Get user credit info from database
@@ -35,38 +40,38 @@ export async function syncCustomerCreditMetafields(
     });
 
     if (!user) {
-      throw new Error('User not found');
+      throw new Error("User not found");
     }
 
     // Prepare metafields to update
     const metafields: MetafieldUpdate[] = [
       {
-        namespace: 'b2b_credit',
-        key: 'is_b2b_customer',
-        value: 'true',
-        type: 'single_line_text_field',
+        namespace: "b2b_credit",
+        key: "is_b2b_customer",
+        value: "true",
+        type: "single_line_text_field",
       },
       {
-        namespace: 'b2b_credit',
-        key: 'company_id',
-        value: user.companyId || '',
-        type: 'single_line_text_field',
+        namespace: "b2b_credit",
+        key: "company_id",
+        value: user.companyId || "",
+        type: "single_line_text_field",
       },
       {
-        namespace: 'b2b_credit',
-        key: 'user_credit_used',
+        namespace: "b2b_credit",
+        key: "user_credit_used",
         value: user.userCreditUsed.toString(),
-        type: 'number_decimal',
+        type: "number_decimal",
       },
     ];
 
     // Add user credit limit if it exists
     if (user.userCreditLimit) {
       metafields.push({
-        namespace: 'b2b_credit',
-        key: 'user_credit_limit',
+        namespace: "b2b_credit",
+        key: "user_credit_limit",
         value: user.userCreditLimit.toString(),
-        type: 'number_decimal',
+        type: "number_decimal",
       });
     }
 
@@ -88,7 +93,7 @@ export async function syncCustomerCreditMetafields(
       }
     `;
 
-    const metafieldInputs = metafields.map(field => ({
+    const metafieldInputs = metafields.map((field) => ({
       ownerId: customerId,
       namespace: field.namespace,
       key: field.key,
@@ -103,14 +108,15 @@ export async function syncCustomerCreditMetafields(
     const data = await response.json();
 
     if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
-      const error = data.errors?.[0]?.message || data.data?.metafieldsSet?.userErrors?.[0]?.message;
+      const error =
+        data.errors?.[0]?.message ||
+        data.data?.metafieldsSet?.userErrors?.[0]?.message;
       throw new Error(`Failed to update customer metafields: ${error}`);
     }
 
     return { success: true, data: data.data?.metafieldsSet?.metafields };
-
-  } catch (error: any) {
-    console.error('Error syncing customer credit metafields:', error);
+  } catch (error: { message: string }) {
+    console.error("Error syncing customer credit metafields:", error);
     return { success: false, error: error.message };
   }
 }
@@ -119,8 +125,8 @@ export async function syncCustomerCreditMetafields(
  * Create or update company metafields for credit information
  */
 export async function syncCompanyCreditMetafields(
-  admin: any,
-  companyId: string
+  admin: AdminApiContext,
+  companyId: string,
 ) {
   try {
     // Get company credit info from database
@@ -133,14 +139,14 @@ export async function syncCompanyCreditMetafields(
     });
 
     if (!company || !company.shopifyCompanyId) {
-      throw new Error('Company not found or no Shopify company ID');
+      throw new Error("Company not found or no Shopify company ID");
     }
 
     // Calculate available credit
     const creditData = await calculateAvailableCredit(companyId);
 
     if (!creditData) {
-      throw new Error('Unable to calculate credit data');
+      throw new Error("Unable to calculate credit data");
     }
 
     const availableCredit = creditData.availableCredit;
@@ -149,16 +155,16 @@ export async function syncCompanyCreditMetafields(
     // Prepare metafields
     const metafields: MetafieldUpdate[] = [
       {
-        namespace: 'b2b_credit',
-        key: 'credit_limit',
+        namespace: "b2b_credit",
+        key: "credit_limit",
         value: company.creditLimit.toString(),
-        type: 'number_decimal',
+        type: "number_decimal",
       },
       {
-        namespace: 'b2b_credit',
-        key: 'credit_used',
+        namespace: "b2b_credit",
+        key: "credit_used",
         value: usedCredit.toString(),
-        type: 'number_decimal',
+        type: "number_decimal",
       },
     ];
 
@@ -180,7 +186,7 @@ export async function syncCompanyCreditMetafields(
       }
     `;
 
-    const metafieldInputs = metafields.map(field => ({
+    const metafieldInputs = metafields.map((field) => ({
       ownerId: company.shopifyCompanyId,
       namespace: field.namespace,
       key: field.key,
@@ -190,22 +196,26 @@ export async function syncCompanyCreditMetafields(
 
     const response = await admin.graphql(mutation, {
       variables: {
-        metafields: metafieldInputs
+        metafields: metafieldInputs,
       },
     });
 
     const data = await response.json();
-    console.log('Company metafield sync response:', data.data?.metafieldsSet?.metafields);
+    console.log(
+      "Company metafield sync response:",
+      data.data?.metafieldsSet?.metafields,
+    );
 
     if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
-      const error = data.errors?.[0]?.message || data.data?.metafieldsSet?.userErrors?.[0]?.message;
+      const error =
+        data.errors?.[0]?.message ||
+        data.data?.metafieldsSet?.userErrors?.[0]?.message;
       throw new Error(`Failed to update company metafields: ${error}`);
     }
 
     return { success: true, data: data.data?.metafieldsSet?.metafields };
-
-  } catch (error: any) {
-    console.error('Error syncing company credit metafields:', error);
+  } catch (error: { message: string }) {
+    console.error("Error syncing company credit metafields:", error);
     return { success: false, error: error.message };
   }
 }
@@ -216,14 +226,13 @@ export async function syncCompanyCreditMetafields(
 export async function syncAllCreditMetafields(
   shop: string,
   customerId: string,
-  userId: string
+  userId: string,
 ) {
-
   try {
     if (!shop) {
       return Response.json({
         success: false,
-        error: 'Invalid shop domain',
+        error: "Invalid shop domain",
       });
     }
     const { admin } = await authenticate.admin(shop);
@@ -235,14 +244,14 @@ export async function syncAllCreditMetafields(
     });
 
     if (!user) {
-      throw new Error('User not found');
+      throw new Error("User not found");
     }
 
     // Sync customer metafields
     const customerResult = await syncCustomerCreditMetafields(
       admin,
       customerId,
-      userId
+      userId,
     );
 
     if (!customerResult.success) {
@@ -260,7 +269,7 @@ export async function syncAllCreditMetafields(
     } else {
       companyResult = {
         success: true,
-        message: 'User not associated with a company, skipping company sync.',
+        message: "User not associated with a company, skipping company sync.",
       };
     }
 
@@ -269,12 +278,11 @@ export async function syncAllCreditMetafields(
       customer: customerResult,
       company: companyResult,
     };
-
-  } catch (error: any) {
-    console.error('Error syncing all credit metafields:', error);
+  } catch (error: unknown) {
+    console.error("Error syncing all credit metafields:", error);
     return {
       success: false,
-      error: error.message,
+      error: error instanceof Error ? error.message : "Unknown error",
       customer: { success: false },
       company: { success: false },
     };
@@ -287,7 +295,7 @@ export async function syncAllCreditMetafields(
  */
 export async function autoSyncCreditMetafields(
   companyId: string,
-  userId?: string
+  userId?: string,
 ) {
   try {
     // Get all users in the company if specific user not provided
@@ -310,12 +318,12 @@ export async function autoSyncCreditMetafields(
       where: { id: companyId },
       select: {
         shop: {
-          select: { shopDomain: true }
-        }
+          select: { shopDomain: true },
+        },
       },
     });
     if (!company?.shop?.shopDomain) {
-      throw new Error('Company shop not found');
+      throw new Error("Company shop not found");
     }
 
     const results = [];
@@ -326,7 +334,7 @@ export async function autoSyncCreditMetafields(
         const result = await syncAllCreditMetafields(
           company.shop.shopDomain,
           user.shopifyCustomerId,
-          user.id
+          user.id,
         );
         results.push({ userId: user.id, result });
       }
@@ -337,9 +345,8 @@ export async function autoSyncCreditMetafields(
       syncedUsers: results.length,
       results,
     };
-
-  } catch (error: any) {
-    console.error('Error in auto-sync credit metafields:', error);
+  } catch (error: { message: string }) {
+    console.error("Error in auto-sync credit metafields:", error);
     return {
       success: false,
       error: error.message,

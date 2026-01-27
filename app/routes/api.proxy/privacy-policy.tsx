@@ -6,7 +6,7 @@ import { getStoreByDomain } from "app/services/store.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     // Get proxy parameters
-    const { shop, loggedInCustomerId } = getProxyParams(request);
+    const { shop } = getProxyParams(request);
 
     if (!shop) {
       return Response.json(

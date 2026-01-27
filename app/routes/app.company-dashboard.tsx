@@ -7,7 +7,6 @@ import {
   getCompanyDashboardData,
   updateCredit,
 } from "../services/company.server";
-import { redirect } from "@remix-run/node";
 import {
   parseForm,
   parseCredit,
@@ -1057,47 +1056,51 @@ export default function CompanyDashboard() {
               </button>
             </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 13, fontWeight: 500 }}>
-                Set payment terms
-              </label>
-              <select
-                value={selectedPaymentTerms}
-                onChange={(e) => setSelectedPaymentTerms(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  marginTop: 6,
-                }}
-              >
-                {paymentTermsOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+  <div style={{ marginBottom: 20 }}>
+    <label 
+      htmlFor="payment-terms-select"
+      style={{ fontSize: 13, fontWeight: 500 }}
+    >
+      Set payment terms
+    </label>
+    <select
+      id="payment-terms-select"
+      value={selectedPaymentTerms}
+      onChange={(e) => setSelectedPaymentTerms(e.target.value)}
+      style={{
+        width: "100%",
+        padding: "8px 12px",
+        marginTop: 6,
+      }}
+    >
+      {paymentTermsOptions.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </div>
 
-            {isEditingPaymentTerms && (
-              <div
-                style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
-              >
-                <button onClick={handleCancelPaymentTermsEdit}>Cancel</button>
-                <button
-                  onClick={handlePaymentTermsUpdate}
-                  disabled={fetcher.state === "submitting"}
-                  style={{
-                    backgroundColor: "#008060",
-                    color: "white",
-                    padding: "8px 16px",
-                    borderRadius: 6,
-                  }}
-                >
-                  {fetcher.state === "submitting" ? "Saving..." : "Save"}
-                </button>
-              </div>
-            )}
-          </section>
+  {isEditingPaymentTerms && (
+    <div
+      style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+    >
+      <button onClick={handleCancelPaymentTermsEdit}>Cancel</button>
+      <button
+        onClick={handlePaymentTermsUpdate}
+        disabled={fetcher.state === "submitting"}
+        style={{
+          backgroundColor: "#008060",
+          color: "white",
+          padding: "8px 16px",
+          borderRadius: 6,
+        }}
+      >
+        {fetcher.state === "submitting" ? "Saving..." : "Save"}
+      </button>
+    </div>
+  )}
+</section>
         </div>
       )}
 

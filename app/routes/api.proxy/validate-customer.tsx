@@ -106,7 +106,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
  
     let hasB2BInShopify = false;
     let accessMethod = "";
-    let additionalInfo: any = {};
+    // If you know what properties might be in additionalInfo
+interface AdditionalInfo {
+  [key: string]: string | number | boolean | null | object | undefined;
+}
+
+let additionalInfo: AdditionalInfo = {};
 
     if (customerCompanyInfo.hasCompany) {
       console.log("✅ Customer has B2B access via CompanyContact");

@@ -11,8 +11,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log(JSON.stringify(payload))
   console.log(`📝 Draft Order Created webhook received for shop: ${shop}`);
 
+
+  interface ShopifyDraftOrder {
+    id: string;
+    name: string;
+    email: string;
+    total_price: string;
+    currency: string;
+    status: string;
+    "b2b?": boolean;
+    line_items?: {
+      id: string;
+      name: string;
+      quantity: number;
+      price: string;
+      currency: string;
+    }[];
+    customer?: {
+      id: string;
+    };
+  }
+  
   try {
-    const draftOrder = payload as any;
+    const draftOrder = payload as ShopifyDraftOrder;
 
     // Validate required fields from the payload
     if (!draftOrder.id || !draftOrder.total_price) {
@@ -118,21 +139,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         userCreditUsed: draftOrderData.userCreditUsed,
       });
 
-    } catch (creditError: any) {
+    } catch (creditError: unknown) {
       console.error(`❌ Credit reservation failed:`, {
-        error: creditError.message,
-        stack: creditError.stack,
+        error: (creditError as Error).message,
+        stack: (creditError as Error).stack,
         companyId: b2bUser.company.id,
         orderAmount: totalAmount
       });
       // Don't fail the webhook, just log the error
-      return new Response(`Credit reservation failed: ${creditError.message}`, { status: 500 });
+      return new Response(`Credit reservation failed: ${(creditError as Error).message}`, { status: 500 });
     }
 
-  } catch (error: any) {
-    console.error(`❌ Error processing draft order webhook:`, error.message);
-    console.error(error.stack);
-    return new Response(`Error: ${error.message}`, { status: 500 });
+  } catch (error: unknown) {
+    console.error(`❌ Error processing draft order webhook:`, (error as Error).message);
+    console.error((error as Error).stack);
+    return new Response(`Error: ${(error as Error).message}`, { status: 500 });
   }
 
   return new Response("OK", { status: 200 });

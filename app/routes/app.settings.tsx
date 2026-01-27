@@ -181,7 +181,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response();
       }
 
-      const customer = payload as any;
+      const customer = payload as {
+        id: number;
+        email: string;
+        first_name: string;
+        last_name: string;
+        tags: string;
+        credit: number;
+      };
       const customerId = customer.id;
       const customerEmail = customer.email;
       const firstName = customer.first_name;
@@ -317,7 +324,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     { status: 200 },
   );
 };
-const ToolbarButton = ({ onClick, title, children }: any) => (
+const ToolbarButton = ({
+  onClick,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  children: ReactNode;
+}) => (
   <button
     type="button"
     onClick={onClick}
@@ -353,12 +368,55 @@ const PRIVACY_PLACEHOLDER = `Privacy Policy
 
 This privacy policy describes how we collect, use, and protect your personal information.`;
 
+
+
 export default function SettingsPage() {
+  // Refs
+  const editorRef = useRef<HTMLDivElement>(null);
+  const hiddenInputRef = useRef<HTMLInputElement>(null);
+  const privacyEditorRef = useRef<HTMLDivElement>(null);
+  const privacyHiddenInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetchers
+  const fetcher = useFetcher<ActionResponse>();
+  const deleteFetcher = useFetcher<ActionResponse>();
+
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [content, setContent] = useState("");
+
   const loaderData = useLoaderData<LoaderData>();
   const { storeMissing } = loaderData;
 
   const [emailHasContent, setEmailHasContent] = useState(false);
   const [privacyHasContent, setPrivacyHasContent] = useState(false);
+
+  // Update the useEffect for successful deletion
+  useEffect(() => {
+    if (deleteFetcher.data?.success) {
+      setShowDeleteModal(false);
+      setConfirmText("");
+
+      // Optional: Reload the page to show fresh state
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    }
+  }, [deleteFetcher.data]);
+  
+  useEffect(() => {
+  const handleEscape = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && showDeleteModal) {
+      setShowDeleteModal(false);
+    }
+  };
+
+  if (showDeleteModal) {
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }
+}, [showDeleteModal]);
 
   // Update handleInput function
   const handleInput = () => {
@@ -413,13 +471,27 @@ export default function SettingsPage() {
         }
       }
     }
-  }, [
-    loaderData.store?.companyWelcomeEmailTemplate,
-    loaderData.store?.privacyPolicyContent,
-    storeMissing,
-  ]);
+  }, [loaderData.store, storeMissing]);
+  const feeprismaack = useMemo(() => {
+    const data = fetcher.data || deleteFetcher.data;
+    if (!data) return null;
 
-  // Update the useEffect for initialization
+    if (!data.success && data.errors?.length) {
+      return {
+        tone: "critical" as const,
+        title: "Error",
+        messages: data.errors,
+      };
+    }
+    if (data.success && data.message) {
+      return {
+        tone: "success" as const,
+        title: data.message,
+        messages: [],
+      };
+    }
+    return null;
+  }, [fetcher.data, deleteFetcher.data]);
 
   // TypeScript now knows if storeMissing is false, store exists
   if (loaderData.storeMissing) {
@@ -436,21 +508,6 @@ export default function SettingsPage() {
       </s-page>
     );
   }
-
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
-  const [content, setContent] = useState("");
-
-  // Refs
-  const editorRef = useRef<HTMLDivElement>(null);
-  const hiddenInputRef = useRef<HTMLInputElement>(null);
-  const privacyEditorRef = useRef<HTMLDivElement>(null);
-  const privacyHiddenInputRef = useRef<HTMLInputElement>(null);
-
-  // Fetchers
-  const fetcher = useFetcher<ActionResponse>();
-  const deleteFetcher = useFetcher<ActionResponse>();
 
   const isSaving = fetcher.state !== "idle";
   const isDeleting = deleteFetcher.state !== "idle";
@@ -469,7 +526,6 @@ export default function SettingsPage() {
     document.execCommand(command, false, value);
     editorRef.current?.focus();
   };
-
 
   const insertVariable = (variable: string) => {
     if (editorRef.current) {
@@ -498,48 +554,31 @@ export default function SettingsPage() {
     privacyEditorRef.current?.focus();
   };
 
-
-
   const handleDelete = () => {
     deleteFetcher.submit({ intent: "delete" }, { method: "post" });
   };
 
-  // Update the useEffect for successful deletion
-  useEffect(() => {
-    if (deleteFetcher.data?.success) {
-      setShowDeleteModal(false);
-      setConfirmText("");
+  // // Feedback message
+  // const feedback = useMemo(() => {
+  //   const data = fetcher.data || deleteFetcher.data;
+  //   if (!data) return null;
 
-      // Optional: Reload the page to show fresh state
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
-    }
-  }, [deleteFetcher.data]);
-
- 
-
-  // Feeprismaack message
-  const feeprismaack = useMemo(() => {
-    const data = fetcher.data || deleteFetcher.data;
-    if (!data) return null;
-
-    if (!data.success && data.errors?.length) {
-      return {
-        tone: "critical" as const,
-        title: "Error",
-        messages: data.errors,
-      };
-    }
-    if (data.success && data.message) {
-      return {
-        tone: "success" as const,
-        title: data.message,
-        messages: [],
-      };
-    }
-    return null;
-  }, [fetcher.data, deleteFetcher.data]);
+  //   if (!data.success && data.errors?.length) {
+  //     return {
+  //       tone: "critical" as const,
+  //       title: "Error",
+  //       messages: data.errors,
+  //     };
+  //   }
+  //   if (data.success && data.message) {
+  //     return {
+  //       tone: "success" as const,
+  //       title: data.message,
+  //       messages: [],
+  //     };
+  //   }
+  //   return null;
+  // }, [fetcher.data, deleteFetcher.data]);
 
   // Early return if store is missing
   if (storeMissing) {
@@ -564,10 +603,7 @@ export default function SettingsPage() {
       <s-section heading="Branding & notifications">
         {feeprismaack && (
           <div style={{ marginBottom: 12 }}>
-            <s-banner
-              tone={feeprismaack.tone}
-              heading={feeprismaack.title}
-            >
+            <s-banner tone={feeprismaack.tone} heading={feeprismaack.title}>
               {feeprismaack.messages.length > 0 && (
                 <s-unordered-list>
                   {feeprismaack.messages.map((msg) => (
@@ -579,7 +615,15 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.04)", padding: 24, marginBottom: 24 }}>
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+            padding: 24,
+            marginBottom: 24,
+          }}
+        >
           <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
             {/* Store Name */}
             <div style={{ display: "grid", gap: 6 }}>
@@ -674,9 +718,7 @@ export default function SettingsPage() {
                       style={{ maxWidth: "100%", maxHeight: "100%" }}
                     />
                   </div>
-                  <s-text tone="neutral">
-                    Preview of the stored logo.
-                  </s-text>
+                  <s-text tone="neutral">Preview of the stored logo.</s-text>
                 </div>
               )}
             </div>
@@ -1049,7 +1091,7 @@ export default function SettingsPage() {
                     </svg>
                   </button>
 
-                  {showDropdown && (
+                  {/* {showDropdown && (
                     <>
                       <div
                         style={{
@@ -1082,6 +1124,95 @@ export default function SettingsPage() {
                               key={variable}
                               type="button"
                               onClick={() => insertVariable(variable)}
+                              style={{
+                                padding: "8px 10px",
+                                background: "#fff",
+                                border: "1px solid #c9cccf",
+                                borderRadius: 6,
+                                textAlign: "left",
+                                cursor: "pointer",
+                                fontSize: 13,
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "#f1f2f3";
+                                e.currentTarget.style.borderColor = "#005bd3";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "#fff";
+                                e.currentTarget.style.borderColor = "#c9cccf";
+                              }}
+                            >
+                              <code
+                                style={{
+                                  background: "#e3f2fd",
+                                  padding: "2px 6px",
+                                  borderRadius: 4,
+                                  fontSize: 12,
+                                  color: "#0066cc",
+                                  fontFamily: "monospace",
+                                }}
+                              >
+                                {variable}
+                              </code>
+                              <span
+                                style={{
+                                  color: "#6d7175",
+                                  fontSize: 12,
+                                  marginLeft: 8,
+                                }}
+                              >
+                                {desc}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )} */}
+                  {showDropdown && (
+                    <>
+                      <div
+                        style={{
+                          position: "fixed",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          zIndex: 999,
+                        }}
+                        onClick={() => setShowDropdown(false)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setShowDropdown(false);
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Close dropdown"
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 4px)",
+                          right: 0,
+                          background: "#fff",
+                          border: "1px solid #c9cccf",
+                          borderRadius: 8,
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                          minWidth: 320,
+                          zIndex: 1000,
+                          padding: 8,
+                        }}
+                        role="menu"
+                      >
+                        <div style={{ display: "grid", gap: 4 }}>
+                          {variables.map(({ var: variable, desc }) => (
+                            <button
+                              key={variable}
+                              type="button"
+                              onClick={() => insertVariable(variable)}
+                              role="menuitem"
                               style={{
                                 padding: "8px 10px",
                                 background: "#fff",
@@ -1468,7 +1599,7 @@ export default function SettingsPage() {
               }}
               onClick={() => !isDeleting && setShowDeleteModal(false)}
             >
-              <div
+              {/* <div
                 style={{
                   background: "#fff",
                   borderRadius: 12,
@@ -1542,6 +1673,178 @@ export default function SettingsPage() {
                       color: "#dc2626",
                       fontWeight: "bold",
                     }}
+                  >
+                    ⚠
+                  </span>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 13,
+                      color: "#7f1d1d",
+                      fontWeight: 600,
+                    }}
+                  >
+                    This action is <strong>irreversible</strong>. All data will
+                    be permanently lost.
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <button
+                    onClick={() => setShowDeleteModal(false)}
+                    disabled={isDeleting}
+                    style={{
+                      padding: "10px 16px",
+                      background: "#fff",
+                      color: "#374151",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: isDeleting ? "not-allowed" : "pointer",
+                      opacity: isDeleting ? 0.6 : 1,
+                      transition: "all 0.2s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#f9fafb";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#fff";
+                      }
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                    style={{
+                      padding: "10px 16px",
+                      background: isDeleting ? "#f87171" : "#dc2626",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: isDeleting ? "not-allowed" : "pointer",
+                      opacity: isDeleting ? 0.6 : 1,
+                      transition: "all 0.2s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#b91c1c";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isDeleting) {
+                        e.currentTarget.style.background = "#dc2626";
+                      }
+                    }}
+                  >
+                    {isDeleting
+                      ? "Deleting all data..."
+                      : "Yes, Delete Everything"}
+                  </button>
+                </div>
+              </div> */}
+              <div
+                style={{
+                  background: "#fff",
+                  borderRadius: 12,
+                  padding: 24,
+                  maxWidth: 500,
+                  width: "100%",
+                  maxHeight: "90vh",
+                  overflowY: "auto",
+                  boxShadow:
+                    "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                  position: "relative",
+                  zIndex: 10001,
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setShowDeleteModal(false);
+                  }
+                }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-modal-title"
+                aria-describedby="delete-modal-description"
+                tabIndex={-1}
+              >
+                <h3
+                  id="delete-modal-title"
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 600,
+                    marginBottom: 12,
+                    color: "#dc2626",
+                  }}
+                >
+                  ⚠️ Confirm Deletion
+                </h3>
+                <p
+                  id="delete-modal-description"
+                  style={{
+                    fontSize: 14,
+                    color: "#374151",
+                    marginBottom: 16,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  You are about to{" "}
+                  <strong>permanently delete all B2B portal data</strong> for
+                  this store. This includes:
+                </p>
+
+                <ul
+                  style={{
+                    fontSize: 14,
+                    color: "#374151",
+                    marginBottom: 24,
+                    paddingLeft: 20,
+                    lineHeight: 1.8,
+                  }}
+                >
+                  <li>All companies and their contacts</li>
+                  <li>All registration submissions</li>
+                  <li>All users and their sessions</li>
+                  <li>All orders and payment records</li>
+                  <li>All credit accounts and transactions</li>
+                  <li>All locations and wishlist items</li>
+                  <li>All store B2B settings</li>
+                </ul>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: 12,
+                    background: "#fee2e2",
+                    borderRadius: 6,
+                    marginBottom: 20,
+                  }}
+                  role="alert"
+                  aria-live="polite"
+                >
+                  <span
+                    style={{
+                      fontSize: 18,
+                      color: "#dc2626",
+                      fontWeight: "bold",
+                    }}
+                    aria-hidden="true"
                   >
                     ⚠
                   </span>

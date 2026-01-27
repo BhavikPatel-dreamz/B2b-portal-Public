@@ -2,7 +2,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
-import { deleteUser, getUserByEmail, getUserById } from "../services/user.server";
+import { deleteUser, getUserById } from "../services/user.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("customers/delete webhook received");

@@ -1,5 +1,4 @@
 import prisma from "../db.server";
-import { Prisma } from "@prisma/client";
 
 export interface CreateWishlistInput {
   name: string;

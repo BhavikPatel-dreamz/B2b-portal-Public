@@ -28,7 +28,7 @@ import prisma from "app/db.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     // Authenticate and validate B2B access with permissions
-    const { companyId, store, shop, userContext, customerId } =
+    const { companyId, store, shop, userContext } =
       await authenticateApiProxyWithPermissions(request);
 
     const companyData = await prisma.companyAccount.findFirst({
@@ -123,7 +123,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     const customerIds = customersData.customers.map(
-      (c: any) => `${c.customer.id}`,
+      (c: { customer: { id: string } }) => `${c.customer.id}`,
     );
     const registrations = await prisma.registrationSubmission.findMany({
       where: {
@@ -135,7 +135,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
 
     // Map to the format expected by the component with locationRoles array
-    const users = customersData.customers.map((c: any) => {
+    const users = customersData.customers.map((c: { customer: { id: string; firstName?: string; lastName?: string; email: string; roleAssignments?: { edges?: { node: { role?: { name?: string }; companyLocation?: { name?: string } } }[] } } }) => {
       const firstName = c.customer.firstName?.trim();
       const lastName = c.customer.lastName?.trim();
 
@@ -150,7 +150,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         c.customer.email === storeAdminEmail;
 
       const locationRoles =
-        c.customer.roleAssignments?.edges?.map((edge: any) => ({
+        c.customer.roleAssignments?.edges?.map((edge: { node: { role?: { name?: string , id?: string }; companyLocation?: { name?: string , id?: string } } }) => ({
           roleName: isThisStoreAdmin
             ? "Company Admin"
             : (edge.node.role?.name ?? ""),

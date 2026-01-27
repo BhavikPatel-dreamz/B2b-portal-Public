@@ -1,9 +1,19 @@
 import { type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import prisma from "../../db.server";
+import type { Prisma } from "@prisma/client";
 import { getStoreByDomain } from "../../services/store.server";
 import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
 import { getProxyParams, validateB2BCustomerAccess } from "../../utils/proxy.server";
 
+interface ShopifyCustomer {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  mainContact: {
+    id: string;
+  };
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
@@ -22,7 +32,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   // Build where clause
-  const where: any = { shopId: store?.id, receiverId: user?.id };
+  const where: Prisma.NotificationWhereInput = { shopId: store?.id, receiverId: user?.id };
   if (activityType) where.activityType = activityType;
   if (senderId) where.senderId = senderId;
   if (isRead) where.isRead = isRead === 'true';
@@ -85,7 +95,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
        }
     // Step 3: Get customer company info
     const companyInfo = await getCustomerCompanyInfo(customerId, shop, store.accessToken);
-      const adminReceiverId = companyInfo?.companies.map((company: any) => company.mainContact.id)
+      const adminReceiverId = companyInfo?.companies.map((company: ShopifyCustomer) => company.mainContact.id) || [];
 
     try {
         switch (actionType) {
@@ -100,7 +110,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                  if (!receiverId  && !senderId) return { error: "At least one receiver or sender is required" };
                 if (!message) return { error: "Message is required" };
 
-                const notificationData: any = {
+                const notificationData: Prisma.NotificationCreateInput = {
                     message,
                     shopId: store?.id,
                     activityType: 'pending',

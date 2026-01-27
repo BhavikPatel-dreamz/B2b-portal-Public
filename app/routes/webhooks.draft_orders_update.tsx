@@ -5,12 +5,32 @@ import { getCompanyByUserId } from "../services/user.server";
 import { upsertOrder, getOrderByShopifyIdWithDetails, deleteOrder } from "../services/order.server";
 import { getStoreByDomain } from "../services/store.server";
 
+interface ShopifyDraftOrder {
+  id: string;
+  name: string;
+  email: string;
+  total_price: string;
+  currency: string;
+  status: string;
+  "b2b?": boolean;
+  line_items?: {
+    id: string;
+    name: string;
+    quantity: number;
+    price: string;
+    currency: string;
+  }[];
+  customer?: {
+    id: string;
+  };
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, shop, payload } = await authenticate.webhook(request);
   console.log(`📝 Draft Order Updated webhook received for shop: ${shop}`);
 
   try {
-    const draftOrder = payload as any;
+    const draftOrder = payload as ShopifyDraftOrder;
     console.log(`Draft Order Update Details:`, {
       id: draftOrder.id,
       email: draftOrder.email,
@@ -81,9 +101,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
 
           console.log(`✅ Credit restored successfully`);
-        } catch (creditError: any) {
+        } catch (creditError: unknown) {
           console.error(`❌ Failed to restore credit:`, {
-            error: creditError.message,
+            error: (creditError as Error).message,
             companyId: b2bUser.company.id,
             orderAmount: existingOrder.creditUsed
           });
@@ -94,9 +114,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       try {
         await deleteOrder(existingOrder.id);
         console.log(`✅ Draft order deleted successfully from B2B system`);
-      } catch (deleteError: any) {
-        console.error(`❌ Failed to delete order:`, deleteError.message);
-        return new Response(`Failed to delete order: ${deleteError.message}`, { status: 500 });
+      } catch (deleteError: unknown) {
+        console.error(`❌ Failed to delete order:`, (deleteError as Error).message);
+        return new Response(`Failed to delete order: ${(deleteError as Error).message}`, { status: 500 });
       }
 
       return new Response("OK", { status: 200 });
@@ -142,15 +162,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
           console.log(`💳 Credit released:`, releaseResult);
         }
-      } catch (creditError: any) {
+      } catch (creditError: unknown) {
         console.error(`❌ Credit adjustment failed:`, {
-          error: creditError.message,
-          stack: creditError.stack,
+          error: (creditError as Error).message,
+          stack: (creditError as Error).stack,
           companyId: b2bUser.company.id,
           orderAmount: amountDifference
         });
         // Don't fail the webhook, just log the error
-        return new Response(`Credit adjustment failed: ${creditError.message}`, { status: 500 });
+        return new Response(`Credit adjustment failed: ${(creditError as Error).message}`, { status: 500 });
       }
     }
 
@@ -176,10 +196,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       userCreditUsed: updatedOrder.userCreditUsed,
     });
 
-  } catch (error: any) {
-    console.error(`❌ Error processing draft order update webhook:`, error.message);
-    console.error(error.stack);
-    return new Response(`Error: ${error.message}`, { status: 500 });
+  } catch (error: unknown) {
+    console.error(`❌ Error processing draft order update webhook:`, (error as Error).message);
+    console.error((error as Error).stack);
+    return new Response(`Error: ${(error as Error).message}`, { status: 500 }); 
   }
 
   return new Response("OK", { status: 200 });

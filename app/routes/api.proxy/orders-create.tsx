@@ -9,6 +9,8 @@ import {
 
 import prisma from "../../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
+import { Prisma } from "@prisma/client";
+import { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 interface OrderItem {
   variantId: string;
@@ -41,11 +43,11 @@ interface CreateOrderRequest {
  * Create a draft order in Shopify
  */
 async function createShopifyDraftOrder(
-  admin: any,
+  admin: AdminApiContext,
   orderData: {
     customerId: string;
     lineItems: Array<{ variantId: string; quantity: number }>;
-    shippingAddress?: any;
+    shippingAddress?: Prisma.InputJsonValue;
     note?: string;
   }
 ) {
@@ -73,7 +75,12 @@ async function createShopifyDraftOrder(
     quantity: item.quantity,
   }));
 
-  const input: any = {
+  const input: {
+    customerId: string;
+    lineItems: Array<{ variantId: string; quantity: number }>;
+    shippingAddress?: Prisma.InputJsonValue;
+    note?: string;
+  } = {
     customerId: orderData.customerId,
     lineItems,
   };
@@ -340,7 +347,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
         { status: 201 }
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error creating B2B order:", error);
 
       // Rollback if we created a B2B order
@@ -369,17 +376,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return Response.json(
         {
           error: "Failed to create order",
-          details: error.message,
+          details: (error as Error).message,
         },
         { status: 500 }
       );
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in order creation endpoint:", error);
     return Response.json(
       {
         error: "Internal server error",
-        details: error.message,
+        details: (error as Error).message,
       },
       { status: 500 }
     );

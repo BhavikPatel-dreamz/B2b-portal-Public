@@ -1,5 +1,5 @@
 import prisma from "app/db.server";
-import axios from "axios";
+import axios, { isAxiosError } from 'axios';
 
 interface EmailParams {
   to: string;
@@ -42,7 +42,7 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
     console.log("✅ Email sent successfully:", response.data);
     return { success: true, messageId: response.data.messageId };
   } catch (error) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       console.error("❌ Brevo API Error:", error.response?.data);
       return {
         success: false,

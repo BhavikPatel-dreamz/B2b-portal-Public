@@ -1,5 +1,4 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../../shopify.server";
 import { getStoreByDomain } from "../../services/store.server";
 import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
 import { getProxyParams } from "app/utils/proxy.server";

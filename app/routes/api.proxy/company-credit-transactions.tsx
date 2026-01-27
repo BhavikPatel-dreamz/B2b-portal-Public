@@ -21,7 +21,7 @@ interface CreditTransactionsRequest {
 /**
  * Convert transactions to CSV format
  */
-function convertToCSV(transactions: any[]): string {
+function convertToCSV(transactions: Prisma.CreditTransactionCreateInput[]): string {
   if (transactions.length === 0) {
     return "No data available";
   }

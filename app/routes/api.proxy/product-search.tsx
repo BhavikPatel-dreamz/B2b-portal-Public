@@ -65,11 +65,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return { products: [] };
   }
 
-  const products = data.data.products.edges.map((edge: any) => ({
+  const products = data.data.products.edges.map((edge: { node: { id: string; title: string; featuredImage?: { url: string }; variants: { edges: { node: { id: string; title: string; price: string } }[] } } } ) => ({
     id: edge.node.id,
     title: edge.node.title,
     image: edge.node.featuredImage?.url,
-    variants: edge.node.variants.edges.map((v: any) => ({
+    variants: edge.node.variants.edges.map((v: { node: { id: string; title: string; price: string } }) => ({
       id: v.node.id,
       title: v.node.title,
       price: v.node.price,

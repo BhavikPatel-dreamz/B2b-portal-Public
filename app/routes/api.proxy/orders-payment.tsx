@@ -210,22 +210,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
         { status: 200 }
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error processing payment:", error);
       return Response.json(
         {
           error: "Failed to process payment",
-          details: error.message,
+          details: (error as Error).message,
         },
         { status: 500 }
       );
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in payment processing endpoint:", error);
     return Response.json(
       {
         error: "Internal server error",
-        details: error.message,
+        details: (error as Error).message,
       },
       { status: 500 }
     );

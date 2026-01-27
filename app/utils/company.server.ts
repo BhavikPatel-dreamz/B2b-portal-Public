@@ -8,13 +8,13 @@ import { sendCompanyWelcomeEmail } from "../services/notification.server";
  * SERVER ONLY - Uses Prisma and admin context
  */
 export const syncShopifyCompanies = async (
-  admin: any,
-  store: any,
+  admin: string,
+  store: string,
   submissionEmail: string | null,
 ) => {
   try {
     // Step 1: Fetch all Shopify B2B companies with pagination
-    let allCompanies: any[] = [];
+    let allCompanies: [] = [];
     let hasNextPage = true;
     let cursor: string | null = null;
 
@@ -238,19 +238,26 @@ export const parseCredit = (value?: string) => {
   return new Prisma.Decimal(numeric);
 };
 
+interface ShopifyRoleAssignment {
+  node: {
+    role: {
+      name: string;
+    };
+  };
+}
 /**
  * Sync Shopify B2B customers/users to local database
  * Fetches customers with B2B access, creates/updates User records
  * SERVER ONLY - Uses Prisma and admin context
  */
 export const syncShopifyUsers = async (
-  admin: any,
-  store: any,
+  admin: string,
+  store: string,
   companyId?: string,
 ) => {
   try {
     // Fetch all customers with B2B company contact profiles
-    let allCustomers: any[] = [];
+    let allCustomers: [] = [];
     let hasNextPage = true;
     let cursor: string | null = null;
 
@@ -364,9 +371,9 @@ export const syncShopifyUsers = async (
             // Determine company role from Shopify role assignments
             let companyRole = "member";
             const roles = profile.roleAssignments?.edges || [];
-            if (roles.some((r: any) => r.node?.role?.name?.includes("Admin"))) {
+            if (roles.some((r: ShopifyRoleAssignment) => r.node?.role?.name?.includes("Admin"))) {
               companyRole = "admin";
-            } else if (roles.some((r: any) => r.node?.role?.name?.includes("Approver"))) {
+            } else if (roles.some((r: ShopifyRoleAssignment) => r.node?.role?.name?.includes("Approver"))) {
               companyRole = "approver";
             }
 

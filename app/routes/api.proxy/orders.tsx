@@ -1,5 +1,4 @@
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../../shopify.server";
 import { getStoreByDomain } from "../../services/store.server";
 import {
   getCustomerCompanyInfo,
@@ -41,6 +40,14 @@ interface OrderRequestPagination {
   before?: string;
 }
 
+interface PageInfo {
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+  endCursor: string | null;
+  startCursor: string | null;
+  first?: number;
+}
+  
 export function buildDateRangeQuery(
   baseQueryParts: string[],
   startDate: Date,
@@ -123,12 +130,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // 🔍 Get user's location assignments
     const userLocationAssignments = company.roleAssignments.filter(
-      (ra: any) => ra.locationId,
+      (ra: { locationId?: string }) => ra.locationId,
     );
     const userAssignedLocationIds =
       userLocationAssignments.length > 0
         ? ([
-            ...new Set(userLocationAssignments.map((ra: any) => ra.locationId)),
+            ...new Set(userLocationAssignments.map((ra: { locationId: string }) => ra.locationId)),
           ] as string[])
         : [];
 
@@ -257,8 +264,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     
     // ✅ FIXED: Helper function to fetch and filter orders
     const fetchAndFilterOrders = async (
-      filters: any,
-      pagination: any
+      filters: OrderRequestFilters,
+      pagination: PageInfo,
     ) => {
       // Fetch orders from Shopify (already filtered by location in getAdvancedCompanyOrders)
       const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
@@ -276,13 +283,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
           companyId: companyData.id,
           shopifyOrderId: {
-            in: result.orders?.map((order: any) => order.id) || [],
+            in: result.orders?.map((order: { id: string }) => order.id) || [],
           },
         },
       });
 
       const uniqueShopifyOrderIds = groupedOrders.map((order) => order.shopifyOrderId);
-      const filteredOrders = result.orders?.filter((order: any) =>
+      const filteredOrders = result.orders?.filter((order: { id: string }) =>
         uniqueShopifyOrderIds.includes(order.id)
       );
 

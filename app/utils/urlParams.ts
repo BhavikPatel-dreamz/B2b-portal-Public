@@ -80,26 +80,27 @@ export function getTypedUrlParam<T = string>(
         return null;
     }
 
-    try {
-        switch (type) {
-            case 'number':
-                const num = Number(value);
-                return (isNaN(num) ? null : num) as T;
-
-            case 'boolean':
-                return (value.toLowerCase() === 'true') as T;
-
-            case 'json':
-                return JSON.parse(value) as T;
-
-            case 'string':
-            default:
-                return value as T;
-        }
-    } catch (error) {
-        console.error(`Error parsing URL param "${param}":`, error);
-        return null;
+try {
+  switch (type) {
+    case 'number': {
+      const num = Number(value);
+      return (isNaN(num) ? null : num) as T;
     }
+
+    case 'boolean':
+      return (value.toLowerCase() === 'true') as T;
+
+    case 'json':
+      return JSON.parse(value) as T;
+
+    case 'string':
+    default:
+      return value as T;
+  }
+} catch (error) {
+  console.error(`Error parsing URL param "${param}":`, error);
+  return null;
+}
 }
 
 /**
@@ -126,8 +127,8 @@ export function buildUrl(baseUrl: string, params: Record<string, string | number
  * console.log(settings.theme); // 'dark'
  * console.log(settings.pageSize); // 25
  */
-export function getSettingsFromUrl(): Record<string, any> {
-    const settings: Record<string, any> = {};
+export function getSettingsFromUrl(): Record<string, string> {
+    const settings: Record<string, string> = {};
     const urlParams = new URLSearchParams(window.location.search);
 
     // Common settings that might be passed via URL

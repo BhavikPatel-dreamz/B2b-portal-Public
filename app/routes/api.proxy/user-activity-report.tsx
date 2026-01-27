@@ -3,6 +3,7 @@ import { authenticate } from "../../shopify.server";
 import { getStoreByDomain } from "../../services/store.server";
 import prisma from "../../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
+import { Prisma } from "@prisma/client";
 
 interface UserActivityRequest {
   companyId: string;
@@ -92,7 +93,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Build where clause for orders
-    const whereClause: any = {
+    const whereClause: Prisma.B2BOrderWhereInput = {
       companyId,
       createdByUserId: userId,
     };

@@ -4,7 +4,6 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { parseCredit } from "../utils/company.server";
 import {
   getCompanyCustomers,
-  getCompanyOrderss,
 } from "app/utils/b2b-customer.server";
 
 export interface CreateCompanyInput {
@@ -46,6 +45,16 @@ export interface CreateCreditTransactionInput {
   notes?: string | null;
   createdBy: string;
 }
+export interface ShopifyOrder {
+  id: string;
+  shopifyOrderId: string;
+  customer?: {
+    email?: string;
+  };
+  remainingBalance: Prisma.Decimal;
+}
+
+
 
 /**
  * Create a new company account
@@ -554,6 +563,7 @@ export async function getCompanyOrders(
     },
     take: 20,
   });
+  console.log(uniqueOrders);
 
   const orders = await prisma.b2BOrder.findMany({
     where: {
@@ -582,14 +592,14 @@ export async function getCompanyOrders(
 
   const newOrders =
     ordersData?.companyOrders.filter(
-      (shopifyOrder: any) => !existingShopifyOrderIds.has(shopifyOrder.id),
+      (shopifyOrder: ShopifyOrder) => !existingShopifyOrderIds.has(shopifyOrder.id),
     ) || [];
 
   const userData = await prisma.user.findMany({
     where: {
       email: {
         in: newOrders
-          .map((order: any) => order.customer?.email || "")
+          .map((order: ShopifyOrder) => order.customer?.email || "")
           .filter(Boolean),
       },
     },
