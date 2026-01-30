@@ -1,9 +1,11 @@
-import { Link, type HeadersFunction, type LoaderFunctionArgs,useLoaderData } from "react-router";
+import {
+  Link,
+  type HeadersFunction,
+  type LoaderFunctionArgs,
+  useLoaderData,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import React, { useState } from 'react';
-
-
-
+import React, { useState } from "react";
 
 type LoaderData = {
   isAuthenticated: boolean;
@@ -19,12 +21,16 @@ type LoaderData = {
   pendingCreditAmount?: number;
 };
 
-
 export default function Welcome() {
   const data = useLoaderData<LoaderData>();
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
+    const [isEnabled, setIsEnabled] = useState(false);
+
+  const handleToggle = () => {
+    setIsEnabled(!isEnabled);
+  };
 
   return (
     <div style={{ background: "#f1f2f4", minHeight: "100vh", padding: "24px" }}>
@@ -69,6 +75,15 @@ export default function Welcome() {
         .help-center-btn:hover {
           background: #d4d5d7;
         }
+          .status-badge.enabled {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-badge.disabled {
+  background-color: #f8d7da;
+  color: #721c24;
+}
 
         /* App Embed Status Card */
         .embed-status-card {
@@ -613,29 +628,23 @@ export default function Welcome() {
         </div>
 
         {/* App Embed Status */}
-        <div className="embed-status-card">
-          <div className="embed-status-left">
-            <div className="embed-status-title">
-              B2B portal app embed status
-              <span className="status-badge">Disabled</span>
-            </div>
-            <div className="embed-status-description">
-              To display B2B registration form, please enable and save app embed
-              block on Shopify Theme Editor.
-            </div>
-          </div>
-          <button
-            className="enable-app-btn"
-            onClick={() => {
-              window.open(
-                "https://admin.shopify.com/store/findash-shipping-1/themes",
-                "_top",
-              );
-            }}
-          >
-            Enable app
-          </button>
+         <div className="embed-status-card">
+      <div className="embed-status-left">
+        <div className="embed-status-title">
+          B2B portal app embed status
+          <span className={`status-badge ${isEnabled ? "enabled" : "disabled"}`}>
+            {isEnabled ? "Enabled" : "Disabled"}
+          </span>
         </div>
+        <div className="embed-status-description">
+          To display B2B registration form, please enable and save app embed
+          block on Shopify Theme Editor.
+        </div>
+      </div>
+      <button className="enable-app-btn" onClick={handleToggle}>
+        {isEnabled ? "Disable app" : "Enable app"}
+      </button>
+    </div>
 
         {/* Setup Guide */}
         <div className="setup-guide-card">
@@ -671,7 +680,17 @@ export default function Welcome() {
                     Publish a B2B company registration form to collect and
                     review all B2B company submissions
                   </div>
-                  <button className="create-form-btn">Create form</button>
+                  <button
+                    className="create-form-btn"
+                    onClick={() => {
+                      window.open(
+                        "https://admin.shopify.com/store/findash-shipping-1/themes",
+                        "_top",
+                      );
+                    }}
+                  >
+                    Create form
+                  </button>
                 </div>
               </div>
 
@@ -701,7 +720,7 @@ export default function Welcome() {
               </div>
             </>
           )}
-        </div>      
+        </div>
 
         {/* Tutorials */}
         <div className="tutorials-section">
