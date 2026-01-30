@@ -15,6 +15,7 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { sendCompanyAssignmentEmail } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
+import { useSearchParams } from "react-router";
 
 interface RegistrationSubmission {
   paymentTerm: string;
@@ -113,7 +114,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
 
   const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
+    where: { shopDomain: session.shop }, 
   });
 
   if (!store) {
@@ -123,20 +124,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 
-  const submissions = await prisma.registrationSubmission.findMany({
-    where: {
-      shopId: store.id,
-      status: "PENDING",
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  // Fetch ALL submissions (PENDING, APPROVED, REJECTED)
+  // Fetch submissions for all statuses
+  const [pendingSubmissions, approvedSubmissions, rejectedSubmissions] = await Promise.all([
+    prisma.registrationSubmission.findMany({
+      where: {
+        shopId: store.id,
+        status: "PENDING",
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.registrationSubmission.findMany({
+      where: {
+        shopId: store.id,
+        status: "APPROVED",
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.registrationSubmission.findMany({
+      where: {
+        shopId: store.id,
+        status: "REJECTED",
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  // Combine all submissions
+  const submissions = [...pendingSubmissions, ...approvedSubmissions, ...rejectedSubmissions];
 
   const companies = await prisma.companyAccount.findMany({
     where: { shopId: store.id },
     orderBy: { name: "asc" },
   });
 
-  // Fetch payment terms templates - NO 'first' argument
+  // Fetch payment terms templates
   const paymentTermsResponse = await admin.graphql(
     `#graphql
     query {
@@ -167,11 +189,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       creditLimit: company.creditLimit.toString(),
       updatedAt: company.updatedAt.toISOString(),
     })),
-    paymentTermsTemplates, // Add this
+    paymentTermsTemplates,
     storeMissing: false,
   });
 };
-
 const parseForm = async (request: Request) => {
   const formData = await request.formData();
   return Object.fromEntries(formData);
@@ -1373,6 +1394,32 @@ export default function RegistrationApprovals() {
     "create",
   );
   const [creditLimit, setCreditLimit] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+const statusFromUrl = searchParams.get("status");
+
+const normalizeStatus = (value: string | null) => {
+  switch (value?.toUpperCase()) {
+    case "APPROVED":
+      return "APPROVED";
+    case "REJECTED":
+      return "REJECTED";
+    default:
+      return "PENDING";
+  }
+};
+  
+  // Add status filter state
+
+  const [statusFilter, setStatusFilter] =
+  useState<"PENDING" | "APPROVED" | "REJECTED">(
+    normalizeStatus(statusFromUrl)
+  );
+
+  useEffect(() => {
+  setStatusFilter(normalizeStatus(statusFromUrl));
+}, [statusFromUrl]);
+
 
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
@@ -1410,6 +1457,11 @@ export default function RegistrationApprovals() {
       });
     });
   };
+
+  // Filter submissions based on selected status
+  const filteredSubmissions = useMemo(() => {
+    return submissions.filter((submission) => submission.status === statusFilter);
+  }, [submissions, statusFilter]);
 
   useEffect(() => {
     if (!flowFetcher.data) return;
@@ -1599,11 +1651,58 @@ export default function RegistrationApprovals() {
 
   return (
     <s-page heading="Registration submissions">
-      {/* Quick Action Buttons */}
+      {/* Status Filter Tabs */}
       <s-section heading="">
-        {submissions.filter((submission) => submission.status === "PENDING")
-          .length === 0 ? (
-          <s-paragraph>There are no pending submissions yet.</s-paragraph>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e3e3e3" }}>
+          <button
+            onClick={() => setStatusFilter("PENDING")}
+            style={{
+              padding: "8px 16px",
+              background: "none",
+              border: "none",
+              borderBottom: statusFilter === "PENDING" ? "2px solid #2c6ecb" : "2px solid transparent",
+              color: statusFilter === "PENDING" ? "#2c6ecb" : "#5c5f62",
+              fontWeight: statusFilter === "PENDING" ? 600 : 400,
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            Pending ({submissions.filter(s => s.status === "PENDING").length})
+          </button>
+          <button
+            onClick={() => setStatusFilter("APPROVED")}
+            style={{
+              padding: "8px 16px",
+              background: "none",
+              border: "none",
+              borderBottom: statusFilter === "APPROVED" ? "2px solid #2c6ecb" : "2px solid transparent",
+              color: statusFilter === "APPROVED" ? "#2c6ecb" : "#5c5f62",
+              fontWeight: statusFilter === "APPROVED" ? 600 : 400,
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            Approved ({submissions.filter(s => s.status === "APPROVED").length})
+          </button>
+          <button
+            onClick={() => setStatusFilter("REJECTED")}
+            style={{
+              padding: "8px 16px",
+              background: "none",
+              border: "none",
+              borderBottom: statusFilter === "REJECTED" ? "2px solid #2c6ecb" : "2px solid transparent",
+              color: statusFilter === "REJECTED" ? "#2c6ecb" : "#5c5f62",
+              fontWeight: statusFilter === "REJECTED" ? 600 : 400,
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            Rejected ({submissions.filter(s => s.status === "REJECTED").length})
+          </button>
+        </div>
+
+        {filteredSubmissions.length === 0 ? (
+          <s-paragraph>There are no {statusFilter.toLowerCase()} submissions yet.</s-paragraph>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table
@@ -1625,72 +1724,70 @@ export default function RegistrationApprovals() {
                 </tr>
               </thead>
               <tbody>
-                {submissions
-                  .filter((submission) => submission.status === "PENDING")
-                  .map((submission) => (
-                    <tr
-                      key={submission.id}
-                      style={{ borderTop: "1px solid #e3e3e3" }}
-                    >
-                      <td style={{ padding: "8px" }}>
-                        {submission.companyName}
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {submission.contactName}
-                      </td>
-                      <td style={{ padding: "8px" }}>{submission.email}</td>
-                      <td style={{ padding: "8px" }}>{submission.phone}</td>
-                      <td style={{ padding: "8px" }}>
-                        <s-badge
-                          tone={
-                            submission.status === "APPROVED"
-                              ? "success"
-                              : submission.status === "REJECTED"
-                                ? "critical"
-                                : "warning"
-                          }
-                        >
-                          {submission.status}
-                        </s-badge>
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {formatDate(submission.createdAt)}
-                      </td>
-                      <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                        {submission.status === "PENDING" ? (
-                          <>
+                {filteredSubmissions.map((submission) => (
+                  <tr
+                    key={submission.id}
+                    style={{ borderTop: "1px solid #e3e3e3" }}
+                  >
+                    <td style={{ padding: "8px" }}>
+                      {submission.companyName}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {submission.contactName}
+                    </td>
+                    <td style={{ padding: "8px" }}>{submission.email}</td>
+                    <td style={{ padding: "8px" }}>{submission.phone}</td>
+                    <td style={{ padding: "8px" }}>
+                      <s-badge
+                        tone={
+                          submission.status === "APPROVED"
+                            ? "success"
+                            : submission.status === "REJECTED"
+                              ? "critical"
+                              : "warning"
+                        }
+                      >
+                        {submission.status}
+                      </s-badge>
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {formatDate(submission.createdAt)}
+                    </td>
+                    <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
+                      {submission.status === "PENDING" ? (
+                        <>
+                          <s-button
+                            onClick={() => startApproval(submission)}
+                            {...(isFlowLoading &&
+                            selected?.id === submission.id
+                              ? { loading: true }
+                              : {})}
+                          >
+                            Approve
+                          </s-button>
+                          <span style={{ marginLeft: 8 }}>
                             <s-button
-                              onClick={() => startApproval(submission)}
-                              {...(isFlowLoading &&
-                              selected?.id === submission.id
+                              tone="critical"
+                              variant="tertiary"
+                              onClick={() => rejectSubmission(submission)}
+                              {...(isRejecting && selected?.id === submission.id
                                 ? { loading: true }
                                 : {})}
                             >
-                              Approve
+                              Reject
                             </s-button>
-                            <span style={{ marginLeft: 8 }}>
-                              <s-button
-                                tone="critical"
-                                variant="tertiary"
-                                onClick={() => rejectSubmission(submission)}
-                                {...(isRejecting && selected?.id === submission.id
-                                  ? { loading: true }
-                                  : {})}
-                              >
-                                Reject
-                              </s-button>
-                            </span>
-                          </>
-                        ) : (
-                          <span style={{ color: "#5c5f62", fontSize: 14 }}>
-                            {submission.status === "APPROVED"
-                              ? "Approved"
-                              : "Rejected"}
                           </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        </>
+                      ) : (
+                        <span style={{ color: "#5c5f62", fontSize: 14 }}>
+                          {submission.status === "APPROVED"
+                            ? "Approved"
+                            : "Rejected"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

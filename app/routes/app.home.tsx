@@ -111,7 +111,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 };
 
-
 export default function Home() {
   const data = useLoaderData<LoaderData>();
 
@@ -804,14 +803,18 @@ export default function Home() {
 
           <div className="company-content-wrapper">
             <div className="company-stats-grid">
-              {/* Total Companies */}
-              <Link to="/app/companies" style={{ textDecoration: "none" }}>
-                <div className="company-stat" style={{ background: "#e0f0ff" }}>
-                  <div className="company-value">{data.totalCompanies}</div>
-                  <div className="company-label">Total Companies</div>
-                  <div className="company-badge blue">Active in portal</div>
+
+               {/* Approved - WITH LINK */}
+              <Link to="/app/registrations?status=approved" style={{ textDecoration: "none" }}>
+                <div className="company-stat" style={{ background: "#e8f5e9" }}>
+                  <div className="company-value">
+                    {data.approvedRegistrations}
+                  </div>
+                  <div className="company-label">Approved</div>
+                  <div className="company-badge green">Successfully approved</div>
                 </div>
               </Link>
+              
 
               {/* Pending Registrations */}
               <Link to="/app/registrations" style={{ textDecoration: "none" }}>
@@ -823,15 +826,26 @@ export default function Home() {
                   <div className="company-badge yellow">Awaiting approval</div>
                 </div>
               </Link>
-
-              {/* Approved */}
-              <div className="company-stat" style={{ background: "#e8f5e9" }}>
-                <div className="company-value">
-                  {data.approvedRegistrations}
+              
+                {/* Rejected - WITH LINK */}
+              <Link to="/app/registrations?status=rejected" style={{ textDecoration: "none" }}>
+                <div className="company-stat" style={{ background: "#ffebee" }}>
+                  <div className="company-value">
+                    {data.rejectedRegistrations}
+                  </div>
+                  <div className="company-label">Rejected</div>
+                  <div className="company-badge red">Declined requests</div>
                 </div>
-                <div className="company-label">Approved</div>
-                <div className="company-badge green">Successfully approved</div>
-              </div>
+              </Link>
+
+             {/* Total Companies */}
+              <Link to="/app/companies" style={{ textDecoration: "none" }}>
+                <div className="company-stat" style={{ background: "#e0f0ff" }}>
+                  <div className="company-value">{data.totalCompanies}</div>
+                  <div className="company-label">Total Companies</div>
+                  <div className="company-badge blue">Active in portal</div>
+                </div>
+              </Link>
 
               {/* Total Users */}
               <div className="company-stat" style={{ background: "#f3e5f5" }}>
@@ -840,14 +854,7 @@ export default function Home() {
                 <div className="company-badge blue">Active users</div>
               </div>
 
-              {/* Rejected */}
-              <div className="company-stat" style={{ background: "#ffebee" }}>
-                <div className="company-value">
-                  {data.rejectedRegistrations}
-                </div>
-                <div className="company-label">Rejected</div>
-                <div className="company-badge red">Declined requests</div>
-              </div>
+            
 
               {/* Approval Rate */}
               <div className="company-stat" style={{ background: "#e1f5fe" }}>
