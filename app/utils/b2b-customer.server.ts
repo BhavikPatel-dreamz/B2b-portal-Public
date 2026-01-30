@@ -2790,9 +2790,9 @@ export async function getCompanyLocations(
       locations: locations,
       locationCustomerCount: locationCustomerCount,
     };
-  } catch (error: { message: string }) {
+  } catch (error: unknown) {
     console.error("Error fetching company locations:", error);
-    return { error: error.message };
+    return { error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
 
@@ -3574,11 +3574,13 @@ async function fetchCompanyLocationss(
     }
 
     const locations =
-      result.data?.company?.locations?.edges.map((e: { node: { id: string; name: string } }) => e.node) || [];
+      result.data?.company?.locations?.edges.map(
+        (e: { node: { id: string; name: string } }) => e.node,
+      ) || [];
 
     return { locations };
   } catch (error: unknown) {
-    return { error: error instanceof Error ? error.message : "Unknown error" }; 
+    return { error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
 
@@ -4120,16 +4122,13 @@ export async function checkLocationExists(
 
   const result = await response.json();
 
-  const locations =
-    result?.data?.company?.locations?.nodes || [];
+  const locations = result?.data?.company?.locations?.nodes || [];
 
   return locations.some(
     (loc: { name: string }) =>
-      loc.name.trim().toLowerCase() ===
-      locationName.trim().toLowerCase(),
+      loc.name.trim().toLowerCase() === locationName.trim().toLowerCase(),
   );
 }
-
 
 export async function getCompanyContactRoles(
   companyId: string,
@@ -4137,7 +4136,6 @@ export async function getCompanyContactRoles(
   accessToken: string,
 ) {
   try {
-   
     const numericId = companyId.split("/").pop();
 
     const query = `
@@ -4373,7 +4371,6 @@ export async function findCompanyContactByCustomer(
     };
   }
 }
-
 
 export async function assignCustomerAsContact(
   companyId: string,
@@ -4899,7 +4896,6 @@ export async function deleteCompanyLocation(
   }
 }
 
-
 export async function checkLocationHasUsers(
   locationId: string,
   shopName: string,
@@ -4915,6 +4911,11 @@ export async function checkLocationHasUsers(
             edges {
               node {
                 id
+                companyContact {
+                  customer {
+                    email
+                  }
+                }
               }
             }
           }
@@ -4944,9 +4945,21 @@ export async function checkLocationHasUsers(
     const location = data.data.companyLocation;
     const userCount = location?.roleAssignments?.edges?.length || 0;
 
+    // Access email through customer object
+    const assignedEmails =
+      location?.roleAssignments?.edges
+        ?.map((edge: any) => edge.node.companyContact?.customer?.email)
+        .filter(Boolean) || [];
+    
+    console.log("Assigned Emails---", assignedEmails);
+    
     return {
       hasUsers: userCount > 0,
       userCount: userCount,
+      assignedEmails: assignedEmails,
+      roleAssignIds:
+        location?.roleAssignments?.edges?.map((edge: any) => edge.node.id) ||
+        [],
       locationName: location?.name,
     };
   } catch (error) {
@@ -5373,21 +5386,19 @@ const paginatedOrders = processedOrders.slice(0, requestedFirst);
 
 const hasMoreFilteredOrders = processedOrders.length > requestedFirst;
 
-return {
-  orders: paginatedOrders,
-  pageInfo: {
-    hasNextPage: hasMoreFilteredOrders,
-    hasPreviousPage: ordersData?.pageInfo?.hasPreviousPage || false,
-    endCursor:
-      paginatedOrders.length > 0
-        ? paginatedOrders[paginatedOrders.length - 1].cursor
-        : null,
-    startCursor:
-      paginatedOrders.length > 0
-        ? paginatedOrders[0].cursor
-        : null,
-  },
-  totalCount: paginatedOrders.length,
+    return {
+      orders: paginatedOrders,
+      pageInfo: {
+        hasNextPage: hasMoreFilteredOrders,
+        hasPreviousPage: ordersData?.pageInfo?.hasPreviousPage || false,
+        endCursor:
+          paginatedOrders.length > 0
+            ? paginatedOrders[paginatedOrders.length - 1].cursor
+            : null,
+        startCursor:
+          paginatedOrders.length > 0 ? paginatedOrders[0].cursor : null,
+      },
+      totalCount: paginatedOrders.length,
       _debug: {
         queryString,
         fetched: ordersData?.edges?.length || 0,
@@ -5400,7 +5411,9 @@ return {
     };
   } catch (error) {
     console.error("Error fetching advanced orders:", error);
-    return { error: error instanceof Error ? error.message : "Unknown error occurred" };
+    return {
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }
 

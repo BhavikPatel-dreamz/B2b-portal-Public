@@ -256,11 +256,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           store.accessToken,
         );
 
+        const checkUser =
+          userContext?.customerEmail === userCheck?.assignedEmails[0];
         if (userCheck.error) {
           return Response.json(
             { error: "Failed to verify location status" },
             { status: 500 },
           );
+        }
+        
+        if (
+          checkUser == true &&
+          userCheck.hasUsers &&
+          userContext.isMainContact == true
+        ) {
+          const result = await deleteCompanyLocation(
+            locationId,
+            shop,
+            store.accessToken,
+          );
+
+          if (result.error) {
+            return Response.json({ error: result.error }, { status: 400 });
+          }
+
+          return Response.json({
+            success: true,
+            deletedId: result.deletedId,
+          });
         }
 
         if (userCheck.hasUsers) {

@@ -39,6 +39,7 @@ export default [
   // App routes
   route("app", "routes/app.tsx", [
     index("routes/app._index.tsx"),
+    route("home", "routes/app.home.tsx"),
     route("companies", "routes/app.companies.tsx"),
     route("registrations", "routes/app.registrations.tsx"),
     route("settings", "routes/app.settings.tsx"),

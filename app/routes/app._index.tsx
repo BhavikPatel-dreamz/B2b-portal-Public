@@ -1,382 +1,791 @@
-import type {
-  HeadersFunction,
-  LoaderFunctionArgs,
-} from "react-router";
-import { Link, useLoaderData } from "react-router";
-import { authenticate } from "../shopify.server";
+import { Link, type HeadersFunction, type LoaderFunctionArgs,useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { countCompanies } from "../services/company.server";
-import { countRegistrations } from "../services/registration.server";
-import prisma from "../db.server";
-
-interface LoaderData {
-  totalCompanies: number;
-  pendingRegistrations: number;
-  approvedRegistrations: number;
-  rejectedRegistrations: number;
-  totalUsers: number;
-  totalOrders: number;
-  totalCreditAllowed: number;
-  totalCreditUsed: number;
-  availableCredit: number;
-  pendingCreditAmount: number;
-  totalOrderValue: number;
-}
-
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-
-  // Get the store based on the session
-  const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  if (!store) {
-    throw new Error("Store not found");
-  }
-
-  // Fetch all the statistics
-
-    const totalOrders = await prisma.b2BOrder.groupBy({
-        by: ["shopifyOrderId"],
-        where: {
-          orderStatus: {
-            not: "cancelled",
-          },
-          shopId: store.id,
-        },
-        _count: {
-          shopifyOrderId: true,
-        },
-      });
-    
+import React, { useState } from 'react';
 
 
-  const [totalCompanies, pendingRegistrations, approvedRegistrations, rejectedRegistrations, totalUsers] = await Promise.all([
-    countCompanies(store.id),
-    countRegistrations(store.id, "PENDING"),
-    countRegistrations(store.id, "APPROVED"),
-    countRegistrations(store.id, "REJECTED"),
-    prisma.user.count({ where: { shopId: store.id } }),
-  ]);
 
-  // Fetch credit statistics
-  const creditStats = await prisma.companyAccount.aggregate({
-    where: { shopId: store.id },
-    _sum: {
-      creditLimit: true,
-    },
-  });
 
-  // Calculate total used credit from all unpaid orders (new business logic)
-  // All unpaid orders are considered "used credit" regardless of status
-  const usedCreditStats = await prisma.b2BOrder.aggregate({
-    where: {
-      shopId: store.id,
-      paymentStatus: { in: ["pending", "partial"] }, // All unpaid orders
-      orderStatus: { notIn: ["cancelled"] }, // Exclude cancelled orders
-    },
-    _sum: {
-      remainingBalance: true, // Use remainingBalance instead of creditUsed
-    },
-  });
-
-  // With the new logic, pending credit is always 0
-  // All unpaid orders are counted as "used credit"
-  const pendingCreditAmount = 0;
-
-  const totalCreditAllowed = Number(creditStats._sum.creditLimit || 0);
-  const totalCreditUsed = Number(usedCreditStats._sum.remainingBalance || 0);
-  const availableCredit = totalCreditAllowed - totalCreditUsed;
-
-  return {
-    totalCompanies,
-    pendingRegistrations,
-    approvedRegistrations,
-    rejectedRegistrations,
-    totalUsers,
-    totalOrders:totalOrders.length,
-    totalCreditAllowed,
-    totalCreditUsed,
-    availableCredit,
-    pendingCreditAmount,
-  };
+type LoaderData = {
+  isAuthenticated: boolean;
+  totalCompanies?: number;
+  pendingRegistrations?: number;
+  approvedRegistrations?: number;
+  rejectedRegistrations?: number;
+  totalUsers?: number;
+  totalOrders?: number;
+  totalCreditAllowed?: number;
+  totalCreditUsed?: number;
+  availableCredit?: number;
+  pendingCreditAmount?: number;
 };
 
 
-
-
-export default function Index() {
+export default function Welcome() {
   const data = useLoaderData<LoaderData>();
 
-  // Credit statistics calculations
-  const creditUsagePercentage = data.totalCreditAllowed > 0
-    ? Math.round((data.totalCreditUsed / data.totalCreditAllowed) * 100)
-    : 0;
-  const pendingCreditPercentage = data.totalCreditAllowed > 0
-    ? Math.round((data.pendingCreditAmount / data.totalCreditAllowed) * 100)
-    : 0;
-  const availableCreditPercentage = data.totalCreditAllowed > 0
-    ? Math.round((data.availableCredit / data.totalCreditAllowed) * 100)
-    : 100;
-
-  // Credit management statistics
-  const creditStatsData = [
-    {
-      label: 'Total Credit Allowed',
-      value: `$${data.totalCreditAllowed.toLocaleString()}`,
-      description: 'Total credit limit across all companies',
-      tone: 'info' as const,
-      percentage: 100
-    },
-    {
-      label: 'Credit Used',
-      value: `$${data.totalCreditUsed.toLocaleString()}`,
-      description: `${creditUsagePercentage}% of total credit`,
-      tone: creditUsagePercentage > 80 ? 'critical' as const : creditUsagePercentage > 60 ? 'warning' as const : 'success' as const,
-      percentage: creditUsagePercentage
-    },
-    {
-      label: 'Available Credit',
-      value: `$${data.availableCredit.toLocaleString()}`,
-      description: `${availableCreditPercentage}% remaining`,
-      tone: availableCreditPercentage < 20 ? 'critical' as const : availableCreditPercentage < 40 ? 'warning' as const : 'success' as const,
-      percentage: availableCreditPercentage
-    }
-    // {
-    //   label: 'Pending Credit',
-    //   value: `$${data.pendingCreditAmount.toLocaleString()}`,
-    //   description: `${pendingCreditPercentage}% awaiting payment`,
-    //   tone: pendingCreditPercentage > 30 ? 'warning' as const : 'info' as const,
-    //   percentage: pendingCreditPercentage
-    // },
-  ];
-
-  // Company registration statistics
-  const companyStatsData = [
-    {
-      label: 'Total Companies Registered',
-      value: data.totalCompanies.toString(),
-      description: 'Active companies in your B2B portal',
-      tone: 'info' as const
-    },
-    {
-      label: 'Pending Registrations',
-      value: data.pendingRegistrations.toString(),
-      description: 'Applications awaiting approval',
-      tone: 'warning' as const
-    },
-    {
-      label: 'Approved Registrations',
-      value: data.approvedRegistrations.toString(),
-      description: 'Successfully approved applications',
-      tone: 'success' as const
-    },
-    {
-      label: 'Total B2B Users',
-      value: data.totalUsers.toString(),
-      description: 'Active users across all companies',
-      tone: 'info' as const
-    },
-  ];
-
-  const orderStatsData = [
-    {
-      label: 'Total B2B Orders',
-      value: data.totalOrders.toString(),
-      description: 'Orders processed through B2B portal',
-      tone: 'info' as const
-    },
-    {
-      label: 'Rejected Applications',
-      value: data.rejectedRegistrations.toString(),
-      description: 'Declined registration requests',
-      tone: 'critical' as const
-    },
-  ];
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
 
   return (
-    <s-page heading="B2B Portal Dashboard">
-      {/* Credit Management Overview */}
-      <s-section>
-        <s-stack direction="block" gap="large">
-          <s-text variant="headingLg" weight="bold">Credit Management Overview</s-text>
-          <s-stack direction="inline" gap="base" wrap="wrap">
-            {creditStatsData.map((stat, index) => (
-              <s-card key={index} style={{ flex: '1 1 calc(25% - 12px)', minWidth: '250px' }}>
-                <s-stack direction="block" gap="small">
-                  <s-text variant="bodyMd" tone="subdued">{stat.label}</s-text>
-                  <s-text variant="heading2xl" weight="bold">{stat.value}</s-text>
-                  <s-badge tone={stat.tone}>{stat.description}</s-badge>
-                  {/* Simple progress bar visualization */}
-                  <div style={{
-                    width: '100%',
-                    height: '8px',
-                    backgroundColor: '#f1f2f3',
-                    borderRadius: '4px',
-                    overflow: 'hidden',
-                    marginTop: '8px'
-                  }}>
-                    <div style={{
-                      width: `${Math.min(stat.percentage, 100)}%`,
-                      height: '100%',
-                      backgroundColor: stat.tone === 'success' ? '#008060' :
-                                      stat.tone === 'warning' ? '#ffc453' :
-                                      stat.tone === 'critical' ? '#d73e3e' : '#5c6ac4',
-                      transition: 'width 0.3s ease'
-                    }}></div>
+    <div style={{ background: "#f1f2f4", minHeight: "100vh", padding: "24px" }}>
+      <style>{`
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+
+        .setup-container {
+          max-width: 1200px;
+          margin: 0 auto;
+        }
+
+        /* Header */
+        .setup-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 24px;
+        }
+
+        .setup-header h1 {
+          font-size: 24px;
+          font-weight: 600;
+          color: #303030;
+        }
+
+        .help-center-btn {
+          background: #e4e5e7;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #303030;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+
+        .help-center-btn:hover {
+          background: #d4d5d7;
+        }
+
+        /* App Embed Status Card */
+        .embed-status-card {
+          background: white;
+          border-radius: 8px;
+          padding: 16px 20px;
+          margin-bottom: 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border: 1px solid #e4e5e7;
+        }
+
+        .embed-status-left {
+          flex: 1;
+        }
+
+        .embed-status-title {
+          font-size: 14px;
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: #303030;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .status-badge {
+          background: #fbefd7;
+          color: #916a00;
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .embed-status-description {
+          color: #6d7175;
+          font-size: 14px;
+        }
+
+        .enable-app-btn {
+          background: #303030;
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+
+        .enable-app-btn:hover {
+          background: #1a1a1a;
+        }
+
+        /* Setup Guide Card */
+        .setup-guide-card {
+          background: white;
+          border-radius: 8px;
+          padding: 20px;
+          margin-bottom: 16px;
+          border: 1px solid #e4e5e7;
+        }
+
+        .setup-guide-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 12px;
+        }
+
+        .setup-guide-title {
+          font-size: 16px;
+          font-weight: 600;
+          color: #303030;
+          margin-bottom: 8px;
+        }
+
+        .collapse-btn {
+          background: transparent;
+          border: none;
+          cursor: pointer;
+          color: #6d7175;
+          font-size: 18px;
+          padding: 0;
+          transition: transform 0.3s;
+        }
+
+        .collapse-btn.collapsed {
+          transform: rotate(180deg);
+        }
+
+        .setup-guide-description {
+          color: #6d7175;
+          font-size: 14px;
+          margin-bottom: 12px;
+        }
+
+        .progress-text {
+          color: #6d7175;
+          font-size: 14px;
+          margin-bottom: 20px;
+        }
+
+        /* Setup Steps */
+        .setup-step {
+          display: flex;
+          gap: 16px;
+          padding: 16px 0;
+          border-top: 1px solid #e4e5e7;
+        }
+
+        .setup-step:first-child {
+          border-top: none;
+        }
+
+        .step-icon {
+          width: 32px;
+          height: 32px;
+          border: 2px solid #c9cccf;
+          border-radius: 50%;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 4px;
+        }
+
+        .step-icon-inner {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: transparent;
+        }
+
+        .step-content {
+          flex: 1;
+        }
+
+        .step-title {
+          font-size: 15px;
+          font-weight: 600;
+          color: #303030;
+          margin-bottom: 8px;
+        }
+
+        .step-description {
+          color: #6d7175;
+          font-size: 14px;
+          margin-bottom: 12px;
+          line-height: 1.5;
+        }
+
+        .create-form-btn {
+          background: #303030;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+
+        .create-form-btn:hover {
+          background: #1a1a1a;
+        }
+
+        .update-badge {
+          background: #0a61c7;
+          color: white;
+          padding: 4px 10px;
+          border-radius: 12px;
+          font-size: 12px;
+          font-weight: 500;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          margin-left: 8px;
+        }
+
+        .update-badge::before {
+          content: "●";
+          font-size: 8px;
+        }
+
+        /* Onboarding Call Card */
+        .onboarding-card {
+          background: white;
+          border-radius: 8px;
+          padding: 20px;
+          margin-bottom: 16px;
+          border: 1px solid #e4e5e7;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .onboarding-left {
+          flex: 1;
+        }
+
+        .onboarding-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: #d1fae5;
+          color: #008060;
+          padding: 4px 12px;
+          border-radius: 12px;
+          font-size: 12px;
+          font-weight: 600;
+          margin-bottom: 12px;
+        }
+
+        .onboarding-badge::before {
+          content: "ⓘ";
+          font-size: 14px;
+        }
+
+        .onboarding-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: #303030;
+          margin-bottom: 12px;
+        }
+
+        .onboarding-description {
+          color: #6d7175;
+          font-size: 14px;
+          line-height: 1.5;
+          margin-bottom: 16px;
+        }
+
+        .onboarding-buttons {
+          display: flex;
+          gap: 12px;
+        }
+
+        .book-call-btn {
+          background: #303030;
+          color: white;
+          border: none;
+          padding: 10px 18px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .book-call-btn:hover {
+          background: #1a1a1a;
+        }
+
+        .chat-btn {
+          background: white;
+          color: #303030;
+          border: 1px solid #c9cccf;
+          padding: 10px 18px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .chat-btn:hover {
+          background: #f6f6f7;
+          border-color: #8a9099;
+        }
+
+        .onboarding-right {
+          position: relative;
+          width: 180px;
+          height: 120px;
+          flex-shrink: 0;
+        }
+
+        .chat-bubble-container {
+          position: relative;
+          width: 100%;
+          height: 100%;
+        }
+
+        .chat-bubble {
+          position: absolute;
+          padding: 12px 16px;
+          border-radius: 12px;
+          font-size: 13px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .chat-bubble-1 {
+          background: #e8f2ff;
+          color: #0a61c7;
+          top: 0;
+          right: 0;
+          width: 140px;
+          height: 40px;
+        }
+
+        .chat-bubble-2 {
+          background: #4a9cb8;
+          color: white;
+          bottom: 0;
+          right: 20px;
+          width: 120px;
+          height: 40px;
+        }
+
+        /* Tutorials Section */
+        .tutorials-section {
+          background: white;
+          border-radius: 8px;
+          padding: 20px;
+          border: 1px solid #e4e5e7;
+        }
+
+        .tutorials-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: #303030;
+          margin-bottom: 20px;
+        }
+
+        .tutorials-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px;
+        }
+
+        .tutorial-card {
+          border: 1px solid #e4e5e7;
+          border-radius: 8px;
+          padding: 16px;
+          transition: all 0.2s;
+        }
+
+        .tutorial-card:hover {
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          border-color: #c9cccf;
+        }
+
+        .tutorial-tag {
+          display: inline-block;
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 12px;
+          font-weight: 500;
+          margin-bottom: 12px;
+        }
+
+        .tag-storefront {
+          background: #f6f6f7;
+          color: #6d7175;
+        }
+
+        .tag-customer {
+          background: #e0f0ff;
+          color: #0a61c7;
+        }
+
+        .tutorial-card-title {
+          font-size: 15px;
+          font-weight: 600;
+          color: #303030;
+          margin-bottom: 8px;
+        }
+
+        .tutorial-card-description {
+          color: #6d7175;
+          font-size: 13px;
+          line-height: 1.5;
+          margin-bottom: 16px;
+        }
+
+        .watch-tutorial-btn {
+          background: white;
+          color: #303030;
+          border: 1px solid #c9cccf;
+          padding: 8px 16px;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+          width: 100%;
+        }
+
+        .watch-tutorial-btn:hover {
+          background: #f6f6f7;
+          border-color: #8a9099;
+        }
+
+        /* Chat Widget */
+        .chat-widget {
+          position: fixed;
+          bottom: 24px;
+          right: 24px;
+          z-index: 1000;
+        }
+
+        .chat-popup {
+          position: absolute;
+          bottom: 70px;
+          right: 0;
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+          padding: 16px;
+          width: 320px;
+          border: 1px solid #e4e5e7;
+        }
+
+        .chat-popup-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+
+        .chat-popup-title {
+          font-size: 15px;
+          font-weight: 600;
+          color: #303030;
+        }
+
+        .close-btn {
+          background: transparent;
+          border: none;
+          color: #6d7175;
+          font-size: 20px;
+          cursor: pointer;
+          padding: 0;
+          line-height: 1;
+        }
+
+        .chat-popup-status {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-bottom: 16px;
+        }
+
+        .online-indicator {
+          width: 8px;
+          height: 8px;
+          background: #00a863;
+          border-radius: 50%;
+        }
+
+        .status-text {
+          color: #303030;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .chat-icons {
+          display: flex;
+          gap: 8px;
+          margin-left: auto;
+        }
+
+        .chat-icon {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+          border: 2px solid #e4e5e7;
+        }
+
+        .qikify-btn {
+          background: #303030;
+          color: white;
+          border: none;
+          padding: 12px 20px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+
+        .chat-bubble-btn {
+          width: 56px;
+          height: 56px;
+          background: #303030;
+          border-radius: 50%;
+          border: none;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+          color: white;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          transition: transform 0.2s;
+        }
+
+        .chat-bubble-btn:hover {
+          transform: scale(1.05);
+        }
+
+        @media (max-width: 768px) {
+          .tutorials-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .onboarding-card {
+            flex-direction: column;
+          }
+
+          .onboarding-right {
+            width: 100%;
+          }
+        }
+      `}</style>
+
+      <div className="setup-container">
+        {/* Header */}
+        <div className="setup-header">
+          <h1>Welcome to B2B portal,</h1>
+          <button className="help-center-btn">Help center</button>
+        </div>
+
+        {/* App Embed Status */}
+        <div className="embed-status-card">
+          <div className="embed-status-left">
+            <div className="embed-status-title">
+              B2B portal app embed status
+              <span className="status-badge">Disabled</span>
+            </div>
+            <div className="embed-status-description">
+              To display B2B registration form, please enable and save app embed
+              block on Shopify Theme Editor.
+            </div>
+          </div>
+          <button
+            className="enable-app-btn"
+            onClick={() => {
+              window.open(
+                "https://admin.shopify.com/store/findash-shipping-1/themes",
+                "_top",
+              );
+            }}
+          >
+            Enable app
+          </button>
+        </div>
+
+        {/* Setup Guide */}
+        <div className="setup-guide-card">
+          <div className="setup-guide-header">
+            <div>
+              <h2 className="setup-guide-title">Setup guide</h2>
+              <p className="setup-guide-description">
+                Use this personalized guide to set up a B2B registration form
+                and activate B2B quick order extensions on your store.
+              </p>
+              <p className="progress-text">0 / 3 completed</p>
+            </div>
+            <button
+              className={`collapse-btn ${isGuideCollapsed ? "collapsed" : ""}`}
+              onClick={() => setIsGuideCollapsed(!isGuideCollapsed)}
+            >
+              ^
+            </button>
+          </div>
+
+          {!isGuideCollapsed && (
+            <>
+              {/* Step 1 */}
+              <div className="setup-step">
+                <div className="step-icon">
+                  <div className="step-icon-inner"></div>
+                </div>
+                <div className="step-content">
+                  <div className="step-title">
+                    Set up B2B Company Registration form
                   </div>
-                  <s-text variant="bodySm" tone="subdued">{stat.percentage}%</s-text>
-                </s-stack>
-              </s-card>
-            ))}
-          </s-stack>
-        </s-stack>
-      </s-section>
-
-      {/* Credit Summary Chart */}
-      <s-section>
-        <s-card>
-          <s-stack direction="block" gap="base">
-            <s-text variant="headingMd" weight="bold">Credit Utilization Summary</s-text>
-            <s-stack direction="inline" gap="large">
-              <div style={{ flex: '1' }}>
-                <s-stack direction="block" gap="small">
-                  <s-text variant="bodyMd">Credit Distribution</s-text>
-                  <div style={{
-                    display: 'flex',
-                    height: '40px',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                    border: '1px solid #e1e3e5'
-                  }}>
-                    <div
-                      style={{
-                        width: `${creditUsagePercentage}%`,
-                        backgroundColor: '#d73e3e',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontSize: '12px',
-                        fontWeight: 'bold'
-                      }}
-                      title={`Used: $${data.totalCreditUsed.toLocaleString()}`}
-                    >
-                      {creditUsagePercentage > 15 ? `${creditUsagePercentage}%` : ''}
-                    </div>
-                    <div
-                      style={{
-                        width: `${pendingCreditPercentage}%`,
-                        backgroundColor: '#ffc453',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'black',
-                        fontSize: '12px',
-                        fontWeight: 'bold'
-                      }}
-                      title={`Pending: $${data.pendingCreditAmount.toLocaleString()}`}
-                    >
-                      {pendingCreditPercentage > 10 ? `${pendingCreditPercentage}%` : ''}
-                    </div>
-                    <div
-                      style={{
-                        width: `${availableCreditPercentage}%`,
-                        backgroundColor: '#008060',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontSize: '12px',
-                        fontWeight: 'bold'
-                      }}
-                      title={`Available: $${data.availableCredit.toLocaleString()}`}
-                    >
-                      {availableCreditPercentage > 15 ? `${availableCreditPercentage}%` : ''}
-                    </div>
+                  <div className="step-description">
+                    Publish a B2B company registration form to collect and
+                    review all B2B company submissions
                   </div>
-                </s-stack>
+                  <button className="create-form-btn">Create form</button>
+                </div>
               </div>
-              <div style={{ flex: '1' }}>
-                <s-stack direction="block" gap="small">
-                  <s-text variant="bodyMd">Legend</s-text>
-                  <s-stack direction="block" gap="tiny">
-                    <s-stack direction="inline" gap="small" alignment="center">
-                      <div style={{ width: '16px', height: '16px', backgroundColor: '#d73e3e', borderRadius: '2px' }}></div>
-                      <s-text variant="bodySm">Used Credit: ${data.totalCreditUsed.toLocaleString()}</s-text>
-                    </s-stack>
-                    {/* <s-stack direction="inline" gap="small" alignment="center">
-                      <div style={{ width: '16px', height: '16px', backgroundColor: '#ffc453', borderRadius: '2px' }}></div>
-                      <s-text variant="bodySm">Pending Credit: ${data.pendingCreditAmount.toLocaleString()}</s-text>
-                    </s-stack> */}
-                    <s-stack direction="inline" gap="small" alignment="center">
-                      <div style={{ width: '16px', height: '16px', backgroundColor: '#008060', borderRadius: '2px' }}></div>
-                      <s-text variant="bodySm">Available Credit: ${data.availableCredit.toLocaleString()}</s-text>
-                    </s-stack>
-                  </s-stack>
-                </s-stack>
+
+              {/* Step 2 */}
+              <div className="setup-step">
+                <div className="step-icon">
+                  <div className="step-icon-inner"></div>
+                </div>
+                <div className="step-content">
+                  <div className="step-title">Enable theme app extensions</div>
+                </div>
               </div>
-            </s-stack>
-          </s-stack>
-        </s-card>
-      </s-section>
 
-      {/* Company Registration Overview */}
-      <s-section>
-        <s-stack direction="block" gap="large">
-          <s-text variant="headingLg" weight="bold">Company Registration Overview</s-text>
-          <s-stack direction="inline" gap="base" wrap="wrap">
-            {companyStatsData.map((stat, index) => (
-              <s-card key={index} style={{ flex: '1 1 calc(25% - 12px)', minWidth: '220px' }}>
-                <s-stack direction="block" gap="small">
-                  <s-text variant="bodyMd" tone="subdued">{stat.label}</s-text>
-                  <s-text variant="heading2xl" weight="bold">{stat.value}</s-text>
-                  <s-badge tone={stat.tone}>{stat.description}</s-badge>
-                </s-stack>
-              </s-card>
-            ))}
-          </s-stack>
-        </s-stack>
-      </s-section>
+              {/* Step 3 */}
+              <div className="setup-step">
+                <div className="step-icon">
+                  <div className="step-icon-inner"></div>
+                </div>
+                <div className="step-content">
+                  <div className="step-title">
+                    Explore all B2B extensions in Customer Account
+                    <span className="update-badge">
+                      Shopify's latest update
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>      
 
-      {/* Additional Statistics */}
-      <s-section>
-        <s-stack direction="block" gap="large">
-          <s-text variant="headingLg" weight="bold">Additional Statistics</s-text>
-          <s-stack direction="inline" gap="base" wrap="wrap">
-            {orderStatsData.map((stat, index) => (
-              <s-card key={index} style={{ flex: '1 1 calc(50% - 12px)', minWidth: '220px' }}>
-                <s-stack direction="block" gap="small">
-                  <s-text variant="bodyMd" tone="subdued">{stat.label}</s-text>
-                  <s-text variant="heading2xl" weight="bold">{stat.value}</s-text>
-                  <s-badge tone={stat.tone}>{stat.description}</s-badge>
-                </s-stack>
-              </s-card>
-            ))}
-          </s-stack>
-        </s-stack>
-      </s-section>
+        {/* Tutorials */}
+        <div className="tutorials-section">
+          <h2 className="tutorials-title">Tutorials</h2>
+          <div className="tutorials-grid">
+            {/* Tutorial 1 */}
+            <div className="tutorial-card">
+              <span className="tutorial-tag tag-storefront">Storefront</span>
+              <h3 className="tutorial-card-title">
+                Display B2B/Wholesale registration form
+              </h3>
+              <p className="tutorial-card-description">
+                The detailed steps to display a B2B company registration form on
+                your storefront
+              </p>
+              <button className="watch-tutorial-btn">Watch tutorial</button>
+            </div>
 
-      {/* Quick Actions */}
-      <s-section>
-  <s-stack direction="block" gap="base">
-    <s-text variant="headingLg" weight="bold">Quick Actions</s-text>
-    <s-stack direction="inline" gap="base">
-      <Link to="/app/companies">
-        <s-button variant="primary">
-          View All Companies
-        </s-button>
-      </Link>
-      <Link to="/app/registrations">
-        <s-button variant="secondary">
-          Review Pending Registrations
-        </s-button>
-      </Link>
-    </s-stack>
-  </s-stack>
-</s-section>
-    </s-page>
+            {/* Tutorial 2 */}
+            <div className="tutorial-card">
+              <span className="tutorial-tag tag-customer">
+                Customer account
+              </span>
+              <h3 className="tutorial-card-title">
+                Add Quick order with SKUs page
+              </h3>
+              <p className="tutorial-card-description">
+                Set up a quick order page where customers can input and order
+                with a list of SKUs & quantities.
+              </p>
+              <button className="watch-tutorial-btn">Watch tutorial</button>
+            </div>
+
+            {/* Tutorial 3 */}
+            <div className="tutorial-card">
+              <span className="tutorial-tag tag-customer">
+                Customer account
+              </span>
+              <h3 className="tutorial-card-title">
+                Add Quick order with CSV Upload
+              </h3>
+              <p className="tutorial-card-description">
+                Set up a quick order block where customers can order by
+                uploading a CSV file.
+              </p>
+              <button className="watch-tutorial-btn">Watch tutorial</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Chat Widget */}
+        <div className="chat-widget">
+          {isChatOpen && (
+            <div className="chat-popup">
+              <div className="chat-popup-header">
+                <div className="chat-popup-title">Questions? Chat with us!</div>
+                <button
+                  className="close-btn"
+                  onClick={() => setIsChatOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="chat-popup-status">
+                <div className="online-indicator"></div>
+                <div className="status-text">Support is online</div>
+                <div className="chat-icons">
+                  <div className="chat-icon">😊</div>
+                  <div className="chat-icon">👤</div>
+                  <div className="chat-icon">💬</div>
+                </div>
+              </div>
+              <button className="qikify-btn">💬 Chat with Qikify Plus</button>
+            </div>
+          )}
+          <button
+            className="chat-bubble-btn"
+            onClick={() => setIsChatOpen(!isChatOpen)}
+          >
+            💬
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

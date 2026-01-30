@@ -38,10 +38,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
 
     if (!companyData) {
-      return Response.json(
-        { error: "Company not found" },
-        { status: 404 },
-      );
+      return Response.json({ error: "Company not found" }, { status: 404 });
     }
     const userData = await prisma.user.findFirst({
       where: {
@@ -135,56 +132,80 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
 
     // Map to the format expected by the component with locationRoles array
-    const users = customersData.customers.map((c: { customer: { id: string; firstName?: string; lastName?: string; email: string; roleAssignments?: { edges?: { node: { role?: { name?: string }; companyLocation?: { name?: string } } }[] } } }) => {
-      const firstName = c.customer.firstName?.trim();
-      const lastName = c.customer.lastName?.trim();
+    const users = customersData.customers.map(
+      (c: {
+        customer: {
+          id: string;
+          firstName?: string;
+          lastName?: string;
+          email: string;
+          roleAssignments?: {
+            edges?: {
+              node: {
+                role?: { name?: string };
+                companyLocation?: { name?: string };
+              };
+            }[];
+          };
+        };
+      }) => {
+        const firstName = c.customer.firstName?.trim();
+        const lastName = c.customer.lastName?.trim();
 
-      const registrationContactName =
-        registrationMap.get(`${c.customer.id}`) || "";
-      const name =
-        (firstName && lastName ? `${firstName} ${lastName}` : firstName) ||
-        registrationContactName;
+        const registrationContactName =
+          registrationMap.get(`${c.customer.id}`) || "";
+        const name =
+          (firstName && lastName ? `${firstName} ${lastName}` : firstName) ||
+          registrationContactName;
 
-      const isThisStoreAdmin =
-        userData?.role === "STORE_ADMIN" &&
-        c.customer.email === storeAdminEmail;
+        const isThisStoreAdmin =
+          userData?.role === "STORE_ADMIN" &&
+          c.customer.email === storeAdminEmail;
 
-      const locationRoles =
-        c.customer.roleAssignments?.edges?.map((edge: { node: { role?: { name?: string , id?: string }; companyLocation?: { name?: string , id?: string } } }) => ({
-          roleName: isThisStoreAdmin
-            ? "Company Admin"
-            : (edge.node.role?.name ?? ""),
+        const locationRoles =
+          c.customer.roleAssignments?.edges?.map(
+            (edge: {
+              node: {
+                role?: { name?: string; id?: string };
+                companyLocation?: { name?: string; id?: string };
+              };
+            }) => ({
+              roleName: isThisStoreAdmin
+                ? "Company Admin"
+                : (edge.node.role?.name ?? ""),
 
-          locationName: edge.node.companyLocation?.name || null,
-          roleId: edge.node.role?.id || null,
-          locationId: edge.node.companyLocation?.id || null,
-        })) || [];
-      return {
-        id: c.id,
-        name,
-        email: c.customer.email,
-        company: customersData.companyName,
-        role: c.roles.length > 0 ? c.roles.join(", ") : "",
-        credit: c.creditLimit ?? 0,
-        locations:
-          c.locationNames?.length > 0 ? c.locationNames.join(", ") : "",
-        isGlobalAdmin: isThisStoreAdmin == true ? true : false,
-        locationRoles,
-        reports: {
-          activity: {
-            lastOrder: "N/A",
-            totalOrders: "0",
-            totalOrdersCount: 0,
+              locationName: edge.node.companyLocation?.name || null,
+              roleId: edge.node.role?.id || null,
+              locationId: edge.node.companyLocation?.id || null,
+            }),
+          ) || [];
+        return {
+          id: c.id,
+          name,
+          email: c.customer.email,
+          company: customersData.companyName,
+          role: c.roles.length > 0 ? c.roles.join(", ") : "",
+          credit: c.creditLimit ?? 0,
+          locations:
+            c.locationNames?.length > 0 ? c.locationNames.join(", ") : "",
+          isGlobalAdmin: isThisStoreAdmin == true ? true : false,
+          locationRoles,
+          reports: {
+            activity: {
+              lastOrder: "N/A",
+              totalOrders: "0",
+              totalOrdersCount: 0,
+            },
+            orders: [],
+            creditUsage: {
+              creditUsed: 0,
+              creditLimit: 0,
+              transactions: [],
+            },
           },
-          orders: [],
-          creditUsage: {
-            creditUsed: 0,
-            creditLimit: 0,
-            transactions: [],
-          },
-        },
-      };
-    });
+        };
+      },
+    );
 
     return Response.json({
       success: true,
