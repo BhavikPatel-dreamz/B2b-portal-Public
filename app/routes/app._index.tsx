@@ -30,7 +30,22 @@ export default function Welcome() {
 
   const handleToggle = () => {
     setIsEnabled(!isEnabled);
+    
   };
+  const [completedSteps, setCompletedSteps] = useState({
+    step1: false,
+    step2: false,
+    step3: false
+  });
+
+  const toggleStep = (step:any) => {
+    setCompletedSteps(prev => ({
+      ...prev,
+      [step]: !prev[step]
+    }));
+  };
+
+  const completedCount = Object.values(completedSteps).filter(Boolean).length;
 
   return (
     <div style={{ background: "#f1f2f4", minHeight: "100vh", padding: "24px" }}>
@@ -647,80 +662,95 @@ export default function Welcome() {
     </div>
 
         {/* Setup Guide */}
-        <div className="setup-guide-card">
-          <div className="setup-guide-header">
-            <div>
-              <h2 className="setup-guide-title">Setup guide</h2>
-              <p className="setup-guide-description">
-                Use this personalized guide to set up a B2B registration form
-                and activate B2B quick order extensions on your store.
-              </p>
-              <p className="progress-text">0 / 3 completed</p>
-            </div>
-            <button
-              className={`collapse-btn ${isGuideCollapsed ? "collapsed" : ""}`}
-              onClick={() => setIsGuideCollapsed(!isGuideCollapsed)}
+         <div className="setup-guide-card">
+      <div className="setup-guide-header">
+        <div>
+          <h2 className="setup-guide-title">Setup guide</h2>
+          <p className="setup-guide-description">
+            Use this personalized guide to set up a B2B registration form
+            and activate B2B quick order extensions on your store.
+          </p>
+          <p className="progress-text">{completedCount} / 3 completed</p>
+        </div>
+        <button
+          className={`collapse-btn ${isGuideCollapsed ? "collapsed" : ""}`}
+          onClick={() => setIsGuideCollapsed(!isGuideCollapsed)}
+        >
+          ^
+        </button>
+      </div>
+
+      {!isGuideCollapsed && (
+        <>
+          {/* Step 1 */}
+          <div className="setup-step">
+            <div 
+              className={`step-radio ${completedSteps.step1 ? 'checked' : ''}`}
+              onClick={() => toggleStep('step1')}
             >
-              ^
-            </button>
+              <div className="radio-circle">
+                {completedSteps.step1 && <div className="radio-dot"></div>}
+              </div>
+            </div>
+            <div className="step-content">
+              <div className="step-title">
+                Set up B2B Company Registration form
+              </div>
+              <div className="step-description">
+                Publish a B2B company registration form to collect and
+                review all B2B company submissions
+              </div>
+              <button
+                className="create-form-btn"
+                onClick={() => {
+                  window.open(
+                    "https://admin.shopify.com/store/findash-shipping-1/themes",
+                    "_top",
+                  );
+                }}
+              >
+                Create form
+              </button>
+            </div>
           </div>
 
-          {!isGuideCollapsed && (
-            <>
-              {/* Step 1 */}
-              <div className="setup-step">
-                <div className="step-icon">
-                  <div className="step-icon-inner"></div>
-                </div>
-                <div className="step-content">
-                  <div className="step-title">
-                    Set up B2B Company Registration form
-                  </div>
-                  <div className="step-description">
-                    Publish a B2B company registration form to collect and
-                    review all B2B company submissions
-                  </div>
-                  <button
-                    className="create-form-btn"
-                    onClick={() => {
-                      window.open(
-                        "https://admin.shopify.com/store/findash-shipping-1/themes",
-                        "_top",
-                      );
-                    }}
-                  >
-                    Create form
-                  </button>
-                </div>
+          {/* Step 2 */}
+          <div className="setup-step">
+            <div 
+              className={`step-radio ${completedSteps.step2 ? 'checked' : ''}`}
+              onClick={() => toggleStep('step2')}
+            >
+              <div className="radio-circle">
+                {completedSteps.step2 && <div className="radio-dot"></div>}
               </div>
+            </div>
+            <div className="step-content">
+              <div className="step-title">Enable theme app extensions</div>
+            </div>
+          </div>
 
-              {/* Step 2 */}
-              <div className="setup-step">
-                <div className="step-icon">
-                  <div className="step-icon-inner"></div>
-                </div>
-                <div className="step-content">
-                  <div className="step-title">Enable theme app extensions</div>
-                </div>
+          {/* Step 3 */}
+          <div className="setup-step">
+            <div 
+              className={`step-radio ${completedSteps.step3 ? 'checked' : ''}`}
+              onClick={() => toggleStep('step3')}
+            >
+              <div className="radio-circle">
+                {completedSteps.step3 && <div className="radio-dot"></div>}
               </div>
-
-              {/* Step 3 */}
-              <div className="setup-step">
-                <div className="step-icon">
-                  <div className="step-icon-inner"></div>
-                </div>
-                <div className="step-content">
-                  <div className="step-title">
-                    Explore all B2B extensions in Customer Account
-                    <span className="update-badge">
-                      Shopify's latest update
-                    </span>
-                  </div>
-                </div>
+            </div>
+            <div className="step-content">
+              <div className="step-title">
+                Explore all B2B extensions in Customer Account
+                <span className="update-badge">
+                  Shopify's latest update
+                </span>
               </div>
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
 
         {/* Tutorials */}
         <div className="tutorials-section">
@@ -736,7 +766,7 @@ export default function Welcome() {
                 The detailed steps to display a B2B company registration form on
                 your storefront
               </p>
-              <button className="watch-tutorial-btn">Watch tutorial</button>
+              <button className="watch-tutorial-btn" onClick={() => window.open("https://youtu.be/8w2wpmj_AVI?si=PFOGATSCQq46gTch", "_blank")}>Watch tutorial</button>
             </div>
 
             {/* Tutorial 2 */}
@@ -751,7 +781,7 @@ export default function Welcome() {
                 Set up a quick order page where customers can input and order
                 with a list of SKUs & quantities.
               </p>
-              <button className="watch-tutorial-btn">Watch tutorial</button>
+              <button className="watch-tutorial-btn" onClick={() => window.open("https://youtu.be/8w2wpmj_AVI?si=PFOGATSCQq46gTch", "_blank")}>Watch tutorial</button>
             </div>
 
             {/* Tutorial 3 */}
@@ -766,7 +796,7 @@ export default function Welcome() {
                 Set up a quick order block where customers can order by
                 uploading a CSV file.
               </p>
-              <button className="watch-tutorial-btn">Watch tutorial</button>
+              <button className="watch-tutorial-btn" onClick={() => window.open("https://youtu.be/8w2wpmj_AVI?si=PFOGATSCQq46gTch", "_blank")}>Watch tutorial</button>
             </div>
           </div>
         </div>
