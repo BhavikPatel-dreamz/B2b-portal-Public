@@ -55,7 +55,7 @@ export default function Welcome() {
       tagClass: "tag-storefront",
       title: "Display B2B/Wholesale registration form",
       description: "The detailed steps to display a B2B company registration form on your storefront",
-      videoUrl: "https://www.youtube.com/embed/8w2wpmj_AVI"
+      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
     },
     {
       id: 2,
@@ -63,7 +63,7 @@ export default function Welcome() {
       tagClass: "tag-customer",
       title: "Add Quick order with SKUs page",
       description: "Set up a quick order page where customers can input and order with a list of SKUs & quantities.",
-      videoUrl: "https://www.youtube.com/embed/8w2wpmj_AVI"
+      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
     },
     {
       id: 3,
@@ -71,7 +71,7 @@ export default function Welcome() {
       tagClass: "tag-customer",
       title: "Add Quick order with CSV Upload",
       description: "Set up a quick order block where customers can order by uploading a CSV file.",
-      videoUrl: "https://www.youtube.com/embed/8w2wpmj_AVI"
+      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
     }
   ];
 
@@ -83,7 +83,6 @@ export default function Welcome() {
     setSelectedTutorial(null);
   };
 
-  const completedCount = Object.values(completedSteps).filter(Boolean).length;
 
   return (
     <div style={{ background: "#f1f2f4", minHeight: "100vh", padding: "24px" }}>
@@ -102,7 +101,6 @@ export default function Welcome() {
         /* Header */
         .setup-header {
           display: flex;
-          justify-content: space-between;
           align-items: center;
           margin-bottom: 24px;
         }
@@ -936,7 +934,7 @@ export default function Welcome() {
 
       <div className="setup-container">
         {/* Header */}
-        <div className="setup-header">
+        <div className="setup-header" style={{marginBottom: '24px', display: 'flex'}}>
           <h1>Welcome to B2B portal,</h1>
         </div>
 
@@ -1043,7 +1041,7 @@ export default function Welcome() {
         )}
 
         {/* Chat Widget */}
-        <div className="chat-widget">
+        {/* <div className="chat-widget">
           {isChatOpen && (
             <div className="chat-popup">
               <div className="chat-popup-header">
@@ -1073,7 +1071,7 @@ export default function Welcome() {
           >
             💬
           </button>
-        </div>
+        </div> */}
       </div>
     </div>
   );
