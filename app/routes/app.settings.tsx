@@ -383,8 +383,6 @@ export default function SettingsPage() {
 
   const [showDropdown, setShowDropdown] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
-  const [content, setContent] = useState("");
 
   const loaderData = useLoaderData<LoaderData>();
   const { storeMissing } = loaderData;
@@ -396,7 +394,6 @@ export default function SettingsPage() {
   useEffect(() => {
     if (deleteFetcher.data?.success) {
       setShowDeleteModal(false);
-      setConfirmText("");
 
       // Optional: Reload the page to show fresh state
       setTimeout(() => {
@@ -428,7 +425,6 @@ export default function SettingsPage() {
       const hasContent = textContent.length > 0;
       setEmailHasContent(hasContent);
 
-      setContent(htmlContent);
       hiddenInputRef.current.value = hasContent ? htmlContent : "";
     }
   };

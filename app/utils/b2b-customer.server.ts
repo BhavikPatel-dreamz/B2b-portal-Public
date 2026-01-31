@@ -4861,13 +4861,23 @@ export async function deleteCompanyLocation(
     );
 
     const result = await response.json();
-
-    // Safe error checking
     const deleteData = result.data?.companyLocationDelete;
     const userErrors = deleteData?.userErrors;
 
-    if (userErrors && userErrors.length > 0) {
-      console.log(userErrors[0].message, "Delete error message");
+
+    if (userErrors && userErrors.length > 0) {    
+      // Check if error is related to orders
+      const errorMessage = userErrors[0].message.toLowerCase();
+      if (errorMessage.includes("order") || errorMessage.includes("transaction")) {
+        return {
+          error: {
+            field: userErrors[0].field,
+            message: "Cannot delete location with existing orders. This location has order history and cannot be removed.",
+            type: "HAS_ORDERS"
+          }
+        };
+      }
+      
       return { error: userErrors[0] };
     }
 
@@ -4892,6 +4902,87 @@ export async function deleteCompanyLocation(
         field: ["general"],
         message: error instanceof Error ? error.message : "Unknown error",
       },
+    };
+  }
+}
+
+// First, add this function to check if location has orders
+ 
+
+export async function checkLocationHasOrders(
+  locationId: string,
+  shopName: string,
+  accessToken: string,
+) {
+  try {
+    // Extract the numeric ID from the GID
+    const numericId = locationId.includes('/') 
+      ? locationId.split('/').pop() 
+      : locationId;
+
+    const query = `
+      query getCompanyLocationOrders($id: ID!) {
+        companyLocation(id: $id) {
+          id
+          name
+          orders(first: 1) {
+            edges {
+              node {
+                id
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query,
+          variables: { id: locationId },
+        }),
+      },
+    );
+
+    const result = await response.json();
+    
+    if (result.errors) {
+      return {
+        error: true,
+        message: result.errors[0]?.message || "GraphQL query failed",
+      };
+    }
+
+    const location = result.data?.companyLocation;
+
+    if (!location) {
+      return {
+        error: true,
+        message: "Location not found",
+      };
+    }
+
+    const hasOrders = location.orders?.edges && location.orders.edges.length > 0;
+
+    return {
+      error: false,
+      hasOrders: hasOrders,
+      ordersCount: hasOrders ? "1 or more" : 0,
+      locationName: location.name,
+      totalSpent: "N/A", // Can't get exact total easily
+    };
+  } catch (error) {
+    console.error("Error checking location orders:", error);
+    return {
+      error: true,
+      message: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }

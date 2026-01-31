@@ -21,28 +21,66 @@ type LoaderData = {
   pendingCreditAmount?: number;
 };
 
+
 export default function Welcome() {
   const data = useLoaderData<LoaderData>();
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
-    const [isEnabled, setIsEnabled] = useState(false);
+  const [isEnabled, setIsEnabled] = useState(false);
 
   const handleToggle = () => {
     setIsEnabled(!isEnabled);
-    
   };
+  
   const [completedSteps, setCompletedSteps] = useState({
     step1: false,
     step2: false,
     step3: false
   });
 
-  const toggleStep = (step:any) => {
+  const toggleStep = (step: any) => {
     setCompletedSteps(prev => ({
       ...prev,
       [step]: !prev[step]
     }));
+  };
+
+  const [selectedTutorial, setSelectedTutorial] = useState<any>(null);
+
+  const tutorials = [
+    {
+      id: 1,
+      tag: "Storefront",
+      tagClass: "tag-storefront",
+      title: "Display B2B/Wholesale registration form",
+      description: "The detailed steps to display a B2B company registration form on your storefront",
+      videoUrl: "https://www.youtube.com/embed/8w2wpmj_AVI"
+    },
+    {
+      id: 2,
+      tag: "Customer account",
+      tagClass: "tag-customer",
+      title: "Add Quick order with SKUs page",
+      description: "Set up a quick order page where customers can input and order with a list of SKUs & quantities.",
+      videoUrl: "https://www.youtube.com/embed/8w2wpmj_AVI"
+    },
+    {
+      id: 3,
+      tag: "Customer account",
+      tagClass: "tag-customer",
+      title: "Add Quick order with CSV Upload",
+      description: "Set up a quick order block where customers can order by uploading a CSV file.",
+      videoUrl: "https://www.youtube.com/embed/8w2wpmj_AVI"
+    }
+  ];
+
+  const openModal = (tutorial: any) => {
+    setSelectedTutorial(tutorial);
+  };
+
+  const closeModal = () => {
+    setSelectedTutorial(null);
   };
 
   const completedCount = Object.values(completedSteps).filter(Boolean).length;
@@ -90,15 +128,16 @@ export default function Welcome() {
         .help-center-btn:hover {
           background: #d4d5d7;
         }
-          .status-badge.enabled {
-  background-color: #d4edda;
-  color: #155724;
-}
 
-.status-badge.disabled {
-  background-color: #f8d7da;
-  color: #721c24;
-}
+        .status-badge.enabled {
+          background-color: #d4edda;
+          color: #155724;
+        }
+
+        .status-badge.disabled {
+          background-color: #f8d7da;
+          color: #721c24;
+        }
 
         /* App Embed Status Card */
         .embed-status-card {
@@ -445,11 +484,13 @@ export default function Welcome() {
           border: 1px solid #e4e5e7;
           border-radius: 8px;
           padding: 16px;
+          cursor: pointer;
           transition: all 0.2s;
         }
 
         .tutorial-card:hover {
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          transform: translateY(-4px);
+          box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
           border-color: #c9cccf;
         }
 
@@ -502,6 +543,244 @@ export default function Welcome() {
         .watch-tutorial-btn:hover {
           background: #f6f6f7;
           border-color: #8a9099;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: rgba(0, 0, 0, 0.6);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 9999;
+          padding: 20px;
+        }
+
+        .modal-content {
+          background: #f5f5f5;
+          border-radius: 12px;
+          width: 95%;
+          max-width: 1400px;
+          height: 90vh;
+          display: flex;
+          position: relative;
+          overflow: hidden;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-close-btn {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          background: white;
+          border: none;
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          font-size: 20px;
+          cursor: pointer;
+          z-index: 100;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .modal-close-btn:hover {
+          background: #f0f0f0;
+        }
+
+        /* Left Sidebar */
+        .modal-sidebar {
+          width: 300px;
+          background: white;
+          border-right: 1px solid #e0e0e0;
+          padding: 24px;
+          overflow-y: auto;
+        }
+
+        .sidebar-header h3 {
+          margin: 0 0 24px 0;
+          font-size: 18px;
+          font-weight: 600;
+          color: #1a1a1a;
+        }
+
+        .sidebar-section {
+          margin-bottom: 24px;
+        }
+
+        .sidebar-label {
+          display: block;
+          font-size: 13px;
+          font-weight: 500;
+          color: #4a4a4a;
+          margin-bottom: 8px;
+        }
+
+        .sidebar-select,
+        .sidebar-input {
+          width: 100%;
+          padding: 10px 12px;
+          border: 1px solid #d0d0d0;
+          border-radius: 6px;
+          font-size: 14px;
+          background: white;
+        }
+
+        .sidebar-select:focus,
+        .sidebar-input:focus {
+          outline: none;
+          border-color: #5c6ac4;
+          box-shadow: 0 0 0 3px rgba(92, 106, 196, 0.1);
+        }
+
+        /* Main Content */
+        .modal-main {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          background: white;
+          margin: 8px;
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .modal-main-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 20px 24px;
+          border-bottom: 1px solid #e0e0e0;
+          background: white;
+        }
+
+        .header-left {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .header-left h2 {
+          margin: 0;
+          font-size: 20px;
+          font-weight: 600;
+          color: #1a1a1a;
+        }
+
+        .modal-status-badge {
+          background: #e8f5e9;
+          color: #2e7d32;
+          padding: 4px 12px;
+          border-radius: 12px;
+          font-size: 13px;
+          font-weight: 500;
+        }
+
+        .header-right {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .icon-btn {
+          background: white;
+          border: 1px solid #d0d0d0;
+          width: 36px;
+          height: 36px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 16px;
+        }
+
+        .icon-btn:hover {
+          background: #f5f5f5;
+        }
+
+        .discard-btn {
+          background: white;
+          border: 1px solid #d0d0d0;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          color: #4a4a4a;
+        }
+
+        .discard-btn:hover {
+          background: #f5f5f5;
+        }
+
+        .save-btn {
+          background: #202223;
+          color: white;
+          border: none;
+          padding: 8px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .save-btn:hover {
+          background: #000000;
+        }
+
+        /* Video Wrapper */
+        .video-wrapper {
+          flex: 1;
+          background: #000;
+          position: relative;
+        }
+
+        .video-wrapper iframe {
+          width: 100%;
+          height: 100%;
+        }
+
+        /* Footer */
+        .modal-footer {
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          padding: 16px 24px;
+          border-top: 1px solid #e0e0e0;
+          background: white;
+        }
+
+        .learn-more-btn {
+          background: white;
+          border: 1px solid #d0d0d0;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          color: #4a4a4a;
+        }
+
+        .learn-more-btn:hover {
+          background: #f5f5f5;
+        }
+
+        .done-btn {
+          background: #202223;
+          color: white;
+          border: none;
+          padding: 10px 24px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .done-btn:hover {
+          background: #000000;
         }
 
         /* Chat Widget */
@@ -620,6 +899,12 @@ export default function Welcome() {
           transform: scale(1.05);
         }
 
+        @media (max-width: 1024px) {
+          .modal-sidebar {
+            display: none;
+          }
+        }
+
         @media (max-width: 768px) {
           .tutorials-grid {
             grid-template-columns: 1fr;
@@ -632,6 +917,20 @@ export default function Welcome() {
           .onboarding-right {
             width: 100%;
           }
+
+          .modal-content {
+            width: 100%;
+            height: 100vh;
+            border-radius: 0;
+          }
+
+          .header-left h2 {
+            font-size: 16px;
+          }
+
+          .icon-btn {
+            display: none;
+          }
         }
       `}</style>
 
@@ -639,167 +938,109 @@ export default function Welcome() {
         {/* Header */}
         <div className="setup-header">
           <h1>Welcome to B2B portal,</h1>
-          <button className="help-center-btn">Help center</button>
         </div>
-
-        {/* App Embed Status */}
-         <div className="embed-status-card">
-      <div className="embed-status-left">
-        <div className="embed-status-title">
-          B2B portal app embed status
-          <span className={`status-badge ${isEnabled ? "enabled" : "disabled"}`}>
-            {isEnabled ? "Enabled" : "Disabled"}
-          </span>
-        </div>
-        <div className="embed-status-description">
-          To display B2B registration form, please enable and save app embed
-          block on Shopify Theme Editor.
-        </div>
-      </div>
-      <button className="enable-app-btn" onClick={handleToggle}>
-        {isEnabled ? "Disable app" : "Enable app"}
-      </button>
-    </div>
 
         {/* Setup Guide */}
-         <div className="setup-guide-card">
-      <div className="setup-guide-header">
-        <div>
-          <h2 className="setup-guide-title">Setup guide</h2>
-          <p className="setup-guide-description">
-            Use this personalized guide to set up a B2B registration form
-            and activate B2B quick order extensions on your store.
-          </p>
-          <p className="progress-text">{completedCount} / 3 completed</p>
+        <div className="setup-guide-card">
+          <div className="setup-guide-header">
+            <div>
+              <h2 className="setup-guide-title">Setup guide</h2>
+              <p className="setup-guide-description">
+                Use this personalized guide to set up a B2B extension on your store.
+              </p>
+            </div>
+            <button
+              className={`collapse-btn ${isGuideCollapsed ? "collapsed" : ""}`}
+              onClick={() => setIsGuideCollapsed(!isGuideCollapsed)}
+            >
+              ^
+            </button>
+          </div>
+
+          {!isGuideCollapsed && (
+            <>
+              {/* Step 2 */}
+              <div className="setup-step">
+                <div 
+                  className={`step-radio ${completedSteps.step2 ? 'checked' : ''}`}
+                  onClick={() => toggleStep('step2')}
+                >
+                  <div className="radio-circle">
+                    {completedSteps.step2 && <div className="radio-dot"></div>}
+                  </div>
+                </div>
+                <div className="step-content">
+                  <button
+                    className="create-form-btn"
+                    onClick={() => window.open("https://admin.shopify.com/store/findash-shipping-1/themes", "_top")}
+                  >
+                    Enable theme app extensions
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
-        <button
-          className={`collapse-btn ${isGuideCollapsed ? "collapsed" : ""}`}
-          onClick={() => setIsGuideCollapsed(!isGuideCollapsed)}
-        >
-          ^
-        </button>
-      </div>
-
-      {!isGuideCollapsed && (
-        <>
-          {/* Step 1 */}
-          <div className="setup-step">
-            <div 
-              className={`step-radio ${completedSteps.step1 ? 'checked' : ''}`}
-              onClick={() => toggleStep('step1')}
-            >
-              <div className="radio-circle">
-                {completedSteps.step1 && <div className="radio-dot"></div>}
-              </div>
-            </div>
-            <div className="step-content">
-              <div className="step-title">
-                Set up B2B Company Registration form
-              </div>
-              <div className="step-description">
-                Publish a B2B company registration form to collect and
-                review all B2B company submissions
-              </div>
-              <button
-                className="create-form-btn"
-                onClick={() => {
-                  window.open(
-                    "https://admin.shopify.com/store/findash-shipping-1/themes",
-                    "_top",
-                  );
-                }}
-              >
-                Create form
-              </button>
-            </div>
-          </div>
-
-          {/* Step 2 */}
-          <div className="setup-step">
-            <div 
-              className={`step-radio ${completedSteps.step2 ? 'checked' : ''}`}
-              onClick={() => toggleStep('step2')}
-            >
-              <div className="radio-circle">
-                {completedSteps.step2 && <div className="radio-dot"></div>}
-              </div>
-            </div>
-            <div className="step-content">
-              <div className="step-title">Enable theme app extensions</div>
-            </div>
-          </div>
-
-          {/* Step 3 */}
-          <div className="setup-step">
-            <div 
-              className={`step-radio ${completedSteps.step3 ? 'checked' : ''}`}
-              onClick={() => toggleStep('step3')}
-            >
-              <div className="radio-circle">
-                {completedSteps.step3 && <div className="radio-dot"></div>}
-              </div>
-            </div>
-            <div className="step-content">
-              <div className="step-title">
-                Explore all B2B extensions in Customer Account
-                <span className="update-badge">
-                  Shopify's latest update
-                </span>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
 
         {/* Tutorials */}
         <div className="tutorials-section">
           <h2 className="tutorials-title">Tutorials</h2>
           <div className="tutorials-grid">
-            {/* Tutorial 1 */}
-            <div className="tutorial-card">
-              <span className="tutorial-tag tag-storefront">Storefront</span>
-              <h3 className="tutorial-card-title">
-                Display B2B/Wholesale registration form
-              </h3>
-              <p className="tutorial-card-description">
-                The detailed steps to display a B2B company registration form on
-                your storefront
-              </p>
-              <button className="watch-tutorial-btn" onClick={() => window.open("https://youtu.be/8w2wpmj_AVI?si=PFOGATSCQq46gTch", "_blank")}>Watch tutorial</button>
-            </div>
-
-            {/* Tutorial 2 */}
-            <div className="tutorial-card">
-              <span className="tutorial-tag tag-customer">
-                Customer account
-              </span>
-              <h3 className="tutorial-card-title">
-                Add Quick order with SKUs page
-              </h3>
-              <p className="tutorial-card-description">
-                Set up a quick order page where customers can input and order
-                with a list of SKUs & quantities.
-              </p>
-              <button className="watch-tutorial-btn" onClick={() => window.open("https://youtu.be/8w2wpmj_AVI?si=PFOGATSCQq46gTch", "_blank")}>Watch tutorial</button>
-            </div>
-
-            {/* Tutorial 3 */}
-            <div className="tutorial-card">
-              <span className="tutorial-tag tag-customer">
-                Customer account
-              </span>
-              <h3 className="tutorial-card-title">
-                Add Quick order with CSV Upload
-              </h3>
-              <p className="tutorial-card-description">
-                Set up a quick order block where customers can order by
-                uploading a CSV file.
-              </p>
-              <button className="watch-tutorial-btn" onClick={() => window.open("https://youtu.be/8w2wpmj_AVI?si=PFOGATSCQq46gTch", "_blank")}>Watch tutorial</button>
-            </div>
+            {tutorials.map((tutorial) => (
+              <div 
+                key={tutorial.id} 
+                className="tutorial-card"
+                onClick={() => openModal(tutorial)}
+              >
+                <span className={`tutorial-tag ${tutorial.tagClass}`}>
+                  {tutorial.tag}
+                </span>
+                <h3 className="tutorial-card-title">{tutorial.title}</h3>
+                <p className="tutorial-card-description">{tutorial.description}</p>
+                <button className="watch-tutorial-btn">Watch tutorial</button>
+              </div>
+            ))}
           </div>
         </div>
+
+        {/* Modal Popup */}
+        {selectedTutorial && (
+          <div className="modal-overlay" onClick={closeModal}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              {/* Close button */}
+              <button className="modal-close-btn" onClick={closeModal}>
+                ✕
+              </button>
+
+              {/* Main Content Area */}
+              <div className="modal-main">
+                {/* Header with status */}
+                <div className="modal-main-header">
+                  <div className="header-left">
+                    <h2>{selectedTutorial.title}</h2>  
+                  </div>
+                </div>
+
+                {/* Video Player */}
+                <div className="video-wrapper">
+                  <iframe
+                    width="100%"
+                    height="100%"
+                    src={`${selectedTutorial.videoUrl}?autoplay=1`}
+                    title={selectedTutorial.title}
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  ></iframe>
+                </div>
+
+                {/* Footer buttons */}
+                <div className="modal-footer">
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Chat Widget */}
         <div className="chat-widget">

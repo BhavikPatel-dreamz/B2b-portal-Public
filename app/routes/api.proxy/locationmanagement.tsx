@@ -5,9 +5,10 @@ import {
   getCompanyLocations,
   updateCompanyLocation,
   deleteCompanyLocation,
-  checkLocationHasUsers,
   createLocationAndAssignToContact,
   checkLocationExists,
+  checkLocationHasOrders,
+  checkLocationHasUsers,
 } from "../../utils/b2b-customer.server";
 
 /**
@@ -249,6 +250,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
+        // Check if location has orders FIRST
+        const orderCheck = await checkLocationHasOrders(
+          locationId,
+          shop,
+          store.accessToken,
+        );
+
+        if (orderCheck.error) {
+         
+          return Response.json(
+            { error: orderCheck.message || "Failed to verify location status" },
+            { status: 500 },
+          );
+        }
+
+        // Prevent deletion if location has orders
+        if (orderCheck.hasOrders) {
+          const errorMessage = `Cannot delete location "${orderCheck.locationName}". This location has ${orderCheck.ordersCount} order(s) are existing.`;
+
+          return Response.json(
+            {
+              error: errorMessage,
+              ordersCount: orderCheck.ordersCount,
+              totalSpent: orderCheck.totalSpent
+            },
+            { status: 400 },
+          );
+        }
+
         // Check if location has assigned users
         const userCheck = await checkLocationHasUsers(
           locationId,
@@ -256,37 +286,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           store.accessToken,
         );
 
-        const checkUser =
-          userContext?.customerEmail === userCheck?.assignedEmails[0];
         if (userCheck.error) {
           return Response.json(
             { error: "Failed to verify location status" },
             { status: 500 },
           );
         }
-        
-        if (
-          checkUser == true &&
-          userCheck.hasUsers &&
-          userContext.isMainContact == true
-        ) {
-          const result = await deleteCompanyLocation(
-            locationId,
-            shop,
-            store.accessToken,
-          );
 
-          if (result.error) {
-            return Response.json({ error: result.error }, { status: 400 });
-          }
+        // Check if current user is assigned to this location
+        const isUserAssignedToLocation =
+          userContext?.customerEmail &&
+          userCheck?.assignedEmails?.includes(userContext.customerEmail);
 
-          return Response.json({
-            success: true,
-            deletedId: result.deletedId,
-          });
-        }
+      
+        const canDelete =
+          !userCheck.hasUsers ||
+          (userContext?.isMainContact === true &&
+            isUserAssignedToLocation &&
+            userCheck.userCount === 1);
 
-        if (userCheck.hasUsers) {
+        if (!canDelete) {
           return Response.json(
             {
               error: `Cannot delete location "${userCheck.locationName}". It has ${userCheck.userCount} assigned user(s). Please unassign all users before deleting.`,
@@ -304,7 +323,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         if (result.error) {
-          return Response.json({ error: result.error }, { status: 400 });
+          return Response.json(
+            {
+              error: result.error.message || result.error,
+              type: result.error.type || "DELETE_FAILED",
+            },
+            { status: 400 },
+          );
         }
 
         return Response.json({

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
+import {
   ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
+  useFetcher, useLoaderData, useRevalidator,useSearchParams
 } from "react-router";
-import { useFetcher, useLoaderData, useRevalidator } from "react-router";
+
 import { useAppBridge } from "@shopify/app-bridge-react";
 import {
   boundary,
@@ -15,7 +16,7 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { sendCompanyAssignmentEmail } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
-import { useSearchParams } from "react-router";
+
 
 interface RegistrationSubmission {
   paymentTerm: string;
