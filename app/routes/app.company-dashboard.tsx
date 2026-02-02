@@ -883,6 +883,10 @@ export default function CompanyDashboard() {
     { value: "", label: "No payment terms" },
     {
       value: "gid://shopify/PaymentTermsTemplate/1",
+      label: "Due on receipt",
+    },
+     {
+      value: "gid://shopify/PaymentTermsTemplate/9",
       label: "Due on fulfillment",
     },
     {
@@ -898,16 +902,20 @@ export default function CompanyDashboard() {
       label: "Net 30",
     },
     {
-      value: "gid://shopify/PaymentTermsTemplate/5",
+      value: "gid://shopify/PaymentTermsTemplate/8",
       label: "Net 45",
     },
     {
-      value: "gid://shopify/PaymentTermsTemplate/6",
+      value: "gid://shopify/PaymentTermsTemplate/5",
       label: "Net 60",
     },
     {
-      value: "gid://shopify/PaymentTermsTemplate/7",
+      value: "gid://shopify/PaymentTermsTemplate/6",
       label: "Net 90",
+    },
+    {
+      value: "gid://shopify/PaymentTermsTemplate/7",
+      label: "Fixed",
     },
   ];
 
@@ -1056,51 +1064,51 @@ export default function CompanyDashboard() {
               </button>
             </div>
 
-  <div style={{ marginBottom: 20 }}>
-    <label 
-      htmlFor="payment-terms-select"
-      style={{ fontSize: 13, fontWeight: 500 }}
-    >
-      Set payment terms
-    </label>
-    <select
-      id="payment-terms-select"
-      value={selectedPaymentTerms}
-      onChange={(e) => setSelectedPaymentTerms(e.target.value)}
-      style={{
-        width: "100%",
-        padding: "8px 12px",
-        marginTop: 6,
-      }}
-    >
-      {paymentTermsOptions.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  </div>
+            <div style={{ marginBottom: 20 }}>
+              <label
+                htmlFor="payment-terms-select"
+                style={{ fontSize: 13, fontWeight: 500 }}
+              >
+                Set payment terms
+              </label>
+              <select
+                id="payment-terms-select"
+                value={selectedPaymentTerms}
+                onChange={(e) => setSelectedPaymentTerms(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  marginTop: 6,
+                }}
+              >
+                {paymentTermsOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-  {isEditingPaymentTerms && (
-    <div
-      style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
-    >
-      <button onClick={handleCancelPaymentTermsEdit}>Cancel</button>
-      <button
-        onClick={handlePaymentTermsUpdate}
-        disabled={fetcher.state === "submitting"}
-        style={{
-          backgroundColor: "#008060",
-          color: "white",
-          padding: "8px 16px",
-          borderRadius: 6,
-        }}
-      >
-        {fetcher.state === "submitting" ? "Saving..." : "Save"}
-      </button>
-    </div>
-  )}
-</section>
+            {isEditingPaymentTerms && (
+              <div
+                style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+              >
+                <button onClick={handleCancelPaymentTermsEdit}>Cancel</button>
+                <button
+                  onClick={handlePaymentTermsUpdate}
+                  disabled={fetcher.state === "submitting"}
+                  style={{
+                    backgroundColor: "#008060",
+                    color: "white",
+                    padding: "8px 16px",
+                    borderRadius: 6,
+                  }}
+                >
+                  {fetcher.state === "submitting" ? "Saving..." : "Save"}
+                </button>
+              </div>
+            )}
+          </section>
         </div>
       )}
 
