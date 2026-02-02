@@ -119,14 +119,14 @@ export default function Home() {
     data.totalCreditAllowed > 0
       ? Math.round((data.totalCreditUsed / data.totalCreditAllowed) * 100)
       : 0;
-  const pendingCreditPercentage =
-    data.totalCreditAllowed > 0
-      ? Math.round((data.pendingCreditAmount / data.totalCreditAllowed) * 100)
-      : 0;
-  const availableCreditPercentage =
-    data.totalCreditAllowed > 0
-      ? Math.round((data.availableCredit / data.totalCreditAllowed) * 100)
-      : 100;
+  // const pendingCreditPercentage =
+  //   data.totalCreditAllowed > 0
+  //     ? Math.round((data.pendingCreditAmount / data.totalCreditAllowed) * 100)
+  //     : 0;
+  // const availableCreditPercentage =
+  //   data.totalCreditAllowed > 0
+  //     ? Math.round((data.availableCredit / data.totalCreditAllowed) * 100)
+  //     : 100;
 
   // Calculate percentages for company stats
   const totalRegistrations = data.totalCompanies;
@@ -1093,7 +1093,7 @@ export default function Home() {
               </div>
 
               <p className="about-note">
-                💡 No obligation. We'll help you evaluate your requirements.
+                💡 No obligation. We will help you evaluate your requirements.
               </p>
 
               <div className="about-footer">

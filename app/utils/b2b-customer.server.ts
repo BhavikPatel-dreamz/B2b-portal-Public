@@ -4915,11 +4915,6 @@ export async function checkLocationHasOrders(
   accessToken: string,
 ) {
   try {
-    // Extract the numeric ID from the GID
-    const numericId = locationId.includes('/') 
-      ? locationId.split('/').pop() 
-      : locationId;
-
     const query = `
       query getCompanyLocationOrders($id: ID!) {
         companyLocation(id: $id) {
@@ -5039,17 +5034,16 @@ export async function checkLocationHasUsers(
     // Access email through customer object
     const assignedEmails =
       location?.roleAssignments?.edges
-        ?.map((edge: any) => edge.node.companyContact?.customer?.email)
+        ?.map((edge: { node: { companyContact: { customer: { email: string } } } }) => edge.node.companyContact?.customer?.email)
         .filter(Boolean) || [];
     
-    console.log("Assigned Emails---", assignedEmails);
     
     return {
       hasUsers: userCount > 0,
       userCount: userCount,
       assignedEmails: assignedEmails,
       roleAssignIds:
-        location?.roleAssignments?.edges?.map((edge: any) => edge.node.id) ||
+        location?.roleAssignments?.edges?.map((edge: { node: { id: string } }) => edge.node.id) ||
         [],
       locationName: location?.name,
     };

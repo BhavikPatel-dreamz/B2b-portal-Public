@@ -63,6 +63,19 @@ interface ActionJson {
     countryCode?: string | null;
     phone?: string | null;
   } | null;
+    data?: {
+    customerCreate?: { userErrors: { message: string; field?: string[] }[] };
+    companyCreate?: { userErrors: { message: string; field?: string[] }[] };
+    companyContactCreate?: {
+      userErrors: { message: string; field?: string[] }[];
+    };
+    companyAssignMainContact?: {
+      userErrors: { message: string; field?: string[] }[];
+    };
+    companyAssignCustomerAsContact?: {
+      userErrors: { message: string; field?: string[] }[];
+    };
+  };
 }
 
 interface CompanyAccount {
@@ -85,7 +98,7 @@ const buildUserErrorList = (payload: any) => {
   const errors: string[] = [];
   if (payload?.errors?.length) {
     errors.push(
-      ...payload.errors.map((err: { message: string }) =>
+      ...payload.errors.map((err: { message: string } | string) =>
         typeof err === "string" ? err : err.message || "Unknown error",
       ),
     );

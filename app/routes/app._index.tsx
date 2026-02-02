@@ -1,37 +1,68 @@
 import {
-  Link,
-  type HeadersFunction,
-  type LoaderFunctionArgs,
   useLoaderData,
+  type HeadersFunction
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import React, { useState } from "react";
+import  { useState } from "react";
+import prisma from "app/db.server";
+import { authenticate } from "app/shopify.server";
+import { LoaderFunctionArgs } from "react-router";
 
-type LoaderData = {
-  isAuthenticated: boolean;
-  totalCompanies?: number;
-  pendingRegistrations?: number;
-  approvedRegistrations?: number;
-  rejectedRegistrations?: number;
-  totalUsers?: number;
-  totalOrders?: number;
-  totalCreditAllowed?: number;
-  totalCreditUsed?: number;
-  availableCredit?: number;
-  pendingCreditAmount?: number;
+// type LoaderData = {
+//   isAuthenticated: boolean;
+//   totalCompanies?: number;
+//   pendingRegistrations?: number;
+//   approvedRegistrations?: number;
+//   rejectedRegistrations?: number;
+//   totalUsers?: number;
+//   totalOrders?: number;
+//   totalCreditAllowed?: number;
+//   totalCreditUsed?: number;
+//   availableCredit?: number;
+//   pendingCreditAmount?: number;
+// };
+
+type CompletedStepsState = {
+  step1: boolean;
+  step2: boolean;
+  step3: boolean;
+};
+ 
+type Tutorial = {
+  id: number;
+  tag: string;
+  tagClass: string;
+  title: string;
+  description: string;
+  videoUrl: string;
 };
 
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: session.shop }, 
+  });
+
+  if (!store) {
+    return Response.json(
+      { submissions: [], storeMissing: true },
+      { status: 404 },
+    );
+  }
+
+
+  return Response.json({
+    store
+  });
+};
 
 export default function Welcome() {
-  const data = useLoaderData<LoaderData>();
-
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
-  const [isEnabled, setIsEnabled] = useState(false);
-
-  const handleToggle = () => {
-    setIsEnabled(!isEnabled);
+  const { store } = useLoaderData<typeof loader>() as { 
+    store: { shopDomain: string } | null 
   };
+  const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
+
   
   const [completedSteps, setCompletedSteps] = useState({
     step1: false,
@@ -39,15 +70,21 @@ export default function Welcome() {
     step3: false
   });
 
-  const toggleStep = (step: any) => {
+ const toggleStep = (step: keyof CompletedStepsState) => {
     setCompletedSteps(prev => ({
       ...prev,
       [step]: !prev[step]
     }));
   };
 
-  const [selectedTutorial, setSelectedTutorial] = useState<any>(null);
+   const getStoreName = () => {
+    if (!store?.shopDomain) return '';
+    return store.shopDomain.split('.')[0];
+  };
 
+
+
+  const [selectedTutorial, setSelectedTutorial] = useState<Tutorial | null>(null);
   const tutorials = [
     {
       id: 1,
@@ -75,7 +112,7 @@ export default function Welcome() {
     }
   ];
 
-  const openModal = (tutorial: any) => {
+  const openModal = (tutorial: Tutorial) => {
     setSelectedTutorial(tutorial);
   };
 
@@ -939,6 +976,7 @@ export default function Welcome() {
         </div>
 
         {/* Setup Guide */}
+       
         <div className="setup-guide-card">
           <div className="setup-guide-header">
             <div>
@@ -970,7 +1008,7 @@ export default function Welcome() {
                 <div className="step-content">
                   <button
                     className="create-form-btn"
-                    onClick={() => window.open("https://admin.shopify.com/store/findash-shipping-1/themes", "_top")}
+                    onClick={() => window.open(`https://admin.shopify.com/store/${getStoreName()}/themes`, "_top")}
                   >
                     Enable theme app extensions
                   </button>
