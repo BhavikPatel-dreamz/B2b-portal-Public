@@ -2059,6 +2059,7 @@ export default function CompanyDashboard() {
                               id: string;
                               shopifyOrderId?: string;
                               remainingBalance: number;
+                              creditUsed?: number;
                               createdBy?: string;
                               createdAt?: string;
                             },
@@ -2088,7 +2089,7 @@ export default function CompanyDashboard() {
                                   {order.shopifyOrderId || order.id.slice(-8)}
                                 </span>
                                 <span style={{ fontWeight: 600 }}>
-                                  {formatCurrency(order.remainingBalance)}
+                                  {formatCurrency(order.creditUsed)}
                                 </span>
                               </div>
                               <div style={{ color: "#5c5f62" }}>

@@ -38,7 +38,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
 
     if (!companyData) {
-      return Response.json({ error: "Company not found" }, { status: 404 });
+      return Response.json(
+        {
+          success: false,
+          error: "Company not found",
+        },
+        { status: 404 },
+      );
     }
     const userData = await prisma.user.findFirst({
       where: {
@@ -61,7 +67,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Ensure accessToken is available
     if (!store.accessToken) {
       return Response.json(
-        { error: "Store access token not available" },
+        {
+          success: false,
+          error: "Store access token not available",
+        },
         { status: 500 },
       );
     }
@@ -114,7 +123,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     if (customersData.error) {
       return Response.json(
-        { error: "Failed to fetch customers" },
+        {
+          success: false,
+          error: "Something went wrong",
+        },
         { status: 500 },
       );
     }
@@ -215,8 +227,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   } catch (error) {
     console.error("Proxy error (GET):", error);
+
     return Response.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
+      {
+        success: false,
+        error: "Something went wrong",
+      },
       { status: 500 },
     );
   }

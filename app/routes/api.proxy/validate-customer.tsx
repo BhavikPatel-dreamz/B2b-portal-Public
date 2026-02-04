@@ -22,7 +22,7 @@ import prisma from "app/db.server";
  * - customerId: string - Shopify customer ID
  * - redirectTo: string - where to redirect if no access
  */
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => { 
   try {
     // Get proxy parameters
     const { shop, loggedInCustomerId } = getProxyParams(request);

@@ -351,7 +351,7 @@ export async function getCompanyDashboardData(
   const recentOrders = await prisma.b2BOrder.findMany({
     where: {
       companyId,
-      orderStatus: { not: "cancelled" },
+      orderStatus: { notIn: ["cancelled","draft"] },
     },
     distinct: ["shopifyOrderId"],
     orderBy: {
@@ -374,7 +374,7 @@ export async function getCompanyDashboardData(
     await Promise.all([
       await prisma.b2BOrder.groupBy({
         by: ["shopifyOrderId"],
-        where: { companyId, orderStatus: { not: "cancelled" } },
+        where: { companyId, orderStatus: { notIn: ["cancelled","draft"] } },
       }),
       await prisma.b2BOrder.groupBy({
         by: ["shopifyOrderId"],
@@ -389,7 +389,7 @@ export async function getCompanyDashboardData(
         where: {
           companyId,
           paymentStatus: { in: ["pending", "partial"] },
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["cancelled","draft"] },
         },
       }),
       await prisma.b2BOrder.groupBy({
