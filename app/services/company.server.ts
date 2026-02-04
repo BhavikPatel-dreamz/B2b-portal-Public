@@ -568,7 +568,7 @@ export async function getCompanyOrders(
   const orders = await prisma.b2BOrder.findMany({
     where: {
       companyId,
-      orderStatus: { not: "cancelled" },
+      orderStatus: { notIn: ["cancelled","draft"] },
     },
     distinct: ["shopifyOrderId"],
     orderBy: {
