@@ -90,24 +90,24 @@ export default function Welcome() {
       id: 1,
       tag: "Storefront",
       tagClass: "tag-storefront",
-      title: "Display B2B/Wholesale registration form",
-      description: "The detailed steps to display a B2B company registration form on your storefront",
+      title: "Enable B2B Registration on Storefront",
+      description: "Learn how to enable the app embed and display the B2B company registration form on your storefront so wholesale customers can apply.",
       videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
     },
     {
       id: 2,
-      tag: "Customer account",
+      tag: "Store setup",
       tagClass: "tag-customer",
-      title: "Add Quick order with SKUs page",
-      description: "Set up a quick order page where customers can input and order with a list of SKUs & quantities.",
+      title: "Create & Publish B2B Portal Page",
+      description: "Step-by-step guide to creating a B2B portal page, adding the app block, and linking it to your store menu.",
       videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
     },
     {
       id: 3,
-      tag: "Customer account",
+      tag: "Admin workflow",
       tagClass: "tag-customer",
-      title: "Add Quick order with CSV Upload",
-      description: "Set up a quick order block where customers can order by uploading a CSV file.",
+      title: "Approve Companies & Manage Access",
+      description: "See how to review B2B registrations, approve companies, manage users, locations, and assign roles.",
       videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
     }
   ];
