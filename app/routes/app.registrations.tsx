@@ -467,34 +467,46 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const response = await admin.graphql(
           `#graphql
-          mutation CreateCustomer($input: CustomerInput!) {
-            customerCreate(input: $input) {
-              customer {
-                id
-                email
-                firstName
-                lastName
-                phone
-              }
-              userErrors { field message }
-            }
-          }
-        `,
+    mutation CreateCustomer($input: CustomerInput!) {
+      customerCreate(input: $input) {
+        customer {
+          id
+          email
+          firstName
+          lastName
+          phone
+        }
+        userErrors { field message }
+      }
+    }
+  `,
           {
             variables: {
               input: {
                 email,
                 firstName,
                 lastName: lastName || undefined,
-                phone,
+                ...(phone && { phone: phone }),
               },
             },
           },
         );
 
         const payload = await response.json();
-        const errors = buildUserErrorList(payload);
-        if (errors.length) {
+
+        // Check for errors but filter out phone validation errors
+        const userErrors = payload?.data?.customerCreate?.userErrors || [];
+        const nonPhoneErrors = userErrors.filter(
+          (error: any) =>
+            !error.field?.includes("phone") &&
+            !error.message?.toLowerCase().includes("phone"),
+        );
+
+        // If there are non-phone errors, return them
+        if (nonPhoneErrors.length > 0) {
+          const errors = buildUserErrorList({
+            data: { customerCreate: { userErrors: nonPhoneErrors } },
+          });
           return Response.json({ intent, success: false, errors });
         }
         const customer = payload?.data?.customerCreate?.customer;

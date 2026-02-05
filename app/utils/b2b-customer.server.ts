@@ -68,7 +68,11 @@ export async function checkCustomerExists(
           firstName: customer.firstName,
           lastName: customer.lastName,
           phone: customer.phone,
-          metafields: customer.metafields.edges.map((edge: { node: { namespace: string; key: string; value: string } }) => edge.node),
+          metafields: customer.metafields.edges.map(
+            (edge: {
+              node: { namespace: string; key: string; value: string };
+            }) => edge.node,
+          ),
         },
       };
     }
@@ -204,7 +208,12 @@ export async function createShopifyCustomer(
       console.error("Shopify User Errors:", errors);
       return {
         success: false,
-        error: errors.map((e: { field: string; message: string }) => `${e.field}: ${e.message}`).join(", "),
+        error: errors
+          .map(
+            (e: { field: string; message: string }) =>
+              `${e.field}: ${e.message}`,
+          )
+          .join(", "),
       };
     }
 
@@ -379,7 +388,8 @@ export async function assignCompanyToCustomer(
 
     // Find "Member" role or use the first available role
     let companyContactRoleId = roles.find(
-      (edge: { node: { name: string; id: string } }) => edge.node.name.toLowerCase() === "Company Admin",
+      (edge: { node: { name: string; id: string } }) =>
+        edge.node.name.toLowerCase() === "Company Admin",
     )?.node?.id;
 
     if (!companyContactRoleId && roles.length > 0) {
@@ -860,7 +870,9 @@ export async function checkCustomerIsB2BInShopify(
 
     // Check for company metafield
     const metafields =
-      customer.metafields?.edges?.map((edge: { node: { key: string; value: string } }) => edge.node) || [];
+      customer.metafields?.edges?.map(
+        (edge: { node: { key: string; value: string } }) => edge.node,
+      ) || [];
     const companyMetafield = metafields.find(
       (mf: { key: string }) => mf.key === "b2b_company" || mf.key === "company",
     );
@@ -1088,7 +1100,6 @@ export async function getCustomerCompanyInfo(
 
     const data = await response.json();
 
-  
     if (data.errors) {
       console.error("GraphQL Errors:", data.errors);
       return { hasCompany: false, error: data.errors };
@@ -1118,86 +1129,116 @@ export async function getCustomerCompanyInfo(
       },
     });
     // Process company information
-    const companies = companyProfiles.map((profile: { company: { id: string | number; name: string; mainContact: { customer: { id: string | number } } }; roleAssignments: { edges: Array<{ node: { role: { name: string }; companyLocation: { id: string | number; name: string } } }> } }) => {
-      const company = profile.company;
+    const companies = companyProfiles.map(
+      (profile: {
+        company: {
+          id: string | number;
+          name: string;
+          mainContact: { customer: { id: string | number } };
+        };
+        roleAssignments: {
+          edges: Array<{
+            node: {
+              role: { name: string };
+              companyLocation: { id: string | number; name: string };
+            };
+          }>;
+        };
+      }) => {
+        const company = profile.company;
 
-      const roleAssignments =
-        profile.roleAssignments?.edges?.map((edge: { node: { role: { name: string }; companyLocation: { id: string | number; name: string } } }) => ({
-          role: edge.node.role.name,
-          locationId: edge.node.companyLocation?.id,
-          locationName: edge.node.companyLocation?.name,
-        })) || [];
-
-      const roles = roleAssignments.map((r: { role: string }) => r.role);
-
-      // Check if this customer is the main contact (company owner)
-      const isMainContact =
-        company.mainContact?.customer?.id ===
-        `gid://shopify/Customer/${customerId}`;
-
-      // Check if user has "Company Admin" role (NOT "Location Admin")
-      // Only "Company Admin" (without "Location" prefix) should be considered admin
-      const hasCompanyAdminRole = roles.some((r: string) => {
-        const roleLower = r.toLowerCase();
-        // Match "company admin" or "admin" but NOT "location admin"
-        return (
-          (roleLower === "admin" || roleLower === "company admin") &&
-          !roleLower.includes("location")
-        );
-      });
-
-      // User is admin if they are main contact OR have Company Admin role
-      const isAdmin = isMainContact || hasCompanyAdminRole;
-
-      // Extract unique location IDs that this user has access to
-      const assignedLocationIds = roleAssignments
-        .filter((ra: { locationId: string | number }) => ra.locationId)
-        .map((ra: { locationId: string }) => ra.locationId as string);
-
-      // Remove duplicates
-      const uniqueLocationIds = [...new Set(assignedLocationIds)];
-
-      // Group role assignments by location for easier validation
-      const locationRoles = roleAssignments.reduce(
-        (
-          acc: Record<string, { locationId: string; locationName: string; roles: string[] }>,
-          ra: { locationId: string | number; locationName: string; role: string },
-        ) => {
-          if (ra.locationId) {
-            if (!acc[ra.locationId]) {
-              acc[ra.locationId] = {
-                locationId: ra.locationId,
-                locationName: ra.locationName,
-                roles: [],
+        const roleAssignments =
+          profile.roleAssignments?.edges?.map(
+            (edge: {
+              node: {
+                role: { name: string };
+                companyLocation: { id: string | number; name: string };
               };
-            }
-            acc[ra.locationId].roles.push(ra.role);
-          }
-          return acc;
-        },
-        {},
-      );
+            }) => ({
+              role: edge.node.role.name,
+              locationId: edge.node.companyLocation?.id,
+              locationName: edge.node.companyLocation?.name,
+            }),
+          ) || [];
 
-      return {
-        companyId: company.id,
-        companyName: company.name,
-        externalId: company.externalId,
-        mainContact: company.mainContact?.customer,
-        totalSpent: company.totalSpent,
-        locationsCount: company.locationsCount?.count || 0,
-        updatedAt: company.updatedAt,
-        roles: roles,
-        roleAssignments: roleAssignments,
-        // NEW: Enhanced location-based access control fields
-        assignedLocationIds: uniqueLocationIds,
-        locationRoles: Object.values(locationRoles),
-        // Helper flag: user has access to all locations if they're admin/main contact
-        hasAllLocationAccess: isAdmin || isMainContact,
-        title: profile.title,
-        // isAdmin,
-        // isMainContact,
-      };
-    });
+        const roles = roleAssignments.map((r: { role: string }) => r.role);
+
+        // Check if this customer is the main contact (company owner)
+        const isMainContact =
+          company.mainContact?.customer?.id ===
+          `gid://shopify/Customer/${customerId}`;
+
+        // Check if user has "Company Admin" role (NOT "Location Admin")
+        // Only "Company Admin" (without "Location" prefix) should be considered admin
+        const hasCompanyAdminRole = roles.some((r: string) => {
+          const roleLower = r.toLowerCase();
+          // Match "company admin" or "admin" but NOT "location admin"
+          return (
+            (roleLower === "admin" || roleLower === "company admin") &&
+            !roleLower.includes("location")
+          );
+        });
+
+        // User is admin if they are main contact OR have Company Admin role
+        const isAdmin = isMainContact || hasCompanyAdminRole;
+
+        // Extract unique location IDs that this user has access to
+        const assignedLocationIds = roleAssignments
+          .filter((ra: { locationId: string | number }) => ra.locationId)
+          .map((ra: { locationId: string }) => ra.locationId as string);
+
+        // Remove duplicates
+        const uniqueLocationIds = [...new Set(assignedLocationIds)];
+
+        // Group role assignments by location for easier validation
+        const locationRoles = roleAssignments.reduce(
+          (
+            acc: Record<
+              string,
+              { locationId: string; locationName: string; roles: string[] }
+            >,
+            ra: {
+              locationId: string | number;
+              locationName: string;
+              role: string;
+            },
+          ) => {
+            if (ra.locationId) {
+              if (!acc[ra.locationId]) {
+                acc[ra.locationId] = {
+                  locationId: ra.locationId,
+                  locationName: ra.locationName,
+                  roles: [],
+                };
+              }
+              acc[ra.locationId].roles.push(ra.role);
+            }
+            return acc;
+          },
+          {},
+        );
+
+        return {
+          companyId: company.id,
+          companyName: company.name,
+          externalId: company.externalId,
+          mainContact: company.mainContact?.customer,
+          totalSpent: company.totalSpent,
+          locationsCount: company.locationsCount?.count || 0,
+          updatedAt: company.updatedAt,
+          roles: roles,
+          roleAssignments: roleAssignments,
+          // NEW: Enhanced location-based access control fields
+          assignedLocationIds: uniqueLocationIds,
+          locationRoles: Object.values(locationRoles),
+          // Helper flag: user has access to all locations if they're admin/main contact
+          hasAllLocationAccess: isAdmin || isMainContact,
+          title: profile.title,
+          // isAdmin,
+          // isMainContact,
+        };
+      },
+    );
     const creditInfo = await calculateAvailableCredit(companyData?.id || "");
     const creditLimitNum = parseFloat(
       companyData?.creditLimit.toString() || "0",
@@ -1301,21 +1342,47 @@ export async function getCompanyOrderss(
     }
 
     const company = data.data.company;
-    const allOrders = company.orders.edges.map((o: { node: { id: string; createdAt: string; totalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; customer: { firstName: string; lastName: string; email: string } } }) => o.node);
-    const locations = company.locations.edges.map((l: { node: { id: string; name: string; shippingAddress: { address1: string; city: string; province: string; zip: string } } }) => l.node);
+    const allOrders = company.orders.edges.map(
+      (o: {
+        node: {
+          id: string;
+          createdAt: string;
+          totalPriceSet: {
+            shopMoney: { amount: string; currencyCode: string };
+          };
+          customer: { firstName: string; lastName: string; email: string };
+        };
+      }) => o.node,
+    );
+    const locations = company.locations.edges.map(
+      (l: {
+        node: {
+          id: string;
+          name: string;
+          shippingAddress: {
+            address1: string;
+            city: string;
+            province: string;
+            zip: string;
+          };
+        };
+      }) => l.node,
+    );
 
     // Group orders by location
-    const locationsWithOrders = locations.map((location: { id: string; name: string }) => {
-      const locationOrders = allOrders.filter(
-        (order: { companyLocation: { id: string } }) =>
-          order.companyLocation?.id === location.id,
-      );
-      return {
-        locationId: location.id,
-        locationName: location.name,
-        orders: locationOrders,
-      };
-    });
+    const locationsWithOrders = locations.map(
+      (location: { id: string; name: string }) => {
+        const locationOrders = allOrders.filter(
+          (order: { companyLocation: { id: string } }) =>
+            order.companyLocation?.id === location.id,
+        );
+        return {
+          locationId: location.id,
+          locationName: location.name,
+          orders: locationOrders,
+        };
+      },
+    );
 
     return {
       companyId: company.id,
@@ -1434,38 +1501,64 @@ export async function getCompanyCustomers(
     }
 
     const company = data.data.company;
-    const contacts = company.contacts.edges.map((edge: { node: { id: string; title: string; customer: { id: string; firstName: string; lastName: string; email: string; phone: string; metafield: { value: string; type: string } } } }) => {
-      const node = edge.node;
-      const cust = node.customer;
+    const contacts = company.contacts.edges.map(
+      (edge: {
+        node: {
+          id: string;
+          title: string;
+          customer: {
+            id: string;
+            firstName: string;
+            lastName: string;
+            email: string;
+            phone: string;
+            metafield: { value: string; type: string };
+          };
+        };
+      }) => {
+        const node = edge.node;
+        const cust = node.customer;
 
-      const roles =
-        node.roleAssignments?.edges?.map((r: { node: { role: { id: string; name: string }; companyLocation: { id: string; name: string } } }) => ({
-          id: r.node.role.id,
-          name: r.node.role.name,
-          locationId: r.node.companyLocation?.id,
-          locationName: r.node.companyLocation?.name,
-        })) || [];
+        const roles =
+          node.roleAssignments?.edges?.map(
+            (r: {
+              node: {
+                role: { id: string; name: string };
+                companyLocation: { id: string; name: string };
+              };
+            }) => ({
+              id: r.node.role.id,
+              name: r.node.role.name,
+              locationId: r.node.companyLocation?.id,
+              locationName: r.node.companyLocation?.name,
+            }),
+          ) || [];
 
-      return {
-        id: node.id,
-        customerId: cust.id,
-        title: node.title,
-        customer: {
-          id: cust.id,
-          firstName: cust.firstName,
-          lastName: cust.lastName,
-          email: cust.email,
-          phone: cust.phone,
-          // Include roleAssignments in customer object for easy access
-          roleAssignments: node.roleAssignments,
-        },
-        roles: roles.map((r: { name: string }) => r.name),
-        roleIds: roles.map((r: { id: string }) => r.id),
-        locationIds: roles.map((r: { locationId: string }) => r.locationId).filter(Boolean),
-        locationNames: roles.map((r: { locationName: string }) => r.locationName).filter(Boolean),
-        credit: cust.metafield?.value ? Number(cust.metafield.value) : 0,
-      };
-    });
+        return {
+          id: node.id,
+          customerId: cust.id,
+          title: node.title,
+          customer: {
+            id: cust.id,
+            firstName: cust.firstName,
+            lastName: cust.lastName,
+            email: cust.email,
+            phone: cust.phone,
+            // Include roleAssignments in customer object for easy access
+            roleAssignments: node.roleAssignments,
+          },
+          roles: roles.map((r: { name: string }) => r.name),
+          roleIds: roles.map((r: { id: string }) => r.id),
+          locationIds: roles
+            .map((r: { locationId: string }) => r.locationId)
+            .filter(Boolean),
+          locationNames: roles
+            .map((r: { locationName: string }) => r.locationName)
+            .filter(Boolean),
+          credit: cust.metafield?.value ? Number(cust.metafield.value) : 0,
+        };
+      },
+    );
 
     return {
       companyId: company.id,
@@ -1475,7 +1568,7 @@ export async function getCompanyCustomers(
     };
   } catch (error: unknown) {
     console.error("Error fetching company customers:", error);
-    return { error: error instanceof Error ? error.message : "Unknown error" }; 
+    return { error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
 
@@ -1545,7 +1638,9 @@ async function assignRoleToCompanyContact(
 
   const rolesData = await rolesResponse.json();
   const roles =
-    rolesData.data?.company?.roles?.edges?.map((e: { node: { id: string; name: string } }) => e.node) || [];
+    rolesData.data?.company?.roles?.edges?.map(
+      (e: { node: { id: string; name: string } }) => e.node,
+    ) || [];
 
   // Find role by name (case insensitive)
   const role = roles.find(
@@ -2208,7 +2303,9 @@ async function fetchCompanyLocations(
     }
 
     const locations =
-      result.data?.company?.locations?.edges.map((e: { node: { id: string; name: string } }) => e.node) || [];
+      result.data?.company?.locations?.edges.map(
+        (e: { node: { id: string; name: string } }) => e.node,
+      ) || [];
 
     return { locations };
   } catch (error: { message: string }) {
@@ -2622,7 +2719,6 @@ export async function getCompanyLocations(
   shopName: string,
   accessToken: string,
 ) {
-
   try {
     const query = `
   query {
@@ -2707,24 +2803,47 @@ export async function getCompanyLocations(
 
     const company = data.data.company;
     // Get all contacts with their location assignments
-    const contacts = company.contacts.edges.map((edge: { node: { id: string; title: string; customer: { id: string }; roleAssignments: { edges: Array<{ node: { companyLocation: { id: string; name: string }; role: { name: string } } }> } } }) => {
-      const node = edge.node;
-      const locationAssignments =
-        node.roleAssignments?.edges
-          ?.map((r: { node: { companyLocation: { id: string; name: string }; role: { name: string } } }) => ({
-            locationId: r.node.companyLocation?.id,
-            locationName: r.node.companyLocation?.name,
-            roleName: r.node.role?.name,
-          }))
-          .filter((la: { locationId: string }) => la.locationId) || [];
+    const contacts = company.contacts.edges.map(
+      (edge: {
+        node: {
+          id: string;
+          title: string;
+          customer: { id: string };
+          roleAssignments: {
+            edges: Array<{
+              node: {
+                companyLocation: { id: string; name: string };
+                role: { name: string };
+              };
+            }>;
+          };
+        };
+      }) => {
+        const node = edge.node;
+        const locationAssignments =
+          node.roleAssignments?.edges
+            ?.map(
+              (r: {
+                node: {
+                  companyLocation: { id: string; name: string };
+                  role: { name: string };
+                };
+              }) => ({
+                locationId: r.node.companyLocation?.id,
+                locationName: r.node.companyLocation?.name,
+                roleName: r.node.role?.name,
+              }),
+            )
+            .filter((la: { locationId: string }) => la.locationId) || [];
 
-      return {
-        id: node.id,
-        title: node.title,
-        customer: node.customer,
-        locationAssignments: locationAssignments,
-      };
-    });
+        return {
+          id: node.id,
+          title: node.title,
+          customer: node.customer,
+          locationAssignments: locationAssignments,
+        };
+      },
+    );
 
     // Count customers per location
     const locationCustomerCount: Record<
@@ -2733,7 +2852,10 @@ export async function getCompanyLocations(
     > = {};
 
     contacts.forEach(
-      (contact: { locationAssignments: { locationId: string; locationName: string }[]; customer: { id: string } }) => {
+      (contact: {
+        locationAssignments: { locationId: string; locationName: string }[];
+        customer: { id: string };
+      }) => {
         contact.locationAssignments.forEach((assignment) => {
           if (!locationCustomerCount[assignment.locationId]) {
             locationCustomerCount[assignment.locationId] = {
@@ -2759,29 +2881,42 @@ export async function getCompanyLocations(
     );
 
     // Get locations with customer count
-    const locations = company.locations.edges.map((edge: { node: { id: string; name: string; shippingAddress: { address1: string; city: string; province: string; zip: string } } }) => {
-      const location = edge.node;
+    const locations = company.locations.edges.map(
+      (edge: {
+        node: {
+          id: string;
+          name: string;
+          shippingAddress: {
+            address1: string;
+            city: string;
+            province: string;
+            zip: string;
+          };
+        };
+      }) => {
+        const location = edge.node;
 
-      const customerInfo = locationCustomerCount[location.id] || {
-        count: 0,
-        customerIds: [],
-      };
-      const shippingAddress = location.shippingAddress;
-      const formattedAddress = shippingAddress
-        ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
-        : "No address provided";
-      return {
-        id: location.id,
-        name: location.name,
-        note: location.note,
-        phone: location.phone,
-        externalId: location.externalId,
-        shippingAddress: location.shippingAddress,
-        billingAddress: location.billingAddress,
-        assignedUsers: customerInfo.count,
-        address: formattedAddress,
-      };
-    });
+        const customerInfo = locationCustomerCount[location.id] || {
+          count: 0,
+          customerIds: [],
+        };
+        const shippingAddress = location.shippingAddress;
+        const formattedAddress = shippingAddress
+          ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
+          : "No address provided";
+        return {
+          id: location.id,
+          name: location.name,
+          note: location.note,
+          phone: location.phone,
+          externalId: location.externalId,
+          shippingAddress: location.shippingAddress,
+          billingAddress: location.billingAddress,
+          assignedUsers: customerInfo.count,
+          address: formattedAddress,
+        };
+      },
+    );
 
     return {
       companyId: company.id,
@@ -2931,7 +3066,10 @@ export async function updateCompanyCustomer(
       warnings: [],
     };
 
-    const makeGraphQLRequest = async (query: string, variables: Record<string, unknown>) => {
+    const makeGraphQLRequest = async (
+      query: string,
+      variables: Record<string, unknown>,
+    ) => {
       const response = await fetch(
         `https://${shopName}/admin/api/2025-01/graphql.json`,
         {
@@ -2997,7 +3135,13 @@ export async function updateCompanyCustomer(
     // Get existing role assignments with full details
     const existingRoleAssignments =
       getCustomerResult.data?.companyContact?.roleAssignments?.edges?.map(
-        (edge: { node: { id: string; role: { id: string; name: string }; companyLocation: { id: string; name: string } } }) => ({
+        (edge: {
+          node: {
+            id: string;
+            role: { id: string; name: string };
+            companyLocation: { id: string; name: string };
+          };
+        }) => ({
           id: edge.node.id,
           roleId: edge.node.role?.id,
           roleName: edge.node.role?.name,
@@ -3158,7 +3302,7 @@ async function smartRoleUpdate(
             roleId = role.id;
             roleName = role.name;
           } else return null;
-        } 
+        }
         // Resolve locationId from locationName if needed
         if (!locationId && locationName) {
           const location = locations.find(
@@ -4186,7 +4330,9 @@ export async function getCompanyContactRoles(
     return {
       success: true,
       roles: roles,
-      defaultRoleId: roles.find((r: { name: string }) => r.name === "Location admin")?.id || roles[0].id,
+      defaultRoleId:
+        roles.find((r: { name: string }) => r.name === "Location admin")?.id ||
+        roles[0].id,
     };
   } catch (error) {
     console.error("💥 Error fetching company roles:", error);
@@ -4284,7 +4430,8 @@ export async function assignContactToLocation(
 
     return {
       success: true,
-      roleAssignment: result.data?.companyContactAssignRole?.companyContactRoleAssignment,
+      roleAssignment:
+        result.data?.companyContactAssignRole?.companyContactRoleAssignment,
     };
   } catch (error) {
     console.error("💥 Error assigning role:", error);
@@ -4293,7 +4440,6 @@ export async function assignContactToLocation(
     };
   }
 }
-
 
 export async function findCompanyContactByCustomer(
   companyId: string,
@@ -4347,16 +4493,20 @@ export async function findCompanyContactByCustomer(
       };
     }
 
-    const contacts = result.data?.companies?.edges?.[0]?.node?.contacts?.edges || [];
-    
+    const contacts =
+      result.data?.companies?.edges?.[0]?.node?.contacts?.edges || [];
+
     const matchingContact = contacts.find(
-      (edge: { node: { customer: { id: string } } }) => edge.node.customer?.id === customerId
+      (edge: { node: { customer: { id: string } } }) =>
+        edge.node.customer?.id === customerId,
     );
 
     if (!matchingContact) {
       return {
         error: "Company contact not found for this customer",
-        availableContacts: contacts.map((e: { node: { id: string } }) => e.node.id),
+        availableContacts: contacts.map(
+          (e: { node: { id: string } }) => e.node.id,
+        ),
       };
     }
 
@@ -4437,8 +4587,10 @@ export async function assignCustomerAsContact(
 
     return {
       success: true,
-      companyContactId: result.data?.companyAssignCustomerAsContact?.companyContact?.id,
-      companyContact: result.data?.companyAssignCustomerAsContact?.companyContact,
+      companyContactId:
+        result.data?.companyAssignCustomerAsContact?.companyContact?.id,
+      companyContact:
+        result.data?.companyAssignCustomerAsContact?.companyContact,
     };
   } catch (error) {
     console.error("💥 Error assigning customer as contact:", error);
@@ -4448,10 +4600,9 @@ export async function assignCustomerAsContact(
   }
 }
 
-
 export async function createLocationAndAssignToContact(
   companyId: string,
-  customerId: string, 
+  customerId: string,
   shopName: string,
   accessToken: string,
   locationData: {
@@ -4469,7 +4620,6 @@ export async function createLocationAndAssignToContact(
 ) {
   console.log("🚀 Starting complete workflow...");
 
-  
   const locationResult = await createCompanyLocation(
     companyId,
     shopName,
@@ -4493,7 +4643,6 @@ export async function createLocationAndAssignToContact(
   );
 
   if (findResult.success && findResult.companyContactId) {
-
     companyContactId = findResult.companyContactId;
     console.log("✅ Found existing Company Contact:", companyContactId);
   } else {
@@ -4525,7 +4674,7 @@ export async function createLocationAndAssignToContact(
   if (!rolesResult.success || !rolesResult.defaultRoleId) {
     return {
       warning: "Location and contact created but failed to fetch roles",
-      locationId: locationResult.locationId,  
+      locationId: locationResult.locationId,
       companyContactId: companyContactId,
       rolesError: rolesResult.error,
     };
@@ -4864,20 +5013,23 @@ export async function deleteCompanyLocation(
     const deleteData = result.data?.companyLocationDelete;
     const userErrors = deleteData?.userErrors;
 
-
-    if (userErrors && userErrors.length > 0) {    
+    if (userErrors && userErrors.length > 0) {
       // Check if error is related to orders
       const errorMessage = userErrors[0].message.toLowerCase();
-      if (errorMessage.includes("order") || errorMessage.includes("transaction")) {
+      if (
+        errorMessage.includes("order") ||
+        errorMessage.includes("transaction")
+      ) {
         return {
           error: {
             field: userErrors[0].field,
-            message: "Cannot delete location with existing orders. This location has order history and cannot be removed.",
-            type: "HAS_ORDERS"
-          }
+            message:
+              "Cannot delete location with existing orders. This location has order history and cannot be removed.",
+            type: "HAS_ORDERS",
+          },
         };
       }
-      
+
       return { error: userErrors[0] };
     }
 
@@ -4907,7 +5059,6 @@ export async function deleteCompanyLocation(
 }
 
 // First, add this function to check if location has orders
- 
 
 export async function checkLocationHasOrders(
   locationId: string,
@@ -4947,7 +5098,7 @@ export async function checkLocationHasOrders(
     );
 
     const result = await response.json();
-    
+
     if (result.errors) {
       return {
         error: true,
@@ -4964,7 +5115,8 @@ export async function checkLocationHasOrders(
       };
     }
 
-    const hasOrders = location.orders?.edges && location.orders.edges.length > 0;
+    const hasOrders =
+      location.orders?.edges && location.orders.edges.length > 0;
 
     return {
       error: false,
@@ -5034,17 +5186,21 @@ export async function checkLocationHasUsers(
     // Access email through customer object
     const assignedEmails =
       location?.roleAssignments?.edges
-        ?.map((edge: { node: { companyContact: { customer: { email: string } } } }) => edge.node.companyContact?.customer?.email)
+        ?.map(
+          (edge: {
+            node: { companyContact: { customer: { email: string } } };
+          }) => edge.node.companyContact?.customer?.email,
+        )
         .filter(Boolean) || [];
-    
-    
+
     return {
       hasUsers: userCount > 0,
       userCount: userCount,
       assignedEmails: assignedEmails,
       roleAssignIds:
-        location?.roleAssignments?.edges?.map((edge: { node: { id: string } }) => edge.node.id) ||
-        [],
+        location?.roleAssignments?.edges?.map(
+          (edge: { node: { id: string } }) => edge.node.id,
+        ) || [],
       locationName: location?.name,
     };
   } catch (error) {
@@ -5067,10 +5223,8 @@ interface OrderNode {
   fulfillmentStatus: string;
 }
 
-
-
-
 // Function to get advanced company orders with filtering and pagination
+
 export async function getAdvancedCompanyOrders(
   shopName: string,
   accessToken: string,
@@ -5097,16 +5251,11 @@ export async function getAdvancedCompanyOrders(
       sortKey?: string;
       reverse?: boolean;
     };
-    pagination: {
-      first?: number;
-      after?: string;
-    };
   },
 ) {
   try {
-    const { companyId, allowedLocationIds, filters, pagination } = params;
+    const { companyId, allowedLocationIds, filters } = params;
 
-   
     const extractId = (id: string) => {
       if (!id) return "";
       return id.split("/").pop() || id;
@@ -5130,12 +5279,6 @@ export async function getAdvancedCompanyOrders(
         if (!hasAccess) {
           return {
             orders: [],
-            pageInfo: {
-              hasNextPage: false,
-              hasPreviousPage: false,
-              endCursor: null,
-              startCursor: null,
-            },
             totalCount: 0,
             error: "Unauthorized access to location",
           };
@@ -5227,26 +5370,9 @@ export async function getAdvancedCompanyOrders(
 
     const queryString = queryParts.join(" AND ");
 
-    // Fetch MORE orders when we need to post-filter
-    const requestedFirst = pagination.first || 20;
-    const needsPostFiltering =
-      needsLocationPostFilter ||
-      (allowedLocationIds &&
-        allowedLocationIds.length > 0 &&
-        !filters.locationId);
-
-    const fetchFirst = needsPostFiltering
-      ? Math.min(requestedFirst * 3, 250) // Fetch 3x more
-      : requestedFirst;
-
-    const after = pagination.after ? `"${pagination.after}"` : null;
-
-   
-    // console.log("🔍 GraphQL Query String:", queryString);
-
     const query = `
-      query getOrders($query: String!, $first: Int!, $after: String) {
-        orders(query: $query, first: $first, after: $after, sortKey: CREATED_AT, reverse: true) {
+      query getOrders($query: String!) {
+        orders(query: $query, first: 250, sortKey: CREATED_AT, reverse: true) {
           edges {
             node {
               id
@@ -5345,13 +5471,6 @@ export async function getAdvancedCompanyOrders(
                 phone
               }
             }
-            cursor
-          }
-          pageInfo {
-            hasNextPage
-            hasPreviousPage
-            endCursor
-            startCursor
           }
         }
       }
@@ -5369,8 +5488,6 @@ export async function getAdvancedCompanyOrders(
           query,
           variables: {
             query: queryString,
-            first: fetchFirst,
-            after,
           },
         }),
       },
@@ -5412,7 +5529,6 @@ export async function getAdvancedCompanyOrders(
             id: locationId,
             name: locationName,
           },
-          cursor: edge.cursor,
         };
       }) || [];
 
@@ -5444,7 +5560,7 @@ export async function getAdvancedCompanyOrders(
       );
 
       processedOrders = processedOrders.filter((order: OrderNode) => {
-        const orderLocationId = extractId(order.locationId);
+        const orderLocationId = extractId(order?.locationId);
 
         if (!orderLocationId) {
           console.warn(`⚠️ Order ${order.name} has no locationId, excluding`);
@@ -5467,28 +5583,13 @@ export async function getAdvancedCompanyOrders(
       );
     }
 
-const paginatedOrders = processedOrders.slice(0, requestedFirst);
-
-const hasMoreFilteredOrders = processedOrders.length > requestedFirst;
-
     return {
-      orders: paginatedOrders,
-      pageInfo: {
-        hasNextPage: hasMoreFilteredOrders,
-        hasPreviousPage: ordersData?.pageInfo?.hasPreviousPage || false,
-        endCursor:
-          paginatedOrders.length > 0
-            ? paginatedOrders[paginatedOrders.length - 1].cursor
-            : null,
-        startCursor:
-          paginatedOrders.length > 0 ? paginatedOrders[0].cursor : null,
-      },
-      totalCount: paginatedOrders.length,
+      orders: processedOrders,
+      totalCount: processedOrders.length,
       _debug: {
         queryString,
         fetched: ordersData?.edges?.length || 0,
-        afterFilter: processedOrders.length,
-        returned: paginatedOrders.length,
+        returned: processedOrders.length,
         locationFilter: requestedLocationId || "none",
         allowedLocations:
           allowedLocationIds?.map((id) => extractId(id)) || "all",
@@ -5501,7 +5602,7 @@ const hasMoreFilteredOrders = processedOrders.length > requestedFirst;
     };
   }
 }
-
+// Function to get company orders count based on a query string
 export async function getCompanyOrdersCount(
   shopName: string,
   accessToken: string,

@@ -75,7 +75,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       customerId: string;
       shop: string;
       filters?: OrderRequestFilters;
-      pagination?: OrderRequestPagination;
+      pagination?: {
+        page?: number;
+        limit?: number;
+      };
     } = await request.json();
 
     if (!customerId || !shop) {
@@ -175,15 +178,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } else {
         return Response.json({
           orders: [],
-          pageInfo: {
-            hasNextPage: false,
-            hasPreviousPage: false,
-            endCursor: null,
-            startCursor: null,
-          },
           totalCount: 0,
           accessLevel,
           message: "No location assignments found",
+          pagination: {
+            page: 1,
+            limit: 20,
+            totalPages: 0,
+          },
         });
       }
     } else {
@@ -197,15 +199,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } else {
         return Response.json({
           orders: [],
-          pageInfo: {
-            hasNextPage: false,
-            hasPreviousPage: false,
-            endCursor: null,
-            startCursor: null,
-          },
           totalCount: 0,
           accessLevel,
           message: "No location assignments found",
+          pagination: {
+            page: 1,
+            limit: 20,
+            totalPages: 0,
+          },
         });
       }
     }
@@ -236,15 +237,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (!hasAccess) {
         return Response.json({
           orders: [],
-          pageInfo: {
-            hasNextPage: false,
-            hasPreviousPage: false,
-            endCursor: null,
-            startCursor: null,
-          },
           totalCount: 0,
           accessLevel,
           error: "You do not have access to orders from the specified location",
+          pagination: {
+            page: 1,
+            limit: 20,
+            totalPages: 0,
+          },
         });
       }
     }
@@ -255,82 +255,68 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
     
-     if (!companyData) {
+    if (!companyData) {
       return Response.json(
         { error: "Company account not found in B2B portal" },
         { status: 404 },
       );
     }
     
-    // ✅ FIXED: Helper function to fetch and filter orders
+    // ✅ Helper function to fetch orders without B2B database filtering
     const fetchAndFilterOrders = async (
       filters: OrderRequestFilters,
-      pagination: PageInfo,
     ) => {
       // Fetch orders from Shopify (already filtered by location in getAdvancedCompanyOrders)
       const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
         companyId: company.companyId,
         allowedLocationIds,
         filters,
-        pagination,
       });
 
-      const groupedOrders = await prisma.b2BOrder.groupBy({
-        by: ["shopifyOrderId"],
-        where: {
-          orderStatus: {
-            not: "cancelled",
-          },
-          companyId: companyData.id,
-          shopifyOrderId: {
-            in: result.orders?.map((order: { id: string }) => order.id) || [],
-          },
-        },
-      });
-
-      const uniqueShopifyOrderIds = groupedOrders.map((order) => order.shopifyOrderId);
-      const filteredOrders = result.orders?.filter((order: { id: string }) =>
-        uniqueShopifyOrderIds.includes(order.id)
-      );
-
-
-      return { result, filteredOrders, count: groupedOrders.length };
+      // Return all Shopify orders without additional database filtering
+      return { 
+        result, 
+        filteredOrders: result.orders || [], 
+        count: result.orders?.length || 0 
+      };
     };
 
     // Fetch main orders
-    const { result, filteredOrders: orders } = await fetchAndFilterOrders(
+    const { result, filteredOrders: allOrders } = await fetchAndFilterOrders(
       queryFilters,
-      pagination || { first: 20 }
     );
 
-    if (orders.error) {
+    if (allOrders.error) {
       return Response.json(
-        { error: orders.error, accessLevel },
+        { error: allOrders.error, accessLevel },
         { status: 500 },
       );
     }
 
-    // 🔢 Fetch SEPARATE queries for month counts (without pagination limit)
-    const { count: ordersCurrentMonth } = await fetchAndFilterOrders(
-      {
-        ...queryFilters,
-        dateRange: { preset: "current_month" },
-      },
-      { first: 20 }
-    );
+    // 📄 Apply simple pagination
+    const page = pagination?.page || 1;
+    const limit = pagination?.limit || 20;
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    
+    const paginatedOrders = allOrders.slice(startIndex, endIndex);
+    const totalCount = allOrders.length;
+    const totalPages = Math.ceil(totalCount / limit);
 
-    const { count: ordersPreviousMonth } = await fetchAndFilterOrders(
-      {
-        ...queryFilters,
-        dateRange: { preset: "last_month" },
-      },
-      { first: 20 }
-    );
+    // 🔢 Fetch SEPARATE queries for month counts
+    const { count: ordersCurrentMonth } = await fetchAndFilterOrders({
+      ...queryFilters,
+      dateRange: { preset: "current_month" },
+    });
+
+    const { count: ordersPreviousMonth } = await fetchAndFilterOrders({
+      ...queryFilters,
+      dateRange: { preset: "last_month" },
+    });
 
     return Response.json({
-      orders: orders,
-      pageInfo: result.pageInfo,
-      totalCount: orders.length,
+      orders: paginatedOrders,
+      totalCount: totalCount,
       accessLevel,
       allowedLocationIds: allowedLocationIds?.length || "all",
       userRoles: company.roles,
@@ -342,6 +328,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             ((ordersCurrentMonth - ordersPreviousMonth) / ordersPreviousMonth) * 100
           )
         : 0,
+      pagination: {
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
     });
   } catch (error) {
     console.error("Proxy error:", error);
@@ -354,4 +347,3 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 };
-
