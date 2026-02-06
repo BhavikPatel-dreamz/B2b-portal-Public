@@ -2,7 +2,7 @@
 
 client_id = "7b1f6278dc87bae5f334213333c48522"
 name = "b2b-portal-public"
-application_url = "https://b2b-portal-public.vercel.app"
+application_url = "https://b2-b-portal-front.vercel.app"
 embedded = true
 
 [build]
@@ -64,9 +64,9 @@ api_version = "2026-01"
 scopes = "write_validations,read_companies,read_customers,read_locations,read_orders,read_products,write_companies,write_customers,write_locations,write_orders,write_products,read_draft_orders,write_draft_orders"
 
 [auth]
-redirect_urls = [ "https://b2b-portal-public.vercel.app/api/auth" ]
+redirect_urls = [ "https://b2-b-portal-front.vercel.app/api/auth" ]
 
 [app_proxy]
-url = "https://b2b-portal-public.vercel.app"
+url = "https://b2-b-portal-front.vercel.app"
 subpath = "b2b-portal"
 prefix = "apps"
