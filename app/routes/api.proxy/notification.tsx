@@ -61,14 +61,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    const users = await prisma.user.findMany({ where: { id: { in: userIds } } });
   const userMap = new Map(users.map(u => [u.id, `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
 
-  const notificationsdata = notifications.map(n => ({
+  const NotificationsData = notifications.map(n => ({
     ...n,
     senderName: n.senderId ? userMap.get(n.senderId) ?? null : null,
     receiverName: n.receiverId ? userMap.get(n.receiverId) ?? null : null
   }));
 
   return {
-    notificationsdata,
+    NotificationsData,
     unreadCount,
     readCount,
     totalCount,
