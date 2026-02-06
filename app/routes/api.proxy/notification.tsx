@@ -61,14 +61,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    const users = await prisma.user.findMany({ where: { id: { in: userIds } } });
   const userMap = new Map(users.map(u => [u.id, `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
 
-  const NotificationsData = notifications.map(n => ({
+  const notificationsdata = notifications.map(n => ({
     ...n,
     senderName: n.senderId ? userMap.get(n.senderId) ?? null : null,
     receiverName: n.receiverId ? userMap.get(n.receiverId) ?? null : null
   }));
 
   return {
-    NotificationsData,
+    notificationsdata,
     unreadCount,
     readCount,
     totalCount,
@@ -79,7 +79,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       totalPages: Math.ceil(totalCount / pageSize)
     },
     filters: { activityType, receiverId: customerId, senderId, search, isRead }
-  };
+  }; 
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
