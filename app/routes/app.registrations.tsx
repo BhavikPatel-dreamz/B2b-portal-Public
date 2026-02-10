@@ -3,7 +3,10 @@ import {
   ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
-  useFetcher, useLoaderData, useRevalidator,useSearchParams
+  useFetcher,
+  useLoaderData,
+  useRevalidator,
+  useSearchParams,
 } from "react-router";
 
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -16,7 +19,6 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { sendCompanyAssignmentEmail } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
-
 
 interface RegistrationSubmission {
   paymentTerm: string;
@@ -63,7 +65,7 @@ interface ActionJson {
     countryCode?: string | null;
     phone?: string | null;
   } | null;
-    data?: {
+  data?: {
     customerCreate?: { userErrors: { message: string; field?: string[] }[] };
     companyCreate?: { userErrors: { message: string; field?: string[] }[] };
     companyContactCreate?: {
@@ -128,7 +130,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
 
   const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop }, 
+    where: { shopDomain: session.shop },
   });
 
   if (!store) {
@@ -140,32 +142,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Fetch ALL submissions (PENDING, APPROVED, REJECTED)
   // Fetch submissions for all statuses
-  const [pendingSubmissions, approvedSubmissions, rejectedSubmissions] = await Promise.all([
-    prisma.registrationSubmission.findMany({
-      where: {
-        shopId: store.id,
-        status: "PENDING",
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.registrationSubmission.findMany({
-      where: {
-        shopId: store.id,
-        status: "APPROVED",
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.registrationSubmission.findMany({
-      where: {
-        shopId: store.id,
-        status: "REJECTED",
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
+  const [pendingSubmissions, approvedSubmissions, rejectedSubmissions] =
+    await Promise.all([
+      prisma.registrationSubmission.findMany({
+        where: {
+          shopId: store.id,
+          status: "PENDING",
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.registrationSubmission.findMany({
+        where: {
+          shopId: store.id,
+          status: "APPROVED",
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.registrationSubmission.findMany({
+        where: {
+          shopId: store.id,
+          status: "REJECTED",
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
 
   // Combine all submissions
-  const submissions = [...pendingSubmissions, ...approvedSubmissions, ...rejectedSubmissions];
+  const submissions = [
+    ...pendingSubmissions,
+    ...approvedSubmissions,
+    ...rejectedSubmissions,
+  ];
 
   const companies = await prisma.companyAccount.findMany({
     where: { shopId: store.id },
@@ -450,7 +457,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: customer ? "Customer exists" : "No customer found",
         });
       }
-
       case "createCustomer": {
         const email = (form.email as string)?.trim();
         const firstName = (form.firstName as string)?.trim();
@@ -463,6 +469,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             success: false,
             errors: ["First name and email are required"],
           });
+        }
+
+        // Validate and format phone number
+        let formattedPhone = undefined;
+        if (phone) {
+          // Remove all non-digit characters
+          const digitsOnly = phone.replace(/\D/g, "");
+
+          // Only include phone if it has a reasonable length (e.g., 10+ digits)
+          if (digitsOnly.length >= 10) {
+            // Format as E.164 if it looks like a US number (10 digits)
+            if (digitsOnly.length === 10) {
+              formattedPhone = `+1${digitsOnly}`;
+            } else if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
+              formattedPhone = `+${digitsOnly}`;
+            } else if (digitsOnly.startsWith("91") && digitsOnly.length >= 12) {
+              // Indian number format
+              formattedPhone = `+${digitsOnly}`;
+            } else {
+              // For other formats, just add + if not present
+              formattedPhone = phone.startsWith("+") ? phone : `+${digitsOnly}`;
+            }
+          }
+          // If phone is invalid, we'll just skip it rather than error
         }
 
         const response = await admin.graphql(
@@ -486,7 +516,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 email,
                 firstName,
                 lastName: lastName || undefined,
-                ...(phone && { phone: phone }),
+                ...(formattedPhone && { phone: formattedPhone }),
               },
             },
           },
@@ -494,32 +524,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const payload = await response.json();
 
-        // Check for errors but filter out phone validation errors
+        // Check for errors
         const userErrors = payload?.data?.customerCreate?.userErrors || [];
-        const nonPhoneErrors = userErrors.filter(
-          (error: any) =>
-            !error.field?.includes("phone") &&
-            !error.message?.toLowerCase().includes("phone"),
-        );
 
-        // If there are non-phone errors, return them
-        if (nonPhoneErrors.length > 0) {
+        // If there are any errors, return them
+        if (userErrors.length > 0) {
           const errors = buildUserErrorList({
-            data: { customerCreate: { userErrors: nonPhoneErrors } },
+            data: { customerCreate: { userErrors } },
           });
           return Response.json({ intent, success: false, errors });
         }
+
         const customer = payload?.data?.customerCreate?.customer;
         const registrationData = await prisma.registrationSubmission.findFirst({
           where: { email },
         });
 
-        if (!registrationData) {
+        if (!registrationData && customer) {
           await prisma.registrationSubmission.create({
             data: {
               contactName: `${firstName} ${lastName || ""}`.trim(),
               email,
-              phone: phone || "",
+              phone: formattedPhone || phone || "",
               shopifyCustomerId: customer?.id || null,
               status: "PENDING",
               companyName: "",
@@ -528,13 +554,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
+
         const userData = await prisma.user.findFirst({
           where: {
             shopifyCustomerId: customer?.id || null,
             email,
           },
         });
-        if (!userData) {
+
+        if (!userData && customer) {
           await prisma.user.create({
             data: {
               email,
@@ -567,11 +595,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyName = (form.companyName as string)?.trim();
         const businessType = (form.businessType as string)?.trim();
 
-        if (!customerId || !email || !firstName) {
+        if (!customerId) {
           return Response.json({
             intent,
             success: false,
-            errors: ["Customer ID, first name and email are required"],
+            errors: ["Customer ID is required"],
           });
         }
 
@@ -602,14 +630,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           },
         );
-
         const payload = await response.json();
         const errors = buildUserErrorList(payload);
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
         }
         const registrationData = await prisma.registrationSubmission.findFirst({
-          where: { email },
+          where: { shopifyCustomerId: customerId },
         });
         if (registrationData) {
           await prisma.registrationSubmission.update({
@@ -1361,45 +1388,44 @@ function StepBadge({
     //   {label}
     // </div>
     <div
-  onClick={onClick}
-  onKeyDown={(e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onClick?.(e);
-    }
-  }}
-  role="button"
-  tabIndex={0}
-  aria-pressed={active}
-  style={{
-    padding: "6px 14px",
-    borderRadius: 20,
-    cursor: "pointer",
-    background: active ? "#1f2937" : "#e5e7eb",
-    color: active ? "#ffffff" : "#111827",
-    fontSize: 13,
-    fontWeight: 500,
-    userSelect: "none",
-  }}
->
-  {label}
-</div>
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick?.(e);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-pressed={active}
+      style={{
+        padding: "6px 14px",
+        borderRadius: 20,
+        cursor: "pointer",
+        background: active ? "#1f2937" : "#e5e7eb",
+        color: active ? "#ffffff" : "#111827",
+        fontSize: 13,
+        fontWeight: 500,
+        userSelect: "none",
+      }}
+    >
+      {label}
+    </div>
   );
 }
 
 export default function RegistrationApprovals() {
-  const { submissions, storeMissing, paymentTermsTemplates } =
-    useLoaderData<{
-      submissions: RegistrationSubmission[];
-      companies: CompanyAccount[];
-      storeMissing: boolean;
-      paymentTermsTemplates: Array<{
-        id: string;
-        name: string;
-        paymentTermsType: string;
-        dueInDays: number | null;
-      }>;
-    }>();
+  const { submissions, storeMissing, paymentTermsTemplates } = useLoaderData<{
+    submissions: RegistrationSubmission[];
+    companies: CompanyAccount[];
+    storeMissing: boolean;
+    paymentTermsTemplates: Array<{
+      id: string;
+      name: string;
+      paymentTermsType: string;
+      dueInDays: number | null;
+    }>;
+  }>();
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [step, setStep] = useState<
     | "check"
@@ -1422,30 +1448,28 @@ export default function RegistrationApprovals() {
   const [creditLimit, setCreditLimit] = useState(0);
   const [searchParams, setSearchParams] = useSearchParams();
 
-const statusFromUrl = searchParams.get("status");
+  const statusFromUrl = searchParams.get("status");
 
-const normalizeStatus = (value: string | null) => {
-  switch (value?.toUpperCase()) {
-    case "APPROVED":
-      return "APPROVED";
-    case "REJECTED":
-      return "REJECTED";
-    default:
-      return "PENDING";
-  }
-};
-  
+  const normalizeStatus = (value: string | null) => {
+    switch (value?.toUpperCase()) {
+      case "APPROVED":
+        return "APPROVED";
+      case "REJECTED":
+        return "REJECTED";
+      default:
+        return "PENDING";
+    }
+  };
+
   // Add status filter state
 
-  const [statusFilter, setStatusFilter] =
-  useState<"PENDING" | "APPROVED" | "REJECTED">(
-    normalizeStatus(statusFromUrl)
-  );
+  const [statusFilter, setStatusFilter] = useState<
+    "PENDING" | "APPROVED" | "REJECTED"
+  >(normalizeStatus(statusFromUrl));
 
   useEffect(() => {
-  setStatusFilter(normalizeStatus(statusFromUrl));
-}, [statusFromUrl]);
-
+    setStatusFilter(normalizeStatus(statusFromUrl));
+  }, [statusFromUrl]);
 
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
@@ -1486,7 +1510,9 @@ const normalizeStatus = (value: string | null) => {
 
   // Filter submissions based on selected status
   const filteredSubmissions = useMemo(() => {
-    return submissions.filter((submission) => submission.status === statusFilter);
+    return submissions.filter(
+      (submission) => submission.status === statusFilter,
+    );
   }, [submissions, statusFilter]);
 
   useEffect(() => {
@@ -1521,14 +1547,15 @@ const normalizeStatus = (value: string | null) => {
       );
       return;
     }
+ 
     if (flowFetcher.data.intent === "checkCompany") {
       setStep("createCompany");
 
       if (flowFetcher.data.company) {
-        // Company exists - set company data
+        // Company exists - set company data and switch to UPDATE mode
         setCompany(flowFetcher.data.company);
+        setEditMode("update"); // ← KEY FIX: show edit form, not create form
 
-        // Show appropriate message
         if (flowFetcher.data.existsInDb) {
           shopify.toast.show?.(
             "Company already exists - you can review or edit details",
@@ -1537,37 +1564,12 @@ const normalizeStatus = (value: string | null) => {
           shopify.toast.show?.("Company found in Shopify");
         }
       } else {
-        // Company doesn't exist - clear company to show create form
+        // Company doesn't exist - show create form
         setCompany(null);
+        setEditMode("create"); // ← ensure clean create mode
       }
       return;
     }
-
-    if (
-      (flowFetcher.data.intent === "createCompany" ||
-        flowFetcher.data.intent === "updateCompany") &&
-      flowFetcher.data.success
-    ) {
-      setCompany(flowFetcher.data.company || null);
-
-      if (flowFetcher.data.intent === "createCompany") {
-        // After creating, move to assign step
-        setStep("assign");
-        setEditMode("create");
-      } else {
-        // After updating, close edit form and stay on createCompany step
-        setEditMode("create"); // This closes the edit form
-      }
-
-      setShowCompanyModal(false);
-      shopify.toast.show?.(
-        flowFetcher.data.intent === "createCompany"
-          ? "Company created successfully"
-          : "Company updated successfully",
-      );
-      return;
-    }
-
     if (
       flowFetcher.data.intent === "assignMainContact" &&
       flowFetcher.data.success
@@ -1664,7 +1666,9 @@ const normalizeStatus = (value: string | null) => {
       <s-page heading="Registrations">
         <s-section>
           <s-banner tone="critical">
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Store not found</div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              Store not found
+            </div>
             <s-paragraph>
               The current shop does not exist in the database. Please reinstall
               the app.
@@ -1679,21 +1683,31 @@ const normalizeStatus = (value: string | null) => {
     <s-page heading="Registration submissions">
       {/* Status Filter Tabs */}
       <s-section heading="">
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "1px solid #e3e3e3" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginBottom: 16,
+            borderBottom: "1px solid #e3e3e3",
+          }}
+        >
           <button
             onClick={() => setStatusFilter("PENDING")}
             style={{
               padding: "8px 16px",
               background: "none",
               border: "none",
-              borderBottom: statusFilter === "PENDING" ? "2px solid #2c6ecb" : "2px solid transparent",
+              borderBottom:
+                statusFilter === "PENDING"
+                  ? "2px solid #2c6ecb"
+                  : "2px solid transparent",
               color: statusFilter === "PENDING" ? "#2c6ecb" : "#5c5f62",
               fontWeight: statusFilter === "PENDING" ? 600 : 400,
               cursor: "pointer",
               transition: "all 0.2s",
             }}
           >
-            Pending ({submissions.filter(s => s.status === "PENDING").length})
+            Pending ({submissions.filter((s) => s.status === "PENDING").length})
           </button>
           <button
             onClick={() => setStatusFilter("APPROVED")}
@@ -1701,14 +1715,18 @@ const normalizeStatus = (value: string | null) => {
               padding: "8px 16px",
               background: "none",
               border: "none",
-              borderBottom: statusFilter === "APPROVED" ? "2px solid #2c6ecb" : "2px solid transparent",
+              borderBottom:
+                statusFilter === "APPROVED"
+                  ? "2px solid #2c6ecb"
+                  : "2px solid transparent",
               color: statusFilter === "APPROVED" ? "#2c6ecb" : "#5c5f62",
               fontWeight: statusFilter === "APPROVED" ? 600 : 400,
               cursor: "pointer",
               transition: "all 0.2s",
             }}
           >
-            Approved ({submissions.filter(s => s.status === "APPROVED").length})
+            Approved (
+            {submissions.filter((s) => s.status === "APPROVED").length})
           </button>
           <button
             onClick={() => setStatusFilter("REJECTED")}
@@ -1716,19 +1734,25 @@ const normalizeStatus = (value: string | null) => {
               padding: "8px 16px",
               background: "none",
               border: "none",
-              borderBottom: statusFilter === "REJECTED" ? "2px solid #2c6ecb" : "2px solid transparent",
+              borderBottom:
+                statusFilter === "REJECTED"
+                  ? "2px solid #2c6ecb"
+                  : "2px solid transparent",
               color: statusFilter === "REJECTED" ? "#2c6ecb" : "#5c5f62",
               fontWeight: statusFilter === "REJECTED" ? 600 : 400,
               cursor: "pointer",
               transition: "all 0.2s",
             }}
           >
-            Rejected ({submissions.filter(s => s.status === "REJECTED").length})
+            Rejected (
+            {submissions.filter((s) => s.status === "REJECTED").length})
           </button>
         </div>
 
         {filteredSubmissions.length === 0 ? (
-          <s-paragraph>There are no {statusFilter.toLowerCase()} submissions yet.</s-paragraph>
+          <s-paragraph>
+            There are no {statusFilter.toLowerCase()} submissions yet.
+          </s-paragraph>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table
@@ -1755,12 +1779,8 @@ const normalizeStatus = (value: string | null) => {
                     key={submission.id}
                     style={{ borderTop: "1px solid #e3e3e3" }}
                   >
-                    <td style={{ padding: "8px" }}>
-                      {submission.companyName}
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      {submission.contactName}
-                    </td>
+                    <td style={{ padding: "8px" }}>{submission.companyName}</td>
+                    <td style={{ padding: "8px" }}>{submission.contactName}</td>
                     <td style={{ padding: "8px" }}>{submission.email}</td>
                     <td style={{ padding: "8px" }}>{submission.phone}</td>
                     <td style={{ padding: "8px" }}>
@@ -1784,8 +1804,7 @@ const normalizeStatus = (value: string | null) => {
                         <>
                           <s-button
                             onClick={() => startApproval(submission)}
-                            {...(isFlowLoading &&
-                            selected?.id === submission.id
+                            {...(isFlowLoading && selected?.id === submission.id
                               ? { loading: true }
                               : {})}
                           >
@@ -2131,7 +2150,6 @@ const normalizeStatus = (value: string | null) => {
                   </label>
                 )}
 
-              
                 <label
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
@@ -2306,7 +2324,9 @@ const normalizeStatus = (value: string | null) => {
                   ) : customer ? (
                     <>
                       <s-banner tone="success">
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Customer found</div>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                          Customer found
+                        </div>
                         <s-text>
                           {customer.firstName || ""} {customer.lastName || ""} ·{" "}
                           {customer.email}
@@ -2329,9 +2349,12 @@ const normalizeStatus = (value: string | null) => {
                   ) : (
                     <>
                       <s-banner tone="warning">
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>No customer found</div>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                          No customer found
+                        </div>
                         <s-text>
-                          No existing customer found. You Will need to create one.
+                          No existing customer found. You Will need to create
+                          one.
                         </s-text>
                       </s-banner>
                       <div style={{ marginTop: 12 }}>
@@ -2350,7 +2373,9 @@ const normalizeStatus = (value: string | null) => {
                   {customer ? (
                     <>
                       <s-banner tone="info">
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Customer exists</div>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                          Customer exists
+                        </div>
                         <s-text>
                           {customer.firstName} {customer.lastName} ·{" "}
                           {customer.email}
