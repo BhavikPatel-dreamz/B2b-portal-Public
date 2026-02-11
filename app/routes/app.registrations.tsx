@@ -141,7 +141,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // Fetch ALL submissions (PENDING, APPROVED, REJECTED)
-  // Fetch submissions for all statuses
   const [pendingSubmissions, approvedSubmissions, rejectedSubmissions] =
     await Promise.all([
       prisma.registrationSubmission.findMany({
@@ -434,21 +433,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const user = await prisma.user.findFirst({
           where: { email },
         });
-        if (!user && Registration) {
-          await prisma.user.create({
-            data: {
-              email,
-              firstName: Registration?.contactName?.split(" ")[0] || undefined,
-              lastName: Registration?.contactName?.split(" ")[1] || undefined,
-              status: "PENDING",
-              shopId: store.id,
-              isActive: false,
-              role: "STORE_ADMIN",
-              userCreditLimit: 0,
-              password: "",
-            },
-          });
-        }
 
         return Response.json({
           intent,
@@ -635,9 +619,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
         }
+
         const registrationData = await prisma.registrationSubmission.findFirst({
           where: { shopifyCustomerId: customerId },
         });
+
         if (registrationData) {
           await prisma.registrationSubmission.update({
             where: { id: registrationData.id },
@@ -650,6 +636,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         } else {
+          const existingByEmail = await prisma.registrationSubmission.findFirst(
+            {
+              where: { shopifyCustomerId: customerId },
+            },
+          );
+          await prisma.registrationSubmission.delete({
+            where: { id: existingByEmail?.id || "" },
+          });
           await prisma.registrationSubmission.create({
             data: {
               contactName: `${firstName} ${lastName || ""}`.trim(),
@@ -665,11 +659,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
         const userData = await prisma.user.findFirst({
           where: {
-            email,
+            shopifyCustomerId: customerId,
           },
         });
-        if (!userData) {
-          await prisma.user.create({
+        if (userData) {
+          await prisma.user.update({
+            where: { id: userData.id },
             data: {
               email,
               firstName,
@@ -683,8 +678,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         } else {
-          await prisma.user.update({
-            where: { id: userData.id },
+          const existingUser = await prisma.user.findFirst({
+            where: { shopifyCustomerId: customerId },
+          });
+
+          await prisma.user.delete({
+            where: { id: existingUser?.id || "" },
+          });
+          await prisma.user.create({
             data: {
               email,
               firstName,
@@ -693,6 +694,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               shopId: store.id,
               status: "PENDING",
               role: "STORE_ADMIN",
+              password: "",
               companyRole: "admin",
             },
           });
@@ -706,18 +708,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
-      case "checkCompany": {
-        const companyName = (form.companyName as string)?.trim();
-        if (!companyName) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company name is required"],
-          });
-        }
+      case "checkCompany":
+        {
+          const companyName = (form.companyName as string)?.trim();
 
-        const response = await admin.graphql(
-          `#graphql
+          const response = await admin.graphql(
+            `#graphql
           query CompaniesByName($query: String!) {
             companies(first: 1, query: $query) {
               nodes {
@@ -737,45 +733,106 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }
           }
         `,
-          {
-            variables: {
-              query: `name:'${companyName}'`,
+            {
+              variables: {
+                query: `name:'${companyName}'`,
+              },
             },
-          },
-        );
+          );
 
-        const payload = await response.json();
-        const company = payload?.data?.companies?.nodes?.[0] || null;
+          const payload = await response.json();
+          const company = payload?.data?.companies?.nodes?.[0] || null;
 
-        let companyData = null;
-        if (company) {
-          const location = company.locations?.nodes?.[0] || null;
-          companyData = {
-            id: company.id,
-            name: company.name,
-            locationId: location?.id || null,
-            locationName: location?.name || null,
-          };
+          let companyData = null;
+          if (company) {
+            const location = company.locations?.nodes?.[0] || null;
+            companyData = {
+              id: company.id,
+              name: company.name,
+              locationId: location?.id || null,
+              locationName: location?.name || null,
+            };
+          }
+
+          const companyExists = await prisma.companyAccount.findFirst({
+            where: { name: companyName },
+          });
+
+          return Response.json({
+            intent,
+            success: true,
+            company: companyData,
+            existsInDb: !!companyExists,
+            message: company ? "Company exists" : "No company found",
+          });
         }
 
-        const companyExists = await prisma.companyAccount.findFirst({
-          where: { name: companyName },
-        });
-
-        return Response.json({
-          intent,
-          success: true,
-          company: companyData,
-          existsInDb: !!companyExists,
-          message: company ? "Company exists" : "No company found",
-        });
+        async function checkDuplicateCompanyName({
+          admin,
+          prisma,
+          companyName,
+          excludeShopifyCompanyId,
+        }: {
+          admin: any;
+          prisma: any;
+          companyName: string;
+          excludeShopifyCompanyId?: string;
+        }) {
+          /* 1️⃣ Check Shopify */
+          const response = await admin.graphql(
+            `#graphql
+    query CompaniesByName($query: String!) {
+      companies(first: 2, query: $query) {
+        nodes {
+          id
+          name
+        }
       }
+    }`,
+            {
+              variables: {
+                query: `name:'${companyName}'`,
+              },
+            },
+          );
+
+          const payload = await response.json();
+          const shopifyCompany = payload?.data?.companies?.nodes?.find(
+            (c: any) => c.id !== excludeShopifyCompanyId,
+          );
+
+          if (shopifyCompany) {
+            return {
+              exists: true,
+              source: "shopify",
+            };
+          }
+
+          /* 2️⃣ Check Local DB */
+          const localCompany = await prisma.companyAccount.findFirst({
+            where: {
+              name: companyName,
+              ...(excludeShopifyCompanyId
+                ? { shopifyCompanyId: { not: excludeShopifyCompanyId } }
+                : {}),
+            },
+          });
+
+          if (localCompany) {
+            return {
+              exists: true,
+              source: "database",
+            };
+          }
+
+          return { exists: false };
+        }
 
       case "createCompany": {
-        /* 0️⃣ Read & validate form data */
         const companyName = (form.companyName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
         const creditLimit = (form.creditLimit as string)?.trim();
+        const companyContactCustomerId = (form.customerId as string)?.trim();
 
         if (!companyName) {
           return Response.json({
@@ -784,8 +841,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             errors: ["Company name is required"],
           });
         }
+        const duplicateCheck = await checkDuplicateCompanyName({
+          admin,
+          prisma,
+          companyName,
+        });
 
-        /* 1️⃣ Create Company (Shopify AUTO creates 1 location) */
+        if (duplicateCheck.exists) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [`Company "${companyName}" already exists`],
+          });
+        }
+
         const createCompanyResponse = await admin.graphql(
           `#graphql
     mutation CompanyCreate($input: CompanyCreateInput!) {
@@ -910,20 +979,54 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
-        /* 6️⃣ Update user credit limit (optional logic) */
-        if (companyData && creditLimit) {
-          const user = await prisma.user.findFirst({
-            where: { companyId: companyData.id },
+        console.log(companyContactCustomerId, "companyContactCustomerId");
+
+        let linkedUser = null;
+
+        if (companyContactCustomerId) {
+          // ✅ Best case: customerId was passed from frontend
+          linkedUser = await prisma.user.findFirst({
+            where: { shopifyCustomerId: companyContactCustomerId },
+          });
+        }
+
+        if (!linkedUser) {
+          // ✅ Fallback: find the most recent PENDING user for this store with no company yet
+          linkedUser = await prisma.user.findFirst({
+            where: {
+              shopId: store.id,
+              companyId: null,
+              status: "PENDING",
+            },
+            orderBy: { createdAt: "desc" }, // most recently created
+          });
+        }
+
+        console.log(linkedUser, "linkedUser");
+
+        if (linkedUser) {
+          const registration = await prisma.registrationSubmission.findFirst({
+            where: { email: linkedUser.email },
           });
 
-          if (user) {
-            await prisma.user.update({
-              where: { id: user.id },
+          if (registration) {
+            await prisma.registrationSubmission.update({
+              where: { id: registration.id },
               data: {
-                userCreditLimit: new Prisma.Decimal(creditLimit),
+                companyName: companyName, // ✅ always saved
               },
             });
           }
+
+          await prisma.user.update({
+            where: { id: linkedUser.id },
+            data: {
+              companyId: companyData.id,
+              ...(creditLimit && {
+                userCreditLimit: new Prisma.Decimal(creditLimit),
+              }),
+            },
+          });
         }
 
         /* 7️⃣ Final response */
@@ -952,6 +1055,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             intent,
             success: false,
             errors: ["Company ID and company name are required"],
+          });
+        }
+        const duplicateCheck = await checkDuplicateCompanyName({
+          admin,
+          prisma,
+          companyName,
+        });
+
+        if (duplicateCheck.exists) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [`Company "${companyName}" already exists`],
           });
         }
 
@@ -1547,7 +1663,27 @@ export default function RegistrationApprovals() {
       );
       return;
     }
- 
+    // if (flowFetcher.data.intent === "checkCompany") {
+    //   setStep("createCompany");
+
+    //   if (flowFetcher.data.company) {
+    //     // Company exists - set company data
+    //     setCompany(flowFetcher.data.company);
+
+    //     // Show appropriate message
+    //     if (flowFetcher.data.existsInDb) {
+    //       shopify.toast.show?.(
+    //         "Company already exists - you can review or edit details",
+    //       );
+    //     } else {
+    //       shopify.toast.show?.("Company found in Shopify");
+    //     }
+    //   } else {
+    //     // Company doesn't exist - clear company to show create form
+    //     setCompany(null);
+    //   }
+    //   return;
+    // }
     if (flowFetcher.data.intent === "checkCompany") {
       setStep("createCompany");
 
@@ -1570,6 +1706,31 @@ export default function RegistrationApprovals() {
       }
       return;
     }
+    if (
+      (flowFetcher.data.intent === "createCompany" ||
+        flowFetcher.data.intent === "updateCompany") &&
+      flowFetcher.data.success
+    ) {
+      setCompany(flowFetcher.data.company || null);
+
+      if (flowFetcher.data.intent === "createCompany") {
+        // After creating, move to assign step
+        setStep("assign");
+        setEditMode("create");
+      } else {
+        // After updating, close edit form and stay on createCompany step
+        setEditMode("create"); // This closes the edit form
+      }
+
+      setShowCompanyModal(false);
+      shopify.toast.show?.(
+        flowFetcher.data.intent === "createCompany"
+          ? "Company created successfully"
+          : "Company updated successfully",
+      );
+      return;
+    }
+
     if (
       flowFetcher.data.intent === "assignMainContact" &&
       flowFetcher.data.success
