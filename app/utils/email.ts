@@ -72,7 +72,7 @@ export async function sendRegistrationEmail(
   if (!StoreData?.companyWelcomeEmailTemplate) {
     throw new Error("Company welcome email template not found");
   }
-  console.log(StoreData?.shopDomain, "StoreData?.shopDomain");
+
 
   const templateVariables = {
     companyName: companyName || "Company Name",
@@ -227,6 +227,7 @@ function stripHtmlTags(content: string): string {
 
 export async function sendCompanyAssignmentEmail(
   shopName: string,
+  shopDomain: string,
   storeOwnerName: string,
   email: string,
   companyName: string,
@@ -235,6 +236,7 @@ export async function sendCompanyAssignmentEmail(
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
     shopName || "Shop Name",
+    shopDomain || "shop-domain.myshopify.com",
     storeOwnerName || "Store Owner",
     companyName || "Company Name",
     contactName || "Contact Name",
@@ -251,11 +253,13 @@ export async function sendCompanyAssignmentEmail(
 
 function generateCompanyAssignmentTemplate(
   shopName: string,
+  shopDomain: string,
   storeOwnerName: string,
   companyName: string,
   contactName: string,
   note?: string,
 ) {
+    const shopDomaindata = shopDomain.split(".")[0];
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -299,7 +303,7 @@ function generateCompanyAssignmentTemplate(
       </p>
 
        <p style="text-align: center;">
-        <a href="https://findash-shipping-1.myshopify.com/pages/b2b-page" class="btn">
+        <a href="https://${shopDomaindata}/pages/b2b-page" class="btn">
           View B2B Dashboard
         </a>
       </p>

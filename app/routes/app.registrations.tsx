@@ -233,58 +233,50 @@ export async function assignCompanyToCustomer(
   }
 
   try {
-    /* 1️⃣ Get contact roles */
-    const companyRes = await admin.graphql(
-      `#graphql
-      query getCompany($companyId: ID!) {
-        company(id: $companyId) {
-          contactRoles(first: 10) {
-            edges { node { id name } }
+    /* 1️⃣ Get contact roles AND assign customer as contact IN PARALLEL */
+    const [companyRolesRes, contactRes] = await Promise.all([
+      // Get company contact roles
+      admin.graphql(
+        `#graphql
+        query getCompany($companyId: ID!) {
+          company(id: $companyId) {
+            contactRoles(first: 10) {
+              edges { node { id name } }
+            }
           }
-        }
-      }`,
-      { variables: { companyId } },
-    );
+        }`,
+        { variables: { companyId } },
+      ),
 
-    const companyJson = await companyRes.json();
-    const roles = companyJson.data?.company?.contactRoles?.edges || [];
-
-    const companyContactRoleId =
-      roles.find(
-        (edge: { node: { name: string } }) =>
-          edge.node.name.toLowerCase() === "company admin",
-      )?.node?.id || roles[0]?.node?.id;
-
-    if (!companyContactRoleId) {
-      return {
-        success: false,
-        error: "No company contact roles available",
-        step: "getRoles",
-      };
-    }
-
-    /* 2️⃣ Assign customer as contact */
-    const contactRes = await admin.graphql(
-      `#graphql
-      mutation companyAssignCustomerAsContact(
-        $companyId: ID!
-        $customerId: ID!
-      ) {
-        companyAssignCustomerAsContact(
-          companyId: $companyId
-          customerId: $customerId
+      // Assign customer as contact (can happen in parallel with fetching roles)
+      admin.graphql(
+        `#graphql
+        mutation companyAssignCustomerAsContact(
+          $companyId: ID!
+          $customerId: ID!
         ) {
-          companyContact { id }
-          userErrors { message }
-        }
-      }`,
-      { variables: { companyId, customerId } },
-    );
+          companyAssignCustomerAsContact(
+            companyId: $companyId
+            customerId: $customerId
+          ) {
+            companyContact { id }
+            userErrors { message }
+          }
+        }`,
+        { variables: { companyId, customerId } },
+      ),
+    ]);
 
-    const contactJson = await contactRes.json();
+    // Parse both responses
+    const [companyJson, contactJson] = await Promise.all([
+      companyRolesRes.json(),
+      contactRes.json(),
+    ]);
+
+    // Check for errors in assigning contact FIRST (fail fast)
     const contactPayload = contactJson.data?.companyAssignCustomerAsContact;
-
     if (contactPayload?.userErrors?.length) {
+      console.error("Contact assignment error:", contactPayload.userErrors[0]);
       return {
         success: false,
         error: contactPayload.userErrors[0].message,
@@ -294,36 +286,80 @@ export async function assignCompanyToCustomer(
 
     const companyContactId = contactPayload.companyContact.id;
 
-    /* 3️⃣ Assign role + PROVIDED location */
-    const roleRes = await admin.graphql(
-      `#graphql
-      mutation companyContactAssignRole(
-        $companyContactId: ID!
-        $companyContactRoleId: ID!
-        $companyLocationId: ID!
-      ) {
-        companyContactAssignRole(
-          companyContactId: $companyContactId
-          companyContactRoleId: $companyContactRoleId
-          companyLocationId: $companyLocationId
+    // Extract contact role ID
+    const roles = companyJson.data?.company?.contactRoles?.edges || [];
+    const companyContactRoleId =
+      roles.find(
+        (edge: { node: { name: string } }) =>
+          edge.node.name.toLowerCase() === "company admin",
+      )?.node?.id || roles[0]?.node?.id;
+
+    if (!companyContactRoleId) {
+      console.error("No company roles found for assignment");
+      return {
+        success: false,
+        error: "No company contact roles available",
+        step: "getRoles",
+      };
+    }
+
+    /* 2️⃣ Assign role AND set main contact IN PARALLEL */
+    const [roleRes, mainContactRes] = await Promise.all([
+      // Assign role with location
+      admin.graphql(
+        `#graphql
+        mutation companyContactAssignRole(
+          $companyContactId: ID!
+          $companyContactRoleId: ID!
+          $companyLocationId: ID!
         ) {
-          companyContactRoleAssignment { id }
-          userErrors { message }
-        }
-      }`,
-      {
-        variables: {
-          companyContactId,
-          companyContactRoleId,
-          companyLocationId,
+          companyContactAssignRole(
+            companyContactId: $companyContactId
+            companyContactRoleId: $companyContactRoleId
+            companyLocationId: $companyLocationId
+          ) {
+            companyContactRoleAssignment { id }
+            userErrors { message }
+          }
+        }`,
+        {
+          variables: {
+            companyContactId,
+            companyContactRoleId,
+            companyLocationId,
+          },
         },
-      },
-    );
+      ),
 
-    const roleJson = await roleRes.json();
+      // Assign main contact (can happen in parallel with role assignment)
+      admin.graphql(
+        `#graphql
+        mutation companyAssignMainContact(
+          $companyId: ID!
+          $companyContactId: ID!
+        ) {
+          companyAssignMainContact(
+            companyId: $companyId
+            companyContactId: $companyContactId
+          ) {
+            company { id name }
+            userErrors { message }
+          }
+        }`,
+        { variables: { companyId, companyContactId } },
+      ),
+    ]);
+
+    // Parse both responses
+    const [roleJson, mainContactJson] = await Promise.all([
+      roleRes.json(),
+      mainContactRes.json(),
+    ]);
+
+    // Check for errors in role assignment
     const rolePayload = roleJson.data?.companyContactAssignRole;
-
     if (rolePayload?.userErrors?.length) {
+      console.error("❌ Role assignment error:", rolePayload.userErrors[0]);
       return {
         success: false,
         error: rolePayload.userErrors[0].message,
@@ -331,28 +367,10 @@ export async function assignCompanyToCustomer(
       };
     }
 
-    /* 4️⃣ Assign main contact */
-    const mainContactRes = await admin.graphql(
-      `#graphql
-      mutation companyAssignMainContact(
-        $companyId: ID!
-        $companyContactId: ID!
-      ) {
-        companyAssignMainContact(
-          companyId: $companyId
-          companyContactId: $companyContactId
-        ) {
-          company { id name }
-          userErrors { message }
-        }
-      }`,
-      { variables: { companyId, companyContactId } },
-    );
-
-    const mainContactJson = await mainContactRes.json();
+    // Check for errors in main contact assignment
     const mainContactPayload = mainContactJson.data?.companyAssignMainContact;
-
     if (mainContactPayload?.userErrors?.length) {
+      console.error("❌ Main contact assignment error:", mainContactPayload.userErrors[0]);
       return {
         success: false,
         error: mainContactPayload.userErrors[0].message,
@@ -402,43 +420,49 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        const response = await admin.graphql(
-          `#graphql
-          query CustomersByEmail($query: String!) {
-            customers(first: 1, query: $query) {
-              nodes {
-                id
-                email
-                firstName
-                lastName
-                phone
+        console.log("⏳ Checking customer:", email);
+
+        // Parallel check: fetch customer AND check registration
+        const [customerResponse, registration] = await Promise.all([
+          admin.graphql(
+            `#graphql
+            query CustomersByEmail($query: String!) {
+              customers(first: 1, query: $query) {
+                nodes {
+                  id
+                  email
+                  firstName
+                  lastName
+                  phone
+                }
               }
             }
-          }
-        `,
-          {
-            variables: {
-              query: `email:${email}`,
+          `,
+            {
+              variables: {
+                query: `email:${email}`,
+              },
             },
-          },
-        );
+          ),
+          prisma.registrationSubmission.findFirst({
+            where: { email },
+          }),
+        ]);
 
-        const payload = await response.json();
-        const customer = payload?.data?.customers?.nodes?.[0] || null;
+        const customerPayload = await customerResponse.json();
+        const customer = customerPayload?.data?.customers?.nodes?.[0] || null;
 
-        const Registration = await prisma.registrationSubmission.findFirst({
-          where: { email },
-        });
-
-        const user = await prisma.user.findFirst({
-          where: { email },
+        console.log("✅ Customer check completed:", {
+          exists: !!customer,
+          hasRegistration: !!registration,
         });
 
         return Response.json({
           intent,
           success: true,
           customer,
-          message: customer ? "Customer exists" : "No customer found",
+          existsInDb: !!registration,
+          message: customer ? "Customer found" : "No customer found",
         });
       }
       case "createCustomer": {
@@ -453,30 +477,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             success: false,
             errors: ["First name and email are required"],
           });
-        }
-
-        // Validate and format phone number
-        let formattedPhone = undefined;
-        if (phone) {
-          // Remove all non-digit characters
-          const digitsOnly = phone.replace(/\D/g, "");
-
-          // Only include phone if it has a reasonable length (e.g., 10+ digits)
-          if (digitsOnly.length >= 10) {
-            // Format as E.164 if it looks like a US number (10 digits)
-            if (digitsOnly.length === 10) {
-              formattedPhone = `+1${digitsOnly}`;
-            } else if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
-              formattedPhone = `+${digitsOnly}`;
-            } else if (digitsOnly.startsWith("91") && digitsOnly.length >= 12) {
-              // Indian number format
-              formattedPhone = `+${digitsOnly}`;
-            } else {
-              // For other formats, just add + if not present
-              formattedPhone = phone.startsWith("+") ? phone : `+${digitsOnly}`;
-            }
-          }
-          // If phone is invalid, we'll just skip it rather than error
         }
 
         const response = await admin.graphql(
@@ -500,7 +500,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 email,
                 firstName,
                 lastName: lastName || undefined,
-                ...(formattedPhone && { phone: formattedPhone }),
+                phone,
               },
             },
           },
@@ -529,12 +529,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             data: {
               contactName: `${firstName} ${lastName || ""}`.trim(),
               email,
-              phone: formattedPhone || phone || "",
+              phone: phone || "",
               shopifyCustomerId: customer?.id || null,
               status: "PENDING",
               companyName: "",
               businessType: "",
               shopId: store.id,
+            },
+          });
+        } else {
+          await prisma.registrationSubmission.update({
+            where: { id: registrationData?.id || "" },
+            data: {
+              contactName: `${firstName} ${lastName || ""}`.trim(),
+              email,
+              shopifyCustomerId: customer?.id || null,
+              phone: phone || "",
+              status: "PENDING",
+              companyName: "",
+              businessType: "",
             },
           });
         }
@@ -550,6 +563,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           await prisma.user.create({
             data: {
               email,
+              firstName,
+              lastName: lastName || "",
+              shopifyCustomerId: customer?.id || null,
+              shopId: store.id,
+              status: "PENDING",
+              role: "STORE_ADMIN",
+              password: "",
+              companyRole: "admin",
+            },
+          });
+        } else {
+          await prisma.user.update({
+            where: {
+              id: userData?.id || "",
+            },
+            data: {
               firstName,
               lastName: lastName || "",
               shopifyCustomerId: customer?.id || null,
@@ -576,8 +605,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const firstName = (form.firstName as string)?.trim();
         const lastName = (form.lastName as string)?.trim();
         const phone = (form.phone as string)?.trim() || undefined;
-        const companyName = (form.companyName as string)?.trim();
-        const businessType = (form.businessType as string)?.trim();
 
         if (!customerId) {
           return Response.json({
@@ -620,11 +647,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return Response.json({ intent, success: false, errors });
         }
 
+        const customer = payload?.data?.customerUpdate?.customer;
         const registrationData = await prisma.registrationSubmission.findFirst({
           where: { shopifyCustomerId: customerId },
         });
 
-        if (registrationData) {
+        if (registrationData && customer) {
           await prisma.registrationSubmission.update({
             where: { id: registrationData.id },
             data: {
@@ -635,28 +663,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               shopifyCustomerId: customerId || null,
             },
           });
-        } else {
-          const existingByEmail = await prisma.registrationSubmission.findFirst(
-            {
-              where: { shopifyCustomerId: customerId },
-            },
-          );
-          await prisma.registrationSubmission.delete({
-            where: { id: existingByEmail?.id || "" },
-          });
-          await prisma.registrationSubmission.create({
-            data: {
-              contactName: `${firstName} ${lastName || ""}`.trim(),
-              email,
-              phone: phone || "",
-              status: "PENDING",
-              shopifyCustomerId: customerId || null,
-              companyName: companyName || "",
-              businessType: businessType || "",
-              shopId: store.id,
-            },
-          });
-        }
+        } 
         const userData = await prisma.user.findFirst({
           where: {
             shopifyCustomerId: customerId,
@@ -665,27 +672,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (userData) {
           await prisma.user.update({
             where: { id: userData.id },
-            data: {
-              email,
-              firstName,
-              lastName: lastName || "",
-              shopifyCustomerId: customerId || null,
-              shopId: store.id,
-              status: "PENDING",
-              role: "STORE_ADMIN",
-              password: "",
-              companyRole: "admin",
-            },
-          });
-        } else {
-          const existingUser = await prisma.user.findFirst({
-            where: { shopifyCustomerId: customerId },
-          });
-
-          await prisma.user.delete({
-            where: { id: existingUser?.id || "" },
-          });
-          await prisma.user.create({
             data: {
               email,
               firstName,
@@ -832,7 +818,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyName = (form.companyName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
         const creditLimit = (form.creditLimit as string)?.trim();
-        const companyContactCustomerId = (form.customerId as string)?.trim();
+        const customerEmail = (form.customerEmail as string)?.trim();
 
         if (!companyName) {
           return Response.json({
@@ -841,6 +827,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             errors: ["Company name is required"],
           });
         }
+
         const duplicateCheck = await checkDuplicateCompanyName({
           admin,
           prisma,
@@ -855,6 +842,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        // 1️⃣ Create company in Shopify
         const createCompanyResponse = await admin.graphql(
           `#graphql
     mutation CompanyCreate($input: CompanyCreateInput!) {
@@ -885,263 +873,83 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const companyId = companyPayload.data.companyCreate.company.id;
 
-        /* 2️⃣ Update company metafield (credit limit) */
-        if (creditLimit) {
-          await updateCompanyMetafield(admin, companyId, {
-            namespace: "b2b_credit",
-            key: "credit_limit",
-            value: creditLimit.toString(),
-            type: "number_decimal",
-          });
+        // 2️⃣ Parallel operations: Update metafield + Fetch location + Find/Create company in DB + Find user
+        const [locationPayload, companyData, linkedUser] = await Promise.all([
+          // Fetch company location
+          admin
+            .graphql(
+              `#graphql
+      query GetCompanyLocation($companyId: ID!) {
+        company(id: $companyId) {
+          locations(first: 1) {
+            nodes {
+              id
+              name
+            }
+          }
         }
+      }`,
+              { variables: { companyId } },
+            )
+            .then((res) => res.json()),
 
-        /* 3️⃣ Save company in Prisma (ONLY company data) */
-        let companyData = await prisma.companyAccount.findFirst({
-          where: { shopifyCompanyId: companyId },
-        });
-
-        if (!companyData) {
-          companyData = await prisma.companyAccount.create({
-            data: {
+          // Upsert company in Prisma (find or create in one operation)
+          prisma.companyAccount.upsert({
+            where: {
+              shopId_shopifyCompanyId: {
+                shopId: store.id,
+                shopifyCompanyId: companyId,
+              },
+            },
+            update: {
+              name: companyName,
+              paymentTerm: paymentTermsTemplateId || null,
+              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+            },
+            create: {
               shopId: store.id,
               name: companyName,
               shopifyCompanyId: companyId,
               paymentTerm: paymentTermsTemplateId || null,
               creditLimit: creditLimit ? Number(creditLimit) : undefined,
             },
-          });
-        }
+          }),
 
-        /* 4️⃣ Fetch AUTO-created company location */
-        const locationQueryResponse = await admin.graphql(
-          `#graphql
-    query GetCompanyLocation($companyId: ID!) {
-      company(id: $companyId) {
-        locations(first: 1) {
-          nodes {
-            id
-            name
-          }
-        }
-      }
-    }`,
-          { variables: { companyId } },
-        );
-
-        const locationPayload = await locationQueryResponse.json();
-        const location = locationPayload?.data?.company?.locations?.nodes?.[0];
-
-        if (!location) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company location not found"],
-          });
-        }
-
-        /* 5️⃣ Assign payment terms to EXISTING location */
-        if (paymentTermsTemplateId) {
-          const updateLocationResponse = await admin.graphql(
-            `#graphql
-    mutation UpdateCompanyLocation(
-      $companyLocationId: ID!
-      $paymentTermsTemplateId: ID!
-    ) {
-      companyLocationUpdate(
-        companyLocationId: $companyLocationId
-        input: {
-          buyerExperienceConfiguration: {
-            paymentTermsTemplateId: $paymentTermsTemplateId
-          }
-        }
-      ) {
-        companyLocation { id }
-        userErrors { field message }
-      }
-    }`,
-            {
-              variables: {
-                companyLocationId: location.id,
-                paymentTermsTemplateId,
-              },
-            },
-          );
-
-          const updateLocationPayload = await updateLocationResponse.json();
-          const locationErrors = buildUserErrorList(updateLocationPayload);
-
-          if (locationErrors.length) {
-            return Response.json({
-              intent,
-              success: false,
-              errors: locationErrors,
-            });
-          }
-        }
-
-        console.log(companyContactCustomerId, "companyContactCustomerId");
-
-        let linkedUser = null;
-
-        if (companyContactCustomerId) {
-          // ✅ Best case: customerId was passed from frontend
-          linkedUser = await prisma.user.findFirst({
-            where: { shopifyCustomerId: companyContactCustomerId },
-          });
-        }
-
-        if (!linkedUser) {
-          // ✅ Fallback: find the most recent PENDING user for this store with no company yet
-          linkedUser = await prisma.user.findFirst({
-            where: {
-              shopId: store.id,
-              companyId: null,
-              status: "PENDING",
-            },
-            orderBy: { createdAt: "desc" }, // most recently created
-          });
-        }
-
-        console.log(linkedUser, "linkedUser");
-
-        if (linkedUser) {
-          const registration = await prisma.registrationSubmission.findFirst({
-            where: { email: linkedUser.email },
-          });
-
-          if (registration) {
-            await prisma.registrationSubmission.update({
-              where: { id: registration.id },
-              data: {
-                companyName: companyName, // ✅ always saved
-              },
-            });
-          }
-
-          await prisma.user.update({
-            where: { id: linkedUser.id },
-            data: {
-              companyId: companyData.id,
-              ...(creditLimit && {
-                userCreditLimit: new Prisma.Decimal(creditLimit),
+          // Find user - only one query with OR conditions
+          customerEmail
+            ? prisma.user.findFirst({
+                where: {
+                  OR: [
+                    { email: customerEmail },
+                    {
+                      shopId: store.id,
+                      companyId: null,
+                      status: "PENDING",
+                    },
+                  ],
+                },
+                orderBy: { createdAt: "desc" },
+              })
+            : prisma.user.findFirst({
+                where: {
+                  shopId: store.id,
+                  companyId: null,
+                  status: "PENDING",
+                },
+                orderBy: { createdAt: "desc" },
               }),
-            },
-          });
-        }
 
-        /* 7️⃣ Final response */
-        return Response.json({
-          intent,
-          success: true,
-          company: {
-            id: companyId,
-            name: companyName,
-            locationId: location.id,
-            locationName: location.name,
-          },
-          message: "Company created successfully",
-        });
-      }
+          // Update credit limit metafield (if needed)
+          creditLimit
+            ? updateCompanyMetafield(admin, companyId, {
+                namespace: "b2b_credit",
+                key: "credit_limit",
+                value: creditLimit.toString(),
+                type: "number_decimal",
+              })
+            : Promise.resolve(),
+        ]);
 
-      case "updateCompany": {
-        /* 0️⃣ Read & validate form data */
-        const companyId = (form.companyId as string)?.trim();
-        const companyName = (form.companyName as string)?.trim();
-        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
-        const creditLimit = (form.creditLimit as string)?.trim();
-
-        if (!companyId || !companyName) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company ID and company name are required"],
-          });
-        }
-        const duplicateCheck = await checkDuplicateCompanyName({
-          admin,
-          prisma,
-          companyName,
-        });
-
-        if (duplicateCheck.exists) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: [`Company "${companyName}" already exists`],
-          });
-        }
-
-        /* 1️⃣ Update Company name in Shopify */
-        const updateCompanyResponse = await admin.graphql(
-          `#graphql
-    mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
-      companyUpdate(companyId: $companyId, input: $input) {
-        company { id name }
-        userErrors { field message }
-      }
-    }`,
-          {
-            variables: {
-              companyId,
-              input: { name: companyName },
-            },
-          },
-        );
-
-        const companyPayload = await updateCompanyResponse.json();
-        const companyErrors = buildUserErrorList(companyPayload);
-
-        if (companyErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: companyErrors,
-          });
-        }
-
-        /* 2️⃣ Update Credit Limit metafield */
-        if (creditLimit) {
-          await updateCompanyMetafield(admin, companyId, {
-            namespace: "b2b_credit",
-            key: "credit_limit",
-            value: creditLimit.toString(),
-            type: "number_decimal",
-          });
-        }
-
-        /* 3️⃣ Update company in Prisma */
-        const companyExists = await prisma.companyAccount.findFirst({
-          where: { shopifyCompanyId: companyId },
-        });
-
-        if (companyExists) {
-          await prisma.companyAccount.update({
-            where: { id: companyExists.id },
-            data: {
-              name: companyName,
-              paymentTerm: paymentTermsTemplateId || null,
-              creditLimit: creditLimit ? Number(creditLimit) : undefined,
-            },
-          });
-        }
-
-        /* 4️⃣ Fetch EXISTING (auto-created) company location */
-        const locationQueryResponse = await admin.graphql(
-          `#graphql
-    query GetCompanyLocation($companyId: ID!) {
-      company(id: $companyId) {
-        locations(first: 1) {
-          nodes {
-            id
-            name
-          }
-        }
-      }
-    }`,
-          { variables: { companyId } },
-        );
-
-        const locationPayload = await locationQueryResponse.json();
         const location = locationPayload?.data?.company?.locations?.nodes?.[0];
 
         if (!location) {
@@ -1152,7 +960,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        /* 5️⃣ Update payment terms on EXISTING location */
+        // 3️⃣ Update payment terms on location (if needed)
         if (paymentTermsTemplateId) {
           const updateLocationResponse = await admin.graphql(
             `#graphql
@@ -1192,23 +1000,281 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
-        /* 6️⃣ Update user credit limit */
-        if (companyExists && creditLimit) {
-          const user = await prisma.user.findFirst({
-            where: { companyId: companyExists.id },
-          });
-
-          if (user) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                userCreditLimit: new Prisma.Decimal(creditLimit),
+        // 4️⃣ Update user and registration if user found (parallel operations)
+        if (linkedUser) {
+          console.log("Found linked user:", linkedUser);
+          await Promise.all([
+            // Update or create registration
+            prisma.registrationSubmission.upsert({
+              where: {
+                shopId_email: {
+                  shopId: store.id,
+                  email: linkedUser.email,
+                },
               },
+              update: {
+                companyName: companyName,
+              },
+              create: {
+                email: linkedUser.email,
+                companyName: companyName,
+                contactName:
+                  `${linkedUser.firstName} ${linkedUser.lastName}`.trim(),
+                phone: "",
+                shopifyCustomerId: linkedUser.shopifyCustomerId,
+                status: "PENDING",
+                businessType: "",
+                shopId: store.id,
+              },
+            }),
+
+            // Update user
+            prisma.user.update({
+              where: { id: linkedUser.id },
+              data: {
+                companyId: companyData.id,
+              },
+            }),
+          ]);
+        }
+
+        // 5️⃣ Final response
+        return Response.json({
+          intent,
+          success: true,
+          company: {
+            id: companyId,
+            name: companyName,
+            locationId: location.id,
+            locationName: location.name,
+          },
+          message: "Company created successfully",
+        });
+      }
+
+      case "updateCompany": {
+        const companyId = (form.companyId as string)?.trim();
+        const companyName = (form.companyName as string)?.trim();
+        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+        const creditLimit = (form.creditLimit as string)?.trim();
+        const customerEmail = (form.customerEmail as string)?.trim();
+
+        if (!companyId || !companyName) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company ID and company name are required"],
+          });
+        }
+
+        const duplicateCheck = await checkDuplicateCompanyName({
+          admin,
+          prisma,
+          companyName,
+          excludeShopifyCompanyId: companyId,
+        });
+
+        if (duplicateCheck.exists) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [`Company "${companyName}" already exists`],
+          });
+        }
+
+        // 1️⃣ Update Company name in Shopify
+        const updateCompanyResponse = await admin.graphql(
+          `#graphql
+    mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
+      companyUpdate(companyId: $companyId, input: $input) {
+        company { id name }
+        userErrors { field message }
+      }
+    }`,
+          {
+            variables: {
+              companyId,
+              input: { name: companyName },
+            },
+          },
+        );
+
+        const companyPayload = await updateCompanyResponse.json();
+        const companyErrors = buildUserErrorList(companyPayload);
+
+        if (companyErrors.length) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: companyErrors,
+          });
+        }
+
+        // 2️⃣ Parallel operations: Update metafield + Fetch location + Update company in DB + Find user
+        const [locationPayload, companyExists, linkedUser] = await Promise.all([
+          // Fetch company location
+          admin
+            .graphql(
+              `#graphql
+      query GetCompanyLocation($companyId: ID!) {
+        company(id: $companyId) {
+          locations(first: 1) {
+            nodes {
+              id
+              name
+            }
+          }
+        }
+      }`,
+              { variables: { companyId } },
+            )
+            .then((res) => res.json()),
+
+          // Update company in Prisma (using upsert to handle both cases)
+          prisma.companyAccount.upsert({
+            where: {
+              shopId_shopifyCompanyId: {
+                shopId: store.id,
+                shopifyCompanyId: companyId,
+              },
+            },
+            update: {
+              name: companyName,
+              paymentTerm: paymentTermsTemplateId || null,
+              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+            },
+            create: {
+              shopId: store.id,
+              name: companyName,
+              shopifyCompanyId: companyId,
+              paymentTerm: paymentTermsTemplateId || null,
+              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+            },
+          }),
+
+          // Find user - single query with OR conditions
+          customerEmail
+            ? prisma.user.findFirst({
+                where: {
+                  OR: [
+                    { email: customerEmail },
+                    {
+                      shopId: store.id,
+                      companyId: null,
+                      status: "PENDING",
+                    },
+                  ],
+                },
+                orderBy: { createdAt: "desc" },
+              })
+            : prisma.user.findFirst({
+                where: {
+                  shopId: store.id,
+                  companyId: null,
+                  status: "PENDING",
+                },
+                orderBy: { createdAt: "desc" },
+              }),
+
+          // Update credit limit metafield (if needed)
+          creditLimit
+            ? updateCompanyMetafield(admin, companyId, {
+                namespace: "b2b_credit",
+                key: "credit_limit",
+                value: creditLimit.toString(),
+                type: "number_decimal",
+              })
+            : Promise.resolve(),
+        ]);
+
+        const location = locationPayload?.data?.company?.locations?.nodes?.[0];
+
+        if (!location) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Company location not found"],
+          });
+        }
+
+        // 3️⃣ Update payment terms on location (if needed)
+        if (paymentTermsTemplateId) {
+          const updateLocationResponse = await admin.graphql(
+            `#graphql
+      mutation UpdateCompanyLocation(
+        $companyLocationId: ID!
+        $paymentTermsTemplateId: ID!
+      ) {
+        companyLocationUpdate(
+          companyLocationId: $companyLocationId
+          input: {
+            buyerExperienceConfiguration: {
+              paymentTermsTemplateId: $paymentTermsTemplateId
+            }
+          }
+        ) {
+          companyLocation { id }
+          userErrors { field message }
+        }
+      }`,
+            {
+              variables: {
+                companyLocationId: location.id,
+                paymentTermsTemplateId,
+              },
+            },
+          );
+
+          const updateLocationPayload = await updateLocationResponse.json();
+          const locationErrors = buildUserErrorList(updateLocationPayload);
+
+          if (locationErrors.length) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: locationErrors,
             });
           }
         }
 
-        /* 7️⃣ Final response */
+        // 4️⃣ Update user and registration if user found (parallel operations)
+        if (linkedUser) {
+          await Promise.all([
+            // Update or create registration
+            prisma.registrationSubmission.upsert({
+              where: {
+                shopId_email: {
+                  shopId: store.id,
+                  email: linkedUser.email,
+                },
+              },
+              update: {
+                companyName: companyName,
+              },
+              create: {
+                email: linkedUser.email,
+                companyName: companyName,
+                contactName:
+                  `${linkedUser.firstName} ${linkedUser.lastName}`.trim(),
+                phone: "",
+                shopifyCustomerId: linkedUser.shopifyCustomerId,
+                status: "PENDING",
+                businessType: "",
+                shopId: store.id,
+              },
+            }),
+
+            // Update user
+            prisma.user.update({
+              where: { id: linkedUser.id },
+              data: {
+                companyId: companyExists.id,
+              },
+            }),
+          ]);
+        }
+
+        // 5️⃣ Final response
         return Response.json({
           intent,
           success: true,
@@ -1228,12 +1294,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const locationId = (form.locationId as string)?.trim();
 
         if (!companyId || !customerId || !locationId) {
+          console.warn("Missing required fields for assignMainContact:", {
+            companyId: !!companyId,
+            customerId: !!customerId,
+            locationId: !!locationId,
+          });
           return Response.json({
             intent,
             success: false,
             errors: ["Company, customer and location are required"],
           });
         }
+
+        console.log("⏳ Starting assignMainContact for:", {
+          companyId,
+          customerId,
+          locationId,
+        });
 
         const result = await assignCompanyToCustomer(
           admin,
@@ -1243,6 +1320,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         if (!result.success) {
+          console.error("❌ assignMainContact failed:", result);
           return Response.json({
             intent,
             success: false,
@@ -1250,6 +1328,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        console.log("✅ assignMainContact completed successfully");
         return Response.json({
           intent,
           success: true,
@@ -1273,6 +1352,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         await sendCompanyAssignmentEmail(
           store.shopName || "Shop Name",
+          store.shopDomain || "shop-domain.myshopify.com",
           store.storeOwnerName || "Store Owner",
           email,
           companyName,
@@ -1508,7 +1588,7 @@ function StepBadge({
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onClick?.(e);
+          onClick?.();
         }
       }}
       role="button"
@@ -1663,35 +1743,14 @@ export default function RegistrationApprovals() {
       );
       return;
     }
-    // if (flowFetcher.data.intent === "checkCompany") {
-    //   setStep("createCompany");
-
-    //   if (flowFetcher.data.company) {
-    //     // Company exists - set company data
-    //     setCompany(flowFetcher.data.company);
-
-    //     // Show appropriate message
-    //     if (flowFetcher.data.existsInDb) {
-    //       shopify.toast.show?.(
-    //         "Company already exists - you can review or edit details",
-    //       );
-    //     } else {
-    //       shopify.toast.show?.("Company found in Shopify");
-    //     }
-    //   } else {
-    //     // Company doesn't exist - clear company to show create form
-    //     setCompany(null);
-    //   }
-    //   return;
-    // }
     if (flowFetcher.data.intent === "checkCompany") {
       setStep("createCompany");
 
       if (flowFetcher.data.company) {
-        // Company exists - set company data and switch to UPDATE mode
+        // Company exists - set company data
         setCompany(flowFetcher.data.company);
-        setEditMode("update"); // ← KEY FIX: show edit form, not create form
 
+        // Show appropriate message
         if (flowFetcher.data.existsInDb) {
           shopify.toast.show?.(
             "Company already exists - you can review or edit details",
@@ -1700,12 +1759,33 @@ export default function RegistrationApprovals() {
           shopify.toast.show?.("Company found in Shopify");
         }
       } else {
-        // Company doesn't exist - show create form
+        // Company doesn't exist - clear company to show create form
         setCompany(null);
-        setEditMode("create"); // ← ensure clean create mode
       }
       return;
     }
+    // if (flowFetcher.data.intent === "checkCompany") {
+    //   setStep("createCompany");
+
+    //   if (flowFetcher.data.company) {
+    //     // Company exists - set company data and switch to UPDATE mode
+    //     setCompany(flowFetcher.data.company);
+    //     setEditMode("update"); // ← KEY FIX: show edit form, not create form
+
+    //     if (flowFetcher.data.existsInDb) {
+    //       shopify.toast.show?.(
+    //         "Company already exists - you can review or edit details",
+    //       );
+    //     } else {
+    //       shopify.toast.show?.("Company found in Shopify");
+    //     }
+    //   } else {
+    //     // Company doesn't exist - show create form
+    //     setCompany(null);
+    //     setEditMode("create"); // ← ensure clean create mode
+    //   }
+    //   return;
+    // }
     if (
       (flowFetcher.data.intent === "createCompany" ||
         flowFetcher.data.intent === "updateCompany") &&
@@ -1736,7 +1816,20 @@ export default function RegistrationApprovals() {
       flowFetcher.data.success
     ) {
       setStep("email");
-      shopify.toast.show?.("Main contact assigned");
+      shopify.toast.show?.("Main contact assigned successfully");
+      // Revalidate to refresh company data after assignment
+      revalidator.revalidate();
+      return;
+    }
+
+    if (
+      flowFetcher.data.intent === "assignMainContact" &&
+      !flowFetcher.data.success
+    ) {
+      console.error("Contact assignment failed:", flowFetcher.data.errors);
+      shopify.toast.show?.(
+        `Failed to assign contact: ${flowFetcher.data.errors?.[0] || "Unknown error"}`
+      );
       return;
     }
 
@@ -1788,16 +1881,18 @@ export default function RegistrationApprovals() {
 
   const completeApproval = () => {
     if (!selected || !customer) return;
+
     flowFetcher.submit(
       {
         intent: "completeApproval",
         registrationId: selected.id,
-        customerId: customer.id,
+        customerId: customer.id, // ✅ Current customer ID
         companyId: company?.id || "",
-        companyName: company?.name || selected.companyName,
-        contactName: selected.contactName,
-        contactEmail: selected.email,
-        paymentTermsTemplateId: selected.paymentTerm || "",
+        companyName: company?.name || selected.companyName, // ✅ Current company name
+        contactName: `${customer.firstName} ${customer.lastName}`, // ✅ Current customer name
+        contactEmail: customer.email, // ✅ Current customer email
+        paymentTerm: selected.paymentTerm || "",
+        creditLimit: selected.creditLimit || "",
         reviewNotes,
       },
       { method: "post" },
@@ -2245,6 +2340,14 @@ export default function RegistrationApprovals() {
                     "intent",
                     editMode === "create" ? "createCompany" : "updateCompany",
                   );
+
+                  // ✅ Add these lines - pass customer info
+                  data.append("customerId", customer?.id || "");
+                  data.append(
+                    "customerEmail",
+                    customer?.email || selected?.email || "",
+                  );
+
                   if (editMode === "update") {
                     data.append("companyId", company?.id || "");
                     data.append("locationId", company?.locationId || "");
@@ -2458,9 +2561,7 @@ export default function RegistrationApprovals() {
                   onClick={() => goToStep("complete", completeRef)}
                 />
               </div>
-
               {/* Step: Check Customer */}
-
               {step === "check" && (
                 <div
                   style={{
@@ -2527,7 +2628,6 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
               )}
-
               {/* Step: Create Customer */}
               {step === "createCustomer" && (
                 <div>
@@ -2551,7 +2651,11 @@ export default function RegistrationApprovals() {
                           const form = e.currentTarget;
                           const data = new FormData(form);
                           data.append("intent", "updateCustomer");
-                          data.append("customerId", customer.id);
+                          data.append("customerId", customer?.id || "");
+                          data.append(
+                            "customerEmail",
+                            customer?.email || selected?.email || "",
+                          );
                           flowFetcher.submit(data, { method: "post" });
                         }}
                       >
@@ -2798,7 +2902,6 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
               )}
-
               {/* Step: Create Company */}
               {step === "createCompany" && (
                 <div
@@ -2959,6 +3062,11 @@ export default function RegistrationApprovals() {
                         const form = e.currentTarget;
                         const data = new FormData(form);
                         data.append("intent", "createCompany");
+                        data.append("customerId", customer?.id || "");
+                        data.append(
+                          "customerEmail",
+                          customer?.email || selected?.email || "",
+                        );
                         flowFetcher.submit(data, { method: "post" });
                       }}
                     >
@@ -3087,7 +3195,6 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
               )}
-              {/* Step: Assign Contact */}
               {step === "assign" && (
                 <div
                   style={{
@@ -3104,26 +3211,44 @@ export default function RegistrationApprovals() {
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info">
                       <s-text>
-                        Customer: {selected?.contactName}
+                        {/* ✅ FIXED: Use current customer data */}
+                        Customer: {customer?.firstName} {customer?.lastName} (
+                        {customer?.email})
                         <br />
-                        Company: {selected?.companyName}
+                        {/* ✅ FIXED: Use current company data */}
+                        Company: {company?.name || selected?.companyName}
                       </s-text>
                     </s-banner>
                   </div>
 
                   <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                     <s-button
-                      onClick={() =>
+                      onClick={() => {
+                        const companyIdToSend = company?.id || "";
+                        const customerIdToSend = customer?.id || "";
+                        const locationIdToSend = company?.locationId || "";
+
+                        if (
+                          !companyIdToSend ||
+                          !customerIdToSend ||
+                          !locationIdToSend
+                        ) {
+                          shopify.toast.show?.(
+                            "Company, customer, and location are required",
+                          );
+                          return;
+                        }
+
                         flowFetcher.submit(
                           {
                             intent: "assignMainContact",
-                            companyId: company?.id || "",
-                            customerId: customer?.id || "",
-                            locationId: company?.locationId || "",
+                            companyId: companyIdToSend,
+                            customerId: customerIdToSend,
+                            locationId: locationIdToSend,
                           },
                           { method: "post" },
-                        )
-                      }
+                        );
+                      }}
                       {...(isFlowLoading &&
                       flowFetcher.data?.intent === "assignMainContact"
                         ? { loading: true }
@@ -3140,8 +3265,8 @@ export default function RegistrationApprovals() {
                   </div>
                 </div>
               )}
-
-              {/* Step: Send Welcome Email */}
+             
+             
               {step === "email" && (
                 <div
                   style={{
@@ -3158,11 +3283,14 @@ export default function RegistrationApprovals() {
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info">
                       <s-text>
-                        To: {selected.email}
+                        {/* ✅ FIXED: Use current customer email */}
+                        To: {customer?.email || selected.email}
                         <br />
-                        Contact: {selected.contactName}
+                        {/* ✅ FIXED: Use current customer name */}
+                        Contact: {customer?.firstName} {customer?.lastName}
                         <br />
-                        Company: {selected.companyName}
+                        {/* ✅ FIXED: Use current company name */}
+                        Company: {company?.name || selected?.companyName}
                       </s-text>
                     </s-banner>
                   </div>
@@ -3204,10 +3332,10 @@ export default function RegistrationApprovals() {
                         flowFetcher.submit(
                           {
                             intent: "sendWelcomeEmail",
-                            email: selected.email,
-                            contactName: selected.contactName,
-                            companyName: selected.companyName,
-                            reviewNotes: reviewNotes, // Add this line
+                            email: customer?.email || selected.email, // ✅ Use current email
+                            contactName: `${customer?.firstName} ${customer?.lastName}`, // ✅ Use current name
+                            companyName: company?.name || selected.companyName, // ✅ Use current company
+                            reviewNotes: reviewNotes,
                           },
                           { method: "post" },
                         )
@@ -3234,8 +3362,6 @@ export default function RegistrationApprovals() {
                   </div>
                 </div>
               )}
-
-              {/* Step: Complete */}
               {step === "complete" && (
                 <div
                   style={{
@@ -3245,6 +3371,55 @@ export default function RegistrationApprovals() {
                   }}
                 >
                   <h4 style={{ marginTop: 0 }}>Complete Approval</h4>
+
+                  {/* ✅ Add a summary of what will be approved */}
+                  <div
+                    style={{
+                      background: "#f9fafb",
+                      border: "1px solid #e3e3e3",
+                      borderRadius: 8,
+                      padding: 16,
+                      marginBottom: 16,
+                    }}
+                  >
+                    <strong>Approval Summary:</strong>
+                    <div
+                      style={{ marginTop: 8, fontSize: 14, color: "#5c5f62" }}
+                    >
+                      <div>
+                        Customer: {customer?.firstName} {customer?.lastName}
+                      </div>
+                      <div>Email: {customer?.email}</div>
+                      <div>
+                        Company: {company?.name || selected?.companyName}
+                      </div>
+                      {reviewNotes && (
+                        <div style={{ marginTop: 8 }}>
+                          <strong>Review Notes:</strong>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              padding: 8,
+                              background: "white",
+                              borderRadius: 4,
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {reviewNotes}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <s-banner tone="success">
+                    <strong>Ready to approve</strong>
+                    <div style={{ marginTop: 4 }}>
+                      This will mark the registration as approved and activate
+                      the customer account.
+                    </div>
+                  </s-banner>
+
                   <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                     <s-button
                       variant="primary"
@@ -3254,7 +3429,7 @@ export default function RegistrationApprovals() {
                         ? { loading: true }
                         : {})}
                     >
-                      Mark as Approved
+                      Confirm & Approve
                     </s-button>
                     <s-button
                       variant="tertiary"
@@ -3271,7 +3446,6 @@ export default function RegistrationApprovals() {
                   </div>
                 </div>
               )}
-
               {/* Error Display */}
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (

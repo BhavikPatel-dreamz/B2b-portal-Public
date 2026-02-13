@@ -30,36 +30,6 @@ import { uninstallStore } from "../services/store.server";
       if (session) {
         await db.session.deleteMany({ where: { shop } });
       }
-
-      // Delete user sessions first
-      const users = await db.user.findMany({ where: { shopId: store.id } });
-      if (users.length > 0) {
-        const userIds = users.map(u => u.id);
-        await db.userSession.deleteMany({ where: { userId: { in: userIds } } });
-      }
-
-      // Delete order payments
-      const orders = await db.b2BOrder.findMany({ where: { shopId: store.id } });
-      if (orders.length > 0) {
-        const orderIds = orders.map(o => o.id);
-        await db.orderPayment.deleteMany({ where: { orderId: { in: orderIds } } });
-      }
-
-      // Delete credit transactions
-      const companyAccounts = await db.companyAccount.findMany({ where: { shopId: store.id } });
-      if (companyAccounts.length > 0) {
-        const companyIds = companyAccounts.map(c => c.id);
-        await db.creditTransaction.deleteMany({ where: { companyId: { in: companyIds } } });
-      }
-
-      // Delete main records
-      await db.wishlist.deleteMany({ where: { shop } });
-      await db.notification.deleteMany({ where: { shopId: store.id } });
-      await db.b2BOrder.deleteMany({ where: { shopId: store.id } });
-      await db.companyAccount.deleteMany({ where: { shopId: store.id } });
-      await db.registrationSubmission.deleteMany({ where: { shopId: store.id } });
-      await db.user.deleteMany({ where: { shopId: store.id } });
-
       // Mark store as uninstalled
       await uninstallStore(shop);
 
