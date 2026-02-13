@@ -1396,16 +1396,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Set company contact name and email using customer data
         const contactName = `${customerFirstName} ${customerLastName}`.trim();
         
-        await prisma.companyAccount.update({
+        // ✅ Fetch or create the company account to ensure it exists with a local ID
+        const companyAccount = await prisma.companyAccount.upsert({
           where: {
             shopId_shopifyCompanyId: {
               shopId: store.id,
               shopifyCompanyId: companyId,
             },
           },
-          data: {
+          update: {
             contactName: contactName || null,
             contactEmail: customerEmail || null,
+          },
+          create: {
+            shopId: store.id,
+            shopifyCompanyId: companyId,
+            name: "Company",
+            contactName: contactName || null,
+            contactEmail: customerEmail || null,
+          },
+        });
+
+        // ✅ Use the local companyAccount.id, NOT the shopifyCompanyId
+        await prisma.user.upsert({
+          where: {
+            shopId_email: { shopId: store.id, email: customerEmail },
+          },
+          update: {
+            firstName: customerFirstName || null,
+            lastName: customerLastName || null,
+            shopifyCustomerId: customerId,
+            companyId: companyAccount.id,
+            companyRole: "admin",
+            role: "STORE_ADMIN",
+            status: "APPROVED",
+            shopId: store.id,
+          },
+          create: {
+            email: customerEmail,
+            firstName: customerFirstName || null,
+            lastName: customerLastName || null,
+            password: "",
+            shopifyCustomerId: customerId,
+            shopId: store.id,
+            companyId: companyAccount.id,
+            companyRole: "admin",
+            role: "STORE_ADMIN",
+            status: "APPROVED",
           },
         });
 
