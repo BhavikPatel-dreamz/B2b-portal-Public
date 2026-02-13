@@ -147,6 +147,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
           shopId: store.id,
           status: "PENDING",
+          shopifyCustomerId: { not: null },
         },
         orderBy: { createdAt: "desc" },
       }),
@@ -154,6 +155,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
           shopId: store.id,
           status: "APPROVED",
+          shopifyCustomerId: { not: null },
         },
         orderBy: { createdAt: "desc" },
       }),
@@ -161,17 +163,50 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
           shopId: store.id,
           status: "REJECTED",
+          shopifyCustomerId: { not: null },
         },
         orderBy: { createdAt: "desc" },
       }),
     ]);
 
-  // Combine all submissions
   const submissions = [
     ...pendingSubmissions,
     ...approvedSubmissions,
     ...rejectedSubmissions,
   ];
+
+  // ✅ Check if customer exists in Shopify
+  const validSubmissions = [];
+
+  for (const submission of submissions) {
+    try {
+      const res = await admin.graphql(
+        `#graphql
+        query ($id: ID!) {
+          customer(id: $id) {
+            id
+          }
+        }`,
+        {
+          variables: {
+            id: submission.shopifyCustomerId,
+          },
+        },
+      );
+
+      const data = await res.json();
+
+      if (data?.data?.customer) {
+        validSubmissions.push(submission);
+      }
+    } catch (error) {
+      console.warn(
+        "Customer not found in Shopify:",
+        submission.id,
+        submission.shopifyCustomerId,
+      );
+    }
+  }
 
   const companies = await prisma.companyAccount.findMany({
     where: { shopId: store.id },
@@ -194,10 +229,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   );
 
   const paymentTermsData = await paymentTermsResponse.json();
-  const paymentTermsTemplates = paymentTermsData.data.paymentTermsTemplates;
+  const paymentTermsTemplates =
+    paymentTermsData.data.paymentTermsTemplates;
 
   return Response.json({
-    submissions: submissions.map((submission) => ({
+    submissions: validSubmissions.map((submission) => ({
       ...submission,
       createdAt: submission.createdAt.toISOString(),
       reviewedAt: submission.reviewedAt
