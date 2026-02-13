@@ -273,18 +273,69 @@ export async function assignCompanyToCustomer(
       contactRes.json(),
     ]);
 
-    // Check for errors in assigning contact FIRST (fail fast)
+    // Check for errors in assigning contact
+    let companyContactId: string | null = null;
     const contactPayload = contactJson.data?.companyAssignCustomerAsContact;
+    
     if (contactPayload?.userErrors?.length) {
-      console.error("Contact assignment error:", contactPayload.userErrors[0]);
-      return {
-        success: false,
-        error: contactPayload.userErrors[0].message,
-        step: "assignContact",
-      };
+      const errorMessage = contactPayload.userErrors[0].message;
+      console.warn("Contact assignment error:", errorMessage);
+      
+      // Check if customer is already associated with a company contact
+      if (errorMessage.includes("already associated") || errorMessage.includes("already")) {
+        console.log("Customer already associated, fetching existing contact...");
+        
+        // Fetch company contacts and find the one for this customer
+        const existingContactRes = await admin.graphql(
+          `#graphql
+          query getCompanyContacts($companyId: ID!) {
+            company(id: $companyId) {
+              contacts(first: 50) {
+                edges {
+                  node {
+                    id
+                    customer {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }`,
+          { variables: { companyId } },
+        );
+        
+        const existingContactJson = await existingContactRes.json();
+        const contacts = existingContactJson?.data?.company?.contacts?.edges || [];
+        
+        // Find the contact that matches this customer
+        const matchingContact = contacts.find(
+          (edge: any) => edge.node.customer?.id === customerId
+        );
+        companyContactId = matchingContact?.node?.id || null;
+        
+        if (!companyContactId) {
+          console.error("Could not find existing company contact for customer");
+          return {
+            success: false,
+            error: "Could not find existing company contact",
+            step: "getExistingContact",
+          };
+        }
+        
+        console.log("Using existing company contact:", companyContactId);
+      } else {
+        // Different error - fail
+        console.error("Contact assignment failed:", errorMessage);
+        return {
+          success: false,
+          error: errorMessage,
+          step: "assignContact",
+        };
+      }
+    } else {
+      companyContactId = contactPayload.companyContact.id;
     }
-
-    const companyContactId = contactPayload.companyContact.id;
 
     // Extract contact role ID
     const roles = companyJson.data?.company?.contactRoles?.edges || [];
@@ -359,12 +410,22 @@ export async function assignCompanyToCustomer(
     // Check for errors in role assignment
     const rolePayload = roleJson.data?.companyContactAssignRole;
     if (rolePayload?.userErrors?.length) {
-      console.error("❌ Role assignment error:", rolePayload.userErrors[0]);
-      return {
-        success: false,
-        error: rolePayload.userErrors[0].message,
-        step: "assignRole",
-      };
+      const roleErrorMessage = rolePayload.userErrors[0].message;
+      console.warn("Role assignment error:", roleErrorMessage);
+      
+      // Check if role is already assigned - this is not a critical error
+      if (roleErrorMessage.includes("already been assigned") || roleErrorMessage.includes("already assigned")) {
+        console.log("Contact already has role at this location, continuing...");
+        // Don't fail, continue with main contact assignment
+      } else {
+        // Different error - fail
+        console.error("❌ Critical role assignment error:", roleErrorMessage);
+        return {
+          success: false,
+          error: roleErrorMessage,
+          step: "assignRole",
+        };
+      }
     }
 
     // Check for errors in main contact assignment
@@ -1000,43 +1061,43 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
-        // 4️⃣ Update user and registration if user found (parallel operations)
-        if (linkedUser) {
-          console.log("Found linked user:", linkedUser);
-          await Promise.all([
-            // Update or create registration
-            prisma.registrationSubmission.upsert({
+        // 4️⃣ Update registration with company name + Update user if user found
+        // Always update registration submission with company name
+        const updateRegistrationPromise = customerEmail
+          ? prisma.registrationSubmission.upsert({
               where: {
                 shopId_email: {
                   shopId: store.id,
-                  email: linkedUser.email,
+                  email: customerEmail,
                 },
               },
               update: {
                 companyName: companyName,
               },
               create: {
-                email: linkedUser.email,
+                email: customerEmail,
                 companyName: companyName,
-                contactName:
-                  `${linkedUser.firstName} ${linkedUser.lastName}`.trim(),
+                contactName: "",
                 phone: "",
-                shopifyCustomerId: linkedUser.shopifyCustomerId,
+                shopifyCustomerId: null,
                 status: "PENDING",
                 businessType: "",
                 shopId: store.id,
               },
-            }),
+            })
+          : Promise.resolve();
 
-            // Update user
-            prisma.user.update({
+        // Update user if found
+        const updateUserPromise = linkedUser
+          ? prisma.user.update({
               where: { id: linkedUser.id },
               data: {
                 companyId: companyData.id,
               },
-            }),
-          ]);
-        }
+            })
+          : Promise.resolve();
+
+        await Promise.all([updateRegistrationPromise, updateUserPromise]);
 
         // 5️⃣ Final response
         return Response.json({
@@ -1237,42 +1298,43 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
-        // 4️⃣ Update user and registration if user found (parallel operations)
-        if (linkedUser) {
-          await Promise.all([
-            // Update or create registration
-            prisma.registrationSubmission.upsert({
+        // 4️⃣ Update registration with company name + Update user if user found
+        // Always update registration submission with company name
+        const updateRegistrationPromise = customerEmail
+          ? prisma.registrationSubmission.upsert({
               where: {
                 shopId_email: {
                   shopId: store.id,
-                  email: linkedUser.email,
+                  email: customerEmail,
                 },
               },
               update: {
                 companyName: companyName,
               },
               create: {
-                email: linkedUser.email,
+                email: customerEmail,
                 companyName: companyName,
-                contactName:
-                  `${linkedUser.firstName} ${linkedUser.lastName}`.trim(),
+                contactName: "",
                 phone: "",
-                shopifyCustomerId: linkedUser.shopifyCustomerId,
+                shopifyCustomerId: null,
                 status: "PENDING",
                 businessType: "",
                 shopId: store.id,
               },
-            }),
+            })
+          : Promise.resolve();
 
-            // Update user
-            prisma.user.update({
+        // Update user if found
+        const updateUserPromise = linkedUser
+          ? prisma.user.update({
               where: { id: linkedUser.id },
               data: {
                 companyId: companyExists.id,
               },
-            }),
-          ]);
-        }
+            })
+          : Promise.resolve();
+
+        await Promise.all([updateRegistrationPromise, updateUserPromise]);
 
         // 5️⃣ Final response
         return Response.json({
@@ -1292,6 +1354,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyId = (form.companyId as string)?.trim();
         const customerId = normalizeCustomerId(form.customerId as string);
         const locationId = (form.locationId as string)?.trim();
+        const customerFirstName = (form.customerFirstName as string)?.trim();
+        const customerLastName = (form.customerLastName as string)?.trim();
+        const customerEmail = (form.customerEmail as string)?.trim();
 
         if (!companyId || !customerId || !locationId) {
           console.warn("Missing required fields for assignMainContact:", {
@@ -1327,6 +1392,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             errors: [`${result.step}: ${result.error}`],
           });
         }
+        
+        // Set company contact name and email using customer data
+        const contactName = `${customerFirstName} ${customerLastName}`.trim();
+        
+        await prisma.companyAccount.update({
+          where: {
+            shopId_shopifyCompanyId: {
+              shopId: store.id,
+              shopifyCompanyId: companyId,
+            },
+          },
+          data: {
+            contactName: contactName || null,
+            contactEmail: customerEmail || null,
+          },
+        });
 
         console.log("✅ assignMainContact completed successfully");
         return Response.json({
@@ -2964,6 +3045,10 @@ export default function RegistrationApprovals() {
                               "locationId",
                               company?.locationId || "",
                             );
+                            data.append(
+                              "customerEmail",
+                              customer?.email || selected?.email || "",
+                            );
                             flowFetcher.submit(data, { method: "post" });
                           }}
                         >
@@ -3245,6 +3330,9 @@ export default function RegistrationApprovals() {
                             companyId: companyIdToSend,
                             customerId: customerIdToSend,
                             locationId: locationIdToSend,
+                            customerFirstName: customer?.firstName || "",
+                            customerLastName: customer?.lastName || "",
+                            customerEmail: customer?.email || "",
                           },
                           { method: "post" },
                         );
