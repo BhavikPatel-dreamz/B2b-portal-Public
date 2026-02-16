@@ -3,7 +3,8 @@ import type {
   LoaderFunctionArgs,
   HeadersFunction,
 } from "react-router";
-import { useFetcher, useLoaderData, Link, useSearchParams } from "react-router";
+import { useFetcher, useLoaderData, Link, useSearchParams, useNavigation } from "react-router";
+import { useState } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -140,6 +141,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
 
       // Only fetch Shopify customers if company has a Shopify ID
+       let dbUserEmails 
       if (company.shopifyCompanyId) {
         try {
           const customersData = await getCompanyCustomers(
@@ -158,7 +160,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               customer,
             ]) || [],
           );
-
+           dbUserEmails = await prisma.registrationSubmission.findMany({
+            where: {
+              email: {
+                in: customersData?.customers?.map(
+                  (customer: { customer: { email?: string } }) =>
+                    customer.customer?.email?.toLowerCase(),
+                ) || [],
+              },
+            },
+            select: { contactName: true },
+          });
+        
           // Count matched users (users that exist in both DB and Shopify)
           matchedUserCount = dbUsers.filter((user) =>
             shopifyCustomerMap.has(user.email.toLowerCase()),
@@ -174,6 +187,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       return {
         ...company,
+        contactName: dbUserEmails ? dbUserEmails.map((user) => user.contactName).join(", ") : company.contactName, 
         creditLimit: company.creditLimit.toString(),
         usedCredit: creditInfo ? creditInfo.usedCredit.toString() : "0",
         pendingCredit: creditInfo ? creditInfo.pendingCredit.toString() : "0",
@@ -319,11 +333,20 @@ export default function CompaniesPage() {
   } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // Controlled search input
+  const [query, setQuery] = useState(searchQuery);
+
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
 
   const isUpdating = updateFetcher.state !== "idle";
   const isSyncing = syncFetcher.state !== "idle";
+
+  // derive searching state from router navigation
+  const navigation = useNavigation();
+  const isSearching =
+    navigation.state !== "idle" &&
+    (navigation.location?.search?.includes("search=") || Boolean(searchParams.get("search")));
 
   if (storeMissing) {
     return (
@@ -364,32 +387,37 @@ export default function CompaniesPage() {
 
         {/* Search Input */}
         <div style={{ marginBottom: 16 }}>
-          <input
-            type="text"
-            placeholder="Search by company name, Shopify ID, or contact..."
-            defaultValue={searchQuery}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSearchParams((prev) => {
-                const newParams = new URLSearchParams(prev);
-                if (value) {
-                  newParams.set("search", value);
-                  newParams.set("page", "1"); // Reset to page 1 on search
-                } else {
-                  newParams.delete("search");
-                }
-                return newParams;
-              });
-            }}
-            style={{
-              width: "100%",
-              padding: "10px 12px",
-              borderRadius: 8,
-              border: "1px solid #c9ccd0",
-              fontSize: 14,
-              outline: "none",
-            }}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="text"
+              placeholder="Search by company name, Shopify ID, or contact..."
+              value={query}
+              onChange={(e) => {
+                  const value = e.target.value;
+                  setQuery(value);
+                  setSearchParams((prev) => {
+                    const newParams = new URLSearchParams(prev);
+                    if (value) {
+                      newParams.set("search", value);
+                      newParams.set("page", "1"); // Reset to page 1 on search
+                    } else {
+                      newParams.delete("search");
+                    }
+                    return newParams;
+                  });
+                }}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1px solid #c9ccd0",
+                fontSize: 14,
+                outline: "none",
+              }}
+            />
+
+            
+          </div>
         </div>
 
         {companies.length === 0 ? (
@@ -397,13 +425,56 @@ export default function CompaniesPage() {
             heading={searchQuery ? "No companies found" : "No companies yet"}
           />
         ) : (
-          <div>
+          <div style={{ position: "relative" }}>
+            {isSearching && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: "rgba(255, 255, 255, 0.7)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 10,
+                  borderRadius: 8,
+                }}
+              >
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      display: "inline-block",
+                      width: 24,
+                      height: 24,
+                      border: "3px solid #e0e0e0",
+                      borderTop: "3px solid #1a1b1d",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                  <p style={{ marginTop: 8, color: "#5c5f62", fontSize: 13 }}>
+                    Searching…
+                  </p>
+                </div>
+                <style>{`
+                  @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                  }
+                `}</style>
+              </div>
+            )}
             <table
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
+                opacity: isSearching ? 0.5 : 1,
+                pointerEvents: isSearching ? "none" : "auto",
               }}
             >
+            
               <thead>
                 <tr>
                   <th
@@ -471,13 +542,17 @@ export default function CompaniesPage() {
                     </td>
 
                     <td style={{ padding: "8px" }}>
-                      {company.contactName ? (
+                      {company.contactName || company.contactEmail ? (
                         <span>
-                          {company.contactName}
-                          <br />
-                          {company.contactEmail
-                            ? `${company.contactEmail}`
-                            : ""}
+                          {company.contactName ? (
+                            <>
+                              {company.contactName}
+                              <br />
+                              {company.contactEmail ? company.contactEmail : null}
+                            </>
+                          ) : (
+                            <>{company.contactEmail}</>
+                          )}
                         </span>
                       ) : (
                         <span style={{ color: "#5c5f62" }}>Not set</span>
