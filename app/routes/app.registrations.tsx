@@ -175,43 +175,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ...rejectedSubmissions,
   ];
 
-  // ✅ Check if customer exists in Shopify
-  const validSubmissions = [];
-
-  for (const submission of submissions) {
-    try {
-      const res = await admin.graphql(
-        `#graphql
-        query ($id: ID!) {
-          customer(id: $id) {
-            id
-          }
-        }`,
-        {
-          variables: {
-            id: submission.shopifyCustomerId,
-          },
-        },
-      );
-
-      const data = await res.json();
-
-      if (data?.data?.customer) {
-        validSubmissions.push(submission);
-      }
-    } catch (error) {
-      console.warn(
-        "Customer not found in Shopify:",
-        submission.id,
-        submission.shopifyCustomerId,
-      );
-    }
-  }
+  
 
   const companies = await prisma.companyAccount.findMany({
     where: { shopId: store.id },
     orderBy: { name: "asc" },
   });
+
+  // Attach Shopify location info for each company (if we have a shopifyCompanyId)
+  const companiesWithLocations = await Promise.all(
+    companies.map(async (c) => {
+      if (!c.shopifyCompanyId) {
+        return { ...c, locationId: null, locationName: null };
+      }
+
+      try {
+        const locationResp = await admin.graphql(
+          `#graphql
+          query GetCompanyLocation($companyId: ID!) {
+            company(id: $companyId) {
+              locations(first: 1) {
+                nodes { id name }
+              }
+            }
+          }
+        `,
+          { variables: { companyId: c.shopifyCompanyId } },
+        );
+
+        const locationJson = await locationResp.json();
+        const loc = locationJson?.data?.company?.locations?.nodes?.[0] || null;
+        return { ...c, locationId: loc?.id || null, locationName: loc?.name || null };
+      } catch (err) {
+        console.warn('Unable to fetch location for company', c.id, err);
+        return { ...c, locationId: null, locationName: null };
+      }
+    }),
+  );
 
   // Fetch payment terms templates
   const paymentTermsResponse = await admin.graphql(
@@ -229,18 +229,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   );
 
   const paymentTermsData = await paymentTermsResponse.json();
-  const paymentTermsTemplates =
-    paymentTermsData.data.paymentTermsTemplates;
+  const paymentTermsTemplates = paymentTermsData.data.paymentTermsTemplates;
 
   return Response.json({
-    submissions: validSubmissions.map((submission) => ({
+    submissions: submissions.map((submission) => ({
       ...submission,
       createdAt: submission.createdAt.toISOString(),
       reviewedAt: submission.reviewedAt
         ? submission.reviewedAt.toISOString()
         : null,
     })),
-    companies: companies.map((company) => ({
+    companies: companiesWithLocations.map((company) => ({
       ...company,
       creditLimit: company.creditLimit.toString(),
       updatedAt: company.updatedAt.toISOString(),
@@ -312,15 +311,20 @@ export async function assignCompanyToCustomer(
     // Check for errors in assigning contact
     let companyContactId: string | null = null;
     const contactPayload = contactJson.data?.companyAssignCustomerAsContact;
-    
+
     if (contactPayload?.userErrors?.length) {
       const errorMessage = contactPayload.userErrors[0].message;
       console.warn("Contact assignment error:", errorMessage);
-      
+
       // Check if customer is already associated with a company contact
-      if (errorMessage.includes("already associated") || errorMessage.includes("already")) {
-        console.log("Customer already associated, fetching existing contact...");
-        
+      if (
+        errorMessage.includes("already associated") ||
+        errorMessage.includes("already")
+      ) {
+        console.log(
+          "Customer already associated, fetching existing contact...",
+        );
+
         // Fetch company contacts and find the one for this customer
         const existingContactRes = await admin.graphql(
           `#graphql
@@ -340,16 +344,17 @@ export async function assignCompanyToCustomer(
           }`,
           { variables: { companyId } },
         );
-        
+
         const existingContactJson = await existingContactRes.json();
-        const contacts = existingContactJson?.data?.company?.contacts?.edges || [];
-        
+        const contacts =
+          existingContactJson?.data?.company?.contacts?.edges || [];
+
         // Find the contact that matches this customer
         const matchingContact = contacts.find(
-          (edge: any) => edge.node.customer?.id === customerId
+          (edge: any) => edge.node.customer?.id === customerId,
         );
         companyContactId = matchingContact?.node?.id || null;
-        
+
         if (!companyContactId) {
           console.error("Could not find existing company contact for customer");
           return {
@@ -358,7 +363,7 @@ export async function assignCompanyToCustomer(
             step: "getExistingContact",
           };
         }
-        
+
         console.log("Using existing company contact:", companyContactId);
       } else {
         // Different error - fail
@@ -448,9 +453,12 @@ export async function assignCompanyToCustomer(
     if (rolePayload?.userErrors?.length) {
       const roleErrorMessage = rolePayload.userErrors[0].message;
       console.warn("Role assignment error:", roleErrorMessage);
-      
+
       // Check if role is already assigned - this is not a critical error
-      if (roleErrorMessage.includes("already been assigned") || roleErrorMessage.includes("already assigned")) {
+      if (
+        roleErrorMessage.includes("already been assigned") ||
+        roleErrorMessage.includes("already assigned")
+      ) {
         console.log("Contact already has role at this location, continuing...");
         // Don't fail, continue with main contact assignment
       } else {
@@ -467,7 +475,10 @@ export async function assignCompanyToCustomer(
     // Check for errors in main contact assignment
     const mainContactPayload = mainContactJson.data?.companyAssignMainContact;
     if (mainContactPayload?.userErrors?.length) {
-      console.error("❌ Main contact assignment error:", mainContactPayload.userErrors[0]);
+      console.error(
+        "❌ Main contact assignment error:",
+        mainContactPayload.userErrors[0],
+      );
       return {
         success: false,
         error: mainContactPayload.userErrors[0].message,
@@ -739,7 +750,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         );
         const payload = await response.json();
+        console.log("✅ Customer update response:", payload);
         const errors = buildUserErrorList(payload);
+        console.log("Errors:111", payload?.data?.customerUpdate?.userErrors);
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
         }
@@ -760,7 +773,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               shopifyCustomerId: customerId || null,
             },
           });
-        } 
+        }
         const userData = await prisma.user.findFirst({
           where: {
             shopifyCustomerId: customerId,
@@ -1295,29 +1308,76 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         // 3️⃣ Update payment terms on location (if needed)
-        if (paymentTermsTemplateId) {
+        //   if (paymentTermsTemplateId) {
+        //     const updateLocationResponse = await admin.graphql(
+        //       `#graphql
+        // mutation UpdateCompanyLocation(
+        //   $companyLocationId: ID!
+        //   $paymentTermsTemplateId: ID!
+        // ) {
+        //   companyLocationUpdate(
+        //     companyLocationId: $companyLocationId
+        //     input: {
+        //       buyerExperienceConfiguration: {
+        //         paymentTermsTemplateId: $paymentTermsTemplateId
+        //       }
+        //     }
+        //   ) {
+        //     companyLocation { id }
+        //     userErrors { field message }
+        //   }
+        // }`,
+        //       {
+        //         variables: {
+        //           companyLocationId: location.id,
+        //           paymentTermsTemplateId,
+        //         },
+        //       },
+        //     );
+
+        //     const updateLocationPayload = await updateLocationResponse.json();
+        //     const locationErrors = buildUserErrorList(updateLocationPayload);
+
+        //     if (locationErrors.length) {
+        //       return Response.json({
+        //         intent,
+        //         success: false,
+        //         errors: locationErrors,
+        //       });
+        //     }
+        //   }
+        if (paymentTermsTemplateId || companyName) {
           const updateLocationResponse = await admin.graphql(
             `#graphql
-      mutation UpdateCompanyLocation(
-        $companyLocationId: ID!
-        $paymentTermsTemplateId: ID!
-      ) {
-        companyLocationUpdate(
-          companyLocationId: $companyLocationId
-          input: {
-            buyerExperienceConfiguration: {
-              paymentTermsTemplateId: $paymentTermsTemplateId
-            }
+    mutation UpdateCompanyLocation(
+      $companyLocationId: ID!
+      $paymentTermsTemplateId: ID
+      $locationName: String
+    ) {
+      companyLocationUpdate(
+        companyLocationId: $companyLocationId
+        input: {
+          name: $locationName
+          buyerExperienceConfiguration: {
+            paymentTermsTemplateId: $paymentTermsTemplateId
           }
-        ) {
-          companyLocation { id }
-          userErrors { field message }
         }
-      }`,
+      ) {
+        companyLocation {
+          id
+          name
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }`,
             {
               variables: {
                 companyLocationId: location.id,
-                paymentTermsTemplateId,
+                paymentTermsTemplateId: paymentTermsTemplateId || null,
+                locationName: companyName,
               },
             },
           );
@@ -1428,10 +1488,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             errors: [`${result.step}: ${result.error}`],
           });
         }
-        
+
         // Set company contact name and email using customer data
         const contactName = `${customerFirstName} ${customerLastName}`.trim();
-        
+
         // ✅ Fetch or create the company account to ensure it exists with a local ID
         const companyAccount = await prisma.companyAccount.upsert({
           where: {
@@ -1982,7 +2042,7 @@ export default function RegistrationApprovals() {
     ) {
       console.error("Contact assignment failed:", flowFetcher.data.errors);
       shopify.toast.show?.(
-        `Failed to assign contact: ${flowFetcher.data.errors?.[0] || "Unknown error"}`
+        `Failed to assign contact: ${flowFetcher.data.errors?.[0] || "Unknown error"}`,
       );
       return;
     }
@@ -2664,9 +2724,13 @@ export default function RegistrationApprovals() {
               }}
             >
               <div>
-                <h3 style={{ margin: 0 }}>Approve {selected.companyName}</h3>
+                <h3 style={{ margin: 0 }}>
+                  Approve {company?.name || selected?.companyName}
+                </h3>
                 <p style={{ margin: "4px 0", color: "#5c5f62" }}>
-                  {selected.contactName} • {selected.email}
+                  {customer
+                    ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
+                    : selected?.contactName}{" "}• {customer?.email || selected?.email}
                 </p>
               </div>
               <s-button variant="tertiary" onClick={() => setSelected(null)}>
@@ -3426,8 +3490,7 @@ export default function RegistrationApprovals() {
                   </div>
                 </div>
               )}
-             
-             
+
               {step === "email" && (
                 <div
                   style={{
@@ -3444,13 +3507,10 @@ export default function RegistrationApprovals() {
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info">
                       <s-text>
-                        {/* ✅ FIXED: Use current customer email */}
                         To: {customer?.email || selected.email}
                         <br />
-                        {/* ✅ FIXED: Use current customer name */}
                         Contact: {customer?.firstName} {customer?.lastName}
                         <br />
-                        {/* ✅ FIXED: Use current company name */}
                         Company: {company?.name || selected?.companyName}
                       </s-text>
                     </s-banner>
