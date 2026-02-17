@@ -21,7 +21,7 @@ import { sendCompanyAssignmentEmail } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
 
 interface RegistrationSubmission {
-  paymentTerm: string;
+  paymentTermsTemplateId: string;
   id: string;
   companyName: string;
   contactName: string;
@@ -58,8 +58,9 @@ interface ActionJson {
     name: string;
     locationId?: string;
     locationName?: string;
+    paymentTermsTemplateId?: string | null; // ✅ add
+    creditLimit?: number | null;
     zip?: string | null;
-    creditLimit?: string | null;
     address1?: string | null;
     city?: string | null;
     countryCode?: string | null;
@@ -175,8 +176,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ...rejectedSubmissions,
   ];
 
-  
-
   const companies = await prisma.companyAccount.findMany({
     where: { shopId: store.id },
     orderBy: { name: "asc" },
@@ -205,9 +204,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
         const locationJson = await locationResp.json();
         const loc = locationJson?.data?.company?.locations?.nodes?.[0] || null;
-        return { ...c, locationId: loc?.id || null, locationName: loc?.name || null };
+        return {
+          ...c,
+          locationId: loc?.id || null,
+          locationName: loc?.name || null,
+        };
       } catch (err) {
-        console.warn('Unable to fetch location for company', c.id, err);
+        console.warn("Unable to fetch location for company", c.id, err);
         return { ...c, locationId: null, locationName: null };
       }
     }),
@@ -283,7 +286,6 @@ export async function assignCompanyToCustomer(
         { variables: { companyId } },
       ),
 
-      // Assign customer as contact (can happen in parallel with fetching roles)
       admin.graphql(
         `#graphql
         mutation companyAssignCustomerAsContact(
@@ -302,30 +304,29 @@ export async function assignCompanyToCustomer(
       ),
     ]);
 
-    // Parse both responses
     const [companyJson, contactJson] = await Promise.all([
       companyRolesRes.json(),
       contactRes.json(),
     ]);
 
-    // Check for errors in assigning contact
+    // ── Resolve companyContactId ─────────────────────────────────────────
     let companyContactId: string | null = null;
+    let wasAlreadyContact = false;
+
     const contactPayload = contactJson.data?.companyAssignCustomerAsContact;
 
     if (contactPayload?.userErrors?.length) {
-      const errorMessage = contactPayload.userErrors[0].message;
-      console.warn("Contact assignment error:", errorMessage);
+      const errorMessage: string = contactPayload.userErrors[0].message;
+      const isAlreadyAssociated =
+        errorMessage.toLowerCase().includes("already associated") ||
+        errorMessage.toLowerCase().includes("already");
 
-      // Check if customer is already associated with a company contact
-      if (
-        errorMessage.includes("already associated") ||
-        errorMessage.includes("already")
-      ) {
+      if (isAlreadyAssociated) {
+        // ✅ Customer is already a contact — fetch all contacts and match by customerId
         console.log(
-          "Customer already associated, fetching existing contact...",
+          "⚠️ Customer already a contact, fetching existing contact...",
         );
 
-        // Fetch company contacts and find the one for this customer
         const existingContactRes = await admin.graphql(
           `#graphql
           query getCompanyContacts($companyId: ID!) {
@@ -334,9 +335,7 @@ export async function assignCompanyToCustomer(
                 edges {
                   node {
                     id
-                    customer {
-                      id
-                    }
+                    customer { id }
                   }
                 }
               }
@@ -346,28 +345,49 @@ export async function assignCompanyToCustomer(
         );
 
         const existingContactJson = await existingContactRes.json();
-        const contacts =
-          existingContactJson?.data?.company?.contacts?.edges || [];
+        const contacts: Array<{
+          node: { id: string; customer: { id: string } };
+        }> = existingContactJson?.data?.company?.contacts?.edges || [];
 
-        // Find the contact that matches this customer
+        // ✅ Normalize both IDs before comparing (strip gid:// prefix differences)
+        const normalizeId = (id: string) => id?.split("/").pop()?.trim() || id;
+
         const matchingContact = contacts.find(
-          (edge: any) => edge.node.customer?.id === customerId,
+          (edge) =>
+            normalizeId(edge.node.customer?.id) === normalizeId(customerId),
         );
-        companyContactId = matchingContact?.node?.id || null;
 
-        if (!companyContactId) {
-          console.error("Could not find existing company contact for customer");
-          return {
-            success: false,
-            error: "Could not find existing company contact",
-            step: "getExistingContact",
-          };
+        if (matchingContact) {
+          companyContactId = matchingContact.node.id;
+          wasAlreadyContact = true;
+          console.log("✅ Found existing company contact:", companyContactId);
+        } else {
+          // ✅ Last resort: use the first contact if only one exists
+          if (contacts.length === 1) {
+            companyContactId = contacts[0].node.id;
+            wasAlreadyContact = true;
+            console.log(
+              "✅ Using sole existing contact as fallback:",
+              companyContactId,
+            );
+          } else {
+            console.error(
+              "❌ Could not find matching contact among",
+              contacts.length,
+              "contacts for customerId:",
+              customerId,
+            );
+            return {
+              success: false,
+              error:
+                "Could not find existing company contact for this customer",
+              step: "getExistingContact",
+            };
+          }
         }
-
-        console.log("Using existing company contact:", companyContactId);
       } else {
-        // Different error - fail
-        console.error("Contact assignment failed:", errorMessage);
+        // Unrelated error — fail properly
+        console.error("❌ Contact assignment failed:", errorMessage);
         return {
           success: false,
           error: errorMessage,
@@ -375,10 +395,20 @@ export async function assignCompanyToCustomer(
         };
       }
     } else {
-      companyContactId = contactPayload.companyContact.id;
+      // Fresh assignment succeeded
+      companyContactId = contactPayload?.companyContact?.id ?? null;
+      console.log("✅ Customer assigned as new contact:", companyContactId);
     }
 
-    // Extract contact role ID
+    if (!companyContactId) {
+      return {
+        success: false,
+        error: "Failed to resolve company contact ID",
+        step: "resolveContact",
+      };
+    }
+
+    // ── Resolve contact role ─────────────────────────────────────────────
     const roles = companyJson.data?.company?.contactRoles?.edges || [];
     const companyContactRoleId =
       roles.find(
@@ -387,7 +417,7 @@ export async function assignCompanyToCustomer(
       )?.node?.id || roles[0]?.node?.id;
 
     if (!companyContactRoleId) {
-      console.error("No company roles found for assignment");
+      console.error("❌ No company contact roles found");
       return {
         success: false,
         error: "No company contact roles available",
@@ -397,7 +427,6 @@ export async function assignCompanyToCustomer(
 
     /* 2️⃣ Assign role AND set main contact IN PARALLEL */
     const [roleRes, mainContactRes] = await Promise.all([
-      // Assign role with location
       admin.graphql(
         `#graphql
         mutation companyContactAssignRole(
@@ -423,7 +452,6 @@ export async function assignCompanyToCustomer(
         },
       ),
 
-      // Assign main contact (can happen in parallel with role assignment)
       admin.graphql(
         `#graphql
         mutation companyAssignMainContact(
@@ -442,27 +470,25 @@ export async function assignCompanyToCustomer(
       ),
     ]);
 
-    // Parse both responses
     const [roleJson, mainContactJson] = await Promise.all([
       roleRes.json(),
       mainContactRes.json(),
     ]);
 
-    // Check for errors in role assignment
+    // ── Handle role assignment result ────────────────────────────────────
     const rolePayload = roleJson.data?.companyContactAssignRole;
     if (rolePayload?.userErrors?.length) {
-      const roleErrorMessage = rolePayload.userErrors[0].message;
-      console.warn("Role assignment error:", roleErrorMessage);
+      const roleErrorMessage: string = rolePayload.userErrors[0].message;
+      const alreadyAssigned =
+        roleErrorMessage.toLowerCase().includes("already been assigned") ||
+        roleErrorMessage.toLowerCase().includes("already assigned");
 
-      // Check if role is already assigned - this is not a critical error
-      if (
-        roleErrorMessage.includes("already been assigned") ||
-        roleErrorMessage.includes("already assigned")
-      ) {
-        console.log("Contact already has role at this location, continuing...");
-        // Don't fail, continue with main contact assignment
+      if (alreadyAssigned) {
+        // ✅ Non-critical — role already exists, continue
+        console.log(
+          "ℹ️ Contact already has role at this location, continuing...",
+        );
       } else {
-        // Different error - fail
         console.error("❌ Critical role assignment error:", roleErrorMessage);
         return {
           success: false,
@@ -472,24 +498,43 @@ export async function assignCompanyToCustomer(
       }
     }
 
-    // Check for errors in main contact assignment
+    // ── Handle main contact assignment result ────────────────────────────
     const mainContactPayload = mainContactJson.data?.companyAssignMainContact;
     if (mainContactPayload?.userErrors?.length) {
-      console.error(
-        "❌ Main contact assignment error:",
-        mainContactPayload.userErrors[0],
-      );
+      const mainContactError: string = mainContactPayload.userErrors[0].message;
+      const alreadyMain =
+        mainContactError.toLowerCase().includes("already") ||
+        mainContactError.toLowerCase().includes("main contact");
+
+      if (alreadyMain) {
+        // ✅ Already the main contact — treat as success
+        console.log(
+          "ℹ️ Customer is already the main contact, treating as success.",
+        );
+        return {
+          success: true,
+          wasAlreadyContact,
+          companyContactId,
+          message: "Customer was already the main contact — no changes needed",
+        };
+      }
+
+      console.error("❌ Main contact assignment error:", mainContactError);
       return {
         success: false,
-        error: mainContactPayload.userErrors[0].message,
+        error: mainContactError,
         step: "assignMainContact",
       };
     }
 
     return {
       success: true,
+      wasAlreadyContact,
       companyContactId,
-      company: mainContactPayload.company,
+      company: mainContactPayload?.company,
+      message: wasAlreadyContact
+        ? "Contact already existed — role and main contact updated successfully"
+        : "Customer assigned as main contact successfully",
     };
   } catch (error) {
     return {
@@ -530,7 +575,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         console.log("⏳ Checking customer:", email);
 
-        // Parallel check: fetch customer AND check registration
         const [customerResponse, registration] = await Promise.all([
           admin.graphql(
             `#graphql
@@ -573,6 +617,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: customer ? "Customer found" : "No customer found",
         });
       }
+
       case "createCustomer": {
         const email = (form.email as string)?.trim();
         const firstName = (form.firstName as string)?.trim();
@@ -615,11 +660,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         const payload = await response.json();
-
-        // Check for errors
         const userErrors = payload?.data?.customerCreate?.userErrors || [];
 
-        // If there are any errors, return them
         if (userErrors.length > 0) {
           const errors = buildUserErrorList({
             data: { customerCreate: { userErrors } },
@@ -750,9 +792,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         );
         const payload = await response.json();
-        console.log("✅ Customer update response:", payload);
         const errors = buildUserErrorList(payload);
-        console.log("Errors:111", payload?.data?.customerUpdate?.userErrors);
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
         }
@@ -804,12 +844,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
-      case "checkCompany":
-        {
-          const companyName = (form.companyName as string)?.trim();
+      case "checkCompany": {
+        const companyName = (form.companyName as string)?.trim();
 
-          const response = await admin.graphql(
-            `#graphql
+        const response = await admin.graphql(
+          `#graphql
           query CompaniesByName($query: String!) {
             companies(first: 1, query: $query) {
               nodes {
@@ -829,100 +868,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }
           }
         `,
-            {
-              variables: {
-                query: `name:'${companyName}'`,
-              },
+          {
+            variables: {
+              query: `name:'${companyName}'`,
             },
-          );
+          },
+        );
 
-          const payload = await response.json();
-          const company = payload?.data?.companies?.nodes?.[0] || null;
+        const payload = await response.json();
+        const company = payload?.data?.companies?.nodes?.[0] || null;
 
-          let companyData = null;
-          if (company) {
-            const location = company.locations?.nodes?.[0] || null;
-            companyData = {
-              id: company.id,
-              name: company.name,
-              locationId: location?.id || null,
-              locationName: location?.name || null,
-            };
-          }
-
-          const companyExists = await prisma.companyAccount.findFirst({
-            where: { name: companyName },
-          });
-
-          return Response.json({
-            intent,
-            success: true,
-            company: companyData,
-            existsInDb: !!companyExists,
-            message: company ? "Company exists" : "No company found",
-          });
+        let companyData = null;
+        if (company) {
+          const location = company.locations?.nodes?.[0] || null;
+          companyData = {
+            id: company.id,
+            name: company.name,
+            locationId: location?.id || null,
+            locationName: location?.name || null,
+          };
         }
 
-        async function checkDuplicateCompanyName({
-          admin,
-          prisma,
-          companyName,
-          excludeShopifyCompanyId,
-        }: {
-          admin: any;
-          prisma: any;
-          companyName: string;
-          excludeShopifyCompanyId?: string;
-        }) {
-          /* 1️⃣ Check Shopify */
-          const response = await admin.graphql(
-            `#graphql
-    query CompaniesByName($query: String!) {
-      companies(first: 2, query: $query) {
-        nodes {
-          id
-          name
-        }
+        const companyExists = await prisma.companyAccount.findFirst({
+          where: { name: companyName },
+        });
+
+        return Response.json({
+          intent,
+          success: true,
+          company: companyData,
+          existsInDb: !!companyExists,
+          message: company ? "Company exists" : "No company found",
+        });
       }
-    }`,
-            {
-              variables: {
-                query: `name:'${companyName}'`,
-              },
-            },
-          );
-
-          const payload = await response.json();
-          const shopifyCompany = payload?.data?.companies?.nodes?.find(
-            (c: any) => c.id !== excludeShopifyCompanyId,
-          );
-
-          if (shopifyCompany) {
-            return {
-              exists: true,
-              source: "shopify",
-            };
-          }
-
-          /* 2️⃣ Check Local DB */
-          const localCompany = await prisma.companyAccount.findFirst({
-            where: {
-              name: companyName,
-              ...(excludeShopifyCompanyId
-                ? { shopifyCompanyId: { not: excludeShopifyCompanyId } }
-                : {}),
-            },
-          });
-
-          if (localCompany) {
-            return {
-              exists: true,
-              source: "database",
-            };
-          }
-
-          return { exists: false };
-        }
 
       case "createCompany": {
         const companyName = (form.companyName as string)?.trim();
@@ -938,72 +916,219 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        const duplicateCheck = await checkDuplicateCompanyName({
-          admin,
-          prisma,
-          companyName,
-        });
-
-        if (duplicateCheck.exists) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: [`Company "${companyName}" already exists`],
-          });
-        }
-
-        // 1️⃣ Create company in Shopify
-        const createCompanyResponse = await admin.graphql(
+        // ✅ CHECK: Does company already exist in Shopify?
+        const existingShopifyResponse = await admin.graphql(
           `#graphql
-    mutation CompanyCreate($input: CompanyCreateInput!) {
-      companyCreate(input: $input) {
-        company { id name }
-        userErrors { field message }
-      }
-    }`,
+          query CompaniesByName($query: String!) {
+            companies(first: 1, query: $query) {
+              nodes {
+                id
+                name
+                locations(first: 1) {
+                  nodes {
+                    id
+                    name
+                  }
+                }
+              }
+            }
+          }`,
           {
-            variables: {
-              input: {
-                company: { name: companyName },
-              },
-            },
+            variables: { query: `name:'${companyName}'` },
           },
         );
 
-        const companyPayload = await createCompanyResponse.json();
-        const companyErrors = buildUserErrorList(companyPayload);
+        const existingShopifyPayload = await existingShopifyResponse.json();
+        const existingShopifyCompany =
+          existingShopifyPayload?.data?.companies?.nodes?.[0] || null;
 
-        if (companyErrors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: companyErrors,
-          });
-        }
+        // ✅ CHECK: Does company already exist in local DB?
+        const existingLocalCompany = await prisma.companyAccount.findFirst({
+          where: { name: companyName, shopId: store.id },
+        });
 
-        const companyId = companyPayload.data.companyCreate.company.id;
+        let companyId: string;
+        let locationId: string;
+        let locationName: string;
 
-        // 2️⃣ Parallel operations: Update metafield + Fetch location + Find/Create company in DB + Find user
-        const [locationPayload, companyData, linkedUser] = await Promise.all([
-          // Fetch company location
-          admin
-            .graphql(
+        if (existingShopifyCompany) {
+          // ── COMPANY EXISTS IN SHOPIFY → UPDATE instead of error ──
+          console.log(
+            "🔄 Company already exists in Shopify, updating:",
+            existingShopifyCompany.id,
+          );
+
+          companyId = existingShopifyCompany.id;
+          const existingLocation =
+            existingShopifyCompany.locations?.nodes?.[0] || null;
+
+          if (!existingLocation) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: ["Existing company location not found"],
+            });
+          }
+
+          locationId = existingLocation.id;
+          locationName = existingLocation.name;
+
+          // Update metafield and payment terms in parallel
+          await Promise.all([
+            creditLimit
+              ? updateCompanyMetafield(admin, companyId, {
+                  namespace: "b2b_credit",
+                  key: "credit_limit",
+                  value: creditLimit.toString(),
+                  type: "number_decimal",
+                })
+              : Promise.resolve(),
+
+            paymentTermsTemplateId
+              ? admin
+                  .graphql(
+                    `#graphql
+                    mutation UpdateCompanyLocation(
+                      $companyLocationId: ID!
+                      $paymentTermsTemplateId: ID!
+                    ) {
+                      companyLocationUpdate(
+                        companyLocationId: $companyLocationId
+                        input: {
+                          buyerExperienceConfiguration: {
+                            paymentTermsTemplateId: $paymentTermsTemplateId
+                          }
+                        }
+                      ) {
+                        companyLocation { id }
+                        userErrors { field message }
+                      }
+                    }`,
+                    {
+                      variables: {
+                        companyLocationId: locationId,
+                        paymentTermsTemplateId,
+                      },
+                    },
+                  )
+                  .then((res) => res.json())
+              : Promise.resolve(),
+          ]);
+        } else {
+          // ── COMPANY DOES NOT EXIST → CREATE NEW ──
+          console.log("✅ Creating new company:", companyName);
+
+          const createCompanyResponse = await admin.graphql(
+            `#graphql
+            mutation CompanyCreate($input: CompanyCreateInput!) {
+              companyCreate(input: $input) {
+                company { id name }
+                userErrors { field message }
+              }
+            }`,
+            {
+              variables: {
+                input: {
+                  company: { name: companyName },
+                },
+              },
+            },
+          );
+
+          const companyPayload = await createCompanyResponse.json();
+          const companyErrors = buildUserErrorList(companyPayload);
+
+          if (companyErrors.length) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: companyErrors,
+            });
+          }
+
+          companyId = companyPayload.data.companyCreate.company.id;
+
+          // Fetch location + update payment terms/metafield in parallel
+          const [locationPayload] = await Promise.all([
+            admin
+              .graphql(
+                `#graphql
+                query GetCompanyLocation($companyId: ID!) {
+                  company(id: $companyId) {
+                    locations(first: 1) {
+                      nodes { id name }
+                    }
+                  }
+                }`,
+                { variables: { companyId } },
+              )
+              .then((res) => res.json()),
+
+            creditLimit
+              ? updateCompanyMetafield(admin, companyId, {
+                  namespace: "b2b_credit",
+                  key: "credit_limit",
+                  value: creditLimit.toString(),
+                  type: "number_decimal",
+                })
+              : Promise.resolve(),
+          ]);
+
+          const newLocation =
+            locationPayload?.data?.company?.locations?.nodes?.[0];
+          if (!newLocation) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: ["Company location not found after creation"],
+            });
+          }
+
+          locationId = newLocation.id;
+          locationName = newLocation.name;
+
+          // Update payment terms on the new location
+          if (paymentTermsTemplateId) {
+            const updateLocationResponse = await admin.graphql(
               `#graphql
-      query GetCompanyLocation($companyId: ID!) {
-        company(id: $companyId) {
-          locations(first: 1) {
-            nodes {
-              id
-              name
+              mutation UpdateCompanyLocation(
+                $companyLocationId: ID!
+                $paymentTermsTemplateId: ID!
+              ) {
+                companyLocationUpdate(
+                  companyLocationId: $companyLocationId
+                  input: {
+                    buyerExperienceConfiguration: {
+                      paymentTermsTemplateId: $paymentTermsTemplateId
+                    }
+                  }
+                ) {
+                  companyLocation { id }
+                  userErrors { field message }
+                }
+              }`,
+              {
+                variables: {
+                  companyLocationId: locationId,
+                  paymentTermsTemplateId,
+                },
+              },
+            );
+
+            const updateLocationPayload = await updateLocationResponse.json();
+            const locationErrors = buildUserErrorList(updateLocationPayload);
+            if (locationErrors.length) {
+              return Response.json({
+                intent,
+                success: false,
+                errors: locationErrors,
+              });
             }
           }
         }
-      }`,
-              { variables: { companyId } },
-            )
-            .then((res) => res.json()),
 
-          // Upsert company in Prisma (find or create in one operation)
+        // ── UPSERT company in local DB (handles both create & update) ──
+        const [companyData, linkedUser] = await Promise.all([
           prisma.companyAccount.upsert({
             where: {
               shopId_shopifyCompanyId: {
@@ -1025,140 +1150,66 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           }),
 
-          // Find user - only one query with OR conditions
           customerEmail
             ? prisma.user.findFirst({
                 where: {
                   OR: [
                     { email: customerEmail },
-                    {
-                      shopId: store.id,
-                      companyId: null,
-                      status: "PENDING",
-                    },
+                    { shopId: store.id, companyId: null, status: "PENDING" },
                   ],
                 },
                 orderBy: { createdAt: "desc" },
               })
             : prisma.user.findFirst({
-                where: {
-                  shopId: store.id,
-                  companyId: null,
-                  status: "PENDING",
-                },
+                where: { shopId: store.id, companyId: null, status: "PENDING" },
                 orderBy: { createdAt: "desc" },
               }),
+        ]);
 
-          // Update credit limit metafield (if needed)
-          creditLimit
-            ? updateCompanyMetafield(admin, companyId, {
-                namespace: "b2b_credit",
-                key: "credit_limit",
-                value: creditLimit.toString(),
-                type: "number_decimal",
+        // Update registration and user in parallel
+        await Promise.all([
+          customerEmail
+            ? prisma.registrationSubmission.upsert({
+                where: {
+                  shopId_email: { shopId: store.id, email: customerEmail },
+                },
+                update: { companyName },
+                create: {
+                  email: customerEmail,
+                  companyName,
+                  contactName: "",
+                  phone: "",
+                  shopifyCustomerId: null,
+                  status: "PENDING",
+                  businessType: "",
+                  shopId: store.id,
+                },
+              })
+            : Promise.resolve(),
+
+          linkedUser
+            ? prisma.user.update({
+                where: { id: linkedUser.id },
+                data: { companyId: companyData.id },
               })
             : Promise.resolve(),
         ]);
 
-        const location = locationPayload?.data?.company?.locations?.nodes?.[0];
-
-        if (!location) {
-          return Response.json({
-            intent,
-            success: false,
-            errors: ["Company location not found"],
-          });
-        }
-
-        // 3️⃣ Update payment terms on location (if needed)
-        if (paymentTermsTemplateId) {
-          const updateLocationResponse = await admin.graphql(
-            `#graphql
-      mutation UpdateCompanyLocation(
-        $companyLocationId: ID!
-        $paymentTermsTemplateId: ID!
-      ) {
-        companyLocationUpdate(
-          companyLocationId: $companyLocationId
-          input: {
-            buyerExperienceConfiguration: {
-              paymentTermsTemplateId: $paymentTermsTemplateId
-            }
-          }
-        ) {
-          companyLocation { id }
-          userErrors { field message }
-        }
-      }`,
-            {
-              variables: {
-                companyLocationId: location.id,
-                paymentTermsTemplateId,
-              },
-            },
-          );
-
-          const updateLocationPayload = await updateLocationResponse.json();
-          const locationErrors = buildUserErrorList(updateLocationPayload);
-
-          if (locationErrors.length) {
-            return Response.json({
-              intent,
-              success: false,
-              errors: locationErrors,
-            });
-          }
-        }
-
-        // 4️⃣ Update registration with company name + Update user if user found
-        // Always update registration submission with company name
-        const updateRegistrationPromise = customerEmail
-          ? prisma.registrationSubmission.upsert({
-              where: {
-                shopId_email: {
-                  shopId: store.id,
-                  email: customerEmail,
-                },
-              },
-              update: {
-                companyName: companyName,
-              },
-              create: {
-                email: customerEmail,
-                companyName: companyName,
-                contactName: "",
-                phone: "",
-                shopifyCustomerId: null,
-                status: "PENDING",
-                businessType: "",
-                shopId: store.id,
-              },
-            })
-          : Promise.resolve();
-
-        // Update user if found
-        const updateUserPromise = linkedUser
-          ? prisma.user.update({
-              where: { id: linkedUser.id },
-              data: {
-                companyId: companyData.id,
-              },
-            })
-          : Promise.resolve();
-
-        await Promise.all([updateRegistrationPromise, updateUserPromise]);
-
-        // 5️⃣ Final response
         return Response.json({
           intent,
           success: true,
+          wasExisting: !!existingShopifyCompany || !!existingLocalCompany,
           company: {
             id: companyId,
             name: companyName,
-            locationId: location.id,
-            locationName: location.name,
+            locationId,
+            locationName,
+            paymentTermsTemplateId: paymentTermsTemplateId || null,
+            creditLimit: creditLimit ? Number(creditLimit) : null,
           },
-          message: "Company created successfully",
+          message: existingShopifyCompany
+            ? "Company already existed — details updated"
+            : "",
         });
       }
 
@@ -1177,14 +1228,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        const duplicateCheck = await checkDuplicateCompanyName({
-          admin,
-          prisma,
-          companyName,
-          excludeShopifyCompanyId: companyId,
+        // ✅ Check for duplicate name (exclude current company)
+        const duplicateShopifyResponse = await admin.graphql(
+          `#graphql
+          query CompaniesByName($query: String!) {
+            companies(first: 2, query: $query) {
+              nodes { id name }
+            }
+          }`,
+          { variables: { query: `name:'${companyName}'` } },
+        );
+        const duplicatePayload = await duplicateShopifyResponse.json();
+        const duplicateShopifyCompany =
+          duplicatePayload?.data?.companies?.nodes?.find(
+            (c: any) => c.id !== companyId,
+          );
+
+        const duplicateLocalCompany = await prisma.companyAccount.findFirst({
+          where: {
+            name: companyName,
+            shopId: store.id,
+            shopifyCompanyId: { not: companyId },
+          },
         });
 
-        if (duplicateCheck.exists) {
+        if (duplicateShopifyCompany || duplicateLocalCompany) {
           return Response.json({
             intent,
             success: false,
@@ -1195,12 +1263,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // 1️⃣ Update Company name in Shopify
         const updateCompanyResponse = await admin.graphql(
           `#graphql
-    mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
-      companyUpdate(companyId: $companyId, input: $input) {
-        company { id name }
-        userErrors { field message }
-      }
-    }`,
+          mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
+            companyUpdate(companyId: $companyId, input: $input) {
+              company { id name }
+              userErrors { field message }
+            }
+          }`,
           {
             variables: {
               companyId,
@@ -1220,27 +1288,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // 2️⃣ Parallel operations: Update metafield + Fetch location + Update company in DB + Find user
+        // 2️⃣ Parallel: fetch location + update DB + find user + update metafield
         const [locationPayload, companyExists, linkedUser] = await Promise.all([
-          // Fetch company location
           admin
             .graphql(
               `#graphql
-      query GetCompanyLocation($companyId: ID!) {
-        company(id: $companyId) {
-          locations(first: 1) {
-            nodes {
-              id
-              name
-            }
-          }
-        }
-      }`,
+              query GetCompanyLocation($companyId: ID!) {
+                company(id: $companyId) {
+                  locations(first: 1) {
+                    nodes { id name }
+                  }
+                }
+              }`,
               { variables: { companyId } },
             )
             .then((res) => res.json()),
 
-          // Update company in Prisma (using upsert to handle both cases)
           prisma.companyAccount.upsert({
             where: {
               shopId_shopifyCompanyId: {
@@ -1262,31 +1325,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           }),
 
-          // Find user - single query with OR conditions
           customerEmail
             ? prisma.user.findFirst({
                 where: {
                   OR: [
                     { email: customerEmail },
-                    {
-                      shopId: store.id,
-                      companyId: null,
-                      status: "PENDING",
-                    },
+                    { shopId: store.id, companyId: null, status: "PENDING" },
                   ],
                 },
                 orderBy: { createdAt: "desc" },
               })
             : prisma.user.findFirst({
-                where: {
-                  shopId: store.id,
-                  companyId: null,
-                  status: "PENDING",
-                },
+                where: { shopId: store.id, companyId: null, status: "PENDING" },
                 orderBy: { createdAt: "desc" },
               }),
 
-          // Update credit limit metafield (if needed)
           creditLimit
             ? updateCompanyMetafield(admin, companyId, {
                 namespace: "b2b_credit",
@@ -1307,72 +1360,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // 3️⃣ Update payment terms on location (if needed)
-        //   if (paymentTermsTemplateId) {
-        //     const updateLocationResponse = await admin.graphql(
-        //       `#graphql
-        // mutation UpdateCompanyLocation(
-        //   $companyLocationId: ID!
-        //   $paymentTermsTemplateId: ID!
-        // ) {
-        //   companyLocationUpdate(
-        //     companyLocationId: $companyLocationId
-        //     input: {
-        //       buyerExperienceConfiguration: {
-        //         paymentTermsTemplateId: $paymentTermsTemplateId
-        //       }
-        //     }
-        //   ) {
-        //     companyLocation { id }
-        //     userErrors { field message }
-        //   }
-        // }`,
-        //       {
-        //         variables: {
-        //           companyLocationId: location.id,
-        //           paymentTermsTemplateId,
-        //         },
-        //       },
-        //     );
-
-        //     const updateLocationPayload = await updateLocationResponse.json();
-        //     const locationErrors = buildUserErrorList(updateLocationPayload);
-
-        //     if (locationErrors.length) {
-        //       return Response.json({
-        //         intent,
-        //         success: false,
-        //         errors: locationErrors,
-        //       });
-        //     }
-        //   }
+        // 3️⃣ Update location name and payment terms
         if (paymentTermsTemplateId || companyName) {
           const updateLocationResponse = await admin.graphql(
             `#graphql
-    mutation UpdateCompanyLocation(
-      $companyLocationId: ID!
-      $paymentTermsTemplateId: ID
-      $locationName: String
-    ) {
-      companyLocationUpdate(
-        companyLocationId: $companyLocationId
-        input: {
-          name: $locationName
-          buyerExperienceConfiguration: {
-            paymentTermsTemplateId: $paymentTermsTemplateId
-          }
-        }
-      ) {
-        companyLocation {
-          id
-          name
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }`,
+            mutation UpdateCompanyLocation(
+              $companyLocationId: ID!
+              $paymentTermsTemplateId: ID
+              $locationName: String
+            ) {
+              companyLocationUpdate(
+                companyLocationId: $companyLocationId
+                input: {
+                  name: $locationName
+                  buyerExperienceConfiguration: {
+                    paymentTermsTemplateId: $paymentTermsTemplateId
+                  }
+                }
+              ) {
+                companyLocation { id name }
+                userErrors { field message }
+              }
+            }`,
             {
               variables: {
                 companyLocationId: location.id,
@@ -1394,45 +1403,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
-        // 4️⃣ Update registration with company name + Update user if user found
-        // Always update registration submission with company name
-        const updateRegistrationPromise = customerEmail
-          ? prisma.registrationSubmission.upsert({
-              where: {
-                shopId_email: {
-                  shopId: store.id,
-                  email: customerEmail,
+        // 4️⃣ Update registration + user in parallel
+        await Promise.all([
+          customerEmail
+            ? prisma.registrationSubmission.upsert({
+                where: {
+                  shopId_email: { shopId: store.id, email: customerEmail },
                 },
-              },
-              update: {
-                companyName: companyName,
-              },
-              create: {
-                email: customerEmail,
-                companyName: companyName,
-                contactName: "",
-                phone: "",
-                shopifyCustomerId: null,
-                status: "PENDING",
-                businessType: "",
-                shopId: store.id,
-              },
-            })
-          : Promise.resolve();
+                update: { companyName },
+                create: {
+                  email: customerEmail,
+                  companyName,
+                  contactName: "",
+                  phone: "",
+                  shopifyCustomerId: null,
+                  status: "PENDING",
+                  businessType: "",
+                  shopId: store.id,
+                },
+              })
+            : Promise.resolve(),
 
-        // Update user if found
-        const updateUserPromise = linkedUser
-          ? prisma.user.update({
-              where: { id: linkedUser.id },
-              data: {
-                companyId: companyExists.id,
-              },
-            })
-          : Promise.resolve();
+          linkedUser
+            ? prisma.user.update({
+                where: { id: linkedUser.id },
+                data: { companyId: companyExists.id },
+              })
+            : Promise.resolve(),
+        ]);
 
-        await Promise.all([updateRegistrationPromise, updateUserPromise]);
-
-        // 5️⃣ Final response
         return Response.json({
           intent,
           success: true,
@@ -1441,6 +1440,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             name: companyName,
             locationId: location.id,
             locationName: location.name,
+            paymentTermsTemplateId: paymentTermsTemplateId || null,
+            creditLimit: creditLimit ? Number(creditLimit) : null,
           },
           message: "Company updated successfully",
         });
@@ -1455,23 +1456,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const customerEmail = (form.customerEmail as string)?.trim();
 
         if (!companyId || !customerId || !locationId) {
-          console.warn("Missing required fields for assignMainContact:", {
-            companyId: !!companyId,
-            customerId: !!customerId,
-            locationId: !!locationId,
-          });
           return Response.json({
             intent,
             success: false,
             errors: ["Company, customer and location are required"],
           });
         }
-
-        console.log("⏳ Starting assignMainContact for:", {
-          companyId,
-          customerId,
-          locationId,
-        });
 
         const result = await assignCompanyToCustomer(
           admin,
@@ -1481,7 +1471,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         if (!result.success) {
-          console.error("❌ assignMainContact failed:", result);
           return Response.json({
             intent,
             success: false,
@@ -1489,10 +1478,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // Set company contact name and email using customer data
         const contactName = `${customerFirstName} ${customerLastName}`.trim();
 
-        // ✅ Fetch or create the company account to ensure it exists with a local ID
         const companyAccount = await prisma.companyAccount.upsert({
           where: {
             shopId_shopifyCompanyId: {
@@ -1513,7 +1500,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        // ✅ Use the local companyAccount.id, NOT the shopifyCompanyId
         await prisma.user.upsert({
           where: {
             shopId_email: { shopId: store.id, email: customerEmail },
@@ -1542,11 +1528,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        console.log("✅ assignMainContact completed successfully");
         return Response.json({
           intent,
           success: true,
-          message: "Main contact assigned successfully",
+          wasAlreadyContact: (result as any).wasAlreadyContact ?? false,
+          message:
+            (result as any).message ?? "Main contact assigned successfully",
         });
       }
 
@@ -1554,7 +1541,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const email = (form.email as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
         const contactName = (form.contactName as string)?.trim();
-        const note = (form.reviewNotes as string)?.trim() || null; // ✅ Extracting reviewNotes
+        const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!email) {
           return Response.json({
@@ -1571,20 +1558,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           email,
           companyName,
           contactName,
-          note || "", // ✅ Passing note as first parameter
+          note || "",
         );
 
         const registerData = await prisma.registrationSubmission.findFirst({
-          where: {
-            email,
-          },
+          where: { email },
         });
         if (registerData) {
           await prisma.registrationSubmission.update({
             where: { id: registerData.id },
-            data: {
-              reviewNotes: note,
-            },
+            data: { reviewNotes: note },
           });
         }
 
@@ -1597,7 +1580,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       case "completeApproval": {
         const registrationId = (form.registrationId as string)?.trim();
-
         const customerId = normalizeCustomerId(
           (form.customerId as string) || "",
         );
@@ -1677,6 +1659,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
+
         let user = null;
         if (companyData && companyData.contactEmail) {
           user = await prisma.user.findFirst({
@@ -1765,7 +1748,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 };
-
 const formatDate = (value?: string | null) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -1836,6 +1818,7 @@ export default function RegistrationApprovals() {
       dueInDays: number | null;
     }>;
   }>();
+
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [step, setStep] = useState<
     | "check"
@@ -1871,8 +1854,6 @@ export default function RegistrationApprovals() {
     }
   };
 
-  // Add status filter state
-
   const [statusFilter, setStatusFilter] = useState<
     "PENDING" | "APPROVED" | "REJECTED"
   >(normalizeStatus(statusFromUrl));
@@ -1886,24 +1867,32 @@ export default function RegistrationApprovals() {
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
 
+  // ── Granular loading states ──────────────────────────────────────────────
   const isFlowLoading = flowFetcher.state !== "idle";
   const isRejecting = rejectFetcher.state !== "idle";
+  const currentIntent = flowFetcher.formData?.get("intent") as
+    | string
+    | undefined;
 
+  const isCheckingCustomer = isFlowLoading && currentIntent === "checkCustomer";
+  const isCreatingCustomer =
+    isFlowLoading && currentIntent === "createCustomer";
+  const isUpdatingCustomer =
+    isFlowLoading && currentIntent === "updateCustomer";
+  const isCheckingCompany = isFlowLoading && currentIntent === "checkCompany";
+  const isCreatingCompany = isFlowLoading && currentIntent === "createCompany";
+  const isUpdatingCompany = isFlowLoading && currentIntent === "updateCompany";
+  const isAssigning = isFlowLoading && currentIntent === "assignMainContact";
+  const isSendingEmail = isFlowLoading && currentIntent === "sendWelcomeEmail";
+  const isCompletingApproval =
+    isFlowLoading && currentIntent === "completeApproval";
   const checkRef = useRef<HTMLDivElement>(null);
   const createCustomerRef = useRef<HTMLDivElement>(null);
   const createCompanyRef = useRef<HTMLDivElement>(null);
   const assignRef = useRef<HTMLDivElement>(null);
   const emailRef = useRef<HTMLDivElement>(null);
   const completeRef = useRef<HTMLDivElement>(null);
-
-  type StepName =
-    | "check"
-    | "createCustomer"
-    | "updateCompany"
-    | "createCompany"
-    | "assign"
-    | "email"
-    | "complete";
+  // ────────────────────────────────────────────────────────────────────────
 
   const goToStep = (
     stepName: StepName,
@@ -1918,11 +1907,8 @@ export default function RegistrationApprovals() {
     });
   };
 
-  // Filter submissions based on selected status
   const filteredSubmissions = useMemo(() => {
-    return submissions.filter(
-      (submission) => submission.status === statusFilter,
-    );
+    return submissions.filter((s) => s.status === statusFilter);
   }, [submissions, statusFilter]);
 
   useEffect(() => {
@@ -1933,10 +1919,10 @@ export default function RegistrationApprovals() {
       flowFetcher.data.customer
     ) {
       setCustomer(flowFetcher.data.customer);
-      flowFetcher.submit(
-        { intent: "checkCompany", companyName: selected?.companyName || "" },
-        { method: "post" },
-      );
+      // flowFetcher.submit(
+      //   { intent: "checkCompany", companyName: selected?.companyName || "" },
+      //   { method: "post" },
+      // );
       return;
     }
 
@@ -1946,77 +1932,39 @@ export default function RegistrationApprovals() {
       flowFetcher.data.success
     ) {
       setCustomer(flowFetcher.data.customer || null);
-      if (flowFetcher.data.intent === "createCustomer") {
-        setStep("createCompany");
-      }
+      // ✅ Both create AND update redirect to createCompany step
+      setStep("createCompany");
       setShowCustomerModal(false);
       shopify.toast.show?.(
-        flowFetcher.data.intent === "createCustomer"
-          ? "Customer created"
-          : "Customer updated",
+        flowFetcher.data.intent === "createCustomer" ? "Customer created" : "",
       );
       return;
     }
+
     if (flowFetcher.data.intent === "checkCompany") {
       setStep("createCompany");
-
       if (flowFetcher.data.company) {
-        // Company exists - set company data
         setCompany(flowFetcher.data.company);
-
-        // Show appropriate message
-        if (flowFetcher.data.existsInDb) {
-          shopify.toast.show?.(
-            "Company already exists - you can review or edit details",
-          );
-        } else {
-          shopify.toast.show?.("Company found in Shopify");
-        }
       } else {
-        // Company doesn't exist - clear company to show create form
         setCompany(null);
       }
       return;
     }
-    // if (flowFetcher.data.intent === "checkCompany") {
-    //   setStep("createCompany");
 
-    //   if (flowFetcher.data.company) {
-    //     // Company exists - set company data and switch to UPDATE mode
-    //     setCompany(flowFetcher.data.company);
-    //     setEditMode("update"); // ← KEY FIX: show edit form, not create form
-
-    //     if (flowFetcher.data.existsInDb) {
-    //       shopify.toast.show?.(
-    //         "Company already exists - you can review or edit details",
-    //       );
-    //     } else {
-    //       shopify.toast.show?.("Company found in Shopify");
-    //     }
-    //   } else {
-    //     // Company doesn't exist - show create form
-    //     setCompany(null);
-    //     setEditMode("create"); // ← ensure clean create mode
-    //   }
-    //   return;
-    // }
     if (
       (flowFetcher.data.intent === "createCompany" ||
         flowFetcher.data.intent === "updateCompany") &&
       flowFetcher.data.success
     ) {
       setCompany(flowFetcher.data.company || null);
-
       if (flowFetcher.data.intent === "createCompany") {
-        // After creating, move to assign step
         setStep("assign");
         setEditMode("create");
       } else {
-        // After updating, close edit form and stay on createCompany step
-        setEditMode("create"); // This closes the edit form
+        setEditMode("create");
       }
-
       setShowCompanyModal(false);
+      // ✅ Show different toast if company already existed and was updated
       shopify.toast.show?.(
         flowFetcher.data.intent === "createCompany"
           ? "Company created successfully"
@@ -2025,14 +1973,17 @@ export default function RegistrationApprovals() {
       return;
     }
 
-    if (
-      flowFetcher.data.intent === "assignMainContact" &&
-      flowFetcher.data.success
-    ) {
-      setStep("email");
-      shopify.toast.show?.("Main contact assigned successfully");
-      // Revalidate to refresh company data after assignment
-      revalidator.revalidate();
+    if (flowFetcher.data.intent === "assignMainContact") {
+      if (flowFetcher.data.success) {
+        setStep("email");
+        shopify.toast.show?.(
+          (flowFetcher.data as any).wasAlreadyContact
+            ? "Contact already existed — role and main contact updated successfully"
+            : "Main contact assigned successfully",
+        );
+        revalidator.revalidate();
+      }
+      // On failure: do NOT call setStep — stay on "assign" so the error renders
       return;
     }
 
@@ -2040,7 +1991,6 @@ export default function RegistrationApprovals() {
       flowFetcher.data.intent === "assignMainContact" &&
       !flowFetcher.data.success
     ) {
-      console.error("Contact assignment failed:", flowFetcher.data.errors);
       shopify.toast.show?.(
         `Failed to assign contact: ${flowFetcher.data.errors?.[0] || "Unknown error"}`,
       );
@@ -2051,7 +2001,8 @@ export default function RegistrationApprovals() {
       flowFetcher.data.intent === "sendWelcomeEmail" &&
       flowFetcher.data.success
     ) {
-      setStep("complete");
+      // ✅ NO auto-redirect — stay on email step, show success inline
+      // User must click "Next: Complete Approval" manually
       shopify.toast.show?.("Welcome email sent");
       return;
     }
@@ -2060,16 +2011,12 @@ export default function RegistrationApprovals() {
       flowFetcher.data.intent === "completeApproval" &&
       flowFetcher.data.success
     ) {
-      setSelected(null);
-      setCustomer(null);
-      setCompany(null);
-      setStep("check");
-      setReviewNotes("");
-      setEditMode("create");
+      // ✅ NO auto-close — stay on complete step, show success inline
+      // User must click "Done" manually
       revalidator.revalidate();
       shopify.toast.show?.("Registration approved");
     }
-  }, [flowFetcher, shopify, revalidator, selected]);
+  }, [flowFetcher, shopify, revalidator]);
 
   useEffect(() => {
     if (rejectFetcher.data?.success) {
@@ -2085,26 +2032,22 @@ export default function RegistrationApprovals() {
     setCompany(null);
     setStep("check");
     flowFetcher.submit(
-      {
-        intent: "checkCustomer",
-        email: submission.email,
-      },
+      { intent: "checkCustomer", email: submission.email },
       { method: "post" },
     );
   };
 
   const completeApproval = () => {
     if (!selected || !customer) return;
-
     flowFetcher.submit(
       {
         intent: "completeApproval",
         registrationId: selected.id,
-        customerId: customer.id, // ✅ Current customer ID
+        customerId: customer.id,
         companyId: company?.id || "",
-        companyName: company?.name || selected.companyName, // ✅ Current company name
-        contactName: `${customer.firstName} ${customer.lastName}`, // ✅ Current customer name
-        contactEmail: customer.email, // ✅ Current customer email
+        companyName: company?.name || selected.companyName,
+        contactName: `${customer.firstName} ${customer.lastName}`,
+        contactEmail: customer.email,
         paymentTerm: selected.paymentTerm || "",
         creditLimit: selected.creditLimit || "",
         reviewNotes,
@@ -2118,7 +2061,6 @@ export default function RegistrationApprovals() {
       `Reject registration for ${submission.companyName}?`,
     );
     if (!confirmReject) return;
-
     rejectFetcher.submit(
       { intent: "reject", registrationId: submission.id },
       { method: "post" },
@@ -2161,62 +2103,28 @@ export default function RegistrationApprovals() {
             borderBottom: "1px solid #e3e3e3",
           }}
         >
-          <button
-            onClick={() => setStatusFilter("PENDING")}
-            style={{
-              padding: "8px 16px",
-              background: "none",
-              border: "none",
-              borderBottom:
-                statusFilter === "PENDING"
-                  ? "2px solid #2c6ecb"
-                  : "2px solid transparent",
-              color: statusFilter === "PENDING" ? "#2c6ecb" : "#5c5f62",
-              fontWeight: statusFilter === "PENDING" ? 600 : 400,
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-          >
-            Pending ({submissions.filter((s) => s.status === "PENDING").length})
-          </button>
-          <button
-            onClick={() => setStatusFilter("APPROVED")}
-            style={{
-              padding: "8px 16px",
-              background: "none",
-              border: "none",
-              borderBottom:
-                statusFilter === "APPROVED"
-                  ? "2px solid #2c6ecb"
-                  : "2px solid transparent",
-              color: statusFilter === "APPROVED" ? "#2c6ecb" : "#5c5f62",
-              fontWeight: statusFilter === "APPROVED" ? 600 : 400,
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-          >
-            Approved (
-            {submissions.filter((s) => s.status === "APPROVED").length})
-          </button>
-          <button
-            onClick={() => setStatusFilter("REJECTED")}
-            style={{
-              padding: "8px 16px",
-              background: "none",
-              border: "none",
-              borderBottom:
-                statusFilter === "REJECTED"
-                  ? "2px solid #2c6ecb"
-                  : "2px solid transparent",
-              color: statusFilter === "REJECTED" ? "#2c6ecb" : "#5c5f62",
-              fontWeight: statusFilter === "REJECTED" ? 600 : 400,
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-          >
-            Rejected (
-            {submissions.filter((s) => s.status === "REJECTED").length})
-          </button>
+          {(["PENDING", "APPROVED", "REJECTED"] as const).map((status) => (
+            <button
+              key={status}
+              onClick={() => setStatusFilter(status)}
+              style={{
+                padding: "8px 16px",
+                background: "none",
+                border: "none",
+                borderBottom:
+                  statusFilter === status
+                    ? "2px solid #2c6ecb"
+                    : "2px solid transparent",
+                color: statusFilter === status ? "#2c6ecb" : "#5c5f62",
+                fontWeight: statusFilter === status ? 600 : 400,
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              {status.charAt(0) + status.slice(1).toLowerCase()} (
+              {submissions.filter((s) => s.status === status).length})
+            </button>
+          ))}
         </div>
 
         {filteredSubmissions.length === 0 ? (
@@ -2234,82 +2142,99 @@ export default function RegistrationApprovals() {
             >
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Company</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Contact</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Email</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Phone</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Status</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Created</th>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Actions</th>
+                  {[
+                    "Company",
+                    "Contact",
+                    "Email",
+                    "Phone",
+                    "Status",
+                    "Created",
+                    "Actions",
+                  ].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "8px" }}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredSubmissions.map((submission) => (
-                  <tr
-                    key={submission.id}
-                    style={{ borderTop: "1px solid #e3e3e3" }}
-                  >
-                    <td style={{ padding: "8px" }}>{submission.companyName}</td>
-                    <td style={{ padding: "8px" }}>{submission.contactName}</td>
-                    <td style={{ padding: "8px" }}>{submission.email}</td>
-                    <td style={{ padding: "8px" }}>{submission.phone}</td>
-                    <td style={{ padding: "8px" }}>
-                      <s-badge
-                        tone={
-                          submission.status === "APPROVED"
-                            ? "success"
-                            : submission.status === "REJECTED"
-                              ? "critical"
-                              : "warning"
-                        }
-                      >
-                        {submission.status}
-                      </s-badge>
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      {formatDate(submission.createdAt)}
-                    </td>
-                    <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                      {submission.status === "PENDING" ? (
-                        <>
-                          <s-button
-                            onClick={() => startApproval(submission)}
-                            {...(isFlowLoading && selected?.id === submission.id
-                              ? { loading: true }
-                              : {})}
-                          >
-                            Approve
-                          </s-button>
-                          <span style={{ marginLeft: 8 }}>
+                {filteredSubmissions.map((submission) => {
+                  const isThisRowLoading =
+                    (isFlowLoading || isRejecting) &&
+                    selected?.id === submission.id;
+                  return (
+                    <tr
+                      key={submission.id}
+                      style={{ borderTop: "1px solid #e3e3e3" }}
+                    >
+                      <td style={{ padding: "8px" }}>
+                        {submission.companyName}
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {submission.contactName}
+                      </td>
+                      <td style={{ padding: "8px" }}>{submission.email}</td>
+                      <td style={{ padding: "8px" }}>{submission.phone}</td>
+                      <td style={{ padding: "8px" }}>
+                        <s-badge
+                          tone={
+                            submission.status === "APPROVED"
+                              ? "success"
+                              : submission.status === "REJECTED"
+                                ? "critical"
+                                : "warning"
+                          }
+                        >
+                          {submission.status}
+                        </s-badge>
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {formatDate(submission.createdAt)}
+                      </td>
+                      <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
+                        {submission.status === "PENDING" ? (
+                          <>
                             <s-button
-                              tone="critical"
-                              variant="tertiary"
-                              onClick={() => rejectSubmission(submission)}
-                              {...(isRejecting && selected?.id === submission.id
+                              onClick={() => startApproval(submission)}
+                              {...(isCheckingCustomer &&
+                              selected?.id === submission.id
                                 ? { loading: true }
                                 : {})}
                             >
-                              Reject
+                              Approve
                             </s-button>
+                            <span style={{ marginLeft: 8 }}>
+                              <s-button
+                                tone="critical"
+                                variant="tertiary"
+                                onClick={() => rejectSubmission(submission)}
+                                {...(isRejecting &&
+                                selected?.id === submission.id
+                                  ? { loading: true }
+                                  : {})}
+                              >
+                                Reject
+                              </s-button>
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ color: "#5c5f62", fontSize: 14 }}>
+                            {submission.status === "APPROVED"
+                              ? "Approved"
+                              : "Rejected"}
                           </span>
-                        </>
-                      ) : (
-                        <span style={{ color: "#5c5f62", fontSize: 14 }}>
-                          {submission.status === "APPROVED"
-                            ? "Approved"
-                            : "Rejected"}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </s-section>
 
-      {/* Customer Create/Update Modal */}
+      {/* ── Customer Create/Update Modal ─────────────────────────────────── */}
       {showCustomerModal && (
         <div
           style={{
@@ -2347,6 +2272,7 @@ export default function RegistrationApprovals() {
               <s-button
                 variant="tertiary"
                 onClick={() => setShowCustomerModal(false)}
+                disabled={isCreatingCustomer || isUpdatingCustomer}
               >
                 Close
               </s-button>
@@ -2356,8 +2282,8 @@ export default function RegistrationApprovals() {
                 style={{ display: "grid", gap: 12 }}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const form = e.currentTarget;
-                  const data = new FormData(form);
+                  const formEl = e.currentTarget;
+                  const data = new FormData(formEl);
                   data.append(
                     "intent",
                     editMode === "create" ? "createCustomer" : "updateCustomer",
@@ -2368,107 +2294,63 @@ export default function RegistrationApprovals() {
                   flowFetcher.submit(data, { method: "post" });
                 }}
               >
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "#5c5f62",
-                      fontWeight: 500,
-                    }}
+                {[
+                  {
+                    label: "Email *",
+                    name: "email",
+                    type: "email",
+                    required: true,
+                    value: customer?.email || selected?.email || "",
+                  },
+                  {
+                    label: "First name *",
+                    name: "firstName",
+                    required: true,
+                    value:
+                      customer?.firstName || contactNameParts.firstName || "",
+                  },
+                  {
+                    label: "Last name",
+                    name: "lastName",
+                    value:
+                      customer?.lastName || contactNameParts.lastName || "",
+                  },
+                  {
+                    label: "Phone",
+                    name: "phone",
+                    value: customer?.phone || selected?.phone || "",
+                  },
+                ].map(({ label, name, type = "text", required, value }) => (
+                  <label
+                    key={name}
+                    style={{ display: "flex", flexDirection: "column", gap: 4 }}
                   >
-                    Email *
-                  </span>
-                  <input
-                    name="email"
-                    type="email"
-                    defaultValue={customer?.email || selected?.email || ""}
-                    required
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                    }}
-                  />
-                </label>
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "#5c5f62",
-                      fontWeight: 500,
-                    }}
-                  >
-                    First name *
-                  </span>
-                  <input
-                    name="firstName"
-                    defaultValue={
-                      customer?.firstName || contactNameParts.firstName || ""
-                    }
-                    required
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                    }}
-                  />
-                </label>
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "#5c5f62",
-                      fontWeight: 500,
-                    }}
-                  >
-                    Last name
-                  </span>
-                  <input
-                    name="lastName"
-                    defaultValue={
-                      customer?.lastName || contactNameParts.lastName || ""
-                    }
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                    }}
-                  />
-                </label>
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "#5c5f62",
-                      fontWeight: 500,
-                    }}
-                  >
-                    Phone
-                  </span>
-                  <input
-                    name="phone"
-                    defaultValue={customer?.phone || selected?.phone || ""}
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                    }}
-                  />
-                </label>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "#5c5f62",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {label}
+                    </span>
+                    <input
+                      name={name}
+                      type={type}
+                      defaultValue={value}
+                      required={required}
+                      style={{
+                        padding: 10,
+                        borderRadius: 8,
+                        border: "1px solid #c9ccd0",
+                      }}
+                    />
+                  </label>
+                ))}
                 <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                   <s-button
                     type="submit"
-                    {...(isFlowLoading &&
-                    (flowFetcher.data?.intent === "createCustomer" ||
-                      flowFetcher.data?.intent === "updateCustomer")
+                    {...(isCreatingCustomer || isUpdatingCustomer
                       ? { loading: true }
                       : {})}
                   >
@@ -2479,6 +2361,7 @@ export default function RegistrationApprovals() {
                   <s-button
                     variant="tertiary"
                     onClick={() => setShowCustomerModal(false)}
+                    disabled={isCreatingCustomer || isUpdatingCustomer}
                   >
                     Cancel
                   </s-button>
@@ -2539,6 +2422,7 @@ export default function RegistrationApprovals() {
               <s-button
                 variant="tertiary"
                 onClick={() => setShowCompanyModal(false)}
+                disabled={isCreatingCompany || isUpdatingCompany}
               >
                 Close
               </s-button>
@@ -2548,20 +2432,17 @@ export default function RegistrationApprovals() {
                 style={{ display: "grid", gap: 12 }}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const form = e.currentTarget;
-                  const data = new FormData(form);
+                  const formEl = e.currentTarget;
+                  const data = new FormData(formEl);
                   data.append(
                     "intent",
                     editMode === "create" ? "createCompany" : "updateCompany",
                   );
-
-                  // ✅ Add these lines - pass customer info
                   data.append("customerId", customer?.id || "");
                   data.append(
                     "customerEmail",
                     customer?.email || selected?.email || "",
                   );
-
                   if (editMode === "update") {
                     data.append("companyId", company?.id || "");
                     data.append("locationId", company?.locationId || "");
@@ -2573,11 +2454,7 @@ export default function RegistrationApprovals() {
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
                   <span
-                    style={{
-                      fontSize: 12,
-                      color: "#5c5f62",
-                      fontWeight: 500,
-                    }}
+                    style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}
                   >
                     Company name *
                   </span>
@@ -2611,6 +2488,7 @@ export default function RegistrationApprovals() {
                     </span>
                     <select
                       name="paymentTerms"
+                      defaultValue={selected?.paymentTerm}
                       style={{
                         padding: 10,
                         borderRadius: 8,
@@ -2632,11 +2510,7 @@ export default function RegistrationApprovals() {
                   style={{ display: "flex", flexDirection: "column", gap: 4 }}
                 >
                   <span
-                    style={{
-                      fontSize: 12,
-                      color: "#5c5f62",
-                      fontWeight: 500,
-                    }}
+                    style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}
                   >
                     Credit limit
                   </span>
@@ -2655,9 +2529,7 @@ export default function RegistrationApprovals() {
                 <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                   <s-button
                     type="submit"
-                    {...(isFlowLoading &&
-                    (flowFetcher.data?.intent === "createCompany" ||
-                      flowFetcher.data?.intent === "updateCompany")
+                    {...(isCreatingCompany || isUpdatingCompany
                       ? { loading: true }
                       : {})}
                   >
@@ -2668,6 +2540,7 @@ export default function RegistrationApprovals() {
                   <s-button
                     variant="tertiary"
                     onClick={() => setShowCompanyModal(false)}
+                    disabled={isCreatingCompany || isUpdatingCompany}
                   >
                     Cancel
                   </s-button>
@@ -2730,10 +2603,15 @@ export default function RegistrationApprovals() {
                 <p style={{ margin: "4px 0", color: "#5c5f62" }}>
                   {customer
                     ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
-                    : selected?.contactName}{" "}• {customer?.email || selected?.email}
+                    : selected?.contactName}{" "}
+                  • {customer?.email || selected?.email}
                 </p>
               </div>
-              <s-button variant="tertiary" onClick={() => setSelected(null)}>
+              <s-button
+                variant="tertiary"
+                onClick={() => setSelected(null)}
+                disabled={isFlowLoading}
+              >
                 Close
               </s-button>
             </div>
@@ -2754,27 +2632,22 @@ export default function RegistrationApprovals() {
                   onClick={() => goToStep("check", checkRef)}
                 />
                 <StepBadge
-                  label="2. Create customer"
-                  active={step === "createCustomer"}
-                  onClick={() => goToStep("createCustomer", createCustomerRef)}
-                />
-                <StepBadge
-                  label="3. Create company"
+                  label="2. Create company"
                   active={step === "createCompany"}
                   onClick={() => goToStep("createCompany", createCompanyRef)}
                 />
                 <StepBadge
-                  label="4. Assign contact"
+                  label="3. Assign contact"
                   active={step === "assign"}
                   onClick={() => goToStep("assign", assignRef)}
                 />
                 <StepBadge
-                  label="5. Welcome email"
+                  label="4. Welcome email"
                   active={step === "email"}
                   onClick={() => goToStep("email", emailRef)}
                 />
                 <StepBadge
-                  label="6. Complete"
+                  label="5. Complete"
                   active={step === "complete"}
                   onClick={() => goToStep("complete", completeRef)}
                 />
@@ -2788,14 +2661,14 @@ export default function RegistrationApprovals() {
                     padding: 16,
                   }}
                 >
-                  <h4 style={{ marginTop: 0 }}>Check Customer</h4>
+                  <h4 style={{ margin: 0 }}>Check Customer</h4>
+
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Checking if a customer already exists with email:{" "}
                     {selected.email}
                   </p>
 
-                  {isFlowLoading &&
-                  flowFetcher.data?.intent === "checkCustomer" ? (
+                  {isCheckingCustomer ? (
                     <s-banner tone="info">
                       <s-text>
                         Please wait while we search for existing customer.
@@ -2812,10 +2685,15 @@ export default function RegistrationApprovals() {
                           {customer.email}
                         </s-text>
                       </s-banner>
-                      <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
-                        <s-button onClick={() => setStep("createCompany")}>
-                          Continue to Company Setup
-                        </s-button>
+
+                      {/* ✅ Update button ONLY after customer found */}
+                      <div
+                        style={{
+                          marginTop: 12,
+                          display: "flex",
+                          gap: 8,
+                        }}
+                      >
                         <s-button
                           onClick={() => {
                             setCustomerMode("update");
@@ -2823,6 +2701,10 @@ export default function RegistrationApprovals() {
                           }}
                         >
                           Update Customer
+                        </s-button>
+
+                        <s-button onClick={() => setStep("createCompany")}>
+                          Continue
                         </s-button>
                       </div>
                     </>
@@ -2833,10 +2715,11 @@ export default function RegistrationApprovals() {
                           No customer found
                         </div>
                         <s-text>
-                          No existing customer found. You Will need to create
+                          No existing customer found. You will need to create
                           one.
                         </s-text>
                       </s-banner>
+
                       <div style={{ marginTop: 12 }}>
                         <s-button onClick={() => setStep("createCustomer")}>
                           Create New Customer
@@ -2846,7 +2729,8 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
               )}
-              {/* Step: Create Customer */}
+
+              {/* ── Step: Create / Update Customer ──────────────────────── */}
               {step === "createCustomer" && (
                 <div>
                   {customer ? (
@@ -2861,13 +2745,12 @@ export default function RegistrationApprovals() {
                         </s-text>
                       </s-banner>
 
-                      {/* Show update form */}
                       <form
                         style={{ display: "grid", gap: 12, marginTop: 12 }}
                         onSubmit={(e) => {
                           e.preventDefault();
-                          const form = e.currentTarget;
-                          const data = new FormData(form);
+                          const formEl = e.currentTarget;
+                          const data = new FormData(formEl);
                           data.append("intent", "updateCustomer");
                           data.append("customerId", customer?.id || "");
                           data.append(
@@ -2877,90 +2760,62 @@ export default function RegistrationApprovals() {
                           flowFetcher.submit(data, { method: "post" });
                         }}
                       >
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span>Email *</span>
-                          <input
-                            name="email"
-                            defaultValue={customer.email}
-                            required
+                        {[
+                          {
+                            label: "Email *",
+                            name: "email",
+                            required: true,
+                            value: customer.email,
+                          },
+                          {
+                            label: "First Name *",
+                            name: "firstName",
+                            required: true,
+                            value: customer.firstName ?? "",
+                          },
+                          {
+                            label: "Last Name",
+                            name: "lastName",
+                            value: customer.lastName ?? "",
+                          },
+                          {
+                            label: "Phone",
+                            name: "phone",
+                            value: customer.phone ?? "",
+                          },
+                        ].map(({ label, name, required, value }) => (
+                          <label
+                            key={name}
                             style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
                             }}
-                          />
-                        </label>
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span>First Name *</span>
-                          <input
-                            name="firstName"
-                            defaultValue={customer.firstName ?? ""}
-                            required
-                            style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
-                            }}
-                          />
-                        </label>
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span>Last Name</span>
-                          <input
-                            name="lastName"
-                            defaultValue={customer.lastName ?? ""}
-                            style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
-                            }}
-                          />
-                        </label>
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span>Phone</span>
-                          <input
-                            name="phone"
-                            defaultValue={customer.phone ?? ""}
-                            style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
-                            }}
-                          />
-                        </label>
+                          >
+                            <span>{label}</span>
+                            <input
+                              name={name}
+                              defaultValue={value}
+                              required={required}
+                              style={{
+                                padding: 10,
+                                borderRadius: 8,
+                                border: "1px solid #c9ccd0",
+                              }}
+                            />
+                          </label>
+                        ))}
                         <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                           <s-button
                             type="submit"
-                            {...(isFlowLoading ? { loading: true } : {})}
+                            {...(isUpdatingCustomer ? { loading: true } : {})}
                           >
                             Update Customer
                           </s-button>
                           <s-button
                             variant="tertiary"
                             onClick={() => setStep("check")}
+                            disabled={isUpdatingCustomer}
                           >
                             Back
                           </s-button>
@@ -2968,8 +2823,6 @@ export default function RegistrationApprovals() {
                       </form>
                     </>
                   ) : (
-                    // Existing creation form remains
-
                     <div
                       style={{
                         border: "1px solid #e3e3e3",
@@ -2986,131 +2839,76 @@ export default function RegistrationApprovals() {
                         style={{ display: "grid", gap: 12, marginTop: 12 }}
                         onSubmit={(e) => {
                           e.preventDefault();
-                          const form = e.currentTarget;
-                          const data = new FormData(form);
+                          const formEl = e.currentTarget;
+                          const data = new FormData(formEl);
                           data.append("intent", "createCustomer");
                           flowFetcher.submit(data, { method: "post" });
                         }}
                       >
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span
+                        {[
+                          {
+                            label: "Email",
+                            name: "email",
+                            required: true,
+                            value: selected.email,
+                          },
+                          {
+                            label: "First name",
+                            name: "firstName",
+                            required: true,
+                            value: contactNameParts.firstName,
+                          },
+                          {
+                            label: "Last name",
+                            name: "lastName",
+                            value: contactNameParts.lastName,
+                          },
+                          {
+                            label: "Phone",
+                            name: "phone",
+                            value: selected.phone,
+                          },
+                        ].map(({ label, name, required, value }) => (
+                          <label
+                            key={name}
                             style={{
-                              fontSize: 12,
-                              color: "#5c5f62",
-                              fontWeight: 500,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
                             }}
                           >
-                            Email
-                          </span>
-                          <input
-                            name="email"
-                            defaultValue={selected.email}
-                            required
-                            style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
-                            }}
-                          />
-                        </label>
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 12,
-                              color: "#5c5f62",
-                              fontWeight: 500,
-                            }}
-                          >
-                            First name
-                          </span>
-                          <input
-                            name="firstName"
-                            defaultValue={contactNameParts.firstName}
-                            required
-                            style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
-                            }}
-                          />
-                        </label>
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 12,
-                              color: "#5c5f62",
-                              fontWeight: 500,
-                            }}
-                          >
-                            Last name
-                          </span>
-                          <input
-                            name="lastName"
-                            defaultValue={contactNameParts.lastName}
-                            style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
-                            }}
-                          />
-                        </label>
-                        <label
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 12,
-                              color: "#5c5f62",
-                              fontWeight: 500,
-                            }}
-                          >
-                            Phone
-                          </span>
-                          <input
-                            name="phone"
-                            defaultValue={selected.phone}
-                            style={{
-                              padding: 10,
-                              borderRadius: 8,
-                              border: "1px solid #c9ccd0",
-                            }}
-                          />
-                        </label>
+                            <span
+                              style={{
+                                fontSize: 12,
+                                color: "#5c5f62",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {label}
+                            </span>
+                            <input
+                              name={name}
+                              defaultValue={value}
+                              required={required}
+                              style={{
+                                padding: 10,
+                                borderRadius: 8,
+                                border: "1px solid #c9ccd0",
+                              }}
+                            />
+                          </label>
+                        ))}
                         <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                           <s-button
                             type="submit"
-                            {...(isFlowLoading &&
-                            flowFetcher.data?.intent === "createCustomer"
-                              ? { loading: true }
-                              : {})}
+                            {...(isCreatingCustomer ? { loading: true } : {})}
                           >
                             Create Customer
                           </s-button>
                           <s-button
                             variant="tertiary"
                             onClick={() => setStep("check")}
+                            disabled={isCreatingCustomer}
                           >
                             Back
                           </s-button>
@@ -3120,7 +2918,8 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
               )}
-              {/* Step: Create Company */}
+
+              {/* ── Step: Create Company ─────────────────────────────────── */}
               {step === "createCompany" && (
                 <div
                   style={{
@@ -3129,7 +2928,27 @@ export default function RegistrationApprovals() {
                     padding: 16,
                   }}
                 >
-                  <h4 style={{ marginTop: 0 }}>Create Company & Location</h4>
+                  {/* Header with Back button */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <h4 style={{ margin: 0 }}>Create Company & Location</h4>
+
+                    {company && editMode !== "update" && (
+                      <s-button
+                        variant="secondary"
+                        onClick={() => setEditMode("update")}
+                      >
+                        Update Company
+                      </s-button>
+                    )}
+                  </div>
+
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Create the company record and main location.
                   </p>
@@ -3143,24 +2962,30 @@ export default function RegistrationApprovals() {
                         </s-text>
                       </s-banner>
 
-                      {/* Show buttons when NOT in edit mode */}
                       {editMode !== "update" && (
                         <div
                           style={{ marginTop: 12, display: "flex", gap: 10 }}
                         >
                           <s-button onClick={() => setStep("assign")}>
-                            Continue to Assign Contact
+                            Continue
                           </s-button>
-                          <s-button
+                          {/* <s-button
                             variant="secondary"
                             onClick={() => setEditMode("update")}
                           >
-                            Edit Company Details
+                            Update Company
+                          </s-button> */}
+                          <s-button
+                            variant="secondary"
+                            onClick={() =>
+                              setStep(customer ? "check" : "createCustomer")
+                            }
+                          >
+                            Back
                           </s-button>
                         </div>
                       )}
 
-                      {/* Inline Edit Form - shows when editMode is "update" */}
                       {editMode === "update" && (
                         <form
                           style={{
@@ -3174,8 +2999,8 @@ export default function RegistrationApprovals() {
                           }}
                           onSubmit={(e) => {
                             e.preventDefault();
-                            const form = e.currentTarget;
-                            const data = new FormData(form);
+                            const formEl = e.currentTarget;
+                            const data = new FormData(formEl);
                             data.append("intent", "updateCompany");
                             data.append("companyId", company?.id || "");
                             data.append(
@@ -3220,6 +3045,7 @@ export default function RegistrationApprovals() {
                               }}
                             />
                           </label>
+
                           <label
                             style={{
                               display: "flex",
@@ -3238,6 +3064,9 @@ export default function RegistrationApprovals() {
                             </span>
                             <select
                               name="paymentTerms"
+                              defaultValue={
+                                company?.paymentTermsTemplateId || ""
+                              }
                               style={{
                                 padding: 10,
                                 borderRadius: 8,
@@ -3253,15 +3082,13 @@ export default function RegistrationApprovals() {
                               ))}
                             </select>
                           </label>
+
                           <div
                             style={{ display: "flex", gap: 10, marginTop: 8 }}
                           >
                             <s-button
                               type="submit"
-                              {...(isFlowLoading &&
-                              flowFetcher.data?.intent === "updateCompany"
-                                ? { loading: true }
-                                : {})}
+                              {...(isUpdatingCompany ? { loading: true } : {})}
                             >
                               Update Company
                             </s-button>
@@ -3269,6 +3096,7 @@ export default function RegistrationApprovals() {
                               variant="tertiary"
                               type="button"
                               onClick={() => setEditMode("create")}
+                              disabled={isUpdatingCompany}
                             >
                               Cancel
                             </s-button>
@@ -3281,8 +3109,8 @@ export default function RegistrationApprovals() {
                       style={{ display: "grid", gap: 12, marginTop: 12 }}
                       onSubmit={(e) => {
                         e.preventDefault();
-                        const form = e.currentTarget;
-                        const data = new FormData(form);
+                        const formEl = e.currentTarget;
+                        const data = new FormData(formEl);
                         data.append("intent", "createCompany");
                         data.append("customerId", customer?.id || "");
                         data.append(
@@ -3319,6 +3147,7 @@ export default function RegistrationApprovals() {
                           }}
                         />
                       </label>
+
                       <label
                         style={{
                           display: "flex",
@@ -3337,6 +3166,7 @@ export default function RegistrationApprovals() {
                         </span>
                         <select
                           name="paymentTerms"
+                          defaultValue={selected.paymentTermsTemplateId}
                           style={{
                             padding: 10,
                             borderRadius: 8,
@@ -3365,42 +3195,27 @@ export default function RegistrationApprovals() {
                         >
                           Credit limit
                         </span>
-                        <div
+                        <input
+                          name="creditLimit"
+                          type="number"
+                          defaultValue={selected.creditLimit}
+                          onChange={(e) =>
+                            setCreditLimit(Number(e.target.value) || 0)
+                          }
+                          required
                           style={{
-                            display: "flex",
-                            alignItems: "stretch",
-                            border: "1px solid #c9ccd0",
+                            padding: 10,
                             borderRadius: 8,
-                            overflow: "hidden",
+                            border: "1px solid #c9ccd0",
+                            width: 120,
                           }}
-                        >
-                          <input
-                            name="creditLimit"
-                            type="number"
-                            value={selected.creditLimit}
-                            onChange={(e) =>
-                              setCreditLimit(Number(e.target.value) || 0)
-                            }
-                            required
-                            style={{
-                              padding: 10,
-                              border: "none",
-                              borderLeft: "1px solid #c9ccd0",
-                              borderRight: "1px solid #c9ccd0",
-                              width: 120,
-                              textAlign: "center",
-                              outline: "none",
-                            }}
-                          />
-                        </div>
+                        />
                       </div>
+
                       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                         <s-button
                           type="submit"
-                          {...(isFlowLoading &&
-                          flowFetcher.data?.intent === "createCompany"
-                            ? { loading: true }
-                            : {})}
+                          {...(isCreatingCompany ? { loading: true } : {})}
                         >
                           Create Company
                         </s-button>
@@ -3409,6 +3224,7 @@ export default function RegistrationApprovals() {
                           onClick={() =>
                             setStep(customer ? "check" : "createCustomer")
                           }
+                          disabled={isCreatingCompany}
                         >
                           Back
                         </s-button>
@@ -3417,6 +3233,8 @@ export default function RegistrationApprovals() {
                   )}
                 </div>
               )}
+
+              {/* ── Step: Assign ─────────────────────────────────────────── */}
               {step === "assign" && (
                 <div
                   style={{
@@ -3433,11 +3251,9 @@ export default function RegistrationApprovals() {
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info">
                       <s-text>
-                        {/* ✅ FIXED: Use current customer data */}
                         Customer: {customer?.firstName} {customer?.lastName} (
                         {customer?.email})
                         <br />
-                        {/* ✅ FIXED: Use current company data */}
                         Company: {company?.name || selected?.companyName}
                       </s-text>
                     </s-banner>
@@ -3474,16 +3290,14 @@ export default function RegistrationApprovals() {
                           { method: "post" },
                         );
                       }}
-                      {...(isFlowLoading &&
-                      flowFetcher.data?.intent === "assignMainContact"
-                        ? { loading: true }
-                        : {})}
+                      {...(isAssigning ? { loading: true } : {})}
                     >
                       Assign Main Contact
                     </s-button>
                     <s-button
                       variant="tertiary"
                       onClick={() => setStep("createCompany")}
+                      disabled={isAssigning}
                     >
                       Back
                     </s-button>
@@ -3516,6 +3330,23 @@ export default function RegistrationApprovals() {
                     </s-banner>
                   </div>
 
+                  {/* ✅ Show success banner after email sent — no auto-redirect */}
+                  {flowFetcher.data?.intent === "sendWelcomeEmail" &&
+                    flowFetcher.data?.success && (
+                      <div style={{ marginTop: 12 }}>
+                        <s-banner tone="success">
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                            ✓ Welcome email sent successfully
+                          </div>
+                          <s-text>
+                            Email delivered to{" "}
+                            {customer?.email || selected.email}. Click "Next:
+                            Complete Approval" when ready.
+                          </s-text>
+                        </s-banner>
+                      </div>
+                    )}
+
                   <div style={{ marginTop: 12 }}>
                     <label
                       style={{
@@ -3537,52 +3368,88 @@ export default function RegistrationApprovals() {
                         value={reviewNotes}
                         onChange={(e) => setReviewNotes(e.target.value)}
                         placeholder="Add any notes about this approval"
+                        disabled={
+                          flowFetcher.data?.intent === "sendWelcomeEmail" &&
+                          flowFetcher.data?.success
+                        }
                         style={{
                           minHeight: 80,
                           padding: 10,
                           borderRadius: 8,
                           border: "1px solid #c9ccd0",
+                          backgroundColor:
+                            flowFetcher.data?.intent === "sendWelcomeEmail" &&
+                            flowFetcher.data?.success
+                              ? "#f3f4f6"
+                              : "white",
                         }}
                       />
                     </label>
                   </div>
 
-                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                    <s-button
-                      onClick={() =>
-                        flowFetcher.submit(
-                          {
-                            intent: "sendWelcomeEmail",
-                            email: customer?.email || selected.email, // ✅ Use current email
-                            contactName: `${customer?.firstName} ${customer?.lastName}`, // ✅ Use current name
-                            companyName: company?.name || selected.companyName, // ✅ Use current company
-                            reviewNotes: reviewNotes,
-                          },
-                          { method: "post" },
-                        )
-                      }
-                      {...(isFlowLoading &&
-                      flowFetcher.data?.intent === "sendWelcomeEmail"
-                        ? { loading: true }
-                        : {})}
-                    >
-                      Send Welcome Email
-                    </s-button>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      marginTop: 16,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {/* Hide Send button once email is sent successfully */}
+                    {!(
+                      flowFetcher.data?.intent === "sendWelcomeEmail" &&
+                      flowFetcher.data?.success
+                    ) && (
+                      <s-button
+                        onClick={() =>
+                          flowFetcher.submit(
+                            {
+                              intent: "sendWelcomeEmail",
+                              email: customer?.email || selected.email,
+                              contactName: `${customer?.firstName} ${customer?.lastName}`,
+                              companyName:
+                                company?.name || selected.companyName,
+                              reviewNotes,
+                            },
+                            { method: "post" },
+                          )
+                        }
+                        {...(isSendingEmail ? { loading: true } : {})}
+                      >
+                        Send Welcome Email
+                      </s-button>
+                    )}
+
+                    {/* ✅ Manual "Next" button — only appears after email is sent */}
+                    {flowFetcher.data?.intent === "sendWelcomeEmail" &&
+                      flowFetcher.data?.success && (
+                        <s-button
+                          variant="primary"
+                          onClick={() => setStep("complete")}
+                        >
+                          Next: Complete Approval →
+                        </s-button>
+                      )}
+
                     <s-button
                       variant="tertiary"
                       onClick={() => setStep("assign")}
+                      disabled={isSendingEmail}
                     >
                       Back
                     </s-button>
                     <s-button
                       variant="tertiary"
                       onClick={() => setStep("complete")}
+                      disabled={isSendingEmail}
                     >
                       Skip Email
                     </s-button>
                   </div>
                 </div>
               )}
+
+              {/* ── Step: Complete ───────────────────────────────────────── */}
               {step === "complete" && (
                 <div
                   style={{
@@ -3593,7 +3460,6 @@ export default function RegistrationApprovals() {
                 >
                   <h4 style={{ marginTop: 0 }}>Complete Approval</h4>
 
-                  {/* ✅ Add a summary of what will be approved */}
                   <div
                     style={{
                       background: "#f9fafb",
@@ -3633,41 +3499,86 @@ export default function RegistrationApprovals() {
                     </div>
                   </div>
 
-                  <s-banner tone="success">
-                    <strong>Ready to approve</strong>
-                    <div style={{ marginTop: 4 }}>
-                      This will mark the registration as approved and activate
-                      the customer account.
-                    </div>
-                  </s-banner>
+                  {/* ✅ Show approved success state OR ready-to-approve prompt */}
+                  {flowFetcher.data?.intent === "completeApproval" &&
+                  flowFetcher.data?.success ? (
+                    <>
+                      <s-banner tone="success">
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            marginBottom: 6,
+                            fontSize: 15,
+                          }}
+                        >
+                          ✓ Registration Approved Successfully
+                        </div>
+                        <s-text>
+                          {customer?.firstName} {customer?.lastName} has been
+                          approved and their account is now active under{" "}
+                          <strong>
+                            {company?.name || selected?.companyName}
+                          </strong>
+                          .
+                        </s-text>
+                      </s-banner>
 
-                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                    <s-button
-                      variant="primary"
-                      onClick={completeApproval}
-                      {...(isFlowLoading &&
-                      flowFetcher.data?.intent === "completeApproval"
-                        ? { loading: true }
-                        : {})}
-                    >
-                      Confirm & Approve
-                    </s-button>
-                    <s-button
-                      variant="tertiary"
-                      onClick={() => setStep("email")}
-                    >
-                      Back
-                    </s-button>
-                    <s-button
-                      variant="tertiary"
-                      onClick={() => setSelected(null)}
-                    >
-                      Cancel
-                    </s-button>
-                  </div>
+                      {/* ✅ Manual Done button — user chooses when to close */}
+                      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                        <s-button
+                          variant="primary"
+                          onClick={() => {
+                            setSelected(null);
+                            setCustomer(null);
+                            setCompany(null);
+                            setStep("check");
+                            setReviewNotes("");
+                            setEditMode("create");
+                          }}
+                        >
+                          Done — Close
+                        </s-button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <s-banner tone="success">
+                        <strong>Ready to approve</strong>
+                        <div style={{ marginTop: 4 }}>
+                          This will mark the registration as approved and
+                          activate the customer account.
+                        </div>
+                      </s-banner>
+
+                      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                        <s-button
+                          variant="primary"
+                          onClick={completeApproval}
+                          {...(isCompletingApproval ? { loading: true } : {})}
+                        >
+                          Confirm & Approve
+                        </s-button>
+                        <s-button
+                          variant="tertiary"
+                          onClick={() => setStep("email")}
+                          disabled={isCompletingApproval}
+                        >
+                          Back
+                        </s-button>
+                        <s-button
+                          variant="tertiary"
+                          onClick={() => setSelected(null)}
+                          disabled={isCompletingApproval}
+                        >
+                          Cancel
+                        </s-button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
-              {/* Error Display */}
+
+              {/* ── Error Display ────────────────────────────────────────── */}
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (
                   <div style={{ marginTop: 16 }}>
