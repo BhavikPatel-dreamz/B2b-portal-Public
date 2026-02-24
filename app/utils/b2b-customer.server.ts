@@ -4037,6 +4037,18 @@ export async function getCompanyContactEmail(
   return result.data?.companyContact?.customer?.email ?? null;
 }
 
+function normalizePhone(phone: string): string {
+  // Remove everything except digits and leading +
+  let normalized = phone.trim().replace(/[^\d+]/g, "");
+
+  // Ensure it starts with +
+  if (!normalized.startsWith("+")) {
+    normalized = "+" + normalized;
+  }
+
+  return normalized;
+}
+
 // Function to create a company location
 export async function createCompanyLocation(
   companyId: string,
@@ -4118,7 +4130,7 @@ export async function createCompanyLocation(
 
     // Add optional fields
     if (locationData.phone) {
-      input.phone = locationData.phone;
+        input.phone = normalizePhone(locationData.phone);
     }
     if (locationData.externalId) {
       input.externalId = locationData.externalId;
