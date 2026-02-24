@@ -156,13 +156,13 @@ export async function syncCompanyCreditMetafields(
     const metafields: MetafieldUpdate[] = [
       {
         namespace: "b2b_credit",
-        key: "credit_limit",
+        key: "company_credit_limit",
         value: company.creditLimit.toString(),
         type: "number_decimal",
       },
       {
         namespace: "b2b_credit",
-        key: "credit_used",
+        key: "company_credit_used",
         value: usedCredit.toString(),
         type: "number_decimal",
       },
