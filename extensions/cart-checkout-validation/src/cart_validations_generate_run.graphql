@@ -31,12 +31,10 @@ query CartValidationsGenerateRunInput {
         company {
           id
           name
-          metafields(identifiers: [
-            {namespace: "b2b_credit", key: "credit_limit"},
-            {namespace: "b2b_credit", key: "credit_used"}
-          ]) {
-            namespace
-            key
+          creditLimit: metafield(namespace: "b2b_credit", key: "credit_limit") {
+            value
+          }
+          creditUsed: metafield(namespace: "b2b_credit", key: "credit_used") {
             value
           }
         }

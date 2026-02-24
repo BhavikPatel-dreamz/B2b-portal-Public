@@ -32,18 +32,8 @@ const testInputSufficientCredit = {
         company: {
           id: "gid://shopify/Company/987654321",
           name: "Test Company Ltd",
-          metafields: [
-            {
-              namespace: "b2b_credit",
-              key: "credit_limit",
-              value: "1000.00"
-            },
-            {
-              namespace: "b2b_credit",
-              key: "credit_used",
-              value: "200.00"
-            }
-          ]
+          creditLimit: { value: "1000.00" },
+          creditUsed: { value: "200.00" }
         }
       }
     }
@@ -72,18 +62,8 @@ const testInputInsufficientCredit = {
         company: {
           id: "gid://shopify/Company/987654322",
           name: "Another Test Company",
-          metafields: [
-            {
-              namespace: "b2b_credit",
-              key: "credit_limit",
-              value: "1000.00"
-            },
-            {
-              namespace: "b2b_credit",
-              key: "credit_used",
-              value: "700.00"
-            }
-          ]
+          creditLimit: { value: "1000.00" },
+          creditUsed: { value: "700.00" }
         }
       }
     }
@@ -112,18 +92,8 @@ const testInputCreditLimitReached = {
         company: {
           id: "gid://shopify/Company/987654323",
           name: "Credit Maxed Company",
-          metafields: [
-            {
-              namespace: "b2b_credit",
-              key: "credit_limit",
-              value: "500.00"
-            },
-            {
-              namespace: "b2b_credit",
-              key: "credit_used",
-              value: "500.00"
-            }
-          ]
+          creditLimit: { value: "500.00" },
+          creditUsed: { value: "500.00" }
         }
       }
     }
@@ -171,7 +141,8 @@ const testInputMissingMetafields = {
         company: {
           id: "gid://shopify/Company/987654324",
           name: "Company Without Metafields",
-          metafields: [] // Empty metafields array
+          creditLimit: null,
+          creditUsed: null
         }
       }
     }
