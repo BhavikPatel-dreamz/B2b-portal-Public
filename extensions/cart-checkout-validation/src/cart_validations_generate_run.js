@@ -26,10 +26,23 @@ export function cartValidationsGenerateRun(input) {
     const company = buyerIdentity.purchasingCompany.company;
     console.log('🏢 B2B Customer detected - Company ID:', company.id);
     console.log('🏢 Company Name:', company.name);
+    console.log('🏢 Available metafields:', company.metafields);
 
-    // Extract credit information from metafields using aliases
-    const creditLimit = company.creditLimit?.value ? parseFloat(company.creditLimit.value) : 0;
-    const creditUsed = company.creditUsed?.value ? parseFloat(company.creditUsed.value) : 0;
+    // Extract credit information from metafields array
+    let creditLimit = 0;
+    let creditUsed = 0;
+
+    if (company.metafields) {
+      const creditLimitMetafield = company.metafields.find(m =>
+        m.namespace === 'b2b_credit' && m.key === 'credit_limit'
+      );
+      const creditUsedMetafield = company.metafields.find(m =>
+        m.namespace === 'b2b_credit' && m.key === 'credit_used'
+      );
+
+      creditLimit = creditLimitMetafield?.value ? parseFloat(creditLimitMetafield.value) : 0;
+      creditUsed = creditUsedMetafield?.value ? parseFloat(creditUsedMetafield.value) : 0;
+    }
 
     // Calculate available credit
     const availableCredit = creditLimit - creditUsed;
@@ -41,6 +54,18 @@ export function cartValidationsGenerateRun(input) {
     console.log('💳 Credit Used:', creditUsed);
     console.log('💵 Available Credit:', availableCredit);
     console.log('🛒 Cart Total:', cartTotal);
+
+    // Fallback: Check if customer has B2B metafields if company metafields are not found
+    if (creditLimit === 0 && buyerIdentity?.customer) {
+      console.log('⚠️ No company metafields found, checking customer metafields as fallback');
+      const customer = buyerIdentity.customer;
+      console.log('👤 Customer ID:', customer.id);
+      console.log('👤 Customer metafields available:', !!customer.b2bCompanyId);
+    }
+
+    console.log('💰 Final Credit Limit:', creditLimit);
+    console.log('💳 Final Credit Used:', creditUsed);
+    console.log('💵 Final Available Credit:', availableCredit);
 
     // Only perform credit validation if we have valid credit data
     if (creditLimit > 0) {

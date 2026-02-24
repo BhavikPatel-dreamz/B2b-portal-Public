@@ -5,6 +5,7 @@ import { parseCredit } from "../utils/company.server";
 import {
   getCompanyCustomers,
 } from "app/utils/b2b-customer.server";
+import { syncCompanyCreditMetafields } from "./metafieldSync.server";
 
 export interface CreateCompanyInput {
   shopId: string;
@@ -696,14 +697,11 @@ export async function updateCredit(
     // Sync to Shopify metadata if admin context is available and company has Shopify ID
     if (admin && updatedCompany.shopifyCompanyId) {
       try {
-        await updateCompanyMetafield(admin, updatedCompany.shopifyCompanyId, {
-          namespace: "b2b_credit",
-          key: "credit_limit",
-          value: credit.toString(),
-          type: "number_decimal",
-        });
+        // Use the comprehensive metafield sync function instead of individual metafield updates
+        await syncCompanyCreditMetafields(admin, updatedCompany.id);
+        console.log(`✅ Successfully synced all credit metafields for company ${updatedCompany.id}`);
       } catch (shopifyError) {
-        console.error("Failed to sync credit to Shopify:", shopifyError);
+        console.error("Failed to sync credit metafields to Shopify:", shopifyError);
         // Continue execution - local update succeeded
       }
     }

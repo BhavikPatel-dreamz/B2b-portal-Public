@@ -2,6 +2,12 @@ query CartValidationsGenerateRunInput {
   cart {
     lines {
       quantity
+      merchandise {
+        ... on ProductVariant {
+          id
+          title
+        }
+      }
     }
     cost {
       totalAmount {
@@ -14,7 +20,10 @@ query CartValidationsGenerateRunInput {
       customer {
         id
         email
-        metafield(namespace: "b2b_portal", key: "company_id") {
+        metafield(namespace: "b2b_credit", key: "company_id") {
+          value
+        }
+        b2bCompanyId: metafield(namespace: "b2b_portal", key: "company_id") {
           value
         }
       }
@@ -22,10 +31,12 @@ query CartValidationsGenerateRunInput {
         company {
           id
           name
-          creditLimit: metafield(namespace: "b2b_credit", key: "credit_limit") {
-            value
-          }
-          creditUsed: metafield(namespace: "b2b_credit", key: "credit_used") {
+          metafields(identifiers: [
+            {namespace: "b2b_credit", key: "credit_limit"},
+            {namespace: "b2b_credit", key: "credit_used"}
+          ]) {
+            namespace
+            key
             value
           }
         }
