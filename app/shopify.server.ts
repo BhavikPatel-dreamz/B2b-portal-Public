@@ -9,6 +9,7 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import type { Session } from "@shopify/shopify-api";
 import prisma from "./db.server";
 import { upsertStore } from "./services/store.server";
+import { registerCartValidationFunction } from "./services/cartValidationRegistration.server";
 
 class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> {
   // Upsert store record whenever Shopify saves a session (install or token refresh)
@@ -43,6 +44,24 @@ const shopify = shopifyApp({
   distribution: AppDistribution.AppStore,
   future: {
     expiringOfflineAccessTokens: true,
+  },
+  // Hook to run after app installation/authentication
+  hooks: {
+    afterAuth: async ({ admin }) => {
+      console.log("🔧 Running post-installation setup...");
+
+      // Register cart validation function
+      try {
+        const result = await registerCartValidationFunction(admin);
+        if (result.success) {
+          console.log(`✅ Post-install setup completed: ${result.message}`);
+        } else {
+          console.warn(`⚠️ Post-install setup warning: ${result.message || result.error}`);
+        }
+      } catch (error) {
+        console.error("❌ Error in post-install setup:", error);
+      }
+    },
   },
   // Register webhook endpoints
   webhooks: {
