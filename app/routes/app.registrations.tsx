@@ -1540,7 +1540,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "sendWelcomeEmail": {
         const email = (form.email as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
-        const contactName = (form.contactName as string)?.trim();
         const note = (form.reviewNotes as string)?.trim() || null;
 
         if (!email) {
@@ -1550,6 +1549,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             errors: ["Email required"],
           });
         }
+        const RegitrationData=await prisma.registrationSubmission.findFirst({
+          where:{email}
+        })
 
         await sendCompanyAssignmentEmail(
           store.shopName || "Shop Name",
@@ -1557,7 +1559,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           store.storeOwnerName || "Store Owner",
           email,
           companyName,
-          contactName,
+          RegitrationData?.contactName || "contect Name",
           note || "",
         );
 
