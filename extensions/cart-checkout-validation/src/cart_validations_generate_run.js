@@ -26,21 +26,18 @@ export function cartValidationsGenerateRun(input) {
       input.cart.cost?.totalAmount?.amount || "0"
     );
 
-    const currency =
-      input.cart.cost?.totalAmount?.currencyCode || "";
-
     if (creditLimit > 0) {
       if (creditUsed >= creditLimit) {
         errors.push({
           message:
-            "Company credit limit has been reached. Please contact support.",
+            "Company credit limit has been reached. Please contact support to increase your credit limit.",
           target: "$.cart",
         });
       } else if (cartTotal > availableCredit) {
         errors.push({
-          message: `Insufficient credit. Available: ${availableCredit.toFixed(
+          message: `Insufficient credit. Available credit: $${availableCredit.toFixed(
             2
-          )} ${currency}, Cart total: ${cartTotal.toFixed(2)} ${currency}`,
+          )}, Cart total: $${cartTotal.toFixed(2)}`,
           target: "$.cart",
         });
       }

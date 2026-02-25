@@ -124,21 +124,18 @@ describe("Cart Validation Function", () => {
   });
 
   describe("Credit limit scenarios", () => {
-    it("should block orders when credit is insufficient", () => {
+    it("should skip validation when creditLimit is 0", () => {
       const input = {
         cart: {
-          lines: [
-            { quantity: 1 },
-            { quantity: 3 }
-          ],
+          lines: [{ quantity: 1 }],
           cost: {
-            totalAmount: { amount: "200.00" }
+            totalAmount: { amount: "500.00" }
           },
           buyerIdentity: {
             purchasingCompany: {
               company: {
-                creditLimit: { value: "1000.00" },
-                creditUsed: { value: "900.00" }
+                creditLimit: { value: "0" },
+                creditUsed: { value: "0" }
               }
             }
           }
@@ -146,9 +143,7 @@ describe("Cart Validation Function", () => {
       };
 
       const result = cartValidationsGenerateRun(input);
-      const errors = result.operations[0].validationAdd.errors;
-      expect(errors).toHaveLength(1);
-      expect(errors.some(e => e.message.includes("Insufficient credit"))).toBe(true);
+      expect(result.operations[0].validationAdd.errors).toHaveLength(0);
     });
   });
 });
