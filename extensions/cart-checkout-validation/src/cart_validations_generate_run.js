@@ -17,7 +17,7 @@ export function cartValidationsGenerateRun(input) {
   console.log('🏢 Has purchasing company:', !!input.cart.buyerIdentity?.purchasingCompany);
   console.log('🛒 Cart total:', input.cart.cost?.totalAmount?.amount, input.cart.cost?.totalAmount?.currencyCode);
   console.log('📦 Number of line items:', input.cart.lines?.length || 0);
-  console.log('----------------------------------------', JSON.stringify(input));
+  console.log('----------------------------------------121', JSON.stringify(input));
 
   // Check company credit validation
   const buyerIdentity = input.cart.buyerIdentity;
@@ -56,7 +56,7 @@ export function cartValidationsGenerateRun(input) {
       if (creditUsed >= creditLimit) {
         errors.push({
           message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
-          target: "cart",
+          target: "$.cart",
         });
         console.log('🚫 Credit limit reached validation triggered');
       }
@@ -64,7 +64,7 @@ export function cartValidationsGenerateRun(input) {
       else if (cartTotal > availableCredit) {
         errors.push({
           message: `Insufficient credit. Available credit: $${availableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
-          target: "cart",
+          target: "$.cart",
         });
         console.log('🚫 Insufficient credit validation triggered');
       } else {
