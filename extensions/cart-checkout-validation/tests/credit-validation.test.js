@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { cartValidationsGenerateRun } from "../src/cart_validations_generate_run.js";
 
+
 describe("Cart Validation Function", () => {
   describe("Credit validation", () => {
     it("should allow cart when sufficient credit is available", () => {
@@ -124,18 +125,21 @@ describe("Cart Validation Function", () => {
   });
 
   describe("Credit limit scenarios", () => {
-    it("should skip validation when creditLimit is 0", () => {
+    it("should block orders when credit is insufficient", () => {
       const input = {
         cart: {
-          lines: [{ quantity: 1 }],
+          lines: [
+            { quantity: 1 },
+            { quantity: 3 }
+          ],
           cost: {
-            totalAmount: { amount: "500.00" }
+            totalAmount: { amount: "200.00" }
           },
           buyerIdentity: {
             purchasingCompany: {
               company: {
-                creditLimit: { value: "0" },
-                creditUsed: { value: "0" }
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "900.00" }
               }
             }
           }
@@ -143,7 +147,10 @@ describe("Cart Validation Function", () => {
       };
 
       const result = cartValidationsGenerateRun(input);
-      expect(result.operations[0].validationAdd.errors).toHaveLength(0);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(errors.some(e => e.message.includes("Insufficient credit"))).toBe(true);
     });
   });
 });
+
