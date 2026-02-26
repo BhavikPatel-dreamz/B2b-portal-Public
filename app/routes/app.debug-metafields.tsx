@@ -138,14 +138,14 @@ export async function action({ request }: ActionFunctionArgs) {
           admin,
           company.shopifyCompanyId,
           "b2b_credit",
-          "credit_limit"
+          "company_credit_limit"
         );
 
         const creditUsedMetafield = await getCompanyMetafield(
           admin,
           company.shopifyCompanyId,
           "b2b_credit",
-          "credit_used"
+          "company_credit_used"
         );
 
         return json({
@@ -341,8 +341,8 @@ export default function DebugMetafields() {
             </Text>
 
             <ul style={{ paddingLeft: "20px" }}>
-              <li>Namespace: "b2b_credit", Key: "credit_limit"</li>
-              <li>Namespace: "b2b_credit", Key: "credit_used"</li>
+              <li>Namespace: "b2b_credit", Key: "company_credit_limit"</li>
+              <li>Namespace: "b2b_credit", Key: "company_credit_used"</li>
             </ul>
           </BlockStack>
         </Card>

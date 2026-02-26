@@ -40,8 +40,8 @@ export async function registerCartValidationFunction(admin: AdminApiContext) {
 
     // Find our cart validation function
     const cartValidationFunction = functionsData.data?.shopifyFunctions?.nodes?.find(
-      (fn: CartValidationFunction) => 
-        fn.apiType === "cart_validation" && 
+      (fn: CartValidationFunction) =>
+        fn.apiType === "cart_validation" &&
         (fn.title === "cart-checkout-validation" || fn.title.includes("cart-checkout-validation"))
     );
 
@@ -55,7 +55,7 @@ export async function registerCartValidationFunction(admin: AdminApiContext) {
     // Step 2: Check if already registered
     const validationsQuery = `
       query {
-        cartValidations(first: 10) {
+        validations(first: 10) {
           nodes {
             id
             functionId
@@ -71,14 +71,14 @@ export async function registerCartValidationFunction(admin: AdminApiContext) {
       throw new Error(`Failed to query validations: ${validationsData.errors[0]?.message}`);
     }
 
-    const existingValidation = validationsData.data?.cartValidations?.nodes?.find(
+    const existingValidation = validationsData.data?.validations?.nodes?.find(
       (validation: CartValidation) => validation.functionId === cartValidationFunction.id
     );
 
     if (existingValidation) {
       console.log(`✅ Cart validation already registered: ${existingValidation.id}`);
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: "Cart validation already registered",
         validationId: existingValidation.id
       };
@@ -86,15 +86,14 @@ export async function registerCartValidationFunction(admin: AdminApiContext) {
 
     // Step 3: Register the cart validation
     const registerMutation = `
-      mutation cartValidationCreate($input: CartValidationInput!) {
-        cartValidationCreate(input: $input) {
-          cartValidation {
-            id
-            functionId
-          }
+      mutation validationCreate($validation: ValidationCreateInput!) {
+        validationCreate(validation: $validation) {
           userErrors {
             field
             message
+          }
+          validation {
+            id
           }
         }
       }
@@ -102,28 +101,31 @@ export async function registerCartValidationFunction(admin: AdminApiContext) {
 
     const registerResponse = await admin.graphql(registerMutation, {
       variables: {
-        input: {
+        validation: {
           functionId: cartValidationFunction.id,
+          enable: true,
+          blockOnFailure: true,
+          title: "B2B Cart Credit Validation"
         },
       },
     });
 
     const registerData = await registerResponse.json();
 
-    if (registerData.errors || registerData.data?.cartValidationCreate?.userErrors?.length > 0) {
-      const error = registerData.errors?.[0]?.message || 
-        registerData.data?.cartValidationCreate?.userErrors?.[0]?.message;
+    if (registerData.errors || registerData.data?.validationCreate?.userErrors?.length > 0) {
+      const error = registerData.errors?.[0]?.message ||
+        registerData.data?.validationCreate?.userErrors?.[0]?.message;
       throw new Error(`Failed to register cart validation: ${error}`);
     }
 
-    const validation = registerData.data?.cartValidationCreate?.cartValidation;
+    const validation = registerData.data?.validationCreate?.validation;
     console.log(`🎉 Cart validation registered successfully: ${validation.id}`);
 
     return {
       success: true,
       message: "Cart validation registered successfully",
       validationId: validation.id,
-      functionId: validation.functionId,
+      functionId: cartValidationFunction.id,
     };
 
   } catch (error) {
@@ -141,8 +143,8 @@ export async function registerCartValidationFunction(admin: AdminApiContext) {
 export async function unregisterCartValidationFunction(admin: AdminApiContext, validationId: string) {
   try {
     const deleteMutation = `
-      mutation cartValidationDelete($id: ID!) {
-        cartValidationDelete(id: $id) {
+      mutation validationDelete($id: ID!) {
+        validationDelete(id: $id) {
           deletedId
           userErrors {
             field
@@ -158,14 +160,14 @@ export async function unregisterCartValidationFunction(admin: AdminApiContext, v
 
     const deleteData = await deleteResponse.json();
 
-    if (deleteData.errors || deleteData.data?.cartValidationDelete?.userErrors?.length > 0) {
-      const error = deleteData.errors?.[0]?.message || 
-        deleteData.data?.cartValidationDelete?.userErrors?.[0]?.message;
+    if (deleteData.errors || deleteData.data?.validationDelete?.userErrors?.length > 0) {
+      const error = deleteData.errors?.[0]?.message ||
+        deleteData.data?.validationDelete?.userErrors?.[0]?.message;
       throw new Error(`Failed to unregister cart validation: ${error}`);
     }
 
-    console.log(`🗑️ Cart validation unregistered: ${deleteData.data?.cartValidationDelete?.deletedId}`);
-    return { success: true, deletedId: deleteData.data?.cartValidationDelete?.deletedId };
+    console.log(`🗑️ Cart validation unregistered: ${deleteData.data?.validationDelete?.deletedId}`);
+    return { success: true, deletedId: deleteData.data?.validationDelete?.deletedId };
 
   } catch (error) {
     console.error("❌ Error unregistering cart validation function:", error);
