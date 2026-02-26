@@ -1,10 +1,8 @@
 import { ActionFunction, LoaderFunction, json } from "@remix-run/node";
 import { useLoaderData, useActionData, Form } from "@remix-run/react";
-import { authenticate } from "~/shopify.server";
-import {
-  registerCartValidationFunction,
-  unregisterCartValidationFunction
-} from "~/services/cartValidationRegistration.server";
+import { registerCartValidationFunction, unregisterCartValidationFunction } from "app/services/cartValidationRegistration.server";
+import { authenticate } from "app/shopify.server";
+
 
 export const loader: LoaderFunction = async ({ request }) => {
   try {

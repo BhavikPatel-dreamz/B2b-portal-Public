@@ -1,0 +1,10 @@
+query CartValidationsGenerateRunInput {
+  cart {
+    deliveryGroups {
+      deliveryAddress {
+        address1
+        address2
+      }
+    }
+  }
+}

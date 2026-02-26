@@ -17,8 +17,9 @@ import {
   Banner,
   CalloutCard,
 } from "@shopify/polaris";
-import { authenticate } from "~/shopify.server";
-import { registerCartValidationFunction, unregisterCartValidationFunction } from "~/services/cartValidationRegistration.server";
+import { registerCartValidationFunction, unregisterCartValidationFunction } from "app/services/cartValidationRegistration.server";
+import { authenticate } from "app/shopify.server";
+
 
 interface ShopifyFunction {
   id: string;
