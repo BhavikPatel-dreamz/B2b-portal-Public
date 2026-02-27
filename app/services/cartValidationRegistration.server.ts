@@ -133,7 +133,7 @@ export async function registerCartValidationFunction(
     };
   }
 }
-}
+
 
 /**
  * Unregister Cart Validation function (useful for cleanup or re-registration)
