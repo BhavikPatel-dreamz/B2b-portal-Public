@@ -30,17 +30,20 @@ export async function registerCartValidationFunction(
   try {
     console.log("🔄 Checking Cart Validation function registration...");
 
-    // Step 1: Find our cart validation function
+    // Step 1: Find our cart validation function - EXACT query as user provided
     const functionsQuery = `
-      query {
+      query MyQuery {
         shopifyFunctions(first: 250) {
-          nodes {
-            id
-            title
-            apiType
-            app {
-              apiKey
+          edges {
+            node {
               id
+              handle
+              app {
+                apiKey
+                handle
+                id
+                title
+              }
               title
             }
           }
@@ -55,94 +58,23 @@ export async function registerCartValidationFunction(
       throw new Error(`Failed to query functions: ${functionsData.errors[0]?.message}`);
     }
 
-    // Debug: Log all available functions
-    const availableFunctions = functionsData.data?.shopifyFunctions?.nodes || [];
-    console.log(`📋 Found ${availableFunctions.length} total Shopify Functions:`);
+    console.log("📋 Function query response:", JSON.stringify(functionsData, null, 2));
 
-    availableFunctions.forEach((fn: CartValidationFunction) => {
-      console.log(`  - ${fn.title} (id: ${fn.id}, apiType: ${fn.apiType}, app: ${fn.app?.title || 'N/A'})`);
-    });
-
-    // Find cart validation functions with flexible matching
-    const cartValidationFunctions = availableFunctions.filter((fn: CartValidationFunction) => {
-      const isCartValidation = fn.apiType === "cart_checkout_validation" || fn.apiType === "cart_validation";
-      const hasValidationTitle = fn.title && (
-        fn.title.toLowerCase().includes("cart") && fn.title.toLowerCase().includes("validation") ||
-        fn.title.toLowerCase().includes("checkout") ||
-        fn.title === "cart-checkout-validation"
-      );
-      return isCartValidation || hasValidationTitle;
-    });
-
-    console.log(`🎯 Found ${cartValidationFunctions.length} potential cart validation functions:`);
-    cartValidationFunctions.forEach((fn: CartValidationFunction) => {
-      console.log(`  - ${fn.title} (id: ${fn.id}, apiType: ${fn.apiType})`);
-    });
-
-    // Try to find the best match
-    const cartValidationFunction = cartValidationFunctions.find((fn: CartValidationFunction) =>
-      fn.apiType === "cart_checkout_validation" || fn.apiType === "cart_validation"
-    ) || cartValidationFunctions.find((fn: CartValidationFunction) =>
-      fn.title === "cart-checkout-validation"
-    ) || cartValidationFunctions[0]; // Fallback to first found
-
-    if (!cartValidationFunction) {
-      console.log("❌ No cart validation function found");
-      console.log("📊 Available function types:", [...new Set(availableFunctions.map(fn => fn.apiType))]);
-      return {
-        success: false,
-        message: "Cart validation function not found",
-        debug: {
-          totalFunctions: availableFunctions.length,
-          availableTypes: [...new Set(availableFunctions.map(fn => fn.apiType))],
-          allFunctions: availableFunctions.map(fn => ({ title: fn.title, apiType: fn.apiType, id: fn.id }))
-        }
-      };
-    }
-
-    console.log(`📋 Found cart validation function: ${cartValidationFunction.title} (id: ${cartValidationFunction.id}, apiType: ${cartValidationFunction.apiType})`);
-    console.log(`📱 App details: ${cartValidationFunction.app.title} (${cartValidationFunction.app.id})`);
-
-    // Step 2: Skip duplicate check for now due to schema issues
-    console.log("⏭️ Skipping duplicate validation check - proceeding with registration...");
-
-    /*
-    // Commented out due to schema issues - "Field 'function' doesn't exist on type 'Validation'"
-    const validationsQuery = `
-      query {
-        validations(first: 10) {
-          nodes {
-            id
-            function {
-              id
-            }
-          }
-        }
-      }
-    `;
-
-    const validationsResponse = await admin.graphql(validationsQuery);
-    const validationsData = await validationsResponse.json();
-
-    if (validationsData.errors) {
-      throw new Error(`Failed to query validations: ${validationsData.errors[0]?.message}`);
-    }
-
-    const existingValidation = validationsData.data?.validations?.nodes?.find(
-      (validation: any) => validation.function?.id === cartValidationFunction.id
+    // Find our cart validation function using handle
+    const cartValidationEdge = functionsData.data?.shopifyFunctions?.edges?.find(
+      (edge: any) => edge.node.handle === "cart-checkout-validation"
     );
 
-    if (existingValidation) {
-      console.log(`✅ Cart validation already registered: ${existingValidation.id}`);
-      return {
-        success: true,
-        message: "Cart validation already registered",
-        validationId: existingValidation.id
-      };
+    if (!cartValidationEdge) {
+      console.log("❌ Cart validation function not found");
+      return { success: false, message: "cart-checkout-validation function not found" };
     }
-    */
 
-    // Step 3: Register the cart validation using functionHandle
+    const cartValidationFunction = cartValidationEdge.node;
+    console.log(`📋 Found cart validation function: ${cartValidationFunction.title} (handle: ${cartValidationFunction.handle}, id: ${cartValidationFunction.id})`);
+    console.log(`📱 App details: ${cartValidationFunction.app.title} (${cartValidationFunction.app.handle})`);
+
+    // Step 2: Register the cart validation using EXACT user example
     const registerMutation = `
       mutation validationCreate($validation: ValidationCreateInput!) {
         validationCreate(validation: $validation) {
@@ -157,14 +89,20 @@ export async function registerCartValidationFunction(
       }
     `;
 
+    // EXACT input as user provided
+    const validationInput = {
+      "validation": {
+        "functionHandle": "cart-checkout-validation",
+        "enable": true,
+        "blockOnFailure": true,
+        "title": validationTitle
+      }
+    };
+
+    console.log("🚀 Creating validation with EXACT user input:", JSON.stringify(validationInput, null, 2));
+
     const registerResponse = await admin.graphql(registerMutation, {
-      variables: {
-        validation: {
-          functionId: cartValidationFunction.id,
-          blockOnFailure: true,
-          title: validationTitle
-        },
-      },
+      variables: validationInput
     });
 
     const registerData = await registerResponse.json();
@@ -172,85 +110,20 @@ export async function registerCartValidationFunction(
     if (registerData.errors || registerData.data?.validationCreate?.userErrors?.length > 0) {
       const error = registerData.errors?.[0]?.message ||
         registerData.data?.validationCreate?.userErrors?.[0]?.message;
+      throw new Error(`Failed to register cart validation: ${error}`);
+    }
 
-      console.log("🔄 First attempt failed, trying alternative input structures...");
-      console.log("❌ Error:", error);
+    const validation = registerData.data?.validationCreate?.validation;
+    console.log(`🎉 Cart validation registered successfully: ${validation.id}`);
 
-      // Try multiple alternative input structures (removed invalid 'enabled' field)
-      const retryAttempts = [
-        {
-          name: "functionHandle approach",
-          input: {
-            functionHandle: "cart-checkout-validation",
-            blockOnFailure: true,
-            title: validationTitle
-          }
-        },
-        {
-          name: "enable field approach",
-          input: {
-            functionId: cartValidationFunction.id,
-            enable: true,  // Try 'enable' instead of 'enabled'
-            blockOnFailure: true,
-            title: validationTitle
-          }
-        },
-        {
-          name: "minimal functionId approach",
-          input: {
-            functionId: cartValidationFunction.id,
-            title: validationTitle
-          }
-        },
-        {
-          name: "minimal functionHandle approach",
-          input: {
-            functionHandle: "cart-checkout-validation",
-            title: validationTitle
-          }
-        },
-        {
-          name: "active field approach",
-          input: {
-            functionId: cartValidationFunction.id,
-            active: true,
-            blockOnFailure: true,
-            title: validationTitle
-          }
-        }
-      ];
-
-      for (const attempt of retryAttempts) {
-        console.log(`🔄 Trying ${attempt.name}...`);
-
-        try {
-          const retryResponse = await admin.graphql(registerMutation, {
-            variables: { validation: attempt.input },
-          });
-
-          const retryData = await retryResponse.json();
-
-          if (!retryData.errors && (!retryData.data?.validationCreate?.userErrors || retryData.data?.validationCreate?.userErrors?.length === 0)) {
-            const validation = retryData.data?.validationCreate?.validation;
-            console.log(`🎉 Cart validation registered successfully with ${attempt.name}: ${validation.id}`);
-
-            return {
-              success: true,
-              message: `Cart validation registered successfully using ${attempt.name}`,
-              validationId: validation.id,
-              functionId: cartValidationFunction.id,
-              functionApiType: cartValidationFunction.apiType,
-              appDetails: cartValidationFunction.app,
-            };
-          } else {
-            const retryError = retryData.errors?.[0]?.message ||
-              retryData.data?.validationCreate?.userErrors?.[0]?.message;
-            console.log(`❌ ${attempt.name} failed:`, retryError);
-          }
-        } catch (retryException) {
-          console.log(`❌ ${attempt.name} threw exception:`, retryException);
-        }
-      }
+    return {
+      success: true,
+      message: "Cart validation registered successfully using exact user example",
+      validationId: validation.id,
+      functionHandle: cartValidationFunction.handle,
+      functionId: cartValidationFunction.id,
+      appDetails: cartValidationFunction.app,
+    };
 
       // All attempts failed
       throw new Error(`Failed to register cart validation - all attempts failed. Last error: ${error}`);
