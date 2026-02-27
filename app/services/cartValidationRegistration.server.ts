@@ -125,22 +125,6 @@ export async function registerCartValidationFunction(
       appDetails: cartValidationFunction.app,
     };
 
-      // All attempts failed
-      throw new Error(`Failed to register cart validation - all attempts failed. Last error: ${error}`);
-    }
-
-    const validation = registerData.data?.validationCreate?.validation;
-    console.log(`🎉 Cart validation registered successfully: ${validation.id}`);
-
-    return {
-      success: true,
-      message: "Cart validation registered successfully using function ID",
-      validationId: validation.id,
-      functionId: cartValidationFunction.id,
-      functionApiType: cartValidationFunction.apiType,
-      appDetails: cartValidationFunction.app,
-    };
-
   } catch (error) {
     console.error("❌ Error registering cart validation function:", error);
     return {
@@ -148,6 +132,7 @@ export async function registerCartValidationFunction(
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
+}
 }
 
 /**
