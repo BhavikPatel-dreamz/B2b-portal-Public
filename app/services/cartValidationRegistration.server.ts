@@ -242,7 +242,6 @@ export async function registerCartValidationFunction(
       // All attempts failed
       throw new Error(`Failed to register cart validation - all attempts failed. Last error: ${error}`);
     }
-    }
 
     const validation = registerData.data?.validationCreate?.validation;
     console.log(`🎉 Cart validation registered successfully: ${validation.id}`);
