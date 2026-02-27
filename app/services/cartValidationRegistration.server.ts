@@ -13,7 +13,9 @@ interface CartValidationFunction {
 
 interface CartValidation {
   id: string;
-  functionId: string;
+  function: {
+    id: string;
+  };
 }
 
 /**
@@ -63,7 +65,7 @@ export async function registerCartValidationFunction(
 
     // Find cart validation functions with flexible matching
     const cartValidationFunctions = availableFunctions.filter((fn: CartValidationFunction) => {
-      const isCartValidation = fn.apiType === "cart_validation";
+      const isCartValidation = fn.apiType === "cart_checkout_validation" || fn.apiType === "cart_validation";
       const hasValidationTitle = fn.title && (
         fn.title.toLowerCase().includes("cart") && fn.title.toLowerCase().includes("validation") ||
         fn.title.toLowerCase().includes("checkout") ||
@@ -79,7 +81,7 @@ export async function registerCartValidationFunction(
 
     // Try to find the best match
     const cartValidationFunction = cartValidationFunctions.find((fn: CartValidationFunction) =>
-      fn.apiType === "cart_validation"
+      fn.apiType === "cart_checkout_validation" || fn.apiType === "cart_validation"
     ) || cartValidationFunctions.find((fn: CartValidationFunction) =>
       fn.title === "cart-checkout-validation"
     ) || cartValidationFunctions[0]; // Fallback to first found
@@ -107,7 +109,9 @@ export async function registerCartValidationFunction(
         validations(first: 10) {
           nodes {
             id
-            functionId
+            function {
+              id
+            }
           }
         }
       }
@@ -121,7 +125,7 @@ export async function registerCartValidationFunction(
     }
 
     const existingValidation = validationsData.data?.validations?.nodes?.find(
-      (validation: CartValidation) => validation.functionId === cartValidationFunction.id
+      (validation: any) => validation.function?.id === cartValidationFunction.id
     );
 
     if (existingValidation) {
@@ -152,7 +156,7 @@ export async function registerCartValidationFunction(
       variables: {
         validation: {
           functionId: cartValidationFunction.id,
-          enable: true,
+          enabled: true,
           blockOnFailure: true,
           title: validationTitle
         },
@@ -164,6 +168,43 @@ export async function registerCartValidationFunction(
     if (registerData.errors || registerData.data?.validationCreate?.userErrors?.length > 0) {
       const error = registerData.errors?.[0]?.message ||
         registerData.data?.validationCreate?.userErrors?.[0]?.message;
+
+      // If functionId doesn't work, try with different field structure
+      if (error?.includes("functionId") || error?.includes("Field")) {
+        console.log("🔄 Retrying with alternative input structure...");
+
+        const retryResponse = await admin.graphql(registerMutation, {
+          variables: {
+            validation: {
+              function: cartValidationFunction.id,
+              enabled: true,
+              blockOnFailure: true,
+              title: validationTitle
+            },
+          },
+        });
+
+        const retryData = await retryResponse.json();
+
+        if (retryData.errors || retryData.data?.validationCreate?.userErrors?.length > 0) {
+          const retryError = retryData.errors?.[0]?.message ||
+            retryData.data?.validationCreate?.userErrors?.[0]?.message;
+          throw new Error(`Failed to register cart validation (retry): ${retryError}`);
+        }
+
+        const validation = retryData.data?.validationCreate?.validation;
+        console.log(`🎉 Cart validation registered successfully (retry): ${validation.id}`);
+
+        return {
+          success: true,
+          message: "Cart validation registered successfully using function ID (retry approach)",
+          validationId: validation.id,
+          functionId: cartValidationFunction.id,
+          functionApiType: cartValidationFunction.apiType,
+          appDetails: cartValidationFunction.app,
+        };
+      }
+
       throw new Error(`Failed to register cart validation: ${error}`);
     }
 
@@ -277,7 +318,7 @@ export async function registerCartValidationWithExactQuery(
 
     // Find cart-checkout-validation function by apiType and title patterns with flexible matching
     const targetFunction = availableFunctions.find((fn: CartValidationFunction) =>
-      fn.apiType === "cart_validation"
+      fn.apiType === "cart_checkout_validation" || fn.apiType === "cart_validation"
     ) || availableFunctions.find((fn: CartValidationFunction) =>
       fn.title === "cart-checkout-validation" || fn.title.includes("cart-checkout-validation")
     ) || availableFunctions.find((fn: CartValidationFunction) =>
@@ -315,11 +356,11 @@ export async function registerCartValidationWithExactQuery(
       }
     `;
 
-    // Updated input using functionId instead of functionHandle
+    // Updated input using functionId with enabled field
     const mutationInput = {
       validation: {
         functionId: targetFunction.id,
-        enable: true,
+        enabled: true,
         blockOnFailure: true,
         title: validationTitle
       }
@@ -336,6 +377,43 @@ export async function registerCartValidationWithExactQuery(
     if (createData.errors || createData.data?.validationCreate?.userErrors?.length > 0) {
       const error = createData.errors?.[0]?.message ||
         createData.data?.validationCreate?.userErrors?.[0]?.message;
+
+      // If functionId doesn't work, try with different field structure
+      if (error?.includes("functionId") || error?.includes("Field")) {
+        console.log("🔄 Retrying exact query with alternative input structure...");
+
+        const retryInput = {
+          validation: {
+            function: targetFunction.id,
+            enabled: true,
+            blockOnFailure: true,
+            title: validationTitle
+          }
+        };
+
+        const retryResponse = await admin.graphql(validationCreateMutation, {
+          variables: retryInput
+        });
+
+        const retryData = await retryResponse.json();
+
+        if (retryData.errors || retryData.data?.validationCreate?.userErrors?.length > 0) {
+          const retryError = retryData.errors?.[0]?.message ||
+            retryData.data?.validationCreate?.userErrors?.[0]?.message;
+          throw new Error(`Failed to create validation (exact query retry): ${retryError}`);
+        }
+
+        const validation = retryData.data?.validationCreate?.validation;
+        console.log(`🎉 Validation created successfully (retry):`, validation);
+
+        return {
+          success: true,
+          message: "Cart validation created using exact query approach (retry)",
+          validationId: validation.id,
+          functionData: targetFunction,
+        };
+      }
+
       throw new Error(`Failed to create validation: ${error}`);
     }
 

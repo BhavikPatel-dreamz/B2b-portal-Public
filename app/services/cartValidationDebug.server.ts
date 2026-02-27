@@ -86,7 +86,9 @@ export class CartValidationDebugService {
           validations(first: 50) {
             nodes {
               id
-              functionId
+              function {
+                id
+              }
               enabled
               title
               blockOnFailure
