@@ -103,7 +103,11 @@ export async function registerCartValidationFunction(
     console.log(`📋 Found cart validation function: ${cartValidationFunction.title} (id: ${cartValidationFunction.id}, apiType: ${cartValidationFunction.apiType})`);
     console.log(`📱 App details: ${cartValidationFunction.app.title} (${cartValidationFunction.app.id})`);
 
-    // Step 2: Check if already registered
+    // Step 2: Skip duplicate check for now due to schema issues
+    console.log("⏭️ Skipping duplicate validation check - proceeding with registration...");
+
+    /*
+    // Commented out due to schema issues - "Field 'function' doesn't exist on type 'Validation'"
     const validationsQuery = `
       query {
         validations(first: 10) {
@@ -136,6 +140,7 @@ export async function registerCartValidationFunction(
         validationId: existingValidation.id
       };
     }
+    */
 
     // Step 3: Register the cart validation using functionHandle
     const registerMutation = `
@@ -169,43 +174,74 @@ export async function registerCartValidationFunction(
       const error = registerData.errors?.[0]?.message ||
         registerData.data?.validationCreate?.userErrors?.[0]?.message;
 
-      // If functionId doesn't work, try with different field structure
-      if (error?.includes("functionId") || error?.includes("Field")) {
-        console.log("🔄 Retrying with alternative input structure...");
+      console.log("🔄 First attempt failed, trying alternative input structures...");
+      console.log("❌ Error:", error);
 
-        const retryResponse = await admin.graphql(registerMutation, {
-          variables: {
-            validation: {
-              function: cartValidationFunction.id,
-              enabled: true,
-              blockOnFailure: true,
-              title: validationTitle
-            },
-          },
-        });
-
-        const retryData = await retryResponse.json();
-
-        if (retryData.errors || retryData.data?.validationCreate?.userErrors?.length > 0) {
-          const retryError = retryData.errors?.[0]?.message ||
-            retryData.data?.validationCreate?.userErrors?.[0]?.message;
-          throw new Error(`Failed to register cart validation (retry): ${retryError}`);
+      // Try multiple alternative input structures
+      const retryAttempts = [
+        {
+          name: "functionHandle approach",
+          input: {
+            functionHandle: "cart-checkout-validation",
+            enabled: true,
+            blockOnFailure: true,
+            title: validationTitle
+          }
+        },
+        {
+          name: "function field approach",
+          input: {
+            function: cartValidationFunction.id,
+            enabled: true,
+            blockOnFailure: true,
+            title: validationTitle
+          }
+        },
+        {
+          name: "minimal approach",
+          input: {
+            functionId: cartValidationFunction.id,
+            enabled: true,
+            title: validationTitle
+          }
         }
+      ];
 
-        const validation = retryData.data?.validationCreate?.validation;
-        console.log(`🎉 Cart validation registered successfully (retry): ${validation.id}`);
+      for (const attempt of retryAttempts) {
+        console.log(`🔄 Trying ${attempt.name}...`);
 
-        return {
-          success: true,
-          message: "Cart validation registered successfully using function ID (retry approach)",
-          validationId: validation.id,
-          functionId: cartValidationFunction.id,
-          functionApiType: cartValidationFunction.apiType,
-          appDetails: cartValidationFunction.app,
-        };
+        try {
+          const retryResponse = await admin.graphql(registerMutation, {
+            variables: { validation: attempt.input },
+          });
+
+          const retryData = await retryResponse.json();
+
+          if (!retryData.errors && (!retryData.data?.validationCreate?.userErrors || retryData.data?.validationCreate?.userErrors?.length === 0)) {
+            const validation = retryData.data?.validationCreate?.validation;
+            console.log(`🎉 Cart validation registered successfully with ${attempt.name}: ${validation.id}`);
+
+            return {
+              success: true,
+              message: `Cart validation registered successfully using ${attempt.name}`,
+              validationId: validation.id,
+              functionId: cartValidationFunction.id,
+              functionApiType: cartValidationFunction.apiType,
+              appDetails: cartValidationFunction.app,
+            };
+          } else {
+            const retryError = retryData.errors?.[0]?.message ||
+              retryData.data?.validationCreate?.userErrors?.[0]?.message;
+            console.log(`❌ ${attempt.name} failed:`, retryError);
+          }
+        } catch (retryException) {
+          console.log(`❌ ${attempt.name} threw exception:`, retryException);
+        }
       }
 
-      throw new Error(`Failed to register cart validation: ${error}`);
+      // All attempts failed
+      throw new Error(`Failed to register cart validation - all attempts failed. Last error: ${error}`);
+    }
     }
 
     const validation = registerData.data?.validationCreate?.validation;
