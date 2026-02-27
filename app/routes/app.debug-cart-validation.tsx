@@ -98,6 +98,13 @@ export default function DebugCartValidation() {
 
               <Button
                 loading={isLoading}
+                onClick={() => handleAction("debug_all_functions")}
+              >
+                🔍 Debug Function Discovery
+              </Button>
+
+              <Button
+                loading={isLoading}
                 onClick={() => handleAction("list_validations")}
               >
                 📋 List All Validations

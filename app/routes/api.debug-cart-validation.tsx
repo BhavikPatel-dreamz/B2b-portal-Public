@@ -17,6 +17,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "list_functions":
         return json(await CartValidationDebugService.listAllShopifyFunctions(admin));
 
+      case "debug_all_functions":
+        return json(await CartValidationDebugService.debugListAllFunctions(admin));
+
       case "list_validations":
         return json(await CartValidationDebugService.listAllValidations(admin));
 

@@ -2,7 +2,8 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import {
   registerCartValidationFunction,
   registerCartValidationWithExactQuery,
-  unregisterCartValidationFunction
+  unregisterCartValidationFunction,
+  debugListAllShopifyFunctions
 } from "./cartValidationRegistration.server";
 
 /**
@@ -24,6 +25,14 @@ export class CartValidationDebugService {
   static async testExactQueryRegistration(admin: AdminApiContext, customTitle?: string) {
     console.log("🧪 Testing exact query registration approach...");
     return await registerCartValidationWithExactQuery(admin, customTitle);
+  }
+
+  /**
+   * Debug list all available Shopify Functions with detailed output
+   */
+  static async debugListAllFunctions(admin: AdminApiContext) {
+    console.log("🧪 Testing enhanced function discovery...");
+    return await debugListAllShopifyFunctions(admin);
   }
 
   /**

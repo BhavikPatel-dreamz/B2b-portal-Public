@@ -53,16 +53,49 @@ export async function registerCartValidationFunction(
       throw new Error(`Failed to query functions: ${functionsData.errors[0]?.message}`);
     }
 
-    // Find our cart validation function by apiType and title
-    const cartValidationFunction = functionsData.data?.shopifyFunctions?.nodes?.find(
-      (fn: CartValidationFunction) =>
-        fn.apiType === "cart_validation" &&
-        (fn.title === "cart-checkout-validation" || fn.title.includes("cart-checkout-validation"))
-    );
+    // Debug: Log all available functions
+    const availableFunctions = functionsData.data?.shopifyFunctions?.nodes || [];
+    console.log(`📋 Found ${availableFunctions.length} total Shopify Functions:`);
+
+    availableFunctions.forEach((fn: CartValidationFunction) => {
+      console.log(`  - ${fn.title} (id: ${fn.id}, apiType: ${fn.apiType}, app: ${fn.app?.title || 'N/A'})`);
+    });
+
+    // Find cart validation functions with flexible matching
+    const cartValidationFunctions = availableFunctions.filter((fn: CartValidationFunction) => {
+      const isCartValidation = fn.apiType === "cart_validation";
+      const hasValidationTitle = fn.title && (
+        fn.title.toLowerCase().includes("cart") && fn.title.toLowerCase().includes("validation") ||
+        fn.title.toLowerCase().includes("checkout") ||
+        fn.title === "cart-checkout-validation"
+      );
+      return isCartValidation || hasValidationTitle;
+    });
+
+    console.log(`🎯 Found ${cartValidationFunctions.length} potential cart validation functions:`);
+    cartValidationFunctions.forEach((fn: CartValidationFunction) => {
+      console.log(`  - ${fn.title} (id: ${fn.id}, apiType: ${fn.apiType})`);
+    });
+
+    // Try to find the best match
+    const cartValidationFunction = cartValidationFunctions.find((fn: CartValidationFunction) =>
+      fn.apiType === "cart_validation"
+    ) || cartValidationFunctions.find((fn: CartValidationFunction) =>
+      fn.title === "cart-checkout-validation"
+    ) || cartValidationFunctions[0]; // Fallback to first found
 
     if (!cartValidationFunction) {
-      console.log("ℹ️ Cart validation function not found - may not be deployed yet");
-      return { success: false, message: "Cart validation function not found" };
+      console.log("❌ No cart validation function found");
+      console.log("📊 Available function types:", [...new Set(availableFunctions.map(fn => fn.apiType))]);
+      return {
+        success: false,
+        message: "Cart validation function not found",
+        debug: {
+          totalFunctions: availableFunctions.length,
+          availableTypes: [...new Set(availableFunctions.map(fn => fn.apiType))],
+          allFunctions: availableFunctions.map(fn => ({ title: fn.title, apiType: fn.apiType, id: fn.id }))
+        }
+      };
     }
 
     console.log(`📋 Found cart validation function: ${cartValidationFunction.title} (id: ${cartValidationFunction.id}, apiType: ${cartValidationFunction.apiType})`);
@@ -234,15 +267,35 @@ export async function registerCartValidationWithExactQuery(
 
     console.log("📋 Function query response:", JSON.stringify(functionsData, null, 2));
 
-// Find cart-checkout-validation function by apiType and title patterns
-    const targetFunction = functionsData.data?.shopifyFunctions?.nodes?.find(
-      (fn: CartValidationFunction) =>
-        fn.apiType === "cart_validation" &&
-        (fn.title === "cart-checkout-validation" || fn.title.includes("cart-checkout-validation"))
+    // Debug: Log all available functions
+    const availableFunctions = functionsData.data?.shopifyFunctions?.nodes || [];
+    console.log(`📋 Found ${availableFunctions.length} total functions for exact query approach:`);
+
+    availableFunctions.forEach((fn: CartValidationFunction) => {
+      console.log(`  - ${fn.title} (id: ${fn.id}, apiType: ${fn.apiType}, app: ${fn.app?.title || 'N/A'})`);
+    });
+
+    // Find cart-checkout-validation function by apiType and title patterns with flexible matching
+    const targetFunction = availableFunctions.find((fn: CartValidationFunction) =>
+      fn.apiType === "cart_validation"
+    ) || availableFunctions.find((fn: CartValidationFunction) =>
+      fn.title === "cart-checkout-validation" || fn.title.includes("cart-checkout-validation")
+    ) || availableFunctions.find((fn: CartValidationFunction) =>
+      fn.title && (fn.title.toLowerCase().includes("cart") || fn.title.toLowerCase().includes("validation"))
     );
 
     if (!targetFunction) {
-      return { success: false, message: "cart-checkout-validation function not found" };
+      console.log("❌ No matching function found for exact query approach");
+      console.log("📊 Available function types:", [...new Set(availableFunctions.map(fn => fn.apiType))]);
+      return {
+        success: false,
+        message: "cart-checkout-validation function not found",
+        debug: {
+          totalFunctions: availableFunctions.length,
+          availableTypes: [...new Set(availableFunctions.map(fn => fn.apiType))],
+          allFunctions: availableFunctions.map(fn => ({ title: fn.title, apiType: fn.apiType, id: fn.id }))
+        }
+      };
     }
 
     console.log(`✅ Found function:`, targetFunction);
@@ -298,6 +351,80 @@ export async function registerCartValidationWithExactQuery(
 
   } catch (error) {
     console.error("❌ Error in exact query implementation:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
+ * Debug utility to list all available Shopify Functions
+ * Useful for troubleshooting when cart validation function isn't found
+ */
+export async function debugListAllShopifyFunctions(admin: AdminApiContext) {
+  try {
+    console.log("🔍 Debug: Listing ALL Shopify Functions...");
+
+    const functionsQuery = `
+      query {
+        shopifyFunctions(first: 250) {
+          nodes {
+            id
+            title
+            apiType
+            app {
+              apiKey
+              id
+              title
+            }
+          }
+        }
+      }
+    `;
+
+    const functionsResponse = await admin.graphql(functionsQuery);
+    const functionsData = await functionsResponse.json();
+
+    if (functionsData.errors) {
+      throw new Error(`Failed to query functions: ${functionsData.errors[0]?.message}`);
+    }
+
+    const availableFunctions = functionsData.data?.shopifyFunctions?.nodes || [];
+
+    console.log("=" .repeat(80));
+    console.log(`📋 COMPLETE FUNCTION LIST (${availableFunctions.length} total):`);
+    console.log("=" .repeat(80));
+
+    // Group by apiType for better visibility
+    const groupedFunctions = availableFunctions.reduce((groups: any, fn: CartValidationFunction) => {
+      const type = fn.apiType || 'unknown';
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(fn);
+      return groups;
+    }, {});
+
+    Object.entries(groupedFunctions).forEach(([apiType, functions]: [string, any]) => {
+      console.log(`\n🏷️ ${apiType.toUpperCase()} (${functions.length} functions):`);
+      functions.forEach((fn: CartValidationFunction) => {
+        console.log(`  • ${fn.title}`);
+        console.log(`    ID: ${fn.id}`);
+        console.log(`    App: ${fn.app?.title || 'N/A'} (${fn.app?.id || 'N/A'})`);
+        console.log("");
+      });
+    });
+
+    console.log("=" .repeat(80));
+
+    return {
+      success: true,
+      totalFunctions: availableFunctions.length,
+      functionsByType: groupedFunctions,
+      allFunctions: availableFunctions,
+    };
+
+  } catch (error) {
+    console.error("❌ Error listing Shopify Functions:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

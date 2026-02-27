@@ -9,7 +9,7 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import type { Session } from "@shopify/shopify-api";
 import prisma from "./db.server";
 import { upsertStore } from "./services/store.server";
-import { registerCartValidationFunction } from "./services/cartValidationRegistration.server";
+import { registerCartValidationFunction, debugListAllShopifyFunctions } from "./services/cartValidationRegistration.server";
 
 class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> {
   // Upsert store record whenever Shopify saves a session (install or token refresh)
@@ -50,6 +50,19 @@ const shopify = shopifyApp({
     afterAuth: async ({ admin }) => {
       console.log("🔧 Running post-installation setup...");
 
+      // First, debug what functions are available
+      try {
+        console.log("🔍 Running debug function listing...");
+        const debugResult = await debugListAllShopifyFunctions(admin);
+        if (debugResult.success) {
+          console.log(`✅ Debug listing completed - found ${debugResult.totalFunctions} total functions`);
+        } else {
+          console.warn(`⚠️ Debug listing failed: ${debugResult.error}`);
+        }
+      } catch (error) {
+        console.error("❌ Error in debug function listing:", error);
+      }
+
       // Register cart validation function
       try {
         const result = await registerCartValidationFunction(admin);
@@ -57,6 +70,9 @@ const shopify = shopifyApp({
           console.log(`✅ Post-install setup completed: ${result.message}`);
         } else {
           console.warn(`⚠️ Post-install setup warning: ${result.message || result.error}`);
+          if (result.debug) {
+            console.log("🐛 Debug info:", JSON.stringify(result.debug, null, 2));
+          }
         }
       } catch (error) {
         console.error("❌ Error in post-install setup:", error);
