@@ -161,7 +161,6 @@ export async function registerCartValidationFunction(
       variables: {
         validation: {
           functionId: cartValidationFunction.id,
-          enabled: true,
           blockOnFailure: true,
           title: validationTitle
         },
@@ -177,31 +176,45 @@ export async function registerCartValidationFunction(
       console.log("🔄 First attempt failed, trying alternative input structures...");
       console.log("❌ Error:", error);
 
-      // Try multiple alternative input structures
+      // Try multiple alternative input structures (removed invalid 'enabled' field)
       const retryAttempts = [
         {
           name: "functionHandle approach",
           input: {
             functionHandle: "cart-checkout-validation",
-            enabled: true,
             blockOnFailure: true,
             title: validationTitle
           }
         },
         {
-          name: "function field approach",
-          input: {
-            function: cartValidationFunction.id,
-            enabled: true,
-            blockOnFailure: true,
-            title: validationTitle
-          }
-        },
-        {
-          name: "minimal approach",
+          name: "enable field approach",
           input: {
             functionId: cartValidationFunction.id,
-            enabled: true,
+            enable: true,  // Try 'enable' instead of 'enabled'
+            blockOnFailure: true,
+            title: validationTitle
+          }
+        },
+        {
+          name: "minimal functionId approach",
+          input: {
+            functionId: cartValidationFunction.id,
+            title: validationTitle
+          }
+        },
+        {
+          name: "minimal functionHandle approach",
+          input: {
+            functionHandle: "cart-checkout-validation",
+            title: validationTitle
+          }
+        },
+        {
+          name: "active field approach",
+          input: {
+            functionId: cartValidationFunction.id,
+            active: true,
+            blockOnFailure: true,
             title: validationTitle
           }
         }
@@ -391,11 +404,10 @@ export async function registerCartValidationWithExactQuery(
       }
     `;
 
-    // Updated input using functionId with enabled field
+    // Updated input using functionId (removed invalid enabled field)
     const mutationInput = {
       validation: {
         functionId: targetFunction.id,
-        enabled: true,
         blockOnFailure: true,
         title: validationTitle
       }
@@ -420,7 +432,6 @@ export async function registerCartValidationWithExactQuery(
         const retryInput = {
           validation: {
             function: targetFunction.id,
-            enabled: true,
             blockOnFailure: true,
             title: validationTitle
           }
