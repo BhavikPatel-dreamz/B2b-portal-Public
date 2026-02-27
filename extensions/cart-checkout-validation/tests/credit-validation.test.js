@@ -47,7 +47,7 @@ describe("Cart Validation Function", () => {
       const result = cartValidationsGenerateRun(input);
       const errors = result.operations[0].validationAdd.errors;
       expect(errors).toHaveLength(1);
-      expect(errors[0].message).toContain("Insufficient credit");
+      expect(errors[0].message).toContain("Insufficient company credit");
       expect(errors[0].message).toContain("Available credit: $100.00");
       expect(errors[0].message).toContain("Cart total: $200.00");
     });
@@ -122,6 +122,60 @@ describe("Cart Validation Function", () => {
       const errors = result.operations[0].validationAdd.errors;
       expect(errors).toHaveLength(0);
     });
+
+    it("should block cart when company credit metafield is missing", () => {
+      const input = {
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "100.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: null,
+                creditUsed: { value: "100.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("Unable to validate company credit");
+    });
+
+    it("should block cart when user-level credit is insufficient", () => {
+      const input = {
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "120.00" }
+          },
+          buyerIdentity: {
+            customer: {
+              userCreditLimit: { value: "200.00" },
+              userCreditUsed: { value: "100.00" }
+            },
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "100.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("Insufficient user credit");
+      expect(errors[0].message).toContain("Available credit: $100.00");
+      expect(errors[0].message).toContain("Cart total: $120.00");
+    });
   });
 
   describe("Credit limit scenarios", () => {
@@ -149,8 +203,7 @@ describe("Cart Validation Function", () => {
       const result = cartValidationsGenerateRun(input);
       const errors = result.operations[0].validationAdd.errors;
       expect(errors).toHaveLength(1);
-      expect(errors.some(e => e.message.includes("Insufficient credit"))).toBe(true);
+      expect(errors.some(e => e.message.includes("Insufficient company credit"))).toBe(true);
     });
   });
 });
-
