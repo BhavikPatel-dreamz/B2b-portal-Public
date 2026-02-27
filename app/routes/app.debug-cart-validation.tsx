@@ -144,9 +144,9 @@ export default function DebugCartValidation() {
                 <div style={{ marginBottom: "1rem" }}>
                   <Text variant="headingMd" as="h3">Shopify Functions:</Text>
                   <List>
-                    {response.functions.map((edge: any, index: number) => (
+                    {response.functions.map((fn: any, index: number) => (
                       <List.Item key={index}>
-                        {edge.node.title} (handle: {edge.node.handle}) - {edge.node.app.title}
+                        {fn.title} (apiType: {fn.apiType}) - {fn.app.title}
                       </List.Item>
                     ))}
                   </List>

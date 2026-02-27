@@ -2,11 +2,10 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 interface CartValidationFunction {
   id: string;
-  handle: string;
   title: string;
+  apiType: string;
   app: {
     apiKey: string;
-    handle: string;
     id: string;
     title: string;
   };
@@ -33,16 +32,13 @@ export async function registerCartValidationFunction(
     const functionsQuery = `
       query {
         shopifyFunctions(first: 250) {
-          edges {
-            node {
+          nodes {
+            id
+            title
+            apiType
+            app {
+              apiKey
               id
-              handle
-              app {
-                apiKey
-                handle
-                id
-                title
-              }
               title
             }
           }
@@ -57,19 +53,20 @@ export async function registerCartValidationFunction(
       throw new Error(`Failed to query functions: ${functionsData.errors[0]?.message}`);
     }
 
-    // Find our cart validation function by handle
-    const cartValidationFunction = functionsData.data?.shopifyFunctions?.edges?.find(
-      (edge: { node: CartValidationFunction }) =>
-        edge.node.handle === "cart-checkout-validation"
-    )?.node;
+    // Find our cart validation function by apiType and title
+    const cartValidationFunction = functionsData.data?.shopifyFunctions?.nodes?.find(
+      (fn: CartValidationFunction) =>
+        fn.apiType === "cart_validation" &&
+        (fn.title === "cart-checkout-validation" || fn.title.includes("cart-checkout-validation"))
+    );
 
     if (!cartValidationFunction) {
       console.log("ℹ️ Cart validation function not found - may not be deployed yet");
       return { success: false, message: "Cart validation function not found" };
     }
 
-    console.log(`📋 Found cart validation function: ${cartValidationFunction.title} (handle: ${cartValidationFunction.handle}, id: ${cartValidationFunction.id})`);
-    console.log(`📱 App details: ${cartValidationFunction.app.title} (${cartValidationFunction.app.handle})`);
+    console.log(`📋 Found cart validation function: ${cartValidationFunction.title} (id: ${cartValidationFunction.id}, apiType: ${cartValidationFunction.apiType})`);
+    console.log(`📱 App details: ${cartValidationFunction.app.title} (${cartValidationFunction.app.id})`);
 
     // Step 2: Check if already registered
     const validationsQuery = `
@@ -121,7 +118,7 @@ export async function registerCartValidationFunction(
     const registerResponse = await admin.graphql(registerMutation, {
       variables: {
         validation: {
-          functionHandle: "cart-checkout-validation",
+          functionId: cartValidationFunction.id,
           enable: true,
           blockOnFailure: true,
           title: validationTitle
@@ -142,10 +139,10 @@ export async function registerCartValidationFunction(
 
     return {
       success: true,
-      message: "Cart validation registered successfully using function handle",
+      message: "Cart validation registered successfully using function ID",
       validationId: validation.id,
-      functionHandle: cartValidationFunction.handle,
       functionId: cartValidationFunction.id,
+      functionApiType: cartValidationFunction.apiType,
       appDetails: cartValidationFunction.app,
     };
 
@@ -210,20 +207,17 @@ export async function registerCartValidationWithExactQuery(
   try {
     console.log("🔄 Running exact query implementation for cart validation...");
 
-    // Exact query from user's example
+    // Updated query using available fields (removed handle fields)
     const myQuery = `
       query MyQuery {
         shopifyFunctions(first: 250) {
-          edges {
-            node {
+          nodes {
+            id
+            title
+            apiType
+            app {
+              apiKey
               id
-              handle
-              app {
-                apiKey
-                handle
-                id
-                title
-              }
               title
             }
           }
@@ -240,11 +234,12 @@ export async function registerCartValidationWithExactQuery(
 
     console.log("📋 Function query response:", JSON.stringify(functionsData, null, 2));
 
-    // Find cart-checkout-validation function
-    const targetFunction = functionsData.data?.shopifyFunctions?.edges?.find(
-      (edge: { node: CartValidationFunction }) =>
-        edge.node.handle === "cart-checkout-validation"
-    )?.node;
+// Find cart-checkout-validation function by apiType and title patterns
+    const targetFunction = functionsData.data?.shopifyFunctions?.nodes?.find(
+      (fn: CartValidationFunction) =>
+        fn.apiType === "cart_validation" &&
+        (fn.title === "cart-checkout-validation" || fn.title.includes("cart-checkout-validation"))
+    );
 
     if (!targetFunction) {
       return { success: false, message: "cart-checkout-validation function not found" };
@@ -267,10 +262,10 @@ export async function registerCartValidationWithExactQuery(
       }
     `;
 
-    // Exact input from user's example
+    // Updated input using functionId instead of functionHandle
     const mutationInput = {
       validation: {
-        functionHandle: "cart-checkout-validation",
+        functionId: targetFunction.id,
         enable: true,
         blockOnFailure: true,
         title: validationTitle

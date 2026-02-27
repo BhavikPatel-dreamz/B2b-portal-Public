@@ -34,16 +34,13 @@ export class CartValidationDebugService {
       const query = `
         query MyQuery {
           shopifyFunctions(first: 250) {
-            edges {
-              node {
+            nodes {
+              id
+              title
+              apiType
+              app {
+                apiKey
                 id
-                handle
-                app {
-                  apiKey
-                  handle
-                  id
-                  title
-                }
                 title
               }
             }
@@ -59,7 +56,7 @@ export class CartValidationDebugService {
       }
 
       console.log("📋 All Shopify Functions:", JSON.stringify(data, null, 2));
-      return { success: true, functions: data.data?.shopifyFunctions?.edges || [] };
+      return { success: true, functions: data.data?.shopifyFunctions?.nodes || [] };
 
     } catch (error) {
       console.error("❌ Error listing functions:", error);
