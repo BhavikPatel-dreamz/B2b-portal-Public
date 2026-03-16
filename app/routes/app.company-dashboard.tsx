@@ -11,6 +11,7 @@ import {
   parseForm,
   parseCredit,
   syncShopifyUsers,
+  syncShopifyOrders,
 } from "../utils/company.server";
 import { useEffect, useState } from "react";
 import { getCompanyOrdersCount } from "app/utils/b2b-customer.server";
@@ -642,6 +643,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
     }
+     case "syncOrders": {
+      try {
+        const companyId = (form.companyId as string)?.trim();
+        if (!companyId) {
+          return Response.json(
+            {
+              intent,
+              success: false,
+              errors: ["Company ID is required"],
+            },
+            { status: 400 },
+          );
+        }
+        const result = await syncShopifyOrders(admin, store, companyId);
+        return Response.json({
+          intent,
+          success: result.success,
+          message: result.message,
+          syncedCount: result.syncedCount,
+          errors: result.errors,
+        });
+      } catch (error) {
+        return Response.json(
+          {
+            intent,
+            success: false,
+            message: "Failed to sync order",
+            errors: [error instanceof Error ? error.message : "Unknown error"],
+          },
+          { status: 500 },
+        );
+      }
+    }
 
     default:
       return Response.json({
@@ -786,6 +820,8 @@ interface ActionResponse {
 export default function CompanyDashboard() {
   const data = useLoaderData<LoaderData>();
   const fetcher = useFetcher();
+  const syncUsersFetcher = useFetcher<ActionResponse>();
+  const syncOrdersFetcher = useFetcher<ActionResponse>();
   const [isEditingCredit, setIsEditingCredit] = useState(false);
   const [creditLimitValue, setCreditLimitValue] = useState(
     data.creditLimit.toString(),
@@ -1650,7 +1686,7 @@ export default function CompanyDashboard() {
                 const formData = new FormData();
                 formData.append("intent", "syncUsers");
                 formData.append("companyId", data.company.id);
-                fetcher.submit(formData, { method: "POST" });
+                syncUsersFetcher.submit(formData, { method: "POST" });
               }}
               style={{
                 padding: "6px 12px",
@@ -1663,9 +1699,11 @@ export default function CompanyDashboard() {
                 cursor: "pointer",
                 textAlign: "center",
               }}
-              disabled={fetcher.state === "submitting"}
+              disabled={syncUsersFetcher.state === "submitting"}
             >
-              {fetcher.state === "submitting" ? "Syncing..." : "Sync Users"}
+              {syncUsersFetcher.state === "submitting"
+                ? "Syncing..."
+                : "Sync Users"}
             </button>
             <Link
               to={`/app/companies/${data.company.id}/users`}
@@ -1741,22 +1779,49 @@ export default function CompanyDashboard() {
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
             Recent Orders
           </h3>
-          <Link
-            to={`/app/companies/${data.company.id}/orders`}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "1px solid #c9ccd0",
-              textDecoration: "none",
-              color: "#202223",
-              fontSize: 12,
-              fontWeight: 500,
-              backgroundColor: "white",
-              cursor: "pointer",
-            }}
-          >
-            View All Orders
-          </Link>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => {
+                const formData = new FormData();
+                formData.append("intent", "syncOrders");
+                formData.append("companyId", data.company.id);
+                syncOrdersFetcher.submit(formData, { method: "POST" });
+              }}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid #c9ccd0",
+                color: "#202223",
+                fontSize: 12,
+                fontWeight: 500,
+                backgroundColor: "white",
+                cursor: "pointer",
+                textAlign: "center",
+              }}
+              disabled={syncOrdersFetcher.state === "submitting"}
+            >
+              {syncOrdersFetcher.state === "submitting"
+                ? "Syncing..."
+                : "Sync Order"}
+            </button>
+            <Link
+              to={`/app/companies/${data.company.id}/orders`}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid #c9ccd0",
+                textDecoration: "none",
+                color: "#202223",
+                fontSize: 12,
+                fontWeight: 500,
+                backgroundColor: "white",
+                cursor: "pointer",
+                textAlign: "center",
+              }}
+            >
+              View All Orders
+            </Link>
+          </div>
         </div>
         {data.recentOrders.length > 0 ? (
           <div style={{ overflowX: "auto" }}>
@@ -1839,7 +1904,7 @@ export default function CompanyDashboard() {
                 {data.recentOrders.map((tx) => (
                   <tr key={tx.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
                     <td style={{ padding: 12, fontSize: 13 }}>
-                      {formatDate(tx.createdAt)}
+                      {(tx.shopifyOrderId)}
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
                       {tx.createdAt.replace(/_/g, " ").toUpperCase()}
@@ -2089,7 +2154,7 @@ export default function CompanyDashboard() {
                                   {order.shopifyOrderId || order.id.slice(-8)}
                                 </span>
                                 <span style={{ fontWeight: 600 }}>
-                                  {formatCurrency(order.creditUsed)}
+                                  {(order.creditUsed)}
                                 </span>
                               </div>
                               <div style={{ color: "#5c5f62" }}>

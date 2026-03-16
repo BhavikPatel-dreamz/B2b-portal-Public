@@ -1,6 +1,7 @@
 import { Prisma, UserRole, UserStatus } from "@prisma/client";
 import prisma from "../db.server";
 import { sendCompanyWelcomeEmail } from "../services/notification.server";
+import { Decimal } from "@prisma/client/runtime/library";
 
 /**
  * Sync Shopify B2B companies to local database
@@ -136,6 +137,8 @@ export const syncShopifyCompanies = async (
             },
           });
 
+            await syncShopifyUsers(admin, store, upsertedCompany.id);
+       await syncShopifyOrders(admin,store,upsertedCompany.id)
           // Send welcome email if email is configured
           if (
             submissionEmail &&
@@ -447,3 +450,227 @@ export const syncShopifyUsers = async (
     };
   }
 };
+
+
+
+export const syncShopifyOrders = async (
+  admin: string,
+  store: { id: string },
+  companyId?: string,
+) => {
+  try {
+    let targetShopifyCompanyId: string | null = null;
+    let localCompanyId: string | null = null;
+
+    if (companyId) {
+      const localCompany = await prisma.companyAccount.findUnique({
+        where: { id: companyId },
+        select: { id: true, shopifyCompanyId: true },
+      });
+      if (!localCompany?.shopifyCompanyId) {
+        return {
+          success: false,
+          syncedCount: 0,
+          errors: ["Company not found or missing Shopify company ID"],
+          message: "Company not found",
+        };
+      }
+      targetShopifyCompanyId = localCompany.shopifyCompanyId;
+      localCompanyId = localCompany.id;
+    }
+
+    if (!targetShopifyCompanyId || !localCompanyId) {
+      return {
+        success: false,
+        syncedCount: 0,
+        errors: ["companyId is required for order sync"],
+        message: "Missing companyId",
+      };
+    }
+
+    // ── Paginate through all company orders ──────────────────────────────
+    let allOrders: ShopifyOrder[] = [];
+    let hasNextPage = true;
+    let cursor: string | null = null;
+
+    while (hasNextPage) {
+      const orderQuery = `
+        query CompanyOrders($companyId: ID!, $cursor: String) {
+          company(id: $companyId) {
+            orders(first: 50, after: $cursor, sortKey: CREATED_AT, reverse: true) {
+              edges {
+                node {
+                  id
+                  name
+                  createdAt
+                  displayFinancialStatus
+                  displayFulfillmentStatus
+                  totalPriceSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  customer {
+                    id
+                    firstName
+                    lastName
+                    email
+                  }
+                }
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await admin.graphql(orderQuery, {
+        variables: { companyId: targetShopifyCompanyId, cursor },
+      });
+      const result = await response.json();
+      const data = result?.data?.company?.orders;
+
+      if (data?.edges?.length) {
+        allOrders = [
+          ...allOrders,
+          ...data.edges.map((edge: { node: ShopifyOrder }) => edge.node),
+        ];
+      }
+
+      hasNextPage = data?.pageInfo?.hasNextPage || false;
+      cursor = data?.pageInfo?.endCursor || null;
+    }
+
+    // ── Upsert each order into b2BOrder ─────────────────────────────────
+    let syncedCount = 0;
+    const errors: string[] = [];
+
+    for (const order of allOrders) {
+      try {
+        if (!order?.id) continue;
+
+        const totalAmount =  order.totalPriceSet?.shopMoney?.amount ?? "0"
+        
+
+        // Resolve the local user from the order's customer email
+        let createdByUserId: string | null = null;
+        if (order.customer?.email) {
+          const localUser = await prisma.user.findUnique({
+            where: {
+              shopId_email: { shopId: store.id, email: order.customer.email },
+            },
+            select: { id: true },
+          });
+          createdByUserId = localUser?.id ?? null;
+        }
+
+        // Map Shopify statuses → your local enums
+        const paymentStatus = mapPaymentStatus(order.displayFinancialStatus);
+        const orderStatus   = mapOrderStatus(order.displayFulfillmentStatus);
+
+        await prisma.b2BOrder.upsert({
+          where: {
+            shopifyOrderId: order.id,
+          },
+          update: {
+            orderTotal:        totalAmount,
+            paymentStatus,
+            orderStatus,
+            remainingBalance:  totalAmount,
+            updatedAt:         new Date(),
+          },
+          create: {
+            shopifyOrderId:    order.id,
+            companyId:         localCompanyId,
+            shopId:            store.id,
+            createdByUserId,
+            orderTotal:        totalAmount,
+            creditUsed:        new Decimal(0),
+            userCreditUsed:    new Decimal(0),
+            paymentStatus,
+            orderStatus,
+            remainingBalance:  totalAmount,
+            paidAmount:        new Decimal(0),
+            createdAt:         new Date(order.createdAt),
+          },
+        });
+
+        syncedCount++;
+      } catch (orderError) {
+        console.error(`Error syncing order ${order?.name}:`, orderError);
+        errors.push(
+          `Failed to sync order ${order?.name ?? order?.id}: ${
+            orderError instanceof Error ? orderError.message : "Unknown error"
+          }`,
+        );
+      }
+    }
+
+    return {
+      success: true,
+      syncedCount,
+      errors,
+      message:
+        errors.length > 0
+          ? `Synced ${syncedCount} orders with ${errors.length} errors`
+          : `Successfully synced ${syncedCount} orders`,
+    };
+  } catch (error) {
+    console.error("Order sync error:", error);
+    return {
+      success: false,
+      syncedCount: 0,
+      errors: [
+        error instanceof Error ? error.message : "Unknown sync error occurred",
+      ],
+      message: "Sync failed",
+    };
+  }
+};
+
+
+function mapPaymentStatus(status: string | null | undefined): string {
+  const map: Record<string, string> = {
+    PAID:               "paid",
+    PENDING:            "pending",
+    PARTIALLY_PAID:     "partially_paid",
+    REFUNDED:           "refunded",
+    PARTIALLY_REFUNDED: "partially_refunded",
+    VOIDED:             "voided",
+    AUTHORIZED:         "authorized",
+  };
+  return map[status ?? ""] ?? "pending";
+}
+
+function mapOrderStatus(status: string | null | undefined): string {
+  const map: Record<string, string> = {
+    FULFILLED:           "fulfilled",
+    UNFULFILLED:         "draft",
+    PARTIALLY_FULFILLED: "partially_fulfilled",
+    IN_PROGRESS:         "in_progress",
+    ON_HOLD:             "on_hold",
+    SCHEDULED:           "scheduled",
+  };
+  return map[status ?? ""] ?? "draft";
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ShopifyOrder {
+  id: string;
+  name: string;
+  createdAt: string;
+  displayFinancialStatus: string;
+  displayFulfillmentStatus: string;
+  totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  customer: {
+    id: string;
+    firstName: string;
+    lastName: string | null;
+    email: string;
+  } | null;
+}

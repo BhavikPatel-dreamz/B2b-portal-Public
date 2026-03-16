@@ -284,7 +284,7 @@ model B2BOrder {
   shopId           String
   shop             Store     @relation("StoreOrders", fields: [shopId], references: [id], onDelete: Cascade)
 
-  shopifyOrderId   String?   // Synced with Shopify
+  shopifyOrderId  String   @unique   // ← add this
 
   orderTotal       Decimal   @db.Decimal(14, 2)
   creditUsed       Decimal   @db.Decimal(14, 2)  // How much credit was used for this order
