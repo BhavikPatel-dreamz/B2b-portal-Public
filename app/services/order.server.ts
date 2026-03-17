@@ -88,7 +88,7 @@ export async function upsertOrder(data: CreateOrderInput) {
  * Create a new B2B order
  */
 export async function createOrder(data: CreateOrderInput) {
-  const order= await prisma.b2BOrder.create({
+  const order = await prisma.b2BOrder.create({
     data: {
       companyId: data.companyId,
       createdByUserId: data.createdByUserId,
@@ -101,7 +101,7 @@ export async function createOrder(data: CreateOrderInput) {
       paidAmount: new Prisma.Decimal(0),
       paymentStatus: data.paymentStatus || "pending",
       orderStatus: data.orderStatus || "draft",
-      notes: data.notes,  // Add optional notes field
+      notes: data.notes, // Add optional notes field
     },
     include: {
       company: true,
@@ -114,23 +114,26 @@ export async function createOrder(data: CreateOrderInput) {
       companyId: order?.companyId,
       role: "STORE_ADMIN",
     },
-  })
-  const notificationData = { 
-    message: `New B2B order created with ID: ${order.id}`,
-    title: "New Order Created",
-    shopId: order?.shopId,
-    activityType: "pending",
-    senderId: order?.createdByUserId,
-    receiverId: storeAdmin?.id,
-    isRead: false,
-    activeAction: order?.orderStatus,
-  };
-
-  await prisma.notification.create({
-    data: notificationData,
   });
-  return order;
 
+  if (order.shopifyOrderId) {
+    const notificationData = {
+      message: `New B2B order created with ID: ${order.id}`,
+      title: "New Order Created",
+      shopId: order?.shopId,
+      activityType: "pending",
+      senderId: order?.createdByUserId,
+      receiverId: storeAdmin?.id,
+      isRead: false,
+      activeAction: order?.orderStatus,
+    };
+
+    await prisma.notification.create({
+      data: notificationData,
+    });
+  }
+
+  return order;
 }
 
 /**
@@ -157,7 +160,10 @@ export async function getOrderById(id: string) {
 /**
  * Get order by Shop ID and Shopify Order GID (used by webhooks)
  */
-export async function getOrderByShopifyId(shopId: string, shopifyOrderId: string) {
+export async function getOrderByShopifyId(
+  shopId: string,
+  shopifyOrderId: string,
+) {
   return await prisma.b2BOrder.findFirst({
     where: { shopId, shopifyOrderId },
     select: {
@@ -178,7 +184,10 @@ export async function getOrderByShopifyId(shopId: string, shopifyOrderId: string
 /**
  * Get complete order details by Shop ID and Shopify Order GID with all relations
  */
-export async function getOrderByShopifyIdWithDetails(shopId: string, shopifyOrderId: string) {
+export async function getOrderByShopifyIdWithDetails(
+  shopId: string,
+  shopifyOrderId: string,
+) {
   return await prisma.b2BOrder.findFirst({
     where: { shopId, shopifyOrderId },
     include: {
@@ -297,7 +306,9 @@ export async function updateOrder(id: string, data: UpdateOrderInput) {
     updateData.creditUsed = new Prisma.Decimal(data.creditUsed.toString());
   }
   if (data.userCreditUsed !== undefined) {
-    updateData.userCreditUsed = new Prisma.Decimal(data.userCreditUsed.toString());
+    updateData.userCreditUsed = new Prisma.Decimal(
+      data.userCreditUsed.toString(),
+    );
   }
   if (data.paidAmount !== undefined) {
     updateData.paidAmount = new Prisma.Decimal(data.paidAmount.toString());

@@ -20,13 +20,13 @@ query CartValidationsGenerateRunInput {
       customer {
         id
         email
-        b2bCompanyId: metafield(namespace: "b2b_credit", key: "company_id") {
+        b2bCompanyId: metafield(namespace: "custom", key: "company_id") {
           value
         }
-        userCreditLimit: metafield(namespace: "b2b_credit", key: "user_credit_limit") {
+        userCreditLimit: metafield(namespace: "custom", key: "user_credit_limit") {
           value
         }
-        userCreditUsed: metafield(namespace: "b2b_credit", key: "user_credit_used") {
+        userCreditUsed: metafield(namespace: "custom", key: "user_credit_used") {
           value
         }
       }
@@ -34,10 +34,10 @@ query CartValidationsGenerateRunInput {
         company {
           id
           name
-          creditLimit: metafield(namespace: "b2b_credit", key: "company_credit_limit") {
+          creditLimit: metafield(namespace: "custom", key: "company_credit_limit") {
             value
           }
-          creditUsed: metafield(namespace: "b2b_credit", key: "company_credit_used") {
+          creditUsed: metafield(namespace: "custom", key: "company_credit_used") {
             value
           }
         }

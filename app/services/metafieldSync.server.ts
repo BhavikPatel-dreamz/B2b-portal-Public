@@ -46,19 +46,19 @@ export async function syncCustomerCreditMetafields(
     // Prepare metafields to update
     const metafields: MetafieldUpdate[] = [
       {
-        namespace: "b2b_credit",
+        namespace: "custom",
         key: "is_b2b_customer",
         value: "true",
         type: "single_line_text_field",
       },
       {
-        namespace: "b2b_credit",
+        namespace: "custom",
         key: "company_id",
         value: user.companyId || "",
         type: "single_line_text_field",
       },
       {
-        namespace: "b2b_credit",
+        namespace: "custom",
         key: "user_credit_used",
         value: user.userCreditUsed.toString(),
         type: "number_decimal",
@@ -68,7 +68,7 @@ export async function syncCustomerCreditMetafields(
     // Add user credit limit if it exists
     if (user.userCreditLimit) {
       metafields.push({
-        namespace: "b2b_credit",
+        namespace: "custom",
         key: "user_credit_limit",
         value: user.userCreditLimit.toString(),
         type: "number_decimal",
@@ -155,13 +155,13 @@ export async function syncCompanyCreditMetafields(
     // Prepare metafields
     const metafields: MetafieldUpdate[] = [
       {
-        namespace: "b2b_credit",
+        namespace: "custom",
         key: "company_credit_limit",
         value: company.creditLimit.toString(),
         type: "number_decimal",
       },
       {
-        namespace: "b2b_credit",
+        namespace: "custom",
         key: "company_credit_used",
         value: usedCredit.toString(),
         type: "number_decimal",

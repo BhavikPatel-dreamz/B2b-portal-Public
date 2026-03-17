@@ -341,8 +341,8 @@ export default function DebugMetafields() {
             </Text>
 
             <ul style={{ paddingLeft: "20px" }}>
-              <li>Namespace: "b2b_credit", Key: "company_credit_limit"</li>
-              <li>Namespace: "b2b_credit", Key: "company_credit_used"</li>
+              <li>namespace: "custom", Key: "company_credit_limit"</li>
+              <li>namespace: "custom", Key: "company_credit_used"</li>
             </ul>
           </BlockStack>
         </Card>

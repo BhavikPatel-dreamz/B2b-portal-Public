@@ -977,7 +977,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           await Promise.all([
             creditLimit
               ? updateCompanyMetafield(admin, companyId, {
-                  namespace: "b2b_credit",
+                  namespace: "custom",
                   key: "company_credit_limit",
                   value: creditLimit.toString(),
                   type: "number_decimal",
@@ -1066,7 +1066,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
             creditLimit
               ? updateCompanyMetafield(admin, companyId, {
-                  namespace: "b2b_credit",
+                  namespace: "custom",
                   key: "company_credit_limit",
                   value: creditLimit.toString(),
                   type: "number_decimal",
@@ -1342,7 +1342,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
           creditLimit
             ? updateCompanyMetafield(admin, companyId, {
-                namespace: "b2b_credit",
+                namespace: "custom",
                 key: "company_credit_limit",
                 value: creditLimit.toString(),
                 type: "number_decimal",

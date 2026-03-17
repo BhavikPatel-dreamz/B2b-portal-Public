@@ -1455,7 +1455,7 @@ export async function getCompanyCustomers(
                   lastName
                   email
                   phone
-                  metafield(namespace: "b2b_credit", key: "user_credit_limit") {
+                  metafield(namespace: "custom", key: "user_credit_limit") {
                     value
                     type
                   }
@@ -4130,7 +4130,7 @@ export async function createCompanyLocation(
 
     // Add optional fields
     if (locationData.phone) {
-        input.phone = normalizePhone(locationData.phone);
+      input.phone = normalizePhone(locationData.phone);
     }
     if (locationData.externalId) {
       input.externalId = locationData.externalId;
