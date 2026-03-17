@@ -1,10 +1,7 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
 import { syncCompanyCreditMetafields } from "./metafieldSync.server";
-import {
-  AdminApiContext,
-} from "@shopify/shopify-app-react-router/server";
-
+import { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 interface CreditAvailability {
   creditLimit: Decimal;
@@ -18,7 +15,7 @@ interface CreditAvailability {
  * Formula: credit_limit - used_credit - pending_credit
  */
 export async function calculateAvailableCredit(
-  companyId: string
+  companyId: string,
 ): Promise<CreditAvailability | null> {
   const company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
@@ -31,12 +28,33 @@ export async function calculateAvailableCredit(
 
   // Ensure creditLimit is not undefined/null
   if (company.creditLimit === null || company.creditLimit === undefined) {
-    console.error(`Company ${companyId} has null/undefined creditLimit:`, company.creditLimit);
+    console.error(
+      `Company ${companyId} has null/undefined creditLimit:`,
+      company.creditLimit,
+    );
     // Set default credit limit of 0
     company.creditLimit = new Decimal(0);
   }
 
   // Calculate used credit: sum of creditUsed from all unpaid orders (pending/partial orders)
+  const orderUpdate = await prisma.b2BOrder.findFirst({
+    where: {
+      companyId,
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { notIn: ["cancelled"] }, // All unpaid orders except cancelled
+    },
+  });
+  
+  if (orderUpdate) {
+    await prisma.b2BOrder.update({
+      where: {
+        id: orderUpdate?.id,
+      },
+      data: {
+        creditUsed: orderUpdate?.orderTotal,
+      },
+    });
+  }
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {
       companyId,
@@ -48,15 +66,18 @@ export async function calculateAvailableCredit(
     },
   });
 
-  const usedCredit = ordersWithBalance._sum.creditUsed ? new Decimal(ordersWithBalance._sum.creditUsed) : new Decimal(0);
+  const usedCredit = ordersWithBalance._sum.creditUsed
+    ? new Decimal(ordersWithBalance._sum.creditUsed)
+    : new Decimal(0);
 
   // Pending credit is separate - these would be orders in draft state that haven't been confirmed yet
   // For now, we're not tracking true "pending" credit separate from "used" credit
   const pendingCredit = new Decimal(0);
 
-  const availableCredit = new Decimal(company.creditLimit)
-    .minus(usedCredit);
-    // pendingCredit is 0, so we only subtract usedCredit
+  const availableCredit = new Decimal(company.creditLimit).minus(usedCredit);
+  // pendingCredit is 0, so we only subtract usedCredit
+
+
 
   return {
     creditLimit: company.creditLimit,
@@ -71,8 +92,12 @@ export async function calculateAvailableCredit(
  */
 export async function canCreateOrder(
   companyId: string,
-  orderAmount: number | Decimal
-): Promise<{ canCreate: boolean; availableCredit?: Decimal; message?: string }> {
+  orderAmount: number | Decimal,
+): Promise<{
+  canCreate: boolean;
+  availableCredit?: Decimal;
+  message?: string;
+}> {
   const creditInfo = await calculateAvailableCredit(companyId);
 
   if (!creditInfo) {
@@ -114,7 +139,7 @@ export async function deductCredit(
   orderId: string,
   amount: number | Decimal,
   userId: string,
-  admin?: AdminApiContext // Optional admin context for metafield sync
+  admin?: AdminApiContext, // Optional admin context for metafield sync
 ): Promise<CreditDeductionResult> {
   const amountDecimal = new Decimal(amount);
 
@@ -181,14 +206,18 @@ export async function deductCredit(
       },
     });
   } else {
-    console.log(`⚠️ Order ${orderId} not found in database - skipping order update`);
+    console.log(
+      `⚠️ Order ${orderId} not found in database - skipping order update`,
+    );
   }
 
   // Sync updated credit information to Shopify metafields for cart validation
   if (admin) {
     try {
       await syncCompanyCreditMetafields(admin, companyId);
-      console.log(`✅ Synced credit data to Shopify metafields for company ${companyId}`);
+      console.log(
+        `✅ Synced credit data to Shopify metafields for company ${companyId}`,
+      );
     } catch (syncError) {
       console.error(`❌ Failed to sync credit metafields:`, syncError);
       // Don't throw error - credit deduction was successful, just metafield sync failed
@@ -201,7 +230,7 @@ export async function deductCredit(
     success: true,
     message: `Credit deducted successfully for order ${orderId}`,
     newBalance,
-    creditUsed: amountDecimal
+    creditUsed: amountDecimal,
   };
 }
 
@@ -215,7 +244,7 @@ export async function restoreCredit(
   amount: number | Decimal,
   userId: string,
   reason: "cancelled" | "refunded" = "cancelled",
-  admin?: AdminApiContext // Optional admin context for metafield sync
+  admin?: AdminApiContext, // Optional admin context for metafield sync
 ): Promise<void> {
   const amountDecimal = new Decimal(amount);
 
@@ -233,7 +262,8 @@ export async function restoreCredit(
     data: {
       companyId,
       orderId,
-      transactionType: reason === "cancelled" ? "order_cancelled" : "payment_received",
+      transactionType:
+        reason === "cancelled" ? "order_cancelled" : "payment_received",
       creditAmount: amountDecimal, // Positive because we're restoring
       previousBalance,
       newBalance,
@@ -246,13 +276,20 @@ export async function restoreCredit(
   if (admin) {
     try {
       await syncCompanyCreditMetafields(admin, companyId);
-      console.log(`✅ Synced credit data to Shopify metafields after restore for company ${companyId}`);
+      console.log(
+        `✅ Synced credit data to Shopify metafields after restore for company ${companyId}`,
+      );
     } catch (syncError) {
-      console.error(`❌ Failed to sync credit metafields after restore:`, syncError);
+      console.error(
+        `❌ Failed to sync credit metafields after restore:`,
+        syncError,
+      );
       // Don't throw error - credit restoration was successful, just metafield sync failed
     }
   } else {
-    console.log(`⚠️ No admin context provided for restore - skipping metafield sync`);
+    console.log(
+      `⚠️ No admin context provided for restore - skipping metafield sync`,
+    );
   }
 }
 
@@ -280,9 +317,9 @@ export async function updatePendingCredit(companyId: string): Promise<{
 
   const totalPending = unpaidOrders.reduce(
     (sum, order) => sum.plus(order.remainingBalance),
-    new Decimal(0)
+    new Decimal(0),
   );
-  console.log(totalPending.toString());
+
 
   return {
     totalPending,
@@ -334,26 +371,28 @@ export async function getCreditSummary(companyId: string) {
   // Calculate totals from B2B orders
   const totalCreditUsed = pendingPartialOrders.reduce(
     (sum, order) => sum.plus(order.creditUsed || new Decimal(0)),
-    new Decimal(0)
+    new Decimal(0),
   );
 
   const totalOrderValue = pendingPartialOrders.reduce(
     (sum, order) => sum.plus(order.orderTotal),
-    new Decimal(0)
+    new Decimal(0),
   );
 
   const totalPaidAmount = pendingPartialOrders.reduce(
     (sum, order) => sum.plus(order.paidAmount || new Decimal(0)),
-    new Decimal(0)
+    new Decimal(0),
   );
 
   const orderCounts = {
-    pending: pendingPartialOrders.filter(order => order.paymentStatus === "pending").length,
-    partial: pendingPartialOrders.filter(order => order.paymentStatus === "partial").length,
+    pending: pendingPartialOrders.filter(
+      (order) => order.paymentStatus === "pending",
+    ).length,
+    partial: pendingPartialOrders.filter(
+      (order) => order.paymentStatus === "partial",
+    ).length,
     total: pendingPartialOrders.length,
   };
-
-
 
   return {
     company,
@@ -374,8 +413,5 @@ export async function getCreditSummary(companyId: string) {
 
     // Individual order details
     pendingPartialOrders,
-
   };
 }
-
-
