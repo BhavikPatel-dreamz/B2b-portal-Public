@@ -736,12 +736,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     0,
     creditSummary.creditLimit.toNumber() - creditSummary.usedCredit.toNumber(),
   );
+  const RegitrationData =await prisma.registrationSubmission.findFirst({
+    where:{
+      email:dashboardData.company.contactEmail
+    }
+  })
 
   return Response.json({
     company: {
       id: dashboardData.company.id,
       name: dashboardData.company.name,
-      contactName: dashboardData.company.contactName,
+      contactName: dashboardData.company.contactName || dashboardData.company.contactName  === null ? RegitrationData.contactName : "-",
       contactEmail: dashboardData.company.contactEmail,
       shopifyCompanyId: dashboardData.company.shopifyCompanyId,
       paymentTermsTemplateId: dashboardData.company.paymentTerm || "",
