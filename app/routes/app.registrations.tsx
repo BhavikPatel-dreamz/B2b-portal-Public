@@ -3408,7 +3408,6 @@ export default function RegistrationApprovals() {
                             {
                               intent: "sendWelcomeEmail",
                               email: customer?.email || selected.email,
-                              contactName: `${customer?.firstName} ${customer?.lastName}`,
                               companyName:
                                 company?.name || selected.companyName,
                               reviewNotes,
@@ -3475,9 +3474,6 @@ export default function RegistrationApprovals() {
                     <div
                       style={{ marginTop: 8, fontSize: 14, color: "#5c5f62" }}
                     >
-                      <div>
-                        Customer: {customer?.firstName} {customer?.lastName}
-                      </div>
                       <div>Email: {customer?.email}</div>
                       <div>
                         Company: {company?.name || selected?.companyName}

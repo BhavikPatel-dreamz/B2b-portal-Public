@@ -313,10 +313,6 @@ function generateCompanyAssignmentTemplate(
         contact our support team.
       </p>
 
-      <p style="text-align;">
-        <b>Note:</b> ${note || ""}
-      </p>
-
       <p>
         Best regards,<br />
         <strong>${shopName}</strong>

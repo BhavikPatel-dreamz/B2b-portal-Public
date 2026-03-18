@@ -32,7 +32,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   // Build where clause
-  const where: Prisma.NotificationWhereInput = { shopId: store?.id, receiverId: user?.id };
+  const where: Prisma.NotificationWhereInput = { shopId: store?.id, receiverId: user?.id, shopifyOrderId: { startsWith: "gid://shopify/Order/" }};
   if (activityType) where.activityType = activityType;
   if (senderId) where.senderId = senderId;
   if (isRead) where.isRead = isRead === 'true';
@@ -44,17 +44,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const skip = (currentPage - 1) * pageSize;
 
   // Parallel queries
-  const [notifications, totalCount, unreadCount, readCount] = await Promise.all([
-    prisma.notification.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: pageSize,
-      skip
-    }),
-    prisma.notification.count({ where }),
-    prisma.notification.count({ where: { ...where, isRead: false } }),
-    prisma.notification.count({ where: { ...where, isRead: true } })
-  ]);
+const [notifications, totalGroups, unreadCount, readCount] = await Promise.all([
+  prisma.notification.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take: pageSize,
+    skip,
+    distinct: ['shopifyOrderId'],
+    
+  }),
+  prisma.notification.groupBy({     
+    by: ['shopifyOrderId'],
+    where,
+  }),
+  prisma.notification.groupBy({
+    by: ['shopifyOrderId'],
+    where: { ...where, isRead: false },
+  }).then(r => r.length),
+  prisma.notification.groupBy({
+    by: ['shopifyOrderId'],
+    where: { ...where, isRead: true },
+  }).then(r => r.length),
+]);
+
+const totalCount = totalGroups.length;  // ← extract length after
 
   // Fetch users
   const userIds = [...new Set(notifications.flatMap(n => [n.senderId, n.receiverId]).filter((id): id is string => !!id))];

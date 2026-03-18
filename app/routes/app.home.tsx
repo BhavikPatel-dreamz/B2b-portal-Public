@@ -45,6 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           not: "cancelled",
         },
         shopId: store.id,
+         shopifyOrderId: { startsWith: "gid://shopify/Order/" }
       },
       _count: {
         shopifyOrderId: true,

@@ -111,27 +111,43 @@ export async function createOrder(data: CreateOrderInput) {
   });
   const storeAdmin = await prisma.user.findFirst({
     where: {
-      companyId: order?.companyId,
+      id: order?.createdByUserId,
       role: "STORE_ADMIN",
     },
   });
 
-  if (order.shopifyOrderId) {
+  
     const notificationData = {
       message: `New B2B order created with ID: ${order.id}`,
       title: "New Order Created",
       shopId: order?.shopId,
       activityType: "pending",
       senderId: order?.createdByUserId,
+      shopifyOrderId:order.shopifyOrderId,
       receiverId: storeAdmin?.id,
       isRead: false,
       activeAction: order?.orderStatus,
     };
+   const notifidationRecode= await prisma.notification.findFirst({
+      where:{
+        shopifyOrderId:order.shopifyOrderId
+      }
+    })
 
+    if(notifidationRecode){
+      console.log(notifidationRecode,"notifidationRecode");
+      await prisma.notification.update({
+        where:{
+          id:notifidationRecode.id
+        },
+      data: notificationData,
+    }); 
+    }
+    console.log("notifidationRecode1111");
     await prisma.notification.create({
       data: notificationData,
     });
-  }
+  
 
   return order;
 }

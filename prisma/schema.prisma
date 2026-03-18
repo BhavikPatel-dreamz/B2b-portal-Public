@@ -243,7 +243,8 @@ model Notification {
   message            String
   activityType       String?
   activeAction       String?  // URL for the action/product
-  isRead             Boolean   @default(false)
+  isRead             Boolean  @default(false)
+  shopifyOrderId     String  
   // Shop relation
   shopId        String
   createdAt     DateTime @default(now())

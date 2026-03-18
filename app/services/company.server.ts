@@ -353,6 +353,7 @@ export async function getCompanyDashboardData(
     where: {
       companyId,
       orderStatus: { notIn: ["cancelled"] },
+      shopifyOrderId: { startsWith: "gid://shopify/Order/" },
     },
     distinct: ["shopifyOrderId"],
     orderBy: {
@@ -375,7 +376,7 @@ export async function getCompanyDashboardData(
     await Promise.all([
       await prisma.b2BOrder.groupBy({
         by: ["shopifyOrderId"],
-        where: { companyId, orderStatus: { notIn: ["cancelled"] } },
+        where: { companyId, orderStatus: { notIn: ["cancelled"] } , shopifyOrderId: { startsWith: "gid://shopify/Order/" },},
       }),
       await prisma.b2BOrder.groupBy({
         by: ["shopifyOrderId"],
@@ -391,6 +392,7 @@ export async function getCompanyDashboardData(
           companyId,
           paymentStatus: { in: ["pending", "partial"] },
           orderStatus: { notIn: ["cancelled"] },
+          shopifyOrderId: { startsWith: "gid://shopify/Order/" }
         },
       }),
       await prisma.b2BOrder.groupBy({
@@ -553,6 +555,7 @@ export async function getCompanyOrders(
     where: {
       companyId,
       orderStatus: { not: "cancelled" },
+  
     },
     _max: {
       createdAt: true,
@@ -570,6 +573,7 @@ export async function getCompanyOrders(
     where: {
       companyId,
       orderStatus: { notIn: ["cancelled"] },
+      shopifyOrderId: { startsWith: "gid://shopify/Order/" }
     },
     distinct: ["shopifyOrderId"],
     orderBy: {
