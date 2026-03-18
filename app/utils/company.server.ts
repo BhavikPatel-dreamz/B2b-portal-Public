@@ -69,7 +69,7 @@ export const syncShopifyCompanies = async (
     let syncedCount = 0;
     const errors: string[] = [];
     // Collect all Shopify company IDs
-    const shopifyCompanyIds = allCompanies.map(company => company.id);
+    const shopifyCompanyIds = allCompanies.map((company) => company.id);
 
     // Step 2-5: Process each company
     for (const company of allCompanies) {
@@ -110,7 +110,9 @@ export const syncShopifyCompanies = async (
 
           // Ensure the company's main contact exists as a store admin user
           await prisma.user.upsert({
-            where: { shopId_email: { shopId: store.id, email: mainContact.email } },
+            where: {
+              shopId_email: { shopId: store.id, email: mainContact.email },
+            },
             update: {
               firstName: mainContact.firstName || null,
               lastName: mainContact.lastName || null,
@@ -137,8 +139,8 @@ export const syncShopifyCompanies = async (
             },
           });
 
-            await syncShopifyUsers(admin, store, upsertedCompany.id);
-       await syncShopifyOrders(admin,store,upsertedCompany.id)
+          await syncShopifyUsers(admin, store, upsertedCompany.id);
+          await syncShopifyOrders(admin, store, upsertedCompany.id);
           // Send welcome email if email is configured
           if (
             submissionEmail &&
@@ -177,7 +179,9 @@ export const syncShopifyCompanies = async (
         },
       });
 
-      console.log(`Deleted ${deleteResult.count} companies that no longer exist in Shopify`);
+      console.log(
+        `Deleted ${deleteResult.count} companies that no longer exist in Shopify`,
+      );
 
       if (deleteResult.count > 0) {
         return {
@@ -356,7 +360,10 @@ export const syncShopifyUsers = async (
             if (!shopifyCompanyId) continue;
 
             // If filtering by company, skip profiles that don't match
-            if (targetShopifyCompanyId && shopifyCompanyId !== targetShopifyCompanyId) {
+            if (
+              targetShopifyCompanyId &&
+              shopifyCompanyId !== targetShopifyCompanyId
+            ) {
               continue;
             }
 
@@ -366,7 +373,12 @@ export const syncShopifyUsers = async (
                 shopId: store.id,
                 shopifyCompanyId: shopifyCompanyId,
               },
-              select: { id: true },
+              select: {
+                id: true,
+                name: true,
+                contactName: true,
+                contactEmail: true,
+              },
             });
 
             if (!localCompany) continue;
@@ -374,19 +386,30 @@ export const syncShopifyUsers = async (
             // Determine company role from Shopify role assignments
             let companyRole = "member";
             const roles = profile.roleAssignments?.edges || [];
-            if (roles.some((r: ShopifyRoleAssignment) => r.node?.role?.name?.includes("Admin"))) {
+            if (
+              roles.some((r: ShopifyRoleAssignment) =>
+                r.node?.role?.name?.includes("Admin"),
+              )
+            ) {
               companyRole = "admin";
-            } else if (roles.some((r: ShopifyRoleAssignment) => r.node?.role?.name?.includes("Approver"))) {
+            } else if (
+              roles.some((r: ShopifyRoleAssignment) =>
+                r.node?.role?.name?.includes("Approver"),
+              )
+            ) {
               companyRole = "approver";
             }
 
             // Check if this customer is the main contact of the company
-            const isMainContact = profile.company?.mainContact?.customer?.id === customerGid;
+            const isMainContact =
+              profile.company?.mainContact?.customer?.id === customerGid;
             const userRole = isMainContact ? "STORE_ADMIN" : "STORE_USER";
 
             // Upsert user in local DB
             await prisma.user.upsert({
-              where: { shopId_email: { shopId: store.id, email: customer.email } },
+              where: {
+                shopId_email: { shopId: store.id, email: customer.email },
+              },
               update: {
                 firstName: customer.firstName || null,
                 lastName: customer.lastName || null,
@@ -410,6 +433,35 @@ export const syncShopifyUsers = async (
                 companyId: localCompany.id,
                 companyRole,
                 shopifyCustomerId: customerGid,
+              },
+            });
+
+           
+            await prisma.registrationSubmission.upsert({
+              where: {
+                shopId_email: { shopId: store.id, email: customer.email },
+              },
+              update: {
+                email: customer.email, // ✅ Keep consistent with the where clause
+                companyName: localCompany.name,
+                contactName:
+                  `${customer.firstName} ${customer.lastName || localCompany.contactName}`.trim(),
+                phone: "",
+                shopifyCustomerId: customerGid,
+                status: "APPROVED",
+                businessType: "",
+                shopId: store.id,
+              },
+              create: {
+                email: customer.email, // ✅ Same fix here
+                companyName: localCompany.name,
+                contactName:
+                  `${customer.firstName} ${customer.lastName || localCompany.contactName}`.trim(),
+                phone: "",
+                shopifyCustomerId: customerGid,
+                status: "APPROVED",
+                businessType: "",
+                shopId: store.id,
               },
             });
 
@@ -450,8 +502,6 @@ export const syncShopifyUsers = async (
     };
   }
 };
-
-
 
 export const syncShopifyOrders = async (
   admin: string,
@@ -553,8 +603,7 @@ export const syncShopifyOrders = async (
       try {
         if (!order?.id) continue;
 
-        const totalAmount =  order.totalPriceSet?.shopMoney?.amount ?? "0"
-        
+        const totalAmount = order.totalPriceSet?.shopMoney?.amount ?? "0";
 
         // Resolve the local user from the order's customer email
         let createdByUserId: string | null = null;
@@ -570,32 +619,32 @@ export const syncShopifyOrders = async (
 
         // Map Shopify statuses → your local enums
         const paymentStatus = mapPaymentStatus(order.displayFinancialStatus);
-        const orderStatus   = mapOrderStatus(order.displayFulfillmentStatus);
+        const orderStatus = mapOrderStatus(order.displayFulfillmentStatus);
 
         await prisma.b2BOrder.upsert({
           where: {
             shopifyOrderId: order.id,
           },
           update: {
-            orderTotal:        totalAmount,
+            orderTotal: totalAmount,
             paymentStatus,
             orderStatus,
-            remainingBalance:  totalAmount,
-            updatedAt:         new Date(),
+            remainingBalance: totalAmount,
+            updatedAt: new Date(),
           },
           create: {
-            shopifyOrderId:    order.id,
-            companyId:         localCompanyId,
-            shopId:            store.id,
+            shopifyOrderId: order.id,
+            companyId: localCompanyId,
+            shopId: store.id,
             createdByUserId,
-            orderTotal:        totalAmount,
-            creditUsed:        new Decimal(0),
-            userCreditUsed:    new Decimal(0),
+            orderTotal: totalAmount,
+            creditUsed: new Decimal(0),
+            userCreditUsed: new Decimal(0),
             paymentStatus,
             orderStatus,
-            remainingBalance:  totalAmount,
-            paidAmount:        new Decimal(0),
-            createdAt:         new Date(order.createdAt),
+            remainingBalance: totalAmount,
+            paidAmount: new Decimal(0),
+            createdAt: new Date(order.createdAt),
           },
         });
 
@@ -632,28 +681,27 @@ export const syncShopifyOrders = async (
   }
 };
 
-
 function mapPaymentStatus(status: string | null | undefined): string {
   const map: Record<string, string> = {
-    PAID:               "paid",
-    PENDING:            "pending",
-    PARTIALLY_PAID:     "partially_paid",
-    REFUNDED:           "refunded",
+    PAID: "paid",
+    PENDING: "pending",
+    PARTIALLY_PAID: "partially_paid",
+    REFUNDED: "refunded",
     PARTIALLY_REFUNDED: "partially_refunded",
-    VOIDED:             "voided",
-    AUTHORIZED:         "authorized",
+    VOIDED: "voided",
+    AUTHORIZED: "authorized",
   };
   return map[status ?? ""] ?? "pending";
 }
 
 function mapOrderStatus(status: string | null | undefined): string {
   const map: Record<string, string> = {
-    FULFILLED:           "fulfilled",
-    UNFULFILLED:         "draft",
+    FULFILLED: "fulfilled",
+    UNFULFILLED: "draft",
     PARTIALLY_FULFILLED: "partially_fulfilled",
-    IN_PROGRESS:         "in_progress",
-    ON_HOLD:             "on_hold",
-    SCHEDULED:           "scheduled",
+    IN_PROGRESS: "in_progress",
+    ON_HOLD: "on_hold",
+    SCHEDULED: "scheduled",
   };
   return map[status ?? ""] ?? "draft";
 }
