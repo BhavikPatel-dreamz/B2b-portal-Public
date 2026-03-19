@@ -3,7 +3,13 @@ import type {
   LoaderFunctionArgs,
   HeadersFunction,
 } from "react-router";
-import { useFetcher, useLoaderData, Link, useSearchParams, useNavigation } from "react-router";
+import {
+  useFetcher,
+  useLoaderData,
+  Link,
+  useSearchParams,
+  useNavigation,
+} from "react-router";
 import { useState } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
@@ -48,7 +54,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shopDomain: session.shop },
   });
 
-   if (!store) {
+  if (!store) {
     return Response.json(
       {
         companies: [] as LoaderCompany[],
@@ -121,7 +127,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const pendingCreditNum = creditInfo
         ? parseFloat(creditInfo.pendingCredit.toString())
         : 0;
-        console.log(pendingCreditNum);
+      console.log(pendingCreditNum);
       const creditUsagePercentage =
         creditLimitNum > 0
           ? Math.round((usedCreditNum / creditLimitNum) * 100)
@@ -136,12 +142,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       let matchedUserCount = 0;
       let shopifyUserCount = 0;
 
-    if (!session.accessToken) {
-            throw new Response("Session access token not found", { status: 404 });
-          }
+      if (!session.accessToken) {
+        throw new Response("Session access token not found", { status: 404 });
+      }
 
       // Only fetch Shopify customers if company has a Shopify ID
-       let dbUserEmails 
+      let dbUserEmails;
       if (company.shopifyCompanyId) {
         try {
           const customersData = await getCompanyCustomers(
@@ -155,23 +161,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
           // Create a map of Shopify customers by email
           const shopifyCustomerMap = new Map(
-            customersData?.customers?.map((customer: { customer: { email?: string } }) => [
-              customer.customer?.email?.toLowerCase(),
-              customer,
-            ]) || [],
+            customersData?.customers?.map(
+              (customer: { customer: { email?: string } }) => [
+                customer.customer?.email?.toLowerCase(),
+                customer,
+              ],
+            ) || [],
           );
-           dbUserEmails = await prisma.registrationSubmission.findMany({
+          dbUserEmails = await prisma.registrationSubmission.findMany({
             where: {
               email: {
-                in: customersData?.customers?.map(
-                  (customer: { customer: { email?: string } }) =>
-                    customer.customer?.email?.toLowerCase(),
-                ) || [],
+                in:
+                  customersData?.customers?.map(
+                    (customer: { customer: { email?: string } }) =>
+                      customer.customer?.email?.toLowerCase(),
+                  ) || [],
               },
             },
             select: { contactName: true },
           });
-        
+
           // Count matched users (users that exist in both DB and Shopify)
           matchedUserCount = dbUsers.filter((user) =>
             shopifyCustomerMap.has(user.email.toLowerCase()),
@@ -187,7 +196,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       return {
         ...company,
-        contactName: dbUserEmails ? dbUserEmails.map((user) => user.contactName).join(", ") : company.contactName, 
+        contactName: (() => {
+          if (!dbUserEmails || !company.contactEmail) return "-";
+          const match = dbUserEmails.find(
+            (u) =>
+              u.email?.toLowerCase() === company.contactEmail?.toLowerCase(),
+          );
+          return match?.contactName || "-";
+        })(),
         creditLimit: company.creditLimit.toString(),
         usedCredit: creditInfo ? creditInfo.usedCredit.toString() : "0",
         pendingCredit: creditInfo ? creditInfo.pendingCredit.toString() : "0",
@@ -323,7 +339,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function CompaniesPage() {
- const {
+  const {
     companies,
     storeMissing,
     totalCount,
@@ -346,11 +362,12 @@ export default function CompaniesPage() {
   const navigation = useNavigation();
   const isSearching =
     navigation.state !== "idle" &&
-    (navigation.location?.search?.includes("search=") || Boolean(searchParams.get("search")));
+    (navigation.location?.search?.includes("search=") ||
+      Boolean(searchParams.get("search")));
 
   if (storeMissing) {
     return (
-       <s-page heading="Companies">
+      <s-page heading="Companies">
         <s-section>
           <s-banner tone="critical">
             <s-heading>Store not found</s-heading>
@@ -393,19 +410,19 @@ export default function CompaniesPage() {
               placeholder="Search by company name, Shopify ID, or contact..."
               value={query}
               onChange={(e) => {
-                  const value = e.target.value;
-                  setQuery(value);
-                  setSearchParams((prev) => {
-                    const newParams = new URLSearchParams(prev);
-                    if (value) {
-                      newParams.set("search", value);
-                      newParams.set("page", "1"); // Reset to page 1 on search
-                    } else {
-                      newParams.delete("search");
-                    }
-                    return newParams;
-                  });
-                }}
+                const value = e.target.value;
+                setQuery(value);
+                setSearchParams((prev) => {
+                  const newParams = new URLSearchParams(prev);
+                  if (value) {
+                    newParams.set("search", value);
+                    newParams.set("page", "1"); // Reset to page 1 on search
+                  } else {
+                    newParams.delete("search");
+                  }
+                  return newParams;
+                });
+              }}
               style={{
                 width: "100%",
                 padding: "10px 12px",
@@ -415,8 +432,6 @@ export default function CompaniesPage() {
                 outline: "none",
               }}
             />
-
-            
           </div>
         </div>
 
@@ -474,7 +489,6 @@ export default function CompaniesPage() {
                 pointerEvents: isSearching ? "none" : "auto",
               }}
             >
-            
               <thead>
                 <tr>
                   <th
@@ -520,7 +534,7 @@ export default function CompaniesPage() {
                 </tr>
               </thead>
               <tbody>
-                {companies.map((company:LoaderCompany) => (
+                {companies.map((company: LoaderCompany) => (
                   <tr
                     key={company.id}
                     style={{
@@ -548,7 +562,9 @@ export default function CompaniesPage() {
                             <>
                               {company.contactName}
                               <br />
-                              {company.contactEmail ? company.contactEmail : null}
+                              {company.contactEmail
+                                ? company.contactEmail
+                                : "-"}
                             </>
                           ) : (
                             <>{company.contactEmail}</>
@@ -738,7 +754,7 @@ export default function CompaniesPage() {
         )}
       </s-section>
     </s-page>
-  )
+  );
 }
 
 export const headers: HeadersFunction = (headersArgs) => {
