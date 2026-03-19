@@ -139,7 +139,35 @@ export const syncShopifyCompanies = async (
             },
           });
 
-          await syncShopifyUsers(admin, store, upsertedCompany.id);
+          await prisma.registrationSubmission.upsert({
+            where: {
+              shopId_email: { shopId: store.id, email: customer.email },
+            },
+            update: {
+              email: mainContact.email, 
+              companyName: upsertedCompany.name,
+              contactName:
+                `${mainContact.firstName} ${mainContact.lastName || upsertedCompany.contactName}`.trim(),
+              phone: "",
+              shopifyCustomerId,
+              status: "APPROVED",
+              businessType: "",
+              shopId: store.id,
+            },
+            create: {
+              email: mainContact.email,
+              companyName: upsertedCompany.name,
+              contactName:
+                `${mainContact.firstName} ${mainContact.lastName || upsertedCompany.contactName}`.trim(),
+              phone: "",
+              shopifyCustomerId,
+              status: "APPROVED",
+              businessType: "",
+              shopId: store.id,
+            },
+          });
+
+           await syncShopifyUsers(admin, store, upsertedCompany.id);
           await syncShopifyOrders(admin, store, upsertedCompany.id);
           // Send welcome email if email is configured
           if (
@@ -384,21 +412,21 @@ export const syncShopifyUsers = async (
             if (!localCompany) continue;
 
             // Determine company role from Shopify role assignments
-            let companyRole = "member";
-            const roles = profile.roleAssignments?.edges || [];
-            if (
-              roles.some((r: ShopifyRoleAssignment) =>
-                r.node?.role?.name?.includes("Admin"),
-              )
-            ) {
-              companyRole = "admin";
-            } else if (
-              roles.some((r: ShopifyRoleAssignment) =>
-                r.node?.role?.name?.includes("Approver"),
-              )
-            ) {
-              companyRole = "approver";
-            }
+            // let companyRole = "member";
+            // const roles = profile.roleAssignments?.edges || [];
+            // if (
+            //   roles.some((r: ShopifyRoleAssignment) =>
+            //     r.node?.role?.name?.includes("Admin"),
+            //   )
+            // ) {
+            //   companyRole = "admin";
+            // } else if (
+            //   roles.some((r: ShopifyRoleAssignment) =>
+            //     r.node?.role?.name?.includes("Approver"),
+            //   )
+            // ) {
+            //   companyRole = "approver";
+            // }
 
             // Check if this customer is the main contact of the company
             const isMainContact =
@@ -411,11 +439,11 @@ export const syncShopifyUsers = async (
                 shopId_email: { shopId: store.id, email: customer.email },
               },
               update: {
-                firstName: customer.firstName || null,
-                lastName: customer.lastName || null,
+                firstName: customer.firstName || localCompany.contactName || "",
+                lastName: customer.lastName || "",
                 shopifyCustomerId: customerGid,
                 companyId: localCompany.id,
-                companyRole,
+                companyRole:userRole == "STORE_ADMIN" ? "admin" : "member",
                 shopId: store.id,
                 status: "APPROVED",
                 isActive: true,
@@ -431,39 +459,11 @@ export const syncShopifyUsers = async (
                 isActive: true,
                 shopId: store.id,
                 companyId: localCompany.id,
-                companyRole,
+                companyRole:userRole == "STORE_ADMIN" ? "admin" : "member",
                 shopifyCustomerId: customerGid,
               },
             });
 
-           
-            await prisma.registrationSubmission.upsert({
-              where: {
-                shopId_email: { shopId: store.id, email: customer.email },
-              },
-              update: {
-                email: customer.email, // ✅ Keep consistent with the where clause
-                companyName: localCompany.name,
-                contactName:
-                  `${customer.firstName} ${customer.lastName || localCompany.contactName}`.trim(),
-                phone: "",
-                shopifyCustomerId: customerGid,
-                status: "APPROVED",
-                businessType: "",
-                shopId: store.id,
-              },
-              create: {
-                email: customer.email, // ✅ Same fix here
-                companyName: localCompany.name,
-                contactName:
-                  `${customer.firstName} ${customer.lastName || localCompany.contactName}`.trim(),
-                phone: "",
-                shopifyCustomerId: customerGid,
-                status: "APPROVED",
-                businessType: "",
-                shopId: store.id,
-              },
-            });
 
             syncedCount++;
           } catch (profileError) {
