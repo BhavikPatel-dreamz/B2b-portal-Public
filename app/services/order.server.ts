@@ -111,7 +111,7 @@ export async function createOrder(data: CreateOrderInput) {
   });
   const storeAdmin = await prisma.user.findFirst({
     where: {
-      id: order?.createdByUserId,
+      companyId: order?.companyId,
       role: "STORE_ADMIN",
     },
   });
