@@ -142,7 +142,7 @@ let additionalInfo: AdditionalInfo = {};
     // STEP 6: Check if user is disabled FIRST (before any other checks)
     if (registration?.isDisable === true) {
       const customerName =
-        registration?.contactName ||
+        `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
         (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
       return Response.json({
@@ -169,7 +169,7 @@ let additionalInfo: AdditionalInfo = {};
 
       if (isApprovedViaRegistration || isApprovedViaUser) {
         const customerName =
-          registration?.contactName ||
+          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim()  ||
           (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
         return Response.json({
@@ -194,7 +194,7 @@ let additionalInfo: AdditionalInfo = {};
       if (registration || user) {
         const status = registration?.status || user?.status;
         const customerName =
-          registration?.contactName ||
+          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
           (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
         return Response.json({
@@ -229,7 +229,7 @@ let additionalInfo: AdditionalInfo = {};
         // Has registration or user record but no B2B access in Shopify
         const status = registration?.status || user?.status;
         const customerName =
-          registration?.contactName ||
+          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
           (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
         let message =

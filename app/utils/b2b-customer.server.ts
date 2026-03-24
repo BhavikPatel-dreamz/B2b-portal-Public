@@ -1258,7 +1258,7 @@ export async function getCustomerCompanyInfo(
       hasCompany: true,
       customerId,
       customerName:
-        RegistrationData?.contactName ||
+        `${RegistrationData?.firstName || ""} ${RegistrationData?.lastName || ""}`.trim() ||
         (customer.firstName
           ? `${customer.firstName} ${customer.lastName || ""}`.trim()
           : customer.firstName || ""),

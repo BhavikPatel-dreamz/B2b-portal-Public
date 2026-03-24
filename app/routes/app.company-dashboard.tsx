@@ -746,7 +746,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     company: {
       id: dashboardData.company.id,
       name: dashboardData.company.name,
-      contactName: dashboardData.company.contactName || dashboardData.company.contactName  === null ? RegitrationData.contactName : "-",
+      contactName: dashboardData.company.contactName || dashboardData.company.contactName  === null ? `${RegitrationData?.firstName || ""}${RegitrationData?.lastName || ""}` : "-",
       contactEmail: dashboardData.company.contactEmail,
       shopifyCompanyId: dashboardData.company.shopifyCompanyId,
       paymentTermsTemplateId: dashboardData.company.paymentTerm || "",

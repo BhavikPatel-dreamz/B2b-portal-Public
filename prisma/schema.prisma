@@ -75,6 +75,7 @@ model Store {
   registrationSubmissions RegistrationSubmission[]
   companyAccounts        CompanyAccount[]
   b2bOrders              B2BOrder[]    @relation("StoreOrders")
+  formFieldConfigs        FormFieldConfig[]
 
   @@index([shopDomain])
 }
@@ -135,40 +136,37 @@ model UserSession {
 }
 
 // B2B Registration Submissions
-model RegistrationSubmission {
-  id              String    @id @default(cuid())
-  companyName     String
-  contactName     String
-  email           String
-  phone           String
-  businessType    String
-  website         String?
-  additionalInfo  String?
-  isPrivacyPolicy Boolean @default(false)
-  isDisable       Boolean @default(false) 
+  model RegistrationSubmission {
+    id              String    @id @default(cuid())
+    companyName     String
+    email           String         
+    firstName       String
+    lastName        String
+    contactTitle    String
+    shipping        Json 
+    billing         Json
+    customFields    Json? 
+    isPrivacyPolicy Boolean @default(false)
+    isDisable       Boolean @default(false) 
 
-  // Store relationship
-  shopId          String
-  shop            Store     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+    // Store relationship
+    shopId          String
+    shop            Store     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+    // Status tracking
+    status          UserStatus @default(PENDING)
 
-  // Status tracking
-  status          UserStatus @default(PENDING)
-  reviewedAt      DateTime?
-  reviewedBy      String?   // User ID who reviewed
-  reviewNotes     String?   // Admin notes on the review
+    // Shopify workflow tracking
+    shopifyCustomerId  String?  // Shopify customer GID
+    workflowCompleted  Boolean  @default(false)
 
-  // Shopify workflow tracking
-  shopifyCustomerId  String?  // Shopify customer GID
-  workflowCompleted  Boolean  @default(false)
+    createdAt       DateTime  @default(now())
+    updatedAt       DateTime  @updatedAt
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  @@index([shopId])
-  @@index([email])
-  @@index([status])
-  @@unique([shopId, email])
-}
+    @@index([shopId])
+    @@index([email])
+    @@index([status])
+    @@unique([shopId, email])
+  }
 
 // Store-level company records for credit management
 model CompanyAccount {
@@ -194,6 +192,17 @@ model CompanyAccount {
 
   @@index([shopId])
   @@unique([shopId, shopifyCompanyId])
+}
+
+model FormFieldConfig {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Store     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  fields    Json     // array of FieldDef
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shopId])
 }
 
 // Wishlist Models

@@ -24,10 +24,14 @@ interface RegistrationSubmission {
   paymentTermsTemplateId: string;
   id: string;
   companyName: string;
-  contactName: string;
+  firstName: string;
+  lastName: string;
   creditLimit: string;
   email: string;
   phone: string;
+  shipping: {
+    phone: string;
+  };
   businessType: string;
   website: string | null;
   additionalInfo: string | null;
@@ -238,9 +242,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     submissions: submissions.map((submission) => ({
       ...submission,
       createdAt: submission.createdAt.toISOString(),
-      reviewedAt: submission.reviewedAt
-        ? submission.reviewedAt.toISOString()
-        : null,
+      // reviewedAt: submission.reviewedAt
+      //   ? submission.reviewedAt.toISOString()
+      //   : null,
     })),
     companies: companiesWithLocations.map((company) => ({
       ...company,
@@ -545,6 +549,220 @@ export async function assignCompanyToCustomer(
   }
 }
 
+const formatPhone = (
+  phone: string,
+  countryCode: string,
+): string | undefined => {
+  if (!phone) return undefined;
+
+  if (phone.startsWith("+")) {
+    const digits = phone.replace(/\D/g, "");
+    if (countryCode === "IN" && digits.length !== 12) {
+      console.warn(
+        `⚠️ Phone digit count invalid for IN: ${phone} (${digits.length} digits, need 12)`,
+      );
+      return undefined;
+    }
+    return phone;
+  }
+
+  const cleaned = phone.replace(/\D/g, "");
+  if (countryCode === "IN") {
+    if (cleaned.length === 10) return `+91${cleaned}`;
+    if (cleaned.length === 11 && cleaned.startsWith("0"))
+      return `+91${cleaned.slice(1)}`;
+    console.warn(
+      `⚠️ Cannot format IN phone: ${phone} (${cleaned.length} digits)`,
+    );
+    return undefined;
+  }
+
+  return `+${cleaned}`;
+};
+
+function parseFormFields(form: Record<string, any>) {
+  const shipping: Record<string, any> = {};
+  const billing: Record<string, any> = {};
+  const customFields: Record<string, any> = {};
+
+  const coreKeys = [
+    "companyName",
+    "email",
+    "firstName",
+    "lastName",
+    "contactTitle",
+    "shopifyCustomerId",
+    "paymentTerms",
+    "creditLimit",
+    "customerEmail",
+    "companyId",
+    "customerId",
+    "phone",
+    "intent",
+    "billSameAsShip",
+    "taxId",
+  ];
+
+  Object.entries(form).forEach(([key, value]) => {
+    if (key.startsWith("ship")) {
+      // e.g. shipAddr1 → Addr1, shipCity → City
+      shipping[key.replace("ship", "")] = value;
+    } else if (key.startsWith("bill")) {
+      // e.g. billAddr1 → Addr1, billCity → City
+      billing[key.replace("bill", "")] = value;
+    } else if (!coreKeys.includes(key)) {
+      // anything else that isn't a core key → customFields
+      customFields[key] = value;
+    }
+  });
+
+  return { shipping, billing, customFields };
+}
+// ── Assign shipping/billing address to company location ──
+async function assignLocationAddresses(
+  admin: any,
+  locationId: string,
+  registrationData: any,
+) {
+  if (!registrationData) {
+    console.log("⚠️ assignLocationAddresses: No registrationData, skipping.");
+    return;
+  }
+
+  const shipping = registrationData.shipping;
+  const billing = registrationData.billing;
+  const isSameAsBilling = billing?.SameAsShip === "true";
+
+  console.log("📦 assignLocationAddresses called:", {
+    locationId,
+    isSameAsBilling,
+    shipping,
+    billing,
+  });
+
+  // ── Shipping address ──
+  if (shipping) {
+    const shippingAddress = {
+      address1: shipping.Addr1 || "",
+      address2: shipping.Addr2 || "",
+      city: shipping.City || "",
+      zip: shipping.Zip || "",
+      countryCode: shipping.Country || "",
+      zoneCode: shipping.State || "",
+      phone: formatPhone(shipping.Phone, shipping.Country),
+      firstName: shipping.FirstName || "",
+      lastName: shipping.LastName || "",
+      recipient:
+        `${shipping.FirstName || ""} ${shipping.LastName || ""}`.trim(),
+    };
+
+    const addressTypes = isSameAsBilling
+      ? ["SHIPPING", "BILLING"]
+      : ["SHIPPING"];
+
+    console.log("🚚 Assigning SHIPPING address:", {
+      shippingAddress,
+      addressTypes,
+    });
+
+    const shippingRes = await admin
+      .graphql(
+        `#graphql
+        mutation AssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
+          companyLocationAssignAddress(
+            locationId: $locationId
+            address: $address
+            addressTypes: $addressTypes
+          ) {
+            addresses { id address1 city zip countryCode }
+            userErrors { field message code }
+          }
+        }`,
+        { variables: { locationId, address: shippingAddress, addressTypes } },
+      )
+      .then((r: any) => r.json());
+
+    const shippingUserErrors =
+      shippingRes?.data?.companyLocationAssignAddress?.userErrors || [];
+
+    if (shippingUserErrors.length > 0) {
+      console.error(
+        "❌ SHIPPING address userErrors:",
+        JSON.stringify(shippingUserErrors, null, 2),
+      );
+      console.error(
+        "❌ Input that caused error:",
+        JSON.stringify({ shippingAddress, addressTypes }, null, 2),
+      );
+    } else {
+      console.log(
+        "✅ SHIPPING address assigned successfully:",
+        shippingRes?.data?.companyLocationAssignAddress?.addresses,
+      );
+    }
+  }
+
+  // ── Billing address (only if different from shipping) ──
+  if (billing && !isSameAsBilling) {
+    const billingAddress = {
+      address1: billing.Addr1 || "",
+      address2: billing.Addr2 || "",
+      city: billing.City || "",
+      zip: billing.Zip || "",
+      countryCode: billing.Country || "",
+      zoneCode: billing.State || "",
+      phone: formatPhone(billing.Phone, billing.Country),
+      firstName: billing.FirstName || "",
+      lastName: billing.LastName || "",
+      recipient: `${billing.FirstName || ""} ${billing.LastName || ""}`.trim(),
+    };
+
+    console.log("🧾 Assigning BILLING address:", billingAddress);
+
+    const billingRes = await admin
+      .graphql(
+        `#graphql
+        mutation AssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
+          companyLocationAssignAddress(
+            locationId: $locationId
+            address: $address
+            addressTypes: $addressTypes
+          ) {
+            addresses { id address1 city zip countryCode }
+            userErrors { field message code }
+          }
+        }`,
+        {
+          variables: {
+            locationId,
+            address: billingAddress,
+            addressTypes: ["BILLING"],
+          },
+        },
+      )
+      .then((r: any) => r.json());
+
+    const billingUserErrors =
+      billingRes?.data?.companyLocationAssignAddress?.userErrors || [];
+
+    if (billingUserErrors.length > 0) {
+      console.error(
+        "❌ BILLING address userErrors:",
+        JSON.stringify(billingUserErrors, null, 2),
+      );
+      console.error(
+        "❌ Input that caused error:",
+        JSON.stringify(billingAddress, null, 2),
+      );
+    } else {
+      console.log(
+        "✅ BILLING address assigned successfully:",
+        billingRes?.data?.companyLocationAssignAddress?.addresses,
+      );
+    }
+  }
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const store = await prisma.store.findUnique({
@@ -575,7 +793,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         console.log("⏳ Checking customer:", email);
 
-        const [customerResponse, registration] = await Promise.all([
+        const [customerResponse, registration, user] = await Promise.all([
           admin.graphql(
             `#graphql
             query CustomersByEmail($query: String!) {
@@ -599,6 +817,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           prisma.registrationSubmission.findFirst({
             where: { email },
           }),
+          prisma.user.findFirst({
+            where: { email },
+          }),
         ]);
 
         const customerPayload = await customerResponse.json();
@@ -606,7 +827,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         console.log("✅ Customer check completed:", {
           exists: !!customer,
-          hasRegistration: !!registration,
+          hasRegistration: !!registration || !!user,
         });
 
         return Response.json({
@@ -623,6 +844,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const firstName = (form.firstName as string)?.trim();
         const lastName = (form.lastName as string)?.trim();
         const phone = (form.phone as string)?.trim() || undefined;
+        const contactTitle = (form.contactTitle as string)?.trim() || "";
 
         if (!email || !firstName) {
           return Response.json({
@@ -632,6 +854,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        // ── Parse shipping / billing / custom fields ──
+        const { shipping, billing, customFields } = parseFormFields(
+          form as Record<string, any>,
+        );
+
+        // ── Create customer in Shopify ──
         const response = await admin.graphql(
           `#graphql
     mutation CreateCustomer($input: CustomerInput!) {
@@ -645,8 +873,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
         userErrors { field message }
       }
-    }
-  `,
+    }`,
           {
             variables: {
               input: {
@@ -674,34 +901,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           where: { email },
         });
 
-        if (!registrationData && customer) {
+        if (!registrationData) {
           await prisma.registrationSubmission.create({
             data: {
-              contactName: `${firstName} ${lastName || ""}`.trim(),
+              firstName,
+              lastName: lastName || "",
               email,
-              phone: phone || "",
+              contactTitle,
               shopifyCustomerId: customer?.id || null,
               status: "PENDING",
               companyName: "",
-              businessType: "",
               shopId: store.id,
+              shipping,
+              billing,
+              customFields,
             },
           });
         } else {
           await prisma.registrationSubmission.update({
-            where: { id: registrationData?.id || "" },
+            where: { id: registrationData.id },
             data: {
-              contactName: `${firstName} ${lastName || ""}`.trim(),
+              firstName,
+              lastName: lastName || "",
               email,
+              contactTitle,
               shopifyCustomerId: customer?.id || null,
-              phone: phone || "",
               status: "PENDING",
-              companyName: "",
-              businessType: "",
+              companyName: registrationData.companyName || "",
+              shopId: store.id,
+              shipping,
+              billing,
+              customFields,
             },
           });
         }
 
+        // ── UPSERT user record ──
         const userData = await prisma.user.findFirst({
           where: {
             shopifyCustomerId: customer?.id || null,
@@ -709,7 +944,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        if (!userData && customer) {
+        if (!userData) {
           await prisma.user.create({
             data: {
               email,
@@ -725,9 +960,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         } else {
           await prisma.user.update({
-            where: {
-              id: userData?.id || "",
-            },
+            where: { id: userData.id },
             data: {
               firstName,
               lastName: lastName || "",
@@ -755,6 +988,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const firstName = (form.firstName as string)?.trim();
         const lastName = (form.lastName as string)?.trim();
         const phone = (form.phone as string)?.trim() || undefined;
+        const contactTitle = (form.contactTitle as string)?.trim() || "";
 
         if (!customerId) {
           return Response.json({
@@ -764,21 +998,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        // ── Parse shipping / billing / custom fields ──
+        const { shipping, billing, customFields } = parseFormFields(
+          form as Record<string, any>,
+        );
+
+        // ── Update customer in Shopify ──
         const response = await admin.graphql(
           `#graphql
-          mutation UpdateCustomer($input: CustomerInput!) {
-            customerUpdate(input: $input) {
-              customer {
-                id
-                email
-                firstName
-                lastName
-                phone
-              }
-              userErrors { field message }
-            }
-          }
-        `,
+    mutation UpdateCustomer($input: CustomerInput!) {
+      customerUpdate(input: $input) {
+        customer {
+          id
+          email
+          firstName
+          lastName
+          phone
+        }
+        userErrors { field message }
+      }
+    }`,
           {
             variables: {
               input: {
@@ -791,34 +1030,61 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           },
         );
+
         const payload = await response.json();
         const errors = buildUserErrorList(payload);
+
         if (errors.length) {
           return Response.json({ intent, success: false, errors });
         }
 
         const customer = payload?.data?.customerUpdate?.customer;
+        console.log(customer, "customer - updateCustomer");
+
+        // ── UPSERT registrationSubmission (with shipping / billing / customFields) ──
         const registrationData = await prisma.registrationSubmission.findFirst({
           where: { shopifyCustomerId: customerId },
         });
 
-        if (registrationData && customer) {
+        if (!registrationData) {
+          // No existing record → create one so data is never lost
+          await prisma.registrationSubmission.create({
+            data: {
+              firstName,
+              lastName: lastName || "",
+              email,
+              contactTitle,
+              shopifyCustomerId: customerId,
+              status: "PENDING",
+              companyName: "",
+              shopId: store.id,
+              shipping,
+              billing,
+              customFields,
+            },
+          });
+        } else {
           await prisma.registrationSubmission.update({
             where: { id: registrationData.id },
             data: {
-              contactName: `${firstName} ${lastName || ""}`.trim(),
+              firstName,
+              lastName: lastName || "",
               email,
-              phone: phone || "",
+              contactTitle,
+              shopifyCustomerId: customerId,
               status: "PENDING",
-              shopifyCustomerId: customerId || null,
+              shipping,
+              billing,
+              customFields,
             },
           });
         }
+
+        // ── UPSERT user record ──
         const userData = await prisma.user.findFirst({
-          where: {
-            shopifyCustomerId: customerId,
-          },
+          where: { shopifyCustomerId: customerId },
         });
+
         if (userData) {
           await prisma.user.update({
             where: { id: userData.id },
@@ -826,7 +1092,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               email,
               firstName,
               lastName: lastName || "",
-              shopifyCustomerId: customerId || null,
+              shopifyCustomerId: customerId,
+              shopId: store.id,
+              status: "PENDING",
+              role: "STORE_ADMIN",
+              password: "",
+              companyRole: "admin",
+            },
+          });
+        } else {
+          // Guard: create user if somehow missing
+          await prisma.user.create({
+            data: {
+              email,
+              firstName,
+              lastName: lastName || "",
+              shopifyCustomerId: customerId,
               shopId: store.id,
               status: "PENDING",
               role: "STORE_ADMIN",
@@ -839,7 +1120,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return Response.json({
           intent,
           success: true,
-          customer: payload?.data?.customerUpdate?.customer,
+          customer,
           message: "Customer updated",
         });
       }
@@ -907,6 +1188,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
         const creditLimit = (form.creditLimit as string)?.trim();
         const customerEmail = (form.customerEmail as string)?.trim();
+        const firstName = (form.firstName as string)?.trim();
+        const lastName = (form.lastName as string)?.trim();
+
+        // ── Fetch registration data for address ──
+        const RegitrasionData = await prisma.registrationSubmission.findFirst({
+          where: { email: customerEmail, shopId: store.id },
+        });
 
         if (!companyName) {
           return Response.json({
@@ -916,7 +1204,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // ✅ CHECK: Does company already exist in Shopify?
+        // ── CHECK: Does company already exist in Shopify? ──
         const existingShopifyResponse = await admin.graphql(
           `#graphql
           query CompaniesByName($query: String!) {
@@ -942,7 +1230,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const existingShopifyCompany =
           existingShopifyPayload?.data?.companies?.nodes?.[0] || null;
 
-        // ✅ CHECK: Does company already exist in local DB?
+        // ── CHECK: Does company already exist in local DB? ──
         const existingLocalCompany = await prisma.companyAccount.findFirst({
           where: { name: companyName, shopId: store.id },
         });
@@ -952,7 +1240,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         let locationName: string;
 
         if (existingShopifyCompany) {
-          // ── COMPANY EXISTS IN SHOPIFY → UPDATE instead of error ──
+          // ── COMPANY EXISTS IN SHOPIFY → UPDATE ──
           console.log(
             "🔄 Company already exists in Shopify, updating:",
             existingShopifyCompany.id,
@@ -973,7 +1261,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           locationId = existingLocation.id;
           locationName = existingLocation.name;
 
-          // Update metafield and payment terms in parallel
           await Promise.all([
             creditLimit
               ? updateCompanyMetafield(admin, companyId, {
@@ -1014,6 +1301,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                   .then((res) => res.json())
               : Promise.resolve(),
           ]);
+
+          // ✅ Assign address for existing company
+          await assignLocationAddresses(admin, locationId, RegitrasionData);
         } else {
           // ── COMPANY DOES NOT EXIST → CREATE NEW ──
           console.log("✅ Creating new company:", companyName);
@@ -1048,7 +1338,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
           companyId = companyPayload.data.companyCreate.company.id;
 
-          // Fetch location + update payment terms/metafield in parallel
           const [locationPayload] = await Promise.all([
             admin
               .graphql(
@@ -1087,7 +1376,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           locationId = newLocation.id;
           locationName = newLocation.name;
 
-          // Update payment terms on the new location
           if (paymentTermsTemplateId) {
             const updateLocationResponse = await admin.graphql(
               `#graphql
@@ -1125,9 +1413,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               });
             }
           }
+
+          // ✅ Assign address for new company
+          await assignLocationAddresses(admin, locationId, RegitrasionData);
         }
 
-        // ── UPSERT company in local DB (handles both create & update) ──
+        // ── UPSERT company in local DB ──
         const [companyData, linkedUser] = await Promise.all([
           prisma.companyAccount.upsert({
             where: {
@@ -1140,6 +1431,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName,
               paymentTerm: paymentTermsTemplateId || null,
               creditLimit: creditLimit ? Number(creditLimit) : undefined,
+              contactEmail: customerEmail || "",
+              contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
             },
             create: {
               shopId: store.id,
@@ -1147,6 +1440,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               shopifyCompanyId: companyId,
               paymentTerm: paymentTermsTemplateId || null,
               creditLimit: creditLimit ? Number(creditLimit) : undefined,
+              contactEmail: customerEmail || "",
+              contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
             },
           }),
 
@@ -1166,27 +1461,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               }),
         ]);
 
-        // Update registration and user in parallel
         await Promise.all([
-          customerEmail
-            ? prisma.registrationSubmission.upsert({
-                where: {
-                  shopId_email: { shopId: store.id, email: customerEmail },
-                },
-                update: { companyName },
-                create: {
-                  email: customerEmail,
-                  companyName,
-                  contactName: "",
-                  phone: "",
-                  shopifyCustomerId: null,
-                  status: "PENDING",
-                  businessType: "",
-                  shopId: store.id,
-                },
-              })
-            : Promise.resolve(),
-
           linkedUser
             ? prisma.user.update({
                 where: { id: linkedUser.id },
@@ -1228,7 +1503,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // ✅ Check for duplicate name (exclude current company)
         const duplicateShopifyResponse = await admin.graphql(
           `#graphql
           query CompaniesByName($query: String!) {
@@ -1260,7 +1534,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // 1️⃣ Update Company name in Shopify
         const updateCompanyResponse = await admin.graphql(
           `#graphql
           mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
@@ -1288,7 +1561,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // 2️⃣ Parallel: fetch location + update DB + find user + update metafield
         const [locationPayload, companyExists, linkedUser] = await Promise.all([
           admin
             .graphql(
@@ -1360,7 +1632,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // 3️⃣ Update location name and payment terms
         if (paymentTermsTemplateId || companyName) {
           const updateLocationResponse = await admin.graphql(
             `#graphql
@@ -1403,26 +1674,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
-        // 4️⃣ Update registration + user in parallel
         await Promise.all([
-          customerEmail
-            ? prisma.registrationSubmission.upsert({
-                where: {
-                  shopId_email: { shopId: store.id, email: customerEmail },
-                },
-                update: { companyName },
-                create: {
-                  email: customerEmail,
-                  companyName,
-                  contactName: "",
-                  phone: "",
-                  shopifyCustomerId: null,
-                  status: "PENDING",
-                  businessType: "",
-                  shopId: store.id,
-                },
-              })
-            : Promise.resolve(),
+          // customerEmail
+          //   ? prisma.registrationSubmission.upsert({
+          //       where: {
+          //         shopId_email: { shopId: store.id, email: customerEmail },
+          //       },
+          //       update: { companyName },
+          //       create: {
+          //         email: customerEmail,
+          //         companyName,
+          //         firstName: "",
+          //         lastName: "",
+          //         shopifyCustomerId: null,
+          //         status: "PENDING",
+          //         shopId: store.id,
+          //       },
+          //     })
+          //   : Promise.resolve(),
 
           linkedUser
             ? prisma.user.update({
@@ -1451,8 +1720,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyId = (form.companyId as string)?.trim();
         const customerId = normalizeCustomerId(form.customerId as string);
         const locationId = (form.locationId as string)?.trim();
-        const customerFirstName = (form.customerFirstName as string)?.trim();
-        const customerLastName = (form.customerLastName as string)?.trim();
         const customerEmail = (form.customerEmail as string)?.trim();
 
         if (!companyId || !customerId || !locationId) {
@@ -1478,7 +1745,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        const contactName = `${customerFirstName} ${customerLastName}`.trim();
+        const RegitrationData = await prisma.registrationSubmission.findFirst({
+          where: { email: customerEmail },
+        });
+
+        const contactName =
+          `${RegitrationData?.firstName} ${RegitrationData?.lastName}`.trim();
 
         const companyAccount = await prisma.companyAccount.upsert({
           where: {
@@ -1505,8 +1777,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             shopId_email: { shopId: store.id, email: customerEmail },
           },
           update: {
-            firstName: customerFirstName || null,
-            lastName: customerLastName || null,
+            firstName: RegitrationData?.firstName || null,
+            lastName: RegitrationData?.lastName || null,
             shopifyCustomerId: customerId,
             companyId: companyAccount.id,
             companyRole: "admin",
@@ -1516,8 +1788,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
           create: {
             email: customerEmail,
-            firstName: customerFirstName || null,
-            lastName: customerLastName || null,
+            firstName: RegitrationData?.firstName || null,
+            lastName: RegitrationData?.lastName || null,
             password: "",
             shopifyCustomerId: customerId,
             shopId: store.id,
@@ -1541,6 +1813,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const email = (form.email as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
         const note = (form.reviewNotes as string)?.trim() || null;
+        const contactName =
+          (`${form?.firstName} ${form?.lastName}` as string)?.trim() ||
+          "First Name";
 
         if (!email) {
           return Response.json({
@@ -1549,9 +1824,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             errors: ["Email required"],
           });
         }
-        const RegitrationData=await prisma.registrationSubmission.findFirst({
-          where:{email}
-        })
+
+        const RegitrationData = await prisma.registrationSubmission.findFirst({
+          where: { email },
+        });
 
         await sendCompanyAssignmentEmail(
           store.shopName || "Shop Name",
@@ -1559,19 +1835,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           store.storeOwnerName || "Store Owner",
           email,
           companyName,
-          RegitrationData?.contactName || "contect Name",
-          note || "",
+          `${RegitrationData?.firstName} ${RegitrationData?.lastName}` || "",
+          note,
         );
-
-        const registerData = await prisma.registrationSubmission.findFirst({
-          where: { email },
-        });
-        if (registerData) {
-          await prisma.registrationSubmission.update({
-            where: { id: registerData.id },
-            data: { reviewNotes: note },
-          });
-        }
 
         return Response.json({
           intent,
@@ -1605,8 +1871,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           where: { id: registrationId },
           data: {
             status: "APPROVED",
-            reviewedAt: new Date(),
-            reviewedBy: session.id,
             shopifyCustomerId: customerId,
             workflowCompleted: true,
           },
@@ -1707,12 +1971,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         await prisma.registrationSubmission.update({
           where: { id: registrationId },
-          data: {
-            status: "REJECTED",
-            reviewedAt: new Date(),
-            reviewedBy: session.id,
-            reviewNotes: note,
-          },
+          data: { status: "REJECTED" },
         });
 
         await prisma.user.update({
@@ -1750,6 +2009,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 };
+
 const formatDate = (value?: string | null) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -1841,8 +2101,11 @@ export default function RegistrationApprovals() {
     "create",
   );
   const [creditLimit, setCreditLimit] = useState(0);
-  const [searchParams, setSearchParams] = useSearchParams();
 
+  // ── Billing same as shipping toggle (used in createCustomer step) ──
+  const [billSameAsShip, setBillSameAsShip] = useState(true);
+
+  const [searchParams, setSearchParams] = useSearchParams();
   const statusFromUrl = searchParams.get("status");
 
   const normalizeStatus = (value: string | null) => {
@@ -1869,13 +2132,11 @@ export default function RegistrationApprovals() {
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
 
-  // ── Granular loading states ──────────────────────────────────────────────
   const isFlowLoading = flowFetcher.state !== "idle";
   const isRejecting = rejectFetcher.state !== "idle";
   const currentIntent = flowFetcher.formData?.get("intent") as
     | string
     | undefined;
-
   const isCheckingCustomer = isFlowLoading && currentIntent === "checkCustomer";
   const isCreatingCustomer =
     isFlowLoading && currentIntent === "createCustomer";
@@ -1888,13 +2149,13 @@ export default function RegistrationApprovals() {
   const isSendingEmail = isFlowLoading && currentIntent === "sendWelcomeEmail";
   const isCompletingApproval =
     isFlowLoading && currentIntent === "completeApproval";
+
   const checkRef = useRef<HTMLDivElement>(null);
   const createCustomerRef = useRef<HTMLDivElement>(null);
   const createCompanyRef = useRef<HTMLDivElement>(null);
   const assignRef = useRef<HTMLDivElement>(null);
   const emailRef = useRef<HTMLDivElement>(null);
   const completeRef = useRef<HTMLDivElement>(null);
-  // ────────────────────────────────────────────────────────────────────────
 
   const goToStep = (
     stepName: StepName,
@@ -1902,16 +2163,22 @@ export default function RegistrationApprovals() {
   ) => {
     setStep(stepName);
     requestAnimationFrame(() => {
-      ref.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
 
-  const filteredSubmissions = useMemo(() => {
-    return submissions.filter((s) => s.status === statusFilter);
-  }, [submissions, statusFilter]);
+  const filteredSubmissions = useMemo(
+    () => submissions.filter((s) => s.status === statusFilter),
+    [submissions, statusFilter],
+  );
+
+  // ── When a submission is selected, pre-set billSameAsShip from stored data ──
+  useEffect(() => {
+    if (selected) {
+      const storedSame = (selected as any)?.customFields?.billSameAsShip;
+      setBillSameAsShip(storedSame === "false" ? false : true);
+    }
+  }, [selected]);
 
   useEffect(() => {
     if (!flowFetcher.data) return;
@@ -1921,10 +2188,6 @@ export default function RegistrationApprovals() {
       flowFetcher.data.customer
     ) {
       setCustomer(flowFetcher.data.customer);
-      // flowFetcher.submit(
-      //   { intent: "checkCompany", companyName: selected?.companyName || "" },
-      //   { method: "post" },
-      // );
       return;
     }
 
@@ -1934,7 +2197,6 @@ export default function RegistrationApprovals() {
       flowFetcher.data.success
     ) {
       setCustomer(flowFetcher.data.customer || null);
-      // ✅ Both create AND update redirect to createCompany step
       setStep("createCompany");
       setShowCustomerModal(false);
       shopify.toast.show?.(
@@ -1945,11 +2207,7 @@ export default function RegistrationApprovals() {
 
     if (flowFetcher.data.intent === "checkCompany") {
       setStep("createCompany");
-      if (flowFetcher.data.company) {
-        setCompany(flowFetcher.data.company);
-      } else {
-        setCompany(null);
-      }
+      setCompany(flowFetcher.data.company ? flowFetcher.data.company : null);
       return;
     }
 
@@ -1966,7 +2224,6 @@ export default function RegistrationApprovals() {
         setEditMode("create");
       }
       setShowCompanyModal(false);
-      // ✅ Show different toast if company already existed and was updated
       shopify.toast.show?.(
         flowFetcher.data.intent === "createCompany"
           ? "Company created successfully"
@@ -1985,17 +2242,6 @@ export default function RegistrationApprovals() {
         );
         revalidator.revalidate();
       }
-      // On failure: do NOT call setStep — stay on "assign" so the error renders
-      return;
-    }
-
-    if (
-      flowFetcher.data.intent === "assignMainContact" &&
-      !flowFetcher.data.success
-    ) {
-      shopify.toast.show?.(
-        `Failed to assign contact: ${flowFetcher.data.errors?.[0] || "Unknown error"}`,
-      );
       return;
     }
 
@@ -2003,8 +2249,6 @@ export default function RegistrationApprovals() {
       flowFetcher.data.intent === "sendWelcomeEmail" &&
       flowFetcher.data.success
     ) {
-      // ✅ NO auto-redirect — stay on email step, show success inline
-      // User must click "Next: Complete Approval" manually
       shopify.toast.show?.("Welcome email sent");
       return;
     }
@@ -2013,8 +2257,6 @@ export default function RegistrationApprovals() {
       flowFetcher.data.intent === "completeApproval" &&
       flowFetcher.data.success
     ) {
-      // ✅ NO auto-close — stay on complete step, show success inline
-      // User must click "Done" manually
       revalidator.revalidate();
       shopify.toast.show?.("Registration approved");
     }
@@ -2075,6 +2317,13 @@ export default function RegistrationApprovals() {
     return { firstName: first, lastName: rest.join(" ") };
   }, [selected]);
 
+  // ── Helpers to read shipping/billing/customFields from selected ──────────
+  const s = (selected as any)?.shipping as Record<string, string> | undefined;
+  const b = (selected as any)?.billing as Record<string, string> | undefined;
+  const cf = (selected as any)?.customFields as
+    | Record<string, string>
+    | undefined;
+
   if (storeMissing) {
     return (
       <s-page heading="Registrations">
@@ -2092,6 +2341,189 @@ export default function RegistrationApprovals() {
       </s-page>
     );
   }
+
+  // ── Shared field style ────────────────────────────────────────────────────
+  const inputStyle: React.CSSProperties = {
+    padding: 10,
+    borderRadius: 8,
+    border: "1px solid #c9ccd0",
+    width: "100%",
+    boxSizing: "border-box",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  };
+  const labelTextStyle: React.CSSProperties = {
+    fontSize: 12,
+    color: "#5c5f62",
+    fontWeight: 500,
+  };
+  const sectionHeadingStyle: React.CSSProperties = {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#374151",
+    margin: "16px 0 8px 0",
+    paddingBottom: 4,
+    borderBottom: "1px solid #e3e3e3",
+  };
+
+  // ── Reusable: address field grid ─────────────────────────────────────────
+  const AddressFields = ({
+    prefix,
+    values,
+    disabled = false,
+  }: {
+    prefix: "ship" | "bill";
+    values?: Record<string, string>;
+    disabled?: boolean;
+  }) => (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 10,
+        opacity: disabled ? 0.5 : 1,
+        pointerEvents: disabled ? "none" : "auto",
+      }}
+    >
+      {[
+        { label: "Department", name: "Dept", col: "1 / -1" },
+        { label: "First name", name: "FirstName" },
+        { label: "Last name", name: "LastName" },
+        { label: "Phone", name: "Phone" },
+        { label: "Address line 1", name: "Addr1", col: "1 / -1" },
+        { label: "Address line 2", name: "Addr2", col: "1 / -1" },
+        { label: "City", name: "City" },
+        { label: "State / Province", name: "State" },
+        { label: "ZIP / Postal code", name: "Zip" },
+        { label: "Country code", name: "Country" },
+      ].map(({ label, name, col }) => (
+        <label key={name} style={{ ...labelStyle, gridColumn: col as any }}>
+          <span style={labelTextStyle}>{label}</span>
+          <input
+            name={`${prefix}${name}`}
+            defaultValue={values?.[name] ?? ""}
+            style={inputStyle}
+          />
+        </label>
+      ))}
+    </div>
+  );
+
+  // ── Reusable: full customer form body ─────────────────────────────────────
+  // Used in BOTH create and update paths so fields stay consistent.
+  const CustomerFormFields = ({
+    prefillEmail,
+    prefillFirstName,
+    prefillLastName,
+    prefillPhone,
+    prefillContactTitle,
+    prefillTaxId,
+    shipValues,
+    billValues,
+  }: {
+    prefillEmail?: string;
+    prefillFirstName?: string;
+    prefillLastName?: string;
+    prefillPhone?: string;
+    prefillContactTitle?: string;
+    prefillTaxId?: string;
+    shipValues?: Record<string, string>;
+    billValues?: Record<string, string>;
+  }) => (
+    <>
+      {/* ── Core fields ── */}
+      <p style={sectionHeadingStyle}>Contact information</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+          <span style={labelTextStyle}>Email *</span>
+          <input
+            name="email"
+            type="email"
+            required
+            defaultValue={prefillEmail ?? ""}
+            style={inputStyle}
+          />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>First name *</span>
+          <input
+            name="firstName"
+            required
+            defaultValue={prefillFirstName ?? ""}
+            style={inputStyle}
+          />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Last name</span>
+          <input
+            name="lastName"
+            defaultValue={prefillLastName ?? ""}
+            style={inputStyle}
+          />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Phone</span>
+          <input
+            name="phone"
+            defaultValue={prefillPhone ?? ""}
+            style={inputStyle}
+          />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Contact title</span>
+          <input
+            name="contactTitle"
+            defaultValue={prefillContactTitle ?? ""}
+            style={inputStyle}
+          />
+        </label>
+        <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+          <span style={labelTextStyle}>Tax ID</span>
+          <input
+            name="taxId"
+            defaultValue={prefillTaxId ?? ""}
+            style={inputStyle}
+          />
+        </label>
+      </div>
+
+      {/* ── Shipping address ── */}
+      <p style={sectionHeadingStyle}>Shipping address</p>
+      <AddressFields prefix="ship" values={shipValues} />
+
+      {/* ── Billing address ── */}
+      <p style={sectionHeadingStyle}>Billing address</p>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+          cursor: "pointer",
+        }}
+      >
+        <input
+          type="checkbox"
+          name="billSameAsShip"
+          checked={billSameAsShip}
+          value="true"
+          onChange={(e) => setBillSameAsShip(e.target.checked)}
+        />
+        <span style={{ fontSize: 13, color: "#374151" }}>
+          Billing address same as shipping
+        </span>
+      </label>
+
+      <AddressFields
+        prefix="bill"
+        values={billSameAsShip ? shipValues : billValues}
+        disabled={billSameAsShip}
+      />
+    </>
+  );
 
   return (
     <s-page heading="Registration submissions">
@@ -2173,10 +2605,12 @@ export default function RegistrationApprovals() {
                         {submission.companyName}
                       </td>
                       <td style={{ padding: "8px" }}>
-                        {submission.contactName}
+                        {submission.firstName} {submission.lastName}
                       </td>
                       <td style={{ padding: "8px" }}>{submission.email}</td>
-                      <td style={{ padding: "8px" }}>{submission.phone}</td>
+                      <td style={{ padding: "8px" }}>
+                        {(submission as any)?.shipping?.Phone}
+                      </td>
                       <td style={{ padding: "8px" }}>
                         <s-badge
                           tone={
@@ -2251,7 +2685,7 @@ export default function RegistrationApprovals() {
         >
           <div
             style={{
-              width: "min(600px, 90vw)",
+              width: "min(700px, 90vw)",
               background: "white",
               borderRadius: 12,
               boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
@@ -2281,11 +2715,10 @@ export default function RegistrationApprovals() {
             </div>
             <div style={{ padding: "18px 24px" }}>
               <form
-                style={{ display: "grid", gap: 12 }}
+                style={{ display: "grid", gap: 4 }}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const formEl = e.currentTarget;
-                  const data = new FormData(formEl);
+                  const data = new FormData(e.currentTarget);
                   data.append(
                     "intent",
                     editMode === "create" ? "createCustomer" : "updateCustomer",
@@ -2296,60 +2729,23 @@ export default function RegistrationApprovals() {
                   flowFetcher.submit(data, { method: "post" });
                 }}
               >
-                {[
-                  {
-                    label: "Email *",
-                    name: "email",
-                    type: "email",
-                    required: true,
-                    value: customer?.email || selected?.email || "",
-                  },
-                  {
-                    label: "First name *",
-                    name: "firstName",
-                    required: true,
-                    value:
-                      customer?.firstName || contactNameParts.firstName || "",
-                  },
-                  {
-                    label: "Last name",
-                    name: "lastName",
-                    value:
-                      customer?.lastName || contactNameParts.lastName || "",
-                  },
-                  {
-                    label: "Phone",
-                    name: "phone",
-                    value: customer?.phone || selected?.phone || "",
-                  },
-                ].map(({ label, name, type = "text", required, value }) => (
-                  <label
-                    key={name}
-                    style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: "#5c5f62",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {label}
-                    </span>
-                    <input
-                      name={name}
-                      type={type}
-                      defaultValue={value}
-                      required={required}
-                      style={{
-                        padding: 10,
-                        borderRadius: 8,
-                        border: "1px solid #c9ccd0",
-                      }}
-                    />
-                  </label>
-                ))}
-                <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                <CustomerFormFields
+                  prefillEmail={customer?.email || selected?.email || ""}
+                  prefillFirstName={
+                    customer?.firstName || contactNameParts.firstName || ""
+                  }
+                  prefillLastName={
+                    customer?.lastName || contactNameParts.lastName || ""
+                  }
+                  prefillPhone={customer?.phone || s?.Phone || ""}
+                  prefillContactTitle={
+                    (selected as any)?.contactTitle || cf?.contactTitle || ""
+                  }
+                  prefillTaxId={cf?.taxId || ""}
+                  shipValues={s}
+                  billValues={b}
+                />
+                <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                   <s-button
                     type="submit"
                     {...(isCreatingCustomer || isUpdatingCustomer
@@ -2434,8 +2830,7 @@ export default function RegistrationApprovals() {
                 style={{ display: "grid", gap: 12 }}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const formEl = e.currentTarget;
-                  const data = new FormData(formEl);
+                  const data = new FormData(e.currentTarget);
                   data.append(
                     "intent",
                     editMode === "create" ? "createCompany" : "updateCompany",
@@ -2452,82 +2847,46 @@ export default function RegistrationApprovals() {
                   flowFetcher.submit(data, { method: "post" });
                 }}
               >
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}
-                  >
-                    Company name *
-                  </span>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Company name *</span>
                   <input
                     name="companyName"
                     defaultValue={company?.name || selected?.companyName || ""}
                     required
                     disabled={editMode === "update"}
                     style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
+                      ...inputStyle,
                       backgroundColor:
                         editMode === "update" ? "#f3f4f6" : "white",
                     }}
                   />
                 </label>
-
                 {editMode === "create" && (
-                  <label
-                    style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: "#5c5f62",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Payment terms
-                    </span>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Payment terms</span>
                     <select
                       name="paymentTerms"
-                      defaultValue={selected?.paymentTerm}
-                      style={{
-                        padding: 10,
-                        borderRadius: 8,
-                        border: "1px solid #c9ccd0",
-                        backgroundColor: "white",
-                      }}
+                      defaultValue={(selected as any)?.paymentTerm}
+                      style={{ ...inputStyle, backgroundColor: "white" }}
                     >
                       <option value="">No payment terms</option>
-                      {paymentTermsTemplates?.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.name}
+                      {paymentTermsTemplates?.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
                         </option>
                       ))}
                     </select>
                   </label>
                 )}
-
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{ fontSize: 12, color: "#5c5f62", fontWeight: 500 }}
-                  >
-                    Credit limit
-                  </span>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Credit limit</span>
                   <input
                     name="creditLimit"
                     defaultValue={company?.creditLimit ?? ""}
                     required
-                    style={{
-                      padding: 10,
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                    }}
+                    style={inputStyle}
                   />
                 </label>
-
                 <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                   <s-button
                     type="submit"
@@ -2548,7 +2907,6 @@ export default function RegistrationApprovals() {
                   </s-button>
                 </div>
               </form>
-
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (
                   <div style={{ marginTop: 16 }}>
@@ -2566,7 +2924,7 @@ export default function RegistrationApprovals() {
         </div>
       )}
 
-      {/* Original Approval Flow Modal */}
+      {/* ── Main Approval Flow Modal ───────────────────────────────────────── */}
       {selected && (
         <div
           style={{
@@ -2581,7 +2939,7 @@ export default function RegistrationApprovals() {
         >
           <div
             style={{
-              width: "min(800px, 90vw)",
+              width: "min(860px, 92vw)",
               background: "white",
               borderRadius: 12,
               boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
@@ -2589,6 +2947,7 @@ export default function RegistrationApprovals() {
               overflowY: "auto",
             }}
           >
+            {/* Modal header */}
             <div
               style={{
                 padding: "18px 24px",
@@ -2605,7 +2964,7 @@ export default function RegistrationApprovals() {
                 <p style={{ margin: "4px 0", color: "#5c5f62" }}>
                   {customer
                     ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
-                    : selected?.contactName}{" "}
+                    : `${selected?.firstName || ""} ${selected?.lastName || ""}`.trim()}{" "}
                   • {customer?.email || selected?.email}
                 </p>
               </div>
@@ -2619,7 +2978,7 @@ export default function RegistrationApprovals() {
             </div>
 
             <div style={{ padding: "18px 24px" }}>
-              {/* Step Progress Indicator */}
+              {/* Step indicator */}
               <div
                 style={{
                   display: "flex",
@@ -2654,7 +3013,8 @@ export default function RegistrationApprovals() {
                   onClick={() => goToStep("complete", completeRef)}
                 />
               </div>
-              {/* Step: Check Customer */}
+
+              {/* ── STEP: Check Customer ──────────────────────────────────── */}
               {step === "check" && (
                 <div
                   style={{
@@ -2664,7 +3024,6 @@ export default function RegistrationApprovals() {
                   }}
                 >
                   <h4 style={{ margin: 0 }}>Check Customer</h4>
-
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Checking if a customer already exists with email:{" "}
                     {selected.email}
@@ -2687,15 +3046,7 @@ export default function RegistrationApprovals() {
                           {customer.email}
                         </s-text>
                       </s-banner>
-
-                      {/* ✅ Update button ONLY after customer found */}
-                      <div
-                        style={{
-                          marginTop: 12,
-                          display: "flex",
-                          gap: 8,
-                        }}
-                      >
+                      <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
                         <s-button
                           onClick={() => {
                             setCustomerMode("update");
@@ -2704,7 +3055,6 @@ export default function RegistrationApprovals() {
                         >
                           Update Customer
                         </s-button>
-
                         <s-button onClick={() => setStep("createCompany")}>
                           Continue
                         </s-button>
@@ -2721,7 +3071,6 @@ export default function RegistrationApprovals() {
                           one.
                         </s-text>
                       </s-banner>
-
                       <div style={{ marginTop: 12 }}>
                         <s-button onClick={() => setStep("createCustomer")}>
                           Create New Customer
@@ -2732,196 +3081,112 @@ export default function RegistrationApprovals() {
                 </div>
               )}
 
-              {/* ── Step: Create / Update Customer ──────────────────────── */}
+              {/* ── STEP: Create / Update Customer ───────────────────────── */}
               {step === "createCustomer" && (
-                <div>
-                  {customer ? (
-                    <>
+                <div
+                  style={{
+                    border: "1px solid #e3e3e3",
+                    borderRadius: 12,
+                    padding: 16,
+                  }}
+                  ref={createCustomerRef}
+                >
+                  <h4 style={{ marginTop: 0 }}>
+                    {customer ? "Update Customer" : "Create Customer"}
+                  </h4>
+                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
+                    {customer
+                      ? "Review and update the customer's details including address information."
+                      : "Fill in the customer details and address information below."}
+                  </p>
+
+                  {customer && (
+                    <div style={{ marginBottom: 12 }}>
                       <s-banner tone="info">
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                          Customer exists
-                        </div>
                         <s-text>
                           {customer.firstName} {customer.lastName} ·{" "}
                           {customer.email}
                         </s-text>
                       </s-banner>
-
-                      <form
-                        style={{ display: "grid", gap: 12, marginTop: 12 }}
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          const formEl = e.currentTarget;
-                          const data = new FormData(formEl);
-                          data.append("intent", "updateCustomer");
-                          data.append("customerId", customer?.id || "");
-                          data.append(
-                            "customerEmail",
-                            customer?.email || selected?.email || "",
-                          );
-                          flowFetcher.submit(data, { method: "post" });
-                        }}
-                      >
-                        {[
-                          {
-                            label: "Email *",
-                            name: "email",
-                            required: true,
-                            value: customer.email,
-                          },
-                          {
-                            label: "First Name *",
-                            name: "firstName",
-                            required: true,
-                            value: customer.firstName ?? "",
-                          },
-                          {
-                            label: "Last Name",
-                            name: "lastName",
-                            value: customer.lastName ?? "",
-                          },
-                          {
-                            label: "Phone",
-                            name: "phone",
-                            value: customer.phone ?? "",
-                          },
-                        ].map(({ label, name, required, value }) => (
-                          <label
-                            key={name}
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span>{label}</span>
-                            <input
-                              name={name}
-                              defaultValue={value}
-                              required={required}
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
-                            />
-                          </label>
-                        ))}
-                        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                          <s-button
-                            type="submit"
-                            {...(isUpdatingCustomer ? { loading: true } : {})}
-                          >
-                            Update Customer
-                          </s-button>
-                          <s-button
-                            variant="tertiary"
-                            onClick={() => setStep("check")}
-                            disabled={isUpdatingCustomer}
-                          >
-                            Back
-                          </s-button>
-                        </div>
-                      </form>
-                    </>
-                  ) : (
-                    <div
-                      style={{
-                        border: "1px solid #e3e3e3",
-                        borderRadius: 12,
-                        padding: 16,
-                      }}
-                    >
-                      <h4 style={{ marginTop: 0 }}>Create Customer</h4>
-                      <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                        Fill in the customer details below.
-                      </p>
-
-                      <form
-                        style={{ display: "grid", gap: 12, marginTop: 12 }}
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          const formEl = e.currentTarget;
-                          const data = new FormData(formEl);
-                          data.append("intent", "createCustomer");
-                          flowFetcher.submit(data, { method: "post" });
-                        }}
-                      >
-                        {[
-                          {
-                            label: "Email",
-                            name: "email",
-                            required: true,
-                            value: selected.email,
-                          },
-                          {
-                            label: "First name",
-                            name: "firstName",
-                            required: true,
-                            value: contactNameParts.firstName,
-                          },
-                          {
-                            label: "Last name",
-                            name: "lastName",
-                            value: contactNameParts.lastName,
-                          },
-                          {
-                            label: "Phone",
-                            name: "phone",
-                            value: selected.phone,
-                          },
-                        ].map(({ label, name, required, value }) => (
-                          <label
-                            key={name}
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
-                              {label}
-                            </span>
-                            <input
-                              name={name}
-                              defaultValue={value}
-                              required={required}
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
-                            />
-                          </label>
-                        ))}
-                        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                          <s-button
-                            type="submit"
-                            {...(isCreatingCustomer ? { loading: true } : {})}
-                          >
-                            Create Customer
-                          </s-button>
-                          <s-button
-                            variant="tertiary"
-                            onClick={() => setStep("check")}
-                            disabled={isCreatingCustomer}
-                          >
-                            Back
-                          </s-button>
-                        </div>
-                      </form>
                     </div>
                   )}
+
+                  <form
+                    style={{ display: "grid", gap: 4 }}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const data = new FormData(e.currentTarget);
+
+                      if (customer) {
+                        // ── UPDATE path ──
+                        data.append("intent", "updateCustomer");
+                        data.append("customerId", customer.id || "");
+                        data.append(
+                          "customerEmail",
+                          customer.email || selected?.email || "",
+                        );
+                      } else {
+                        // ── CREATE path ──
+                        data.append("intent", "createCustomer");
+                      }
+
+                      flowFetcher.submit(data, { method: "post" });
+                    }}
+                  >
+                    <CustomerFormFields
+                      prefillEmail={customer?.email ?? selected.email}
+                      prefillFirstName={
+                        customer?.firstName ?? contactNameParts.firstName
+                      }
+                      prefillLastName={
+                        customer?.lastName ?? contactNameParts.lastName
+                      }
+                      prefillPhone={customer?.phone ?? s?.Phone ?? ""}
+                      prefillContactTitle={
+                        (selected as any)?.contactTitle ??
+                        cf?.contactTitle ??
+                        ""
+                      }
+                      prefillTaxId={cf?.taxId ?? ""}
+                      shipValues={s}
+                      billValues={b}
+                    />
+
+                    <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                      <s-button
+                        type="submit"
+                        {...(isCreatingCustomer || isUpdatingCustomer
+                          ? { loading: true }
+                          : {})}
+                      >
+                        {customer ? "Update Customer" : "Create Customer"}
+                      </s-button>
+                      <s-button
+                        variant="tertiary"
+                        onClick={() => setStep("check")}
+                        disabled={isCreatingCustomer || isUpdatingCustomer}
+                      >
+                        Back
+                      </s-button>
+                    </div>
+                  </form>
+
+                  {flowFetcher.data?.errors &&
+                    flowFetcher.data.errors.length > 0 && (
+                      <div style={{ marginTop: 16 }}>
+                        <s-banner tone="critical">
+                          <s-unordered-list>
+                            {flowFetcher.data.errors.map((err) => (
+                              <s-list-item key={err}>{err}</s-list-item>
+                            ))}
+                          </s-unordered-list>
+                        </s-banner>
+                      </div>
+                    )}
                 </div>
               )}
 
-              {/* ── Step: Create Company ─────────────────────────────────── */}
+              {/* ── STEP: Create Company ──────────────────────────────────── */}
               {step === "createCompany" && (
                 <div
                   style={{
@@ -2929,8 +3194,8 @@ export default function RegistrationApprovals() {
                     borderRadius: 12,
                     padding: 16,
                   }}
+                  ref={createCompanyRef}
                 >
-                  {/* Header with Back button */}
                   <div
                     style={{
                       display: "flex",
@@ -2940,7 +3205,6 @@ export default function RegistrationApprovals() {
                     }}
                   >
                     <h4 style={{ margin: 0 }}>Create Company & Location</h4>
-
                     {company && editMode !== "update" && (
                       <s-button
                         variant="secondary"
@@ -2950,7 +3214,6 @@ export default function RegistrationApprovals() {
                       </s-button>
                     )}
                   </div>
-
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Create the company record and main location.
                   </p>
@@ -2971,12 +3234,6 @@ export default function RegistrationApprovals() {
                           <s-button onClick={() => setStep("assign")}>
                             Continue
                           </s-button>
-                          {/* <s-button
-                            variant="secondary"
-                            onClick={() => setEditMode("update")}
-                          >
-                            Update Company
-                          </s-button> */}
                           <s-button
                             variant="secondary"
                             onClick={() =>
@@ -3001,8 +3258,7 @@ export default function RegistrationApprovals() {
                           }}
                           onSubmit={(e) => {
                             e.preventDefault();
-                            const formEl = e.currentTarget;
-                            const data = new FormData(formEl);
+                            const data = new FormData(e.currentTarget);
                             data.append("intent", "updateCompany");
                             data.append("companyId", company?.id || "");
                             data.append(
@@ -3019,72 +3275,35 @@ export default function RegistrationApprovals() {
                           <h5 style={{ margin: "0 0 8px 0" }}>
                             Edit Company Details
                           </h5>
-
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
-                              Company name *
-                            </span>
+                          <label style={labelStyle}>
+                            <span style={labelTextStyle}>Company name *</span>
                             <input
                               name="companyName"
                               defaultValue={company?.name || ""}
                               required
-                              style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
-                              }}
+                              style={inputStyle}
                             />
                           </label>
-
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#5c5f62",
-                                fontWeight: 500,
-                              }}
-                            >
-                              Payment terms
-                            </span>
+                          <label style={labelStyle}>
+                            <span style={labelTextStyle}>Payment terms</span>
                             <select
                               name="paymentTerms"
                               defaultValue={
                                 company?.paymentTermsTemplateId || ""
                               }
                               style={{
-                                padding: 10,
-                                borderRadius: 8,
-                                border: "1px solid #c9ccd0",
+                                ...inputStyle,
                                 backgroundColor: "white",
                               }}
                             >
                               <option value="">No payment terms</option>
-                              {paymentTermsTemplates?.map((template) => (
-                                <option key={template.id} value={template.id}>
-                                  {template.name}
+                              {paymentTermsTemplates?.map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
                                 </option>
                               ))}
                             </select>
                           </label>
-
                           <div
                             style={{ display: "flex", gap: 10, marginTop: 8 }}
                           >
@@ -3111,8 +3330,7 @@ export default function RegistrationApprovals() {
                       style={{ display: "grid", gap: 12, marginTop: 12 }}
                       onSubmit={(e) => {
                         e.preventDefault();
-                        const formEl = e.currentTarget;
-                        const data = new FormData(formEl);
+                        const data = new FormData(e.currentTarget);
                         data.append("intent", "createCompany");
                         data.append("customerId", customer?.id || "");
                         data.append(
@@ -3122,75 +3340,36 @@ export default function RegistrationApprovals() {
                         flowFetcher.submit(data, { method: "post" });
                       }}
                     >
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Company name *
-                        </span>
+                      <label style={labelStyle}>
+                        <span style={labelTextStyle}>Company name *</span>
                         <input
                           name="companyName"
                           defaultValue={selected.companyName}
                           required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                          }}
+                          style={inputStyle}
                         />
                       </label>
-
-                      <label
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Payment terms
-                        </span>
+                      <label style={labelStyle}>
+                        <span style={labelTextStyle}>Payment terms</span>
                         <select
                           name="paymentTerms"
-                          defaultValue={selected.paymentTermsTemplateId}
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                            backgroundColor: "white",
-                          }}
+                          defaultValue={
+                            (selected as any).paymentTermsTemplateId
+                          }
+                          style={{ ...inputStyle, backgroundColor: "white" }}
                         >
                           <option value="">No payment terms</option>
-                          {paymentTermsTemplates?.map((template) => (
-                            <option key={template.id} value={template.id}>
-                              {template.name}
+                          {paymentTermsTemplates?.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
                             </option>
                           ))}
                         </select>
                       </label>
-
                       <div>
                         <span
                           style={{
-                            fontSize: 12,
-                            color: "#5c5f62",
-                            fontWeight: 500,
+                            ...labelTextStyle,
                             marginBottom: 4,
                             display: "block",
                           }}
@@ -3200,20 +3379,14 @@ export default function RegistrationApprovals() {
                         <input
                           name="creditLimit"
                           type="number"
-                          defaultValue={selected.creditLimit}
+                          defaultValue={(selected as any).creditLimit}
                           onChange={(e) =>
                             setCreditLimit(Number(e.target.value) || 0)
                           }
                           required
-                          style={{
-                            padding: 10,
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                            width: 120,
-                          }}
+                          style={{ ...inputStyle, width: 120 }}
                         />
                       </div>
-
                       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
                         <s-button
                           type="submit"
@@ -3236,7 +3409,7 @@ export default function RegistrationApprovals() {
                 </div>
               )}
 
-              {/* ── Step: Assign ─────────────────────────────────────────── */}
+              {/* ── STEP: Assign ─────────────────────────────────────────── */}
               {step === "assign" && (
                 <div
                   style={{
@@ -3244,12 +3417,12 @@ export default function RegistrationApprovals() {
                     borderRadius: 12,
                     padding: 16,
                   }}
+                  ref={assignRef}
                 >
                   <h4 style={{ marginTop: 0 }}>Assign Main Contact</h4>
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Assign the customer as the main contact for this company.
                   </p>
-
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info">
                       <s-text>
@@ -3260,14 +3433,12 @@ export default function RegistrationApprovals() {
                       </s-text>
                     </s-banner>
                   </div>
-
                   <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                     <s-button
                       onClick={() => {
                         const companyIdToSend = company?.id || "";
                         const customerIdToSend = customer?.id || "";
                         const locationIdToSend = company?.locationId || "";
-
                         if (
                           !companyIdToSend ||
                           !customerIdToSend ||
@@ -3278,7 +3449,6 @@ export default function RegistrationApprovals() {
                           );
                           return;
                         }
-
                         flowFetcher.submit(
                           {
                             intent: "assignMainContact",
@@ -3307,6 +3477,7 @@ export default function RegistrationApprovals() {
                 </div>
               )}
 
+              {/* ── STEP: Welcome Email ───────────────────────────────────── */}
               {step === "email" && (
                 <div
                   style={{
@@ -3314,12 +3485,12 @@ export default function RegistrationApprovals() {
                     borderRadius: 12,
                     padding: 16,
                   }}
+                  ref={emailRef}
                 >
                   <h4 style={{ marginTop: 0 }}>Send Welcome Email</h4>
                   <p style={{ color: "#5c5f62", marginTop: 4 }}>
                     Send a welcome email to notify the customer.
                   </p>
-
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info">
                       <s-text>
@@ -3332,7 +3503,6 @@ export default function RegistrationApprovals() {
                     </s-banner>
                   </div>
 
-                  {/* ✅ Show success banner after email sent — no auto-redirect */}
                   {flowFetcher.data?.intent === "sendWelcomeEmail" &&
                     flowFetcher.data?.success && (
                       <div style={{ marginTop: 12 }}>
@@ -3357,13 +3527,7 @@ export default function RegistrationApprovals() {
                         gap: 6,
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "#5c5f62",
-                          fontWeight: 500,
-                        }}
-                      >
+                      <span style={labelTextStyle}>
                         Review notes (optional)
                       </span>
                       <textarea
@@ -3397,7 +3561,6 @@ export default function RegistrationApprovals() {
                       flexWrap: "wrap",
                     }}
                   >
-                    {/* Hide Send button once email is sent successfully */}
                     {!(
                       flowFetcher.data?.intent === "sendWelcomeEmail" &&
                       flowFetcher.data?.success
@@ -3421,7 +3584,6 @@ export default function RegistrationApprovals() {
                       </s-button>
                     )}
 
-                    {/* ✅ Manual "Next" button — only appears after email is sent */}
                     {flowFetcher.data?.intent === "sendWelcomeEmail" &&
                       flowFetcher.data?.success && (
                         <s-button
@@ -3450,7 +3612,7 @@ export default function RegistrationApprovals() {
                 </div>
               )}
 
-              {/* ── Step: Complete ───────────────────────────────────────── */}
+              {/* ── STEP: Complete ────────────────────────────────────────── */}
               {step === "complete" && (
                 <div
                   style={{
@@ -3458,6 +3620,7 @@ export default function RegistrationApprovals() {
                     borderRadius: 12,
                     padding: 16,
                   }}
+                  ref={completeRef}
                 >
                   <h4 style={{ marginTop: 0 }}>Complete Approval</h4>
 
@@ -3497,7 +3660,6 @@ export default function RegistrationApprovals() {
                     </div>
                   </div>
 
-                  {/* ✅ Show approved success state OR ready-to-approve prompt */}
                   {flowFetcher.data?.intent === "completeApproval" &&
                   flowFetcher.data?.success ? (
                     <>
@@ -3520,8 +3682,6 @@ export default function RegistrationApprovals() {
                           .
                         </s-text>
                       </s-banner>
-
-                      {/* ✅ Manual Done button — user chooses when to close */}
                       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                         <s-button
                           variant="primary"
@@ -3547,7 +3707,6 @@ export default function RegistrationApprovals() {
                           activate the customer account.
                         </div>
                       </s-banner>
-
                       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                         <s-button
                           variant="primary"
@@ -3576,7 +3735,7 @@ export default function RegistrationApprovals() {
                 </div>
               )}
 
-              {/* ── Error Display ────────────────────────────────────────── */}
+              {/* ── Error Display ─────────────────────────────────────────── */}
               {flowFetcher.data?.errors &&
                 flowFetcher.data.errors.length > 0 && (
                   <div style={{ marginTop: 16 }}>
@@ -3599,7 +3758,6 @@ export default function RegistrationApprovals() {
     </s-page>
   );
 }
-
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };

@@ -178,7 +178,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                   ) || [],
               },
             },
-            select: { contactName: true },
+            select: { firstName: true, lastName: true, email: true },
           });
 
           // Count matched users (users that exist in both DB and Shopify)
@@ -202,7 +202,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             (u) =>
               u.email?.toLowerCase() === company.contactEmail?.toLowerCase(),
           );
-          return match?.contactName || "-";
+          return `${match?.firstName || ""} ${match?.lastName || ""}`.trim() || "-";
         })(),
         creditLimit: company.creditLimit.toString(),
         usedCredit: creditInfo ? creditInfo.usedCredit.toString() : "0",

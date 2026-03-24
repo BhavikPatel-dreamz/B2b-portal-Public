@@ -56,7 +56,6 @@ async function sendEmail({ to, subject, html, text }: EmailParams) {
 
 export async function sendRegistrationEmail(
   storeId: string,
-  companyId: string,
   contactEmail: string,
   storeOwnerName: string,
   email: string,
@@ -79,7 +78,6 @@ export async function sendRegistrationEmail(
     storeOwnerName: storeOwnerName || "Store Owner",
     contactName: contactName || "Contact Name",
     email: email,
-    companyId: companyId,
     shopDomain: StoreData?.shopDomain || "store.com",
   };
 
@@ -226,20 +224,14 @@ function stripHtmlTags(content: string): string {
 
 
 export async function sendCompanyAssignmentEmail(
-  shopName: string,
-  shopDomain: string,
-  storeOwnerName: string,
-  email: string,
-  companyName: string,
-  contactName: string,
-  note?: string,
+shopName: string, shopDomain: string, storeOwnerName: string, email: string, companyName: string, contactName: string,  note?: string | null,
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
     shopName || "Shop Name",
     shopDomain || "shop-domain.myshopify.com",
     storeOwnerName || "Store Owner",
     companyName || "Company Name",
-    contactName || "Contact Name",
+    contactName || "",
     note || "important note: ",
   );
 
@@ -303,7 +295,7 @@ function generateCompanyAssignmentTemplate(
       </p>
 
        <p style="text-align: center;">
-        <a href="https://${shopDomaindata}/pages/b2b-page" class="btn">
+        <a href="https://${shopDomaindata}/pages/b2b-page/dashboard" class="btn">
           View B2B Dashboard
         </a>
       </p>

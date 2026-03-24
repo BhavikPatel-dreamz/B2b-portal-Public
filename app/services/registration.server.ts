@@ -24,22 +24,22 @@ export interface UpdateRegistrationInput {
 /**
  * Create a new registration submission
  */
-export async function createRegistration(data: CreateRegistrationInput) {
-  return await prisma.registrationSubmission.create({
-    data: {
-      companyName: data.companyName,
-      contactName: data.contactName,
-      email: data.email,
-      phone: data.phone,
-      businessType: data.businessType,
-      website: data.website,
-      additionalInfo: data.additionalInfo,
-      shopId: data.shopId,
-      status: "PENDING",
-      shopifyCustomerId: data.shopifyCustomerId,
-    },
-  });
-}
+// export async function createRegistration(data: CreateRegistrationInput) {
+//   return await prisma.registrationSubmission.create({
+//     data: {
+//       companyName: data.companyName,
+//       contactName: data.contactName,
+//       email: data.email,
+//       phone: data.phone,
+//       businessType: data.businessType,
+//       website: data.website,
+//       additionalInfo: data.additionalInfo,
+//       shopId: data.shopId,
+//       status: "PENDING",
+//       shopifyCustomerId: data.shopifyCustomerId,
+//     },
+//   });
+// }
 
 /**
  * Get registration by email and shop

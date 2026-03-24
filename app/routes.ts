@@ -34,6 +34,7 @@ export default [
     route("validate-customer", "routes/api.proxy/validate-customer.tsx"),
     route("wishlist", "routes/api.proxy/wishlist.tsx"),
     route("privacy-policy", "routes/api.proxy/privacy-policy.tsx"),
+    route("customer-account", "routes/api.proxy/customer-account.tsx"),
   ]),
 
   // App routes
@@ -43,6 +44,7 @@ export default [
     route("companies", "routes/app.companies.tsx"),
     route("registrations", "routes/app.registrations.tsx"),
     route("settings", "routes/app.settings.tsx"),
+    route("regitration-form","routes/app.regitration-form.tsx"),
     route("companies/:companyId", "routes/app.company-dashboard.tsx"),
     route("companies/:companyId/orders", "routes/app.companies.$companyId.orders.tsx"),
     route("companies/:companyId/users", "routes/app.companies.$companyId.users.tsx"),

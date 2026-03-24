@@ -1,0 +1,174 @@
+import prisma from "app/db.server";
+import { authenticate } from "app/shopify.server";
+import { LoaderFunctionArgs } from "react-router";
+import { FieldCategory, FieldDef, FieldType, FormConfig, FormStep, StoredConfig, StoredField } from "../app.regitration-form";
+
+
+
+function deserializeConfig(stored: StoredConfig): FormConfig {
+  const DISPLAY_TYPES: FieldType[] = [
+    "heading",
+    "paragraph",
+    "link",
+    "divider",
+  ];
+
+  const inferCategory = (f: StoredField): FieldCategory => {
+    if (DISPLAY_TYPES.includes(f.type)) return "display";
+    if (f.section === "shipping") return "shipping";
+    if (f.section === "billing") return "billing";
+    if (f.section === "company" || f.section === "contact") return "general";
+    return "custom";
+  };
+
+  const steps: FormStep[] = stored.map((g) => g.step);
+
+  const fields: FieldDef[] = stored.flatMap((group, stepIdx) =>
+    group.fields
+      .sort((a, b) => a.order - b.order)
+      .map(
+        (f): FieldDef => ({
+          // Runtime-only props — derived, never stored
+          id: `_${f.key}_${stepIdx}_${f.order}`,
+          paletteKey: f.key,
+          category: inferCategory(f),
+          isDisplay: DISPLAY_TYPES.includes(f.type),
+          // Stored props
+          key: f.key,
+          label: f.label,
+          type: f.type,
+          order: f.order,
+          stepIndex: stepIdx, // ← re-injected from array position
+          width: f.width ?? "full",
+          required: f.required,
+          section: f.section,
+          options: f.options,
+          placeholder: f.placeholder,
+          content: f.content,
+        }),
+      ),
+  );
+
+  return { steps, fields };
+}
+
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept",
+  "Access-Control-Max-Age": "86400",
+};
+ 
+/** Drop-in replacement for Response.json() that always includes CORS headers. */
+function json(data: unknown, init: ResponseInit = {}) {
+  return Response.json(data, {
+    ...init,
+    headers: {
+      ...CORS_HEADERS,
+      ...(init.headers ?? {}),
+    },
+  });
+}
+ 
+// ─── LOADER ────────────────────────────────────────────────────────────────────
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  // ✅ Handle OPTIONS preflight — must come before ANY other logic
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+ 
+  try {
+    await authenticate.public.appProxy(request);
+ 
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop");
+    const customerId = url.searchParams.get("customerId");
+ 
+    if (!shop) {
+      return json({ error: "Missing shop" }, { status: 400 });
+    }
+ 
+    const store = await prisma.store.findUnique({
+      where: { shopDomain: shop },
+    });
+ 
+    // ❌ Store doesn't exist — return blank response (with CORS)
+    if (!store) {
+      return json({}, { status: 200 });
+    }
+ 
+    if (!customerId) {
+      return json({ error: "Missing customerId" }, { status: 400 });
+    }
+ 
+    const customer = await prisma.registrationSubmission.findFirst({
+      where: {
+        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
+        shopId: store.id,
+      },
+    });
+ 
+    if (customer?.status === "PENDING") {
+      return json({
+        message: "Your account has already been submitted and is under review",
+      });
+    }
+ 
+    if (customer?.status === "APPROVED") {
+      return json({
+        message: "Your account is approved, but B2B access is not yet configured in Shopify.",
+        redirectTo: `https://${store.shopDomain}/pages/b2b-page/dashboard`,
+      });
+    }
+ 
+    if (customer?.status === "REJECTED") {
+      return json({
+        message: "Your account has been rejected. Please contact the support team.",
+      });
+    }
+ 
+    const formFieldConfig = await prisma.formFieldConfig.findUnique({
+      where: { shopId: store.id },
+    });
+ 
+    let config;
+ 
+    if (formFieldConfig?.fields) {
+      try {
+        const stored = formFieldConfig.fields as unknown as StoredConfig;
+ 
+        if (
+          Array.isArray(stored) &&
+          stored.length > 0 &&
+          stored.every(
+            (g) =>
+              g.step?.id &&
+              g.step?.label &&
+              Array.isArray(g.fields) &&
+              g.fields.every((f) => f.key && f.label && f.type !== undefined)
+          )
+        ) {
+          config = deserializeConfig(stored);
+        }
+      } catch {
+        config = [];
+      }
+    }
+ 
+    return json({
+      config,
+      storeMissing: false,
+      savedAt: formFieldConfig?.updatedAt?.toISOString() ?? null,
+    });
+ 
+  } catch (error) {
+    console.error("❌ Error validating customer:", error);
+ 
+    return json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+};
+

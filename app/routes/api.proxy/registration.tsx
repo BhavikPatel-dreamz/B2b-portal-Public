@@ -1,150 +1,190 @@
-import { ActionFunctionArgs } from "react-router";
+import { ActionFunctionArgs, LoaderFunction } from "react-router";
 import { getProxyParams } from "app/utils/proxy.server";
 import { sendRegistrationEmail } from "app/utils/email";
 import { getStoreByDomain } from "app/services/store.server";
-import {
-  createRegistration,
-  getRegistrationByEmail,
-} from "app/services/registration.server";
 import prisma from "app/db.server";
 
-/**
- * API endpoint for B2B registration form submission
- * This is used by the embed dashboard registration form
- *
- * Route: /apps/b2b-portal/api/proxy/registration
- */
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",          
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept",
+  "Access-Control-Max-Age": "86400",            // cache preflight for 24 h
+};
+ 
+
+function json(data: unknown, init: ResponseInit = {}) {
+  const status = (init as { status?: number }).status ?? 200;
+  return Response.json(data, {
+    ...init,
+    headers: {
+      ...CORS_HEADERS,
+      ...(init.headers ?? {}),
+    },
+  });
+}
+
+function handlePreflight(request: Request): Response | null {
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: CORS_HEADERS,
+    });
+  }
+  return null;
+}
+
+export const loader: LoaderFunction = async ({ request }) => {
+  // ✅ Handle CORS preflight
+  const preflight = handlePreflight(request);
+  if (preflight) return preflight;
+ 
+  const { shop, loggedInCustomerId: shopifyCustomerId } = getProxyParams(request);
+ 
+  if (!shopifyCustomerId) {
+    return json({ success: false, error: "Shopify customer ID is required." }, { status: 400 });
+  }
+ 
+  const store = await getStoreByDomain(shop);
+  if (!store) {
+    return json({ success: false, error: "Store not found." }, { status: 404 });
+  }
+ 
+  const data = await prisma.registrationSubmission.findFirst({
+    where: {
+      shopifyCustomerId: `gid://shopify/Customer/${shopifyCustomerId}`,
+      shopId: store.id,
+    },
+  });
+ 
+  return json({
+    success: true,
+    message: "Registration details fetched successfully.",
+    data,
+  });
+};
+ 
+// ─── ACTION (POST) ─────────────────────────────────────────────────────────────
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("📝 Registration API called");
-
+ 
+  // ✅ Handle CORS preflight
+  const preflight = handlePreflight(request);
+  if (preflight) return preflight;
+ 
   try {
-    // Get proxy parameters to identify the store
-    const { shop, loggedInCustomerId: customerId } = getProxyParams(request);
-
+    const { shop, loggedInCustomerId: shopifyCustomerId } = getProxyParams(request);
+ 
     if (!shop) {
-      return Response.json({
-        success: false,
-        error: 'Store identification failed. Please try again.'
-      }, { status: 400 });
+      return json({ success: false, error: "Store identification failed." }, { status: 400 });
     }
-
-    // Find the store in the database
+ 
     const store = await getStoreByDomain(shop);
-
     if (!store) {
-      return Response.json({
-        success: false,
-        error: 'Store not found. Please ensure the app is installed.'
-      }, { status: 404 });
+      return json({ success: false, error: "Store not found." }, { status: 404 });
     }
-
-    // Parse form data
+ 
+    // ✅ Parse dynamic form data
     const formData = await request.formData();
-    const companyName = formData.get('companyName') as string;
-    const contactName = formData.get('contactName') as string;
-    const email = formData.get('email') as string;
-    const phone = formData.get('phone') as string;
-    const businessType = formData.get('businessType') as string;
-    const website = formData.get('website') as string || null;
-    const additionalInfo = formData.get('additionalInfo') as string || null;
-    // const customerId = formData.get('customerId') as string || null;
-
-    console.log("📋 Registration data:", { companyName, contactName, email, phone, businessType });
-
-    // Validate required fields
-    if (!companyName || !contactName || !email || !phone || !businessType) {
-      return Response.json({
-        success: false,
-        error: 'Please fill in all required fields.'
-      }, { status: 400 });
+    const allFields: Record<string, any> = {};
+    for (const [key, value] of formData.entries()) {
+      allFields[key] = value;
     }
-
-    // Validate email format
+    console.log("🔥 All Form Data:", allFields);
+ 
+    // ✅ Extract main fields
+    const companyName = allFields.companyName || "";
+    const emailKey = Object.keys(allFields).find((key) =>
+      key.toLowerCase().includes("email")
+    );
+    const email = emailKey ? allFields[emailKey] : "";
+    const firstName = allFields.firstName || "";
+    const lastName = allFields.lastName || "";
+    const contactTitle = allFields.contactTitle || "";
+ 
+    // ✅ Basic validation
+    if (!companyName || !email) {
+      return json(
+        { success: false, error: "Company name and email are required." },
+        { status: 400 }
+      );
+    }
+ 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return Response.json({
-        success: false,
-        error: 'Please enter a valid email address.'
-      }, { status: 400 });
+      return json({ success: false, error: "Invalid email format." }, { status: 400 });
     }
-
-    // Check if registration already exists
-    const existingRegistration = await getRegistrationByEmail(email, store.id);
-
-    if (existingRegistration) {
-      return Response.json({
-        success: false,
-        error: 'A registration with this email already exists. Please contact support if you need assistance.'
-      }, { status: 409 });
-    }
-    const CompanyAction =await prisma.companyAccount.findFirst({
-      where: {
-        shopId: store.id,
-        name: companyName,
-      },
+ 
+    // ✅ Duplicate email check
+    const existing = await prisma.registrationSubmission.findFirst({
+      where: { shopId: store.id, email },
     });
-    if (CompanyAction) {
-      return Response.json({
-        success: false,
-        error: 'A registration with this company name already exists. Please contact support if you need assistance.'
-      }, { status: 409 });
+    console.log("✅ Existing Registration:", existing);
+ 
+    if (existing) {
+      return json({ success: false, error: "Email already registered." }, { status: 409 });
     }
-    // Save the registration submission to the database
-    const registration = await createRegistration({
-      companyName,
-      contactName,
-      email,
-      phone,
-      businessType,
-      website,
-      additionalInfo,
-      shopId: store.id,
-      shopifyCustomerId: customerId
-        ? `gid://shopify/Customer/${customerId}`
-        : null,
+ 
+    // ✅ Split fields
+    const shipping: Record<string, any> = {};
+    const billing: Record<string, any> = {};
+    const customFields: Record<string, any> = {};
+ 
+    Object.entries(allFields).forEach(([key, value]) => {
+      if (key.startsWith("ship")) {
+        shipping[key.replace("ship", "")] = value;
+      } else if (key.startsWith("bill")) {
+        billing[key.replace("bill", "")] = value;
+      } else if (
+        !["companyName", "email", "firstName", "lastName", "contactTitle", "shopifyCustomerId"].includes(key)
+      ) {
+        customFields[key] = value;
+      }
     });
-
-    console.log("✅ Registration created:", registration.id);
-    const companyDetail = await prisma.companyAccount.findFirst({
-      where: {
+ 
+    // ✅ Save in DB
+    const registration = await prisma.registrationSubmission.create({
+      data: {
+        companyName,
+        email,
+        firstName,
+        lastName,
+        contactTitle,
+        shipping,
+        billing,
+        customFields,
         shopId: store.id,
-        name: companyName,
+        shopifyCustomerId: allFields.shopifyCustomerId || null,
       },
     });
 
-    // Try to send email notification (optional - don't fail if email not configured)
-    if (store.submissionEmail) {
-         const emailResult = await sendRegistrationEmail(
+        if (store.submissionEmail) {
+        const emailResult = await sendRegistrationEmail(
         store.id,
-        companyDetail?.id || '',
         store.submissionEmail,
         store.storeOwnerName || '',
         email,
         companyName,
-        contactName,
+        `${registration?.firstName || ""} ${registration?.lastName || ""}`,
       );
-
-
-      if (emailResult.success) {
-        console.log("✅ Registration email sent successfully");
-      } else {
+    
+     if (emailResult.success) {
+         console.log("✅ Registration email sent successfully");
+       } else {
         console.warn("⚠️ Failed to send registration email:", emailResult.error);
       }
-    } else {
-      console.warn("⚠️ Store submission email not configured - skipping email notification");
-    }
-
-    return Response.json({
+    };
+ 
+    return json({
       success: true,
-      message: 'Registration submitted successfully! We will review your application and get back to you within 2-3 business days.',
-      registrationId: registration.id
+      message: "Registration submitted successfully!",
+      registrationdata: registration,
     });
-
+ 
   } catch (error) {
-    console.error('❌ Error saving registration:', error);
-    return Response.json({
-      success: false,
-      error: 'An error occurred while submitting your registration. Please try again.'
-    }, { status: 500 });
+    console.error("❌ Error:", error.message);
+    return json({ success: false, error: "Something went wrong." }, { status: 500 });
   }
 };
+ 
+ 
