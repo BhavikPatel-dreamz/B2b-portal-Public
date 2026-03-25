@@ -79,8 +79,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
  
   try {
-    await authenticate.public.appProxy(request);
- 
+    // await authenticate.public.appProxy(request);
+    
     const url = new URL(request.url);
     const shop = url.searchParams.get("shop");
     const customerId = url.searchParams.get("customerId");
@@ -131,6 +131,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const formFieldConfig = await prisma.formFieldConfig.findUnique({
       where: { shopId: store.id },
     });
+    console.log(formFieldConfig,"formFieldConfig");
  
     let config;
  
@@ -163,7 +164,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
  
   } catch (error) {
-    console.error("❌ Error validating customer:", error);
+    console.error("❌ Error validating customer:11111", error);
  
     return json(
       { error: error instanceof Error ? error.message : "Unknown error" },

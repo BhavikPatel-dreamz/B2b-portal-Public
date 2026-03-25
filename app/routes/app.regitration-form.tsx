@@ -2419,7 +2419,7 @@ useEffect(() => {
           marginBottom: 16,
         }}
       >
-        {["Form", "Rules", "Advanced settings"].map((t, ti) => (
+        {/* {["Form", "Rules", "Advanced settings"].map((t, ti) => (
           <button
             key={t}
             style={{
@@ -2436,7 +2436,7 @@ useEffect(() => {
           >
             {t}
           </button>
-        ))}
+        ))} */}
       </div>
 
       {/* ── 3-column editor ────────────────────────────────────────────────── */}
