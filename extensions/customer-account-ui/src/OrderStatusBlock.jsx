@@ -8,7 +8,7 @@ import { useEffect, useState } from 'preact/hooks';
 export default async () => {
   render(<Extension />, document.body)
 }
-const API_URL = "https://b2b.dynamicdreamz.com";
+const API_URL = "https://b2b-portal-public.vercel.app";
 
 function Extension() {
   const [fields, setFields] = useState([]);
