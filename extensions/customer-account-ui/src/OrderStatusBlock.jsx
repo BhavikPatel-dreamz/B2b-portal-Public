@@ -282,7 +282,7 @@ function Extension() {
       console.log("📤 Sending:", Object.fromEntries(form.entries()));
 
       const res = await fetch(
-        `https://${shopDomain}/apps/b2b-portal-public/api/proxy/registration`,
+        `${API_URL}/api/proxy/registration`,
         {
           method: "POST",
           body: form,
