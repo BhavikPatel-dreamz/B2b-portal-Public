@@ -9,6 +9,8 @@ export default async () => {
   render(<Extension />, document.body)
 }
 const API_URL = "https://b2b-portal-public.vercel.app";
+// "https://dd-79.dynamicdreamz.com"
+// "https://b2b-portal-public.vercel.app";
 
 function Extension() {
   const [fields, setFields] = useState([]);
@@ -282,7 +284,7 @@ function Extension() {
       console.log("📤 Sending:", Object.fromEntries(form.entries()));
 
       const res = await fetch(
-        `${API_URL}/api/proxy/registration`,
+        `${API_URL}/api/proxy/registration?shop=${shopDomain}`,
         {
           method: "POST",
           body: form,

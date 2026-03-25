@@ -73,7 +73,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (preflight) return preflight;
  
   try {
-    const { shop, loggedInCustomerId: shopifyCustomerId } = getProxyParams(request);
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop");
  
     if (!shop) {
       return json({ success: false, error: "Store identification failed." }, { status: 400 });
@@ -158,22 +159,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-        if (store.submissionEmail) {
-        const emailResult = await sendRegistrationEmail(
-        store.id,
-        store.submissionEmail,
-        store.storeOwnerName || '',
-        email,
-        companyName,
-        `${registration?.firstName || ""} ${registration?.lastName || ""}`,
-      );
+    //     if (store.submissionEmail) {
+    //     const emailResult = await sendRegistrationEmail(
+    //     store.id,
+    //     store.submissionEmail,
+    //     store.storeOwnerName || '',
+    //     email,
+    //     companyName,
+    //     `${registration?.firstName || ""} ${registration?.lastName || ""}`,
+    //   );
     
-     if (emailResult.success) {
-         console.log("✅ Registration email sent successfully");
-       } else {
-        console.warn("⚠️ Failed to send registration email:", emailResult.error);
-      }
-    };
+    //  if (emailResult.success) {
+    //      console.log("✅ Registration email sent successfully");
+    //    } else {
+    //     console.warn("⚠️ Failed to send registration email:", emailResult.error);
+    //   }
+    // };
  
     return json({
       success: true,

@@ -140,7 +140,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
     });
     const registrationMap = new Map(
-      registrations.map((r) => [r.shopifyCustomerId, r.contactName]),
+      registrations.map((r) => [r.shopifyCustomerId, `${r.firstName || ""} ${r.lastName || ""}`]),
     );
 
     // Map to the format expected by the component with locationRoles array
