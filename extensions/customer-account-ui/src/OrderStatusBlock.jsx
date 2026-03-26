@@ -12,7 +12,6 @@ const API_URL = "https://b2b-portal-public.vercel.app";
 // "https://b2b-portal-public.vercel.app";
 
 
-
 function Extension() {
   const [fields, setFields] = useState([]);
   const [formData, setFormData] = useState({});
@@ -24,7 +23,8 @@ function Extension() {
   const [statusMessage, setStatusMessage] = useState("");
   const [shopDomain, setShopDomain] = useState("");
   const [customerId, setCustomerId] = useState("");
- 
+  const [isRedirecting, setIsRedirecting] = useState(false); // ← NEW
+
   const getCustomerMetafieldQuery = {
     query: `query {
       shop {
@@ -41,7 +41,7 @@ function Extension() {
       }
     }`,
   };
- 
+
   // ───────────────────────────
   // 1. FETCH SHOP & CUSTOMER DATA
   // ───────────────────────────
@@ -69,7 +69,6 @@ function Extension() {
     };
     fetchShopData();
   }, []);
- 
 
   useEffect(() => {
     if (!shopDomain || !customerId) return;
@@ -77,7 +76,7 @@ function Extension() {
       "gid://shopify/Customer/",
       ""
     );
- 
+
     const fetchAccountStatus = async () => {
       try {
         const res = await fetch(
@@ -86,8 +85,9 @@ function Extension() {
         );
         const result = await res.json();
         const { config, message, redirectTo } = result;
- 
+
         if (redirectTo) {
+          setIsRedirecting(true); // ← NEW: show spinner before redirect
           window.location.href = redirectTo;
           return;
         }
@@ -196,11 +196,11 @@ function Extension() {
         );
     }
   };
- 
+
   const renderGroup = (group) => {
     const colCount = group.fields.length || 2;
-    const wideCols  = Array(colCount).fill("fill").join(" ");
- 
+    const wideCols = Array(colCount).fill("fill").join(" ");
+
     return (
       <s-query-container>
         <s-grid
@@ -279,8 +279,20 @@ function Extension() {
   // ═══════════════════════════════════════════════════════════
   //  UI STATES
   // ═══════════════════════════════════════════════════════════
- 
-  // 1. Checking status — native s-spinner with subdued label
+
+  // 1. Redirecting to dashboard — keep spinner visible during navigation
+  if (isRedirecting) {
+    return (
+      <s-box padding="large" inlineAlignment="center" blockAlignment="center">
+        <s-stack direction="inline" gap="base" blockAlignment="center">
+          <s-spinner size="small" />
+          <s-text tone="subdued">Redirecting to your dashboard…</s-text>
+        </s-stack>
+      </s-box>
+    );
+  }
+
+  // 2. Checking status — native s-spinner with subdued label
   if (checkingStatus) {
     return (
       <s-box padding="large" inlineAlignment="center" blockAlignment="center">
@@ -328,8 +340,8 @@ function Extension() {
           <s-stack direction="block" gap="small">
             <s-heading>Registration Submitted</s-heading>
             <s-text tone="subdued">
-              Your request has been received. We'll review your details and
-              be in touch shortly.
+              Your request has been received. We'll review your details and be
+              in touch shortly.
             </s-text>
           </s-stack>
         </s-banner>
