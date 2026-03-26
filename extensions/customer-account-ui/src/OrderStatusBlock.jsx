@@ -24,7 +24,7 @@ function Extension() {
   const [statusMessage, setStatusMessage] = useState("");
   const [shopDomain, setShopDomain] = useState("");
   const [customerId, setCustomerId] = useState("");
-
+ 
   const getCustomerMetafieldQuery = {
     query: `query {
       shop {
@@ -41,10 +41,10 @@ function Extension() {
       }
     }`,
   };
-
-  // =========================
-  // 1. FETCH SHOP DATA
-  // =========================
+ 
+  // ───────────────────────────
+  // 1. FETCH SHOP & CUSTOMER DATA
+  // ───────────────────────────
   useEffect(() => {
     const fetchShopData = async () => {
       try {
@@ -57,40 +57,36 @@ function Extension() {
           }
         );
         const { data } = await res.json();
-        console.log("Shopify API Response------", data);
         setShopDomain(data?.shop?.myshopifyDomain || "");
         setCustomerId(data?.customer?.id || "");
         if (data?.customer?.metafield?.value === "true") {
           setIsLegacyApplePay(true);
         }
       } catch (err) {
-        console.error("Shopify API Error------", err);
+        console.error("Shopify API Error:", err);
         setCheckingStatus(false);
       }
     };
     fetchShopData();
   }, []);
+ 
 
-  // =========================
-  // 2. FETCH ACCOUNT STATUS
-  // =========================
   useEffect(() => {
     if (!shopDomain || !customerId) return;
-    const customerIdWithoutPrefix = customerId.replace("gid://shopify/Customer/", "");
-    console.log(shopDomain, customerId, "shopDomain111");
-
+    const customerIdWithoutPrefix = customerId.replace(
+      "gid://shopify/Customer/",
+      ""
+    );
+ 
     const fetchAccountStatus = async () => {
       try {
         const res = await fetch(
           `${API_URL}/api/proxy/customer-account?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
-          {
-            method: "GET",
-            headers: { "Accept": "application/json" },
-          }
+          { method: "GET", headers: { Accept: "application/json" } }
         );
         const result = await res.json();
         const { config, message, redirectTo } = result;
-
+ 
         if (redirectTo) {
           window.location.href = redirectTo;
           return;
@@ -200,44 +196,38 @@ function Extension() {
         );
     }
   };
-
-  // =========================
-  // RENDER GROUP (multi-column)
-  // s-inline-stack = horizontal layout — works at runtime,
-  // declared above to silence TS errors
-  // =========================
+ 
   const renderGroup = (group) => {
-    const sizeMap = {
-      "2-col": "50%",
-      "3-col": "33.33%",
-      "4-col": "25%",
-    };
-    const size = sizeMap[group.layout] || "100%";
-
+    const colCount = group.fields.length || 2;
+    const wideCols  = Array(colCount).fill("fill").join(" ");
+ 
     return (
-      <s-inline-stack gap="base" blockAlignment="center">
-        {group.fields.map((f) => (
-          <s-box key={f.key} minInlineSize={size} maxInlineSize={size}>
-            {renderField(f)}
-          </s-box>
-        ))}
-      </s-inline-stack>
+      <s-query-container>
+        <s-grid
+          columns={`@container (inline-size > 480px) '${wideCols}', '1fr'`}
+          gap="base"
+        >
+          {group.fields.map((f) => (
+            <s-box key={f.key}>{renderField(f)}</s-box>
+          ))}
+        </s-grid>
+      </s-query-container>
     );
   };
-
-  // =========================
-  // GROUP FIELDS BY SECTION
-  // =========================
+ 
+  // ───────────────────────────
+  // GROUP FIELDS BY SECTION KEY
+  // ───────────────────────────
   const grouped = fields.reduce((acc, field) => {
     const section = field.section || "General";
     if (!acc[section]) acc[section] = [];
     acc[section].push(field);
     return acc;
   }, {});
-
-  // =========================
-  // SUBMIT
-  // =========================
+ 
+  // ───────────────────────────
+  // SUBMIT HANDLER
+  // ───────────────────────────
   const handleSubmit = async () => {
     if (!shopDomain) {
       setErrorMessage("Shop domain not loaded yet.");
@@ -245,7 +235,7 @@ function Extension() {
     }
     setLoading(true);
     setErrorMessage("");
-
+ 
     try {
       const form = new FormData();
       Object.entries(formData).forEach(([key, value]) => {
@@ -254,30 +244,21 @@ function Extension() {
           typeof value === "boolean" ? (value ? "true" : "false") : value
         );
       });
-      if (customerId) {
-        form.append("shopifyCustomerId", customerId);
-      }
-      console.log("📤 Sending:", Object.fromEntries(form.entries()));
-
+      if (customerId) form.append("shopifyCustomerId", customerId);
+ 
       const res = await fetch(
         `${API_URL}/api/proxy/registration?shop=${shopDomain}`,
-        {
-          method: "POST",
-          body: form,
-          headers: { Accept: "application/json" },
-        }
+        { method: "POST", body: form, headers: { Accept: "application/json" } }
       );
       const text = await res.text();
-      console.log("RAW RESPONSE:", text);
-
+ 
       let result;
       try {
         result = JSON.parse(text);
       } catch {
         throw new Error("Invalid JSON from server");
       }
-      console.log("Parsed Result:", result);
-
+ 
       if (!res.ok) {
         setErrorMessage(result?.error || "Request failed");
         return;
@@ -294,91 +275,154 @@ function Extension() {
       setLoading(false);
     }
   };
-
-  // =========================
-  // UI STATES
-  // =========================
-
-  // 1. Loading
+ 
+  // ═══════════════════════════════════════════════════════════
+  //  UI STATES
+  // ═══════════════════════════════════════════════════════════
+ 
+  // 1. Checking status — native s-spinner with subdued label
   if (checkingStatus) {
-    return <s-text>Checking account status...</s-text>;
-  }
-
-  // 2. Server message (PENDING / REJECTED / APPROVED)
-  if (statusMessage) {
-    const bannerStatus =
-      statusMessage.toLowerCase().includes("rejected") ? "critical" :
-        statusMessage.toLowerCase().includes("review") ? "warning" :
-          "info";
     return (
-      <s-banner status={bannerStatus}>
-        <s-text>{statusMessage}</s-text>
-      </s-banner>
+      <s-box padding="large" inlineAlignment="center" blockAlignment="center">
+        <s-stack direction="inline" gap="base" blockAlignment="center">
+          <s-spinner size="small" />
+          <s-text tone="subdued">Checking account status…</s-text>
+        </s-stack>
+      </s-box>
     );
   }
-
-  // 3. Submitted successfully
+ 
+  // 2. Server status message — tone replaces old `status` prop (2026-01)
+  if (statusMessage) {
+    const bannerTone =
+      statusMessage.toLowerCase().includes("rejected")
+        ? "critical"
+        : statusMessage.toLowerCase().includes("review")
+        ? "warning"
+        : "info";
+ 
+    const bannerTitle =
+      bannerTone === "critical"
+        ? "Registration Rejected"
+        : bannerTone === "warning"
+        ? "Under Review"
+        : "Account Status";
+ 
+    return (
+      <s-box padding="base">
+        <s-banner tone={bannerTone}>
+          <s-stack direction="block" gap="small">
+            <s-heading>{bannerTitle}</s-heading>
+            <s-text>{statusMessage}</s-text>
+          </s-stack>
+        </s-banner>
+      </s-box>
+    );
+  }
+ 
+  // 3. Success confirmation
   if (submitted) {
     return (
-      <s-banner status="success">
-        <s-text>Request submitted successfully.</s-text>
-      </s-banner>
+      <s-box padding="base">
+        <s-banner tone="success">
+          <s-stack direction="block" gap="small">
+            <s-heading>Registration Submitted</s-heading>
+            <s-text tone="subdued">
+              Your request has been received. We'll review your details and
+              be in touch shortly.
+            </s-text>
+          </s-stack>
+        </s-banner>
+      </s-box>
     );
   }
-
-  // =========================
-  // FORM UI — matches screenshot
-  // =========================
+ 
   return (
-    <s-stack gap="base">
-
-      <s-banner>
-        <s-text>
-          {isLegacyApplePay ? "Legacy Apple Pay Active" : "Company Registration"}
-        </s-text>
-      </s-banner>
-
-      {/* Legacy Apple Pay notice */}
-      {/* {isLegacyApplePay && (
-        <s-banner status="info">
-          <s-text>Legacy Apple Pay Active</s-text>
-        </s-banner>
-      )} */}
-
-      {/* Error banner */}
-      {errorMessage && (
-        <s-banner status="critical">
-          <s-text>{errorMessage}</s-text>
+    <s-stack direction="block" gap="large">
+ 
+      {/* ── Page header ── */}
+      <s-box padding="base">
+        <s-stack direction="block" gap="small">
+          <s-heading>
+            {isLegacyApplePay ? "Legacy Apple Pay" : "Company Registration"}
+          </s-heading>
+          <s-text tone="subdued">
+            {isLegacyApplePay
+              ? "Your account is configured with Legacy Apple Pay."
+              : "Fill in the details below to register your company and unlock wholesale access."}
+          </s-text>
+        </s-stack>
+      </s-box>
+ 
+      {/* ── Legacy Apple Pay notice ── */}
+      {isLegacyApplePay && (
+        <s-banner tone="info">
+          <s-text>Legacy Apple Pay is currently active on this account.</s-text>
         </s-banner>
       )}
-
-      {/* Sections */}
+ 
+      {/* ── Inline error banner ── */}
+      {errorMessage && (
+        <s-banner tone="critical">
+          <s-stack direction="block" gap="small">
+            <s-heading>Submission Error</s-heading>
+            <s-text>{errorMessage}</s-text>
+          </s-stack>
+        </s-banner>
+      )}
+ 
+      {/* ── One s-section card per section group ── */}
       {Object.entries(grouped).map(([section, sectionFields]) => (
-        <s-stack key={section} gap="base">
-
-          {/* Bold section heading — "Register Company" / "Shipping Address" */}
-          <s-text appearance="heading-md">{section}</s-text>
-
-          {/* Section fields */}
-          {sectionFields.map((field, i) =>
-            field.type === "group"
-              ? <s-box key={i}>{renderGroup(field)}</s-box>
-              : <s-box key={i}>{renderField(field)}</s-box>
-          )}
-
-        </s-stack>
+        <s-section key={section} padding>
+          <s-stack direction="block" gap="base">
+ 
+            {/* Section heading + divider */}
+            <s-heading>{section}</s-heading>
+            <s-divider />
+ 
+            {/* Fields: groups → responsive s-grid; singles → stacked s-box */}
+            <s-stack direction="block" gap="base">
+              {sectionFields.map((field, i) =>
+                field.type === "group" ? (
+                  <s-box key={i}>{renderGroup(field)}</s-box>
+                ) : (
+                  <s-box key={i}>{renderField(field)}</s-box>
+                )
+              )}
+            </s-stack>
+ 
+          </s-stack>
+        </s-section>
       ))}
-
-      {/* Register button */}
-      <s-button kind="primary" onClick={handleSubmit} disabled={loading}>
-        {loading ? "Submitting..." : "Register"}
-      </s-button>
-
+ 
+      {/* ── Submit button row ── */}
+      <s-box>
+        <s-stack direction="inline" gap="base" blockAlignment="center">
+          {/*
+            variant="primary" is the correct 2026-01 prop.
+            loading prop shows a native Polaris spinner inside the button.
+          */}
+          <s-button
+            variant="primary"
+            onClick={handleSubmit}
+            disabled={loading}
+            loading={loading}
+          >
+            {loading ? "Submitting…" : "Register"}
+          </s-button>
+ 
+          {loading && (
+            <s-text tone="subdued">
+              Please wait while we process your request…
+            </s-text>
+          )}
+        </s-stack>
+      </s-box>
+ 
     </s-stack>
   );
 }
-
-
+ 
 
 
 

@@ -251,7 +251,14 @@ function generateCompanyAssignmentTemplate(
   contactName: string,
   note?: string,
 ) {
-    const shopDomaindata = shopDomain.split(".")[0];
+      const safeDomain = shopDomain || "shop-domain.myshopify.com";
+
+  // ✅ safer domain handling
+  const shopDomaindata = safeDomain.startsWith("http")
+    ? safeDomain
+    : `https://${safeDomain}`;
+
+  const dashboardUrl = `${shopDomaindata}/pages/b2b-page/dashboard`;
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -295,7 +302,7 @@ function generateCompanyAssignmentTemplate(
       </p>
 
        <p style="text-align: center;">
-        <a href="https://${shopDomaindata}/pages/b2b-page/dashboard" class="btn">
+         <a href="${dashboardUrl}" class="btn">
           View B2B Dashboard
         </a>
       </p>
@@ -333,6 +340,156 @@ If you have any questions or need assistance, please contact our support team.
 
 Best regards,
 <strong>${storeOwnerName}</strong>
+`;
+
+  return { html, text };
+}
+
+export async function sendEmployeeAssignmentEmail({
+  shopName,
+  shopDomain,
+  adminName,
+  role,
+  email,
+  companyName,
+  contactName,
+}: {
+  shopName: string;
+  shopDomain: string;
+  adminName: string;
+  role: string;
+  email: string;
+  companyName: string;
+  contactName: string;
+}) {
+  const { html, text } = generateEmployeeAssignmentTemplate(
+    shopName || "Shop Name",
+    shopDomain || "shop-domain.myshopify.com",
+    adminName || "Admin",
+    role || "Employee", // ✅ added role
+    companyName || "Company Name",
+    contactName || "Employee"
+  );
+  return sendEmail({
+    to: email,
+    subject: "You've been assigned to a company on our platform",
+    html,
+    text,
+  });
+}
+
+function generateEmployeeAssignmentTemplate(
+  shopName: string,
+  shopDomain: string,
+  adminName: string,
+  role: string,
+  companyName: string,
+  contactName: string,
+) {
+  const safeDomain = shopDomain || "shop-domain.myshopify.com";
+
+  // ✅ safer domain handling
+  const shopDomaindata = safeDomain.startsWith("http")
+    ? safeDomain
+    : `https://${safeDomain}`;
+
+  const dashboardUrl = `${shopDomaindata}/pages/b2b-page/dashboard`;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Employee Assigned</title>
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #f4f6f8; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background-color: #0d6efd; padding: 20px; text-align: center; color: #fff; border-radius: 8px 8px 0 0; }
+    .content { background-color: #ffffff; padding: 30px; border: 1px solid #dee2e6; }
+    .footer { background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d; border-radius: 0 0 8px 8px; }
+    
+    /* ✅ FIXED BUTTON */
+    .btn { 
+      display: inline-block; 
+      padding: 12px 24px; 
+      background-color: #0d6efd; 
+      color: #ffffff !important; 
+      text-decoration: none; 
+      border-radius: 4px; 
+      margin: 20px 0; 
+    }
+
+    .btn:hover { background-color: #0b5ed7; }
+
+    .highlight { background-color: #e7f1ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Employee Assigned</h1>
+    </div>
+
+    <div class="content">
+      <p>Hello <strong>${contactName || "User"}</strong>,</p>
+
+      <p>
+        We are pleased to inform you that you have been successfully assigned
+        as an <strong>${role}</strong> for the company <strong>${companyName}</strong> by
+        <strong>${adminName}</strong>.
+      </p>
+
+      <div class="highlight">
+        <p><strong>Company Name:</strong> ${companyName}</p>
+        <p><strong>Your Role:</strong> ${role}</p>
+      </div>
+
+      <p>
+        You can now log in to the platform and access your dashboard.
+      </p>
+
+      <p style="text-align: center;">
+        <a href="${dashboardUrl}" class="btn">
+          View Dashboard
+        </a>
+      </p>
+
+      <p>
+        If you have any questions or face any issues, please feel free to
+        contact our support team.
+      </p>
+
+      <p>
+        Best regards,<br />
+        <strong>${shopName}</strong>
+      </p>
+    </div>
+
+    <div class="footer">
+      © ${new Date().getFullYear()} ${shopName}. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  const text = `
+Employee Assigned Successfully
+
+Hello ${contactName || "User"},
+
+You have been successfully assigned as a ${role} for ${companyName} by ${adminName}.
+
+Company Name: ${companyName}
+Role: ${role}
+
+Dashboard: ${dashboardUrl}
+
+If you have any questions or need assistance, please contact our support team.
+
+Best regards,
+${shopName}
 `;
 
   return { html, text };

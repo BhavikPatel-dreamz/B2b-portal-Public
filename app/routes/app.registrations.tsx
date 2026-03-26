@@ -3136,10 +3136,10 @@ export default function RegistrationApprovals() {
                     <CustomerFormFields
                       prefillEmail={customer?.email ?? selected.email}
                       prefillFirstName={
-                        customer?.firstName ?? contactNameParts.firstName
+                        customer?.firstName ?? selected.firstName
                       }
                       prefillLastName={
-                        customer?.lastName ?? contactNameParts.lastName
+                        customer?.lastName ?? selected.lastName
                       }
                       prefillPhone={customer?.phone ?? s?.Phone ?? ""}
                       prefillContactTitle={
@@ -3426,7 +3426,7 @@ export default function RegistrationApprovals() {
                   <div style={{ marginTop: 12 }}>
                     <s-banner tone="info">
                       <s-text>
-                        Customer: {customer?.firstName} {customer?.lastName} (
+                        Customer: {customer?.firstName} {customer?.lastName}  {selected?.firstName} {selected?.lastName} (
                         {customer?.email})
                         <br />
                         Company: {company?.name || selected?.companyName}
@@ -3496,7 +3496,7 @@ export default function RegistrationApprovals() {
                       <s-text>
                         To: {customer?.email || selected.email}
                         <br />
-                        Contact: {customer?.firstName} {customer?.lastName}
+                        Contact: {customer?.firstName || selected.firstName} {customer?.lastName || selected.lastName}
                         <br />
                         Company: {company?.name || selected?.companyName}
                       </s-text>
@@ -3518,40 +3518,6 @@ export default function RegistrationApprovals() {
                         </s-banner>
                       </div>
                     )}
-
-                  <div style={{ marginTop: 12 }}>
-                    <label
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      <span style={labelTextStyle}>
-                        Review notes (optional)
-                      </span>
-                      <textarea
-                        value={reviewNotes}
-                        onChange={(e) => setReviewNotes(e.target.value)}
-                        placeholder="Add any notes about this approval"
-                        disabled={
-                          flowFetcher.data?.intent === "sendWelcomeEmail" &&
-                          flowFetcher.data?.success
-                        }
-                        style={{
-                          minHeight: 80,
-                          padding: 10,
-                          borderRadius: 8,
-                          border: "1px solid #c9ccd0",
-                          backgroundColor:
-                            flowFetcher.data?.intent === "sendWelcomeEmail" &&
-                            flowFetcher.data?.success
-                              ? "#f3f4f6"
-                              : "white",
-                        }}
-                      />
-                    </label>
-                  </div>
 
                   <div
                     style={{

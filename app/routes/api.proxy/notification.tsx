@@ -32,7 +32,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   // Build where clause
-  const where: Prisma.NotificationWhereInput = { shopId: store?.id, receiverId: user?.id, shopifyOrderId: { startsWith: "gid://shopify/Order/" }};
+  const where: Prisma.NotificationWhereInput = { shopId: store?.id, receiverId: user?.id};
   if (activityType) where.activityType = activityType;
   if (senderId) where.senderId = senderId;
   if (isRead) where.isRead = isRead === 'true';

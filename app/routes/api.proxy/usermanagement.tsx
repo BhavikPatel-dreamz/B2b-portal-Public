@@ -11,6 +11,7 @@ import {
   getCompanyContactEmail,
 } from "../../utils/b2b-customer.server";
 import prisma from "app/db.server";
+import { sendEmployeeAssignmentEmail } from "app/utils/email";
 
 /**
  * API Proxy Route for User Management
@@ -140,7 +141,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
     });
     const registrationMap = new Map(
-      registrations.map((r) => [r.shopifyCustomerId, `${r.firstName || ""} ${r.lastName || ""}`]),
+      registrations.map((r) => [
+        r.shopifyCustomerId,
+        `${r.firstName || ""} ${r.lastName || ""}`,
+      ]),
     );
 
     // Map to the format expected by the component with locationRoles array
@@ -290,13 +294,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         );
 
-        // ✅ Handle errors properly
+        const emailData = {
+          contactName: `${firstName} ${lastName}`,
+          email: email,
+          adminName: `${userContext?.customerName || ""}`,
+          role: locationRoles[0]?.roleName || "",
+          companyName: userContext?.companyName || "",
+          shopName: store.shopName || "",
+          shopDomain: store.shopDomain || "",
+        };
+        
+        // ✅ Handle errors BEFORE sending email
         if (result.error) {
           return Response.json(
             { success: false, error: result.error },
-            { status: 400 }, // Use 400 for validation errors, not 500
+            { status: 400 },
           );
         }
+
+        // ✅ Send email correctly
+        await sendEmployeeAssignmentEmail(emailData);
 
         return Response.json({
           success: true,
