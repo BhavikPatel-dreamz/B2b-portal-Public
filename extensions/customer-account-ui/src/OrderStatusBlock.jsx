@@ -1,16 +1,14 @@
 // use-strict
-import '@shopify/ui-extensions/preact';
+import "@shopify/ui-extensions/preact";
 import { render } from "preact";
-import { useEffect, useState } from 'preact/hooks';
-
+import { useEffect, useState } from "preact/hooks";
 
 export default async () => {
-  render(<Extension />, document.body)
-}
+  render(<Extension />, document.body);
+};
 const API_URL = "https://b2b-portal-public.vercel.app";
 // "https://dd-79.dynamicdreamz.com"
 // "https://b2b-portal-public.vercel.app";
-
 
 function Extension() {
   const [fields, setFields] = useState([]);
@@ -23,7 +21,7 @@ function Extension() {
   const [statusMessage, setStatusMessage] = useState("");
   const [shopDomain, setShopDomain] = useState("");
   const [customerId, setCustomerId] = useState("");
-  const [isRedirecting, setIsRedirecting] = useState(false); // ← NEW
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const getCustomerMetafieldQuery = {
     query: `query {
@@ -41,6 +39,58 @@ function Extension() {
       }
     }`,
   };
+
+  // ── Country → States mapping ──────────────────────────────────────────────
+  const COUNTRY_STATES = {
+    IN: [
+      { value: "GJ", label: "Gujarat" },
+      { value: "MH", label: "Maharashtra" },
+      { value: "RJ", label: "Rajasthan" },
+      { value: "DL", label: "Delhi" },
+      { value: "KA", label: "Karnataka" },
+      { value: "TN", label: "Tamil Nadu" },
+      { value: "UP", label: "Uttar Pradesh" },
+      { value: "WB", label: "West Bengal" },
+    ],
+    US: [
+      { value: "CA", label: "California" },
+      { value: "TX", label: "Texas" },
+      { value: "NY", label: "New York" },
+      { value: "FL", label: "Florida" },
+      { value: "IL", label: "Illinois" },
+      { value: "WA", label: "Washington" },
+      { value: "AZ", label: "Arizona" },
+      { value: "GA", label: "Georgia" },
+    ],
+    CA: [
+      { value: "ON", label: "Ontario" },
+      { value: "BC", label: "British Columbia" },
+      { value: "AB", label: "Alberta" },
+      { value: "QC", label: "Quebec" },
+      { value: "MB", label: "Manitoba" },
+    ],
+    UK: [
+      { value: "ENG", label: "England" },
+      { value: "SCT", label: "Scotland" },
+      { value: "WLS", label: "Wales" },
+      { value: "NIR", label: "Northern Ireland" },
+    ],
+    AU: [
+      { value: "NSW", label: "New South Wales" },
+      { value: "VIC", label: "Victoria" },
+      { value: "QLD", label: "Queensland" },
+      { value: "WA",  label: "Western Australia" },
+      { value: "SA",  label: "South Australia" },
+    ],
+  };
+
+  const DUMMY_COUNTRIES = [
+    { value: "IN", label: "India" },
+    { value: "US", label: "United States" },
+    { value: "CA", label: "Canada" },
+    { value: "UK", label: "United Kingdom" },
+    { value: "AU", label: "Australia" },
+  ];
 
   // ───────────────────────────
   // 1. FETCH SHOP & CUSTOMER DATA
@@ -87,7 +137,7 @@ function Extension() {
         const { config, message, redirectTo } = result;
 
         if (redirectTo) {
-          setIsRedirecting(true); // ← NEW: show spinner before redirect
+          setIsRedirecting(true);
           window.location.href = redirectTo;
           return;
         }
@@ -98,12 +148,18 @@ function Extension() {
         if (config?.fields) {
           setFields(config.fields);
           const initial = {};
+
+          // ✅ FIX: initialize country/state with defaults
           const processFields = (arr) => {
             arr.forEach((f) => {
               if (f.type === "group") {
                 processFields(f.fields);
               } else if (f.type === "checkbox") {
                 initial[f.key] = false;
+              } else if (f.type === "country") {
+                initial[f.key] = "IN"; // ✅ default country
+              } else if (f.type === "state") {
+                initial[f.key] = COUNTRY_STATES["IN"][0].value; // ✅ default state = "GJ"
               } else {
                 initial[f.key] = "";
               }
@@ -156,20 +212,47 @@ function Extension() {
     });
   };
 
+  // ── Helper: find the paired key in formData ──────────────────────────────
+  const findPairedKey = (sourceKey, findWord, replaceWord) => {
+    const variants = [
+      sourceKey.replace(new RegExp(findWord, "i"), replaceWord),
+      sourceKey.replace(
+        new RegExp(findWord, "i"),
+        replaceWord.charAt(0).toUpperCase() + replaceWord.slice(1)
+      ),
+      sourceKey.replace(
+        new RegExp(findWord.charAt(0).toUpperCase() + findWord.slice(1)),
+        replaceWord.charAt(0).toUpperCase() + replaceWord.slice(1)
+      ),
+    ];
+    return variants.find((v) => v in formData) ?? null;
+  };
+
   // =========================
   // RENDER SINGLE FIELD
   // =========================
   const renderField = (field) => {
     switch (field.type) {
+
       case "select":
         return (
           <s-select
             label={field.label}
             value={formData[field.key] ?? ""}
             onChange={(val) => handleChange(field.key, val)}
-            options={field.options || []}
-          />
+          >
+            {(field.options || []).map((opt) => (
+              <s-option
+                key={opt.value}
+                value={opt.value}
+                defaultSelected={formData[field.key] === opt.value}
+              >
+                {opt.label}
+              </s-option>
+            ))}
+          </s-select>
         );
+
       case "checkbox":
         return (
           <s-checkbox
@@ -178,6 +261,7 @@ function Extension() {
             onChange={(val) => handleChange(field.key, val)}
           />
         );
+
       case "textarea":
         return (
           <s-text-area
@@ -186,6 +270,85 @@ function Extension() {
             onChange={(val) => handleChange(field.key, val)}
           />
         );
+
+      case "country": {
+        const countryOptions = field.options || DUMMY_COUNTRIES;
+        // ✅ || instead of ?? to handle empty string ""
+        const selectedCountry = formData[field.key] || "IN";
+
+        return (
+          <s-select
+            label={field.label}
+            value={selectedCountry}
+            onChange={(val) => {
+              handleChange(field.key, val);
+              // ✅ Reset paired state to first state of newly selected country
+              const stateKey = findPairedKey(field.key, "country", "state");
+              if (stateKey) {
+                const firstState = COUNTRY_STATES[val]?.[0]?.value || "";
+                handleChange(stateKey, firstState);
+              }
+            }}
+          >
+            {countryOptions.map((opt) => (
+              <s-option
+                key={opt.value}
+                value={opt.value}
+                defaultSelected={selectedCountry === opt.value}
+              >
+                {opt.label}
+              </s-option>
+            ))}
+          </s-select>
+        );
+      }
+
+      case "state": {
+        const countryKey = findPairedKey(field.key, "state", "country");
+        // ✅ || instead of ?? to handle empty string ""
+        const selectedCountry = (countryKey && formData[countryKey]) || "IN";
+
+        const stateOptions =
+          field.options || COUNTRY_STATES[selectedCountry] || [];
+
+        // ✅ || instead of ?? to handle empty string ""
+        const selectedState =
+          formData[field.key] || stateOptions[0]?.value || "";
+
+        return (
+          <s-select
+            label={field.label}
+            value={selectedState}
+            onChange={(val) => handleChange(field.key, val)}
+          >
+            {stateOptions.length > 0 ? (
+              stateOptions.map((opt) => (
+                <s-option
+                  key={opt.value}
+                  value={opt.value}
+                  defaultSelected={selectedState === opt.value}
+                >
+                  {opt.label}
+                </s-option>
+              ))
+            ) : (
+              <s-option value="" defaultSelected>
+                — No states available —
+              </s-option>
+            )}
+          </s-select>
+        );
+      }
+
+      case "phone":
+        return (
+          <s-phone-field
+            label={field.label}
+            value={formData[field.key] ?? ""}
+            onChange={(val) => handleChange(field.key, val)}
+          />
+        );
+
       default:
         return (
           <s-text-field
@@ -214,7 +377,7 @@ function Extension() {
       </s-query-container>
     );
   };
- 
+
   // ───────────────────────────
   // GROUP FIELDS BY SECTION KEY
   // ───────────────────────────
@@ -224,7 +387,7 @@ function Extension() {
     acc[section].push(field);
     return acc;
   }, {});
- 
+
   // ───────────────────────────
   // SUBMIT HANDLER
   // ───────────────────────────
@@ -235,7 +398,7 @@ function Extension() {
     }
     setLoading(true);
     setErrorMessage("");
- 
+
     try {
       const form = new FormData();
       Object.entries(formData).forEach(([key, value]) => {
@@ -245,20 +408,20 @@ function Extension() {
         );
       });
       if (customerId) form.append("shopifyCustomerId", customerId);
- 
+
       const res = await fetch(
         `${API_URL}/api/proxy/registration?shop=${shopDomain}`,
         { method: "POST", body: form, headers: { Accept: "application/json" } }
       );
       const text = await res.text();
- 
+
       let result;
       try {
         result = JSON.parse(text);
       } catch {
         throw new Error("Invalid JSON from server");
       }
- 
+
       if (!res.ok) {
         setErrorMessage(result?.error || "Request failed");
         return;
@@ -275,12 +438,12 @@ function Extension() {
       setLoading(false);
     }
   };
- 
+
   // ═══════════════════════════════════════════════════════════
   //  UI STATES
   // ═══════════════════════════════════════════════════════════
 
-  // 1. Redirecting to dashboard — keep spinner visible during navigation
+  // 1. Redirecting
   if (isRedirecting) {
     return (
       <s-box padding="large" inlineAlignment="center" blockAlignment="center">
@@ -292,7 +455,7 @@ function Extension() {
     );
   }
 
-  // 2. Checking status — native s-spinner with subdued label
+  // 2. Checking status
   if (checkingStatus) {
     return (
       <s-box padding="large" inlineAlignment="center" blockAlignment="center">
@@ -303,23 +466,22 @@ function Extension() {
       </s-box>
     );
   }
- 
-  // 2. Server status message — tone replaces old `status` prop (2026-01)
+
+  // 3. Server status message
   if (statusMessage) {
-    const bannerTone =
-      statusMessage.toLowerCase().includes("rejected")
-        ? "critical"
-        : statusMessage.toLowerCase().includes("review")
+    const bannerTone = statusMessage.toLowerCase().includes("rejected")
+      ? "critical"
+      : statusMessage.toLowerCase().includes("review")
         ? "warning"
         : "info";
- 
+
     const bannerTitle =
       bannerTone === "critical"
         ? "Registration Rejected"
         : bannerTone === "warning"
-        ? "Under Review"
-        : "Account Status";
- 
+          ? "Under Review"
+          : "Account Status";
+
     return (
       <s-box padding="base">
         <s-banner tone={bannerTone}>
@@ -331,8 +493,8 @@ function Extension() {
       </s-box>
     );
   }
- 
-  // 3. Success confirmation
+
+  // 4. Success confirmation
   if (submitted) {
     return (
       <s-box padding="base">
@@ -348,10 +510,10 @@ function Extension() {
       </s-box>
     );
   }
- 
+
   return (
     <s-stack direction="block" gap="large">
- 
+
       {/* ── Page header ── */}
       <s-box padding="base">
         <s-stack direction="block" gap="small">
@@ -365,14 +527,14 @@ function Extension() {
           </s-text>
         </s-stack>
       </s-box>
- 
+
       {/* ── Legacy Apple Pay notice ── */}
       {isLegacyApplePay && (
         <s-banner tone="info">
           <s-text>Legacy Apple Pay is currently active on this account.</s-text>
         </s-banner>
       )}
- 
+
       {/* ── Inline error banner ── */}
       {errorMessage && (
         <s-banner tone="critical">
@@ -382,17 +544,15 @@ function Extension() {
           </s-stack>
         </s-banner>
       )}
- 
+
       {/* ── One s-section card per section group ── */}
       {Object.entries(grouped).map(([section, sectionFields]) => (
         <s-section key={section} padding>
           <s-stack direction="block" gap="base">
- 
-            {/* Section heading + divider */}
+
             <s-heading>{section}</s-heading>
             <s-divider />
- 
-            {/* Fields: groups → responsive s-grid; singles → stacked s-box */}
+
             <s-stack direction="block" gap="base">
               {sectionFields.map((field, i) =>
                 field.type === "group" ? (
@@ -402,18 +562,14 @@ function Extension() {
                 )
               )}
             </s-stack>
- 
+
           </s-stack>
         </s-section>
       ))}
- 
+
       {/* ── Submit button row ── */}
       <s-box>
         <s-stack direction="inline" gap="base" blockAlignment="center">
-          {/*
-            variant="primary" is the correct 2026-01 prop.
-            loading prop shows a native Polaris spinner inside the button.
-          */}
           <s-button
             variant="primary"
             onClick={handleSubmit}
