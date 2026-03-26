@@ -108,10 +108,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         shopId: store.id,
       },
     });
- 
+    const userData=await prisma.user.findFirst({
+      where:{
+        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
+        shopId: store.id,
+      }
+    })
+    console.log(userData,"userDataa");
     if (customer?.status === "PENDING") {
       return json({
         message: "Your account has already been submitted and is under review",
+      });
+    }
+
+       if(userData?.shopifyCustomerId === `gid://shopify/Customer/${customerId}` && userData.role !== "STORE_ADMIN"){
+      return json({
+        message: "Your account is not a customer. Please contact the support team.",
+        redirectTo: `https://${store.shopDomain}/pages/b2b-page/dashboard`
       });
     }
  
@@ -127,6 +140,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         message: "Your account has been rejected. Please contact the support team.",
       });
     }
+ 
  
     const formFieldConfig = await prisma.formFieldConfig.findUnique({
       where: { shopId: store.id },

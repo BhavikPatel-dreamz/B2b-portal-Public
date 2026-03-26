@@ -3276,7 +3276,7 @@ export default function RegistrationApprovals() {
                             Edit Company Details
                           </h5>
                           <label style={labelStyle}>
-                            <span style={labelTextStyle}>Company name *</span>
+                            <span style={labelTextStyle}>Company name</span>
                             <input
                               name="companyName"
                               defaultValue={company?.name || ""}

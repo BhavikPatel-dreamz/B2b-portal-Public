@@ -133,9 +133,9 @@ export async function createOrder(data: CreateOrderInput) {
         shopifyOrderId:order.shopifyOrderId
       }
     })
-
+    
     if(notifidationRecode){
-      console.log(notifidationRecode,"notifidationRecode");
+    
       await prisma.notification.update({
         where:{
           id:notifidationRecode.id
@@ -143,7 +143,6 @@ export async function createOrder(data: CreateOrderInput) {
       data: notificationData,
     }); 
     }
-    console.log("notifidationRecode1111");
     await prisma.notification.create({
       data: notificationData,
     });
