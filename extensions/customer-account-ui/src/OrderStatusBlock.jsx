@@ -4,13 +4,14 @@ import { render } from "preact";
 import { useEffect, useState } from 'preact/hooks';
 
 
-
 export default async () => {
   render(<Extension />, document.body)
 }
 const API_URL = "https://b2b-portal-public.vercel.app";
 // "https://dd-79.dynamicdreamz.com"
 // "https://b2b-portal-public.vercel.app";
+
+
 
 function Extension() {
   const [fields, setFields] = useState([]);
@@ -19,10 +20,8 @@ function Extension() {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-
   const [checkingStatus, setCheckingStatus] = useState(true);
-  const [statusMessage, setStatusMessage] = useState(""); // ✅ NEW: server message (PENDING/REJECTED/APPROVED)
-
+  const [statusMessage, setStatusMessage] = useState("");
   const [shopDomain, setShopDomain] = useState("");
   const [customerId, setCustomerId] = useState("");
 
@@ -57,13 +56,10 @@ function Extension() {
             body: JSON.stringify(getCustomerMetafieldQuery),
           }
         );
-
         const { data } = await res.json();
         console.log("Shopify API Response------", data);
-
         setShopDomain(data?.shop?.myshopifyDomain || "");
         setCustomerId(data?.customer?.id || "");
-
         if (data?.customer?.metafield?.value === "true") {
           setIsLegacyApplePay(true);
         }
@@ -72,7 +68,6 @@ function Extension() {
         setCheckingStatus(false);
       }
     };
-
     fetchShopData();
   }, []);
 
@@ -90,34 +85,23 @@ function Extension() {
           `${API_URL}/api/proxy/customer-account?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
           {
             method: "GET",
-            headers: {
-              "Accept": "application/json"
-            }
+            headers: { "Accept": "application/json" },
           }
         );
-
         const result = await res.json();
-
         const { config, message, redirectTo } = result;
 
-        // ✅ If server returned a redirect, go there immediately
         if (redirectTo) {
           window.location.href = redirectTo;
           return;
         }
-
-        // ✅ If server returned a status message (PENDING / REJECTED / APPROVED fallback)
         if (message) {
           setStatusMessage(message);
-          return; // stop here — don't load the form
+          return;
         }
-
-        // ✅ Load form fields only when no message/redirect
         if (config?.fields) {
           setFields(config.fields);
-
           const initial = {};
-
           const processFields = (arr) => {
             arr.forEach((f) => {
               if (f.type === "group") {
@@ -129,7 +113,6 @@ function Extension() {
               }
             });
           };
-
           processFields(config.fields);
           setFormData(initial);
         }
@@ -139,7 +122,6 @@ function Extension() {
         setCheckingStatus(false);
       }
     };
-
     fetchAccountStatus();
   }, [shopDomain, customerId]);
 
@@ -150,10 +132,7 @@ function Extension() {
     const finalValue =
       value?.target?.checked !== undefined
         ? value.target.checked
-        : value?.target?.value ??
-        value?.value ??
-        value ??
-        "";
+        : value?.target?.value ?? value?.value ?? value ?? "";
 
     setFormData((prev) => {
       const updated = { ...prev, [key]: finalValue };
@@ -166,7 +145,6 @@ function Extension() {
           }
         });
       }
-
       if (key === "billSameAsShip" && finalValue === false) {
         Object.keys(prev).forEach((k) => {
           if (k.startsWith("bill") && k !== "billSameAsShip") {
@@ -174,18 +152,16 @@ function Extension() {
           }
         });
       }
-
       if (key.startsWith("ship") && prev["billSameAsShip"] === true) {
         const billKey = "bill" + key.slice(4);
         if (billKey in prev) updated[billKey] = finalValue;
       }
-
       return updated;
     });
   };
 
   // =========================
-  // RENDER FIELD
+  // RENDER SINGLE FIELD
   // =========================
   const renderField = (field) => {
     switch (field.type) {
@@ -226,18 +202,22 @@ function Extension() {
   };
 
   // =========================
-  // GROUP LAYOUT
+  // RENDER GROUP (multi-column)
+  // s-inline-stack = horizontal layout — works at runtime,
+  // declared above to silence TS errors
   // =========================
   const renderGroup = (group) => {
-    let size = "100%";
-    if (group.layout === "2-col") size = "50%";
-    if (group.layout === "3-col") size = "33%";
-    if (group.layout === "4-col") size = "25%";
+    const sizeMap = {
+      "2-col": "50%",
+      "3-col": "33.33%",
+      "4-col": "25%",
+    };
+    const size = sizeMap[group.layout] || "100%";
 
     return (
-      <s-inline-stack gap="base">
+      <s-inline-stack gap="base" blockAlignment="center">
         {group.fields.map((f) => (
-          <s-box key={f.key} inlineSize={size}>
+          <s-box key={f.key} minInlineSize={size} maxInlineSize={size}>
             {renderField(f)}
           </s-box>
         ))}
@@ -246,7 +226,7 @@ function Extension() {
   };
 
   // =========================
-  // GROUP BY SECTION
+  // GROUP FIELDS BY SECTION
   // =========================
   const grouped = fields.reduce((acc, field) => {
     const section = field.section || "General";
@@ -263,24 +243,20 @@ function Extension() {
       setErrorMessage("Shop domain not loaded yet.");
       return;
     }
-
     setLoading(true);
     setErrorMessage("");
 
     try {
       const form = new FormData();
-
       Object.entries(formData).forEach(([key, value]) => {
         form.append(
           key,
           typeof value === "boolean" ? (value ? "true" : "false") : value
         );
       });
-
       if (customerId) {
         form.append("shopifyCustomerId", customerId);
       }
-
       console.log("📤 Sending:", Object.fromEntries(form.entries()));
 
       const res = await fetch(
@@ -291,7 +267,6 @@ function Extension() {
           headers: { Accept: "application/json" },
         }
       );
-
       const text = await res.text();
       console.log("RAW RESPONSE:", text);
 
@@ -301,19 +276,16 @@ function Extension() {
       } catch {
         throw new Error("Invalid JSON from server");
       }
-
       console.log("Parsed Result:", result);
 
       if (!res.ok) {
         setErrorMessage(result?.error || "Request failed");
         return;
       }
-
       if (result.success) {
         setSubmitted(true);
         return;
       }
-
       setErrorMessage(result.error || "Something went wrong");
     } catch (err) {
       console.error("Submit ERROR:", err.message);
@@ -332,13 +304,12 @@ function Extension() {
     return <s-text>Checking account status...</s-text>;
   }
 
-  // 2. ✅ Server message (PENDING / REJECTED / APPROVED without redirect)
+  // 2. Server message (PENDING / REJECTED / APPROVED)
   if (statusMessage) {
     const bannerStatus =
       statusMessage.toLowerCase().includes("rejected") ? "critical" :
         statusMessage.toLowerCase().includes("review") ? "warning" :
           "info";
-
     return (
       <s-banner status={bannerStatus}>
         <s-text>{statusMessage}</s-text>
@@ -356,41 +327,58 @@ function Extension() {
   }
 
   // =========================
-  // FORM UI
+  // FORM UI — matches screenshot
   // =========================
   return (
     <s-stack gap="base">
+
       <s-banner>
         <s-text>
-          {isLegacyApplePay ? "Legacy Apple Pay Active" : "Customer Account"}
+          {isLegacyApplePay ? "Legacy Apple Pay Active" : "Company Registration"}
         </s-text>
       </s-banner>
 
+      {/* Legacy Apple Pay notice */}
+      {/* {isLegacyApplePay && (
+        <s-banner status="info">
+          <s-text>Legacy Apple Pay Active</s-text>
+        </s-banner>
+      )} */}
+
+      {/* Error banner */}
       {errorMessage && (
         <s-banner status="critical">
           <s-text>{errorMessage}</s-text>
         </s-banner>
       )}
 
+      {/* Sections */}
       {Object.entries(grouped).map(([section, sectionFields]) => (
         <s-stack key={section} gap="base">
+
+          {/* Bold section heading — "Register Company" / "Shipping Address" */}
           <s-text appearance="heading-md">{section}</s-text>
 
+          {/* Section fields */}
           {sectionFields.map((field, i) =>
-            field.type === "group" ? (
-              <s-box key={i}>{renderGroup(field)}</s-box>
-            ) : (
-              <s-box key={i}>{renderField(field)}</s-box>
-            )
+            field.type === "group"
+              ? <s-box key={i}>{renderGroup(field)}</s-box>
+              : <s-box key={i}>{renderField(field)}</s-box>
           )}
+
         </s-stack>
       ))}
 
+      {/* Register button */}
       <s-button kind="primary" onClick={handleSubmit} disabled={loading}>
         {loading ? "Submitting..." : "Register"}
       </s-button>
+
     </s-stack>
   );
 }
+
+
+
 
 

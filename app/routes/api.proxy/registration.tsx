@@ -159,22 +159,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    //     if (store.submissionEmail) {
-    //     const emailResult = await sendRegistrationEmail(
-    //     store.id,
-    //     store.submissionEmail,
-    //     store.storeOwnerName || '',
-    //     email,
-    //     companyName,
-    //     `${registration?.firstName || ""} ${registration?.lastName || ""}`,
-    //   );
+        if (store.submissionEmail) {
+        const emailResult = await sendRegistrationEmail(
+        store.id,
+        store.submissionEmail,
+        store.storeOwnerName || '',
+        email,
+        companyName,
+        `${registration?.firstName || ""} ${registration?.lastName || ""}`,
+      );
     
-    //  if (emailResult.success) {
-    //      console.log("✅ Registration email sent successfully");
-    //    } else {
-    //     console.warn("⚠️ Failed to send registration email:", emailResult.error);
-    //   }
-    // };
+     if (emailResult.success) {
+         console.log("✅ Registration email sent successfully");
+       } else {
+        console.warn("⚠️ Failed to send registration email:", emailResult.error);
+      }
+    };
  
     return json({
       success: true,

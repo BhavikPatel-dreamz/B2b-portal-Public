@@ -8,12 +8,9 @@ import {
 } from "react-router";
 
 import { useAppBridge } from "@shopify/app-bridge-react";
-import {
-  boundary
-} from "@shopify/shopify-app-react-router/server";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "app/shopify.server";
-
 
 export type FieldType =
   | "text"
@@ -991,8 +988,6 @@ export const DEFAULT_CONFIG: FormConfig = {
   ],
 };
 
-
-
 // Serialize: FormConfig → StoredConfig (array of step-groups, no stepIndex on fields)
 function serializeConfig(config: FormConfig): StoredConfig {
   return config.steps.map((step, stepIdx): StoredStepGroup => {
@@ -1073,8 +1068,6 @@ function deserializeConfig(stored: StoredConfig): FormConfig {
 // Pre-serialized default (array of step-groups) — used for resetConfig
 const STORED_DEFAULT: StoredConfig = serializeConfig(DEFAULT_CONFIG);
 
-
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
@@ -1107,7 +1100,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             g.step?.id &&
             g.step?.label &&
             Array.isArray(g.fields) &&
-            g.fields.every((f) => f.key && f.label && f.type !== undefined)
+            g.fields.every((f) => f.key && f.label && f.type !== undefined),
         )
       ) {
         config = deserializeConfig(stored);
@@ -1123,8 +1116,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     savedAt: formFieldConfig?.updatedAt?.toISOString() ?? null,
   });
 };
-
-
 
 // ✅ Helper: map form data → prisma data
 function mapToRegistrationData(formData: Record<string, any>) {
@@ -1162,10 +1153,10 @@ function mapToRegistrationData(formData: Record<string, any>) {
       billing[key] = value;
       continue;
     }
-  if (key === "email" || key.startsWith("email")) {
-  mainData.email = value;
-  continue;
-}
+    if (key === "email" || key.startsWith("email")) {
+      mainData.email = value;
+      continue;
+    }
 
     customFields[key] = value;
   }
@@ -1246,18 +1237,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "submitRegistration") {
- 
-  const formData = body.data;
+    const formData = body.data;
 
-  const mapped = mapToRegistrationData(formData);
-  console.log(mapped,"mapped....");
+    const mapped = mapToRegistrationData(formData);
+    console.log(mapped, "mapped....");
 
-  return Response.json({
-    success: true,
-    intent,
-    mappedData: mapped, // 👈 ONLY return mapped result
-  });
-}
+    return Response.json({
+      success: true,
+      intent,
+      mappedData: mapped, // 👈 ONLY return mapped result
+    });
+  }
 
   return Response.json(
     { success: false, intent, error: `Unknown intent: ${intent}` },
@@ -1932,70 +1922,69 @@ export default function FormEditor() {
   const isResetting = isSaving && fetcher.formData === undefined;
   const pendingSubmitRef = useRef(false);
 
- const handleSaveAndSubmit = useCallback(() => {
-  // Step 1: Save config
-  fetcher.submit(
-    JSON.stringify({
-      intent: "saveConfig",
-      config,
-    }),
-    {
-      method: "post",
-      encType: "application/json",
-    }
-  );
+  const handleSaveAndSubmit = useCallback(() => {
+    // Step 1: Save config
+    fetcher.submit(
+      JSON.stringify({
+        intent: "saveConfig",
+        config,
+      }),
+      {
+        method: "post",
+        encType: "application/json",
+      },
+    );
 
-  // Mark that after save → we need submit
-  pendingSubmitRef.current = true;
-
-}, [config, fetcher]);
+    // Mark that after save → we need submit
+    pendingSubmitRef.current = true;
+  }, [config, fetcher]);
 
   // ── Handle fetcher response ────────────────────────────────────────────────
-useEffect(() => {
-  if (!fetcher.data) return;
+  useEffect(() => {
+    if (!fetcher.data) return;
 
-  // ✅ SAVE SUCCESS
-  if (fetcher.data.success && fetcher.data.intent === "saveConfig") {
-    setSavedAt(fetcher.data.savedAt ?? null);
-    setHasUnsaved(false);
-    shopify.toast.show?.("Form saved successfully");
+    // ✅ SAVE SUCCESS
+    if (fetcher.data.success && fetcher.data.intent === "saveConfig") {
+      setSavedAt(fetcher.data.savedAt ?? null);
+      setHasUnsaved(false);
+      shopify.toast.show?.("Form saved successfully");
 
-    // 👉 STEP 2: Now trigger submitRegistration
-    if (pendingSubmitRef.current) {
-      pendingSubmitRef.current = false;
+      // 👉 STEP 2: Now trigger submitRegistration
+      if (pendingSubmitRef.current) {
+        pendingSubmitRef.current = false;
 
-      const formData: Record<string, any> = {};
+        const formData: Record<string, any> = {};
 
-      config.fields.forEach((field) => {
-        formData[field.key] = `${field.key}`; // replace with real values
-      });
+        config.fields.forEach((field) => {
+          formData[field.key] = `${field.key}`; // replace with real values
+        });
 
-      fetcher.submit(
-        JSON.stringify({
-          intent: "submitRegistration",
-          data: formData,
-        }),
-        {
-          method: "post",
-          encType: "application/json",
-        }
-      );
+        fetcher.submit(
+          JSON.stringify({
+            intent: "submitRegistration",
+            data: formData,
+          }),
+          {
+            method: "post",
+            encType: "application/json",
+          },
+        );
+      }
+    } else if (
+      fetcher.data.success &&
+      fetcher.data.intent === "submitRegistration"
+    ) {
+      shopify.toast.show?.("Registration mapped successfully 🎉");
     }
-  }
-  else if (fetcher.data.success && fetcher.data.intent === "submitRegistration") {
-    shopify.toast.show?.("Registration mapped successfully 🎉");
-  }
 
-  // ❌ ERROR
-  else if (!fetcher.data.success) {
-    pendingSubmitRef.current = false;
-    shopify.toast.show?.(
-      `Error: ${fetcher.data.error ?? "Unknown error"}`,
-      { isError: true }
-    );
-  }
-
-}, [fetcher.data, config, shopify]);
+    // ❌ ERROR
+    else if (!fetcher.data.success) {
+      pendingSubmitRef.current = false;
+      shopify.toast.show?.(`Error: ${fetcher.data.error ?? "Unknown error"}`, {
+        isError: true,
+      });
+    }
+  }, [fetcher.data, config, shopify]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const stepFields = useMemo(
@@ -2360,54 +2349,16 @@ useEffect(() => {
         }}
       >
         {/* Left: save status + field count */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 12, color: "#9ca3af" }}>
-            {formatSavedAt(savedAt)}
-          </span>
-          {hasUnsaved && (
-            <span
-              style={{
-                fontSize: 12,
-                color: "#f59e0b",
-                fontWeight: 500,
-                background: "#fffbeb",
-                padding: "2px 8px",
-                borderRadius: 99,
-                border: "1px solid #fde68a",
-              }}
-            >
-              Unsaved changes
-            </span>
-          )}
-          <span style={{ fontSize: 12, color: "#9ca3af" }}>
-            {totalFields} field{totalFields !== 1 ? "s" : ""} · {totalSections}{" "}
-            section{totalSections !== 1 ? "s" : ""} · {config.steps.length} step
-            {config.steps.length !== 1 ? "s" : ""}
-          </span>
-        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}></div>
         {/* Right: buttons */}
         <div style={{ display: "flex", gap: 8 }}>
           <s-button
-            variant="tertiary"
-            onClick={resetToDefault}
-            disabled={isSaving}
+            variant="primary"
+            onClick={handleSaveAndSubmit}
+            loading={isSaving}
           >
-            Reset to default
+            Save & Submit
           </s-button>
-          <s-button
-            variant="secondary"
-            onClick={() => shopify.toast.show?.("Install form — coming soon")}
-            disabled={isSaving}
-          >
-            Install form
-          </s-button>
-          <s-button
-  variant="primary"
-  onClick={handleSaveAndSubmit}
-  loading={isSaving}
->
-  Save & Submit
-</s-button>
         </div>
       </div>
 
