@@ -273,8 +273,7 @@ function Extension() {
 
       case "country": {
         const countryOptions = field.options || DUMMY_COUNTRIES;
-        // ✅ || instead of ?? to handle empty string ""
-        const selectedCountry = formData[field.key] || "IN";
+        const selectedCountry = formData[field.key] ?? "IN";
 
         return (
           <s-select
@@ -282,14 +281,16 @@ function Extension() {
             value={selectedCountry}
             onChange={(val) => {
               handleChange(field.key, val);
-              // ✅ Reset paired state to first state of newly selected country
               const stateKey = findPairedKey(field.key, "country", "state");
               if (stateKey) {
-                const firstState = COUNTRY_STATES[val]?.[0]?.value || "";
+                const firstState = val
+                  ? COUNTRY_STATES[val]?.[0]?.value || ""
+                  : "";
                 handleChange(stateKey, firstState);
               }
             }}
           >
+            <s-option value="">Select a country</s-option>
             {countryOptions.map((opt) => (
               <s-option
                 key={opt.value}
@@ -305,15 +306,13 @@ function Extension() {
 
       case "state": {
         const countryKey = findPairedKey(field.key, "state", "country");
-        // ✅ || instead of ?? to handle empty string ""
-        const selectedCountry = (countryKey && formData[countryKey]) || "IN";
+        const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
 
         const stateOptions =
-          field.options || COUNTRY_STATES[selectedCountry] || [];
+          field.options || (selectedCountry ? COUNTRY_STATES[selectedCountry] || [] : []);
 
-        // ✅ || instead of ?? to handle empty string ""
         const selectedState =
-          formData[field.key] || stateOptions[0]?.value || "";
+          formData[field.key] ?? stateOptions[0]?.value ?? "";
 
         return (
           <s-select
@@ -321,6 +320,7 @@ function Extension() {
             value={selectedState}
             onChange={(val) => handleChange(field.key, val)}
           >
+            <s-option value="">Select a state</s-option>
             {stateOptions.length > 0 ? (
               stateOptions.map((opt) => (
                 <s-option
@@ -591,6 +591,5 @@ function Extension() {
   );
 }
  
-
 
 

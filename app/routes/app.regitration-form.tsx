@@ -67,166 +67,32 @@ export interface FormConfig {
 }
 
 export interface StoredField {
-  key: string; // unique field key
-  label: string; // visible label
-  type: FieldType; // input type
-  order: number; // position within this step
+  key: string;
+  label: string;
+  type: FieldType;
+  order: number;
   required?: boolean;
-  width?: FieldWidth; // "full" | "half"  (default: "full")
-  section?: string; // visual grouping e.g. "company" | "contact" | "shipping" | "billing"
-  options?: string[]; // for select / radio / multi-check
+  width?: FieldWidth;
+  section?: string;
+  options?: string[];
   placeholder?: string;
-  content?: string; // for heading / paragraph / link display-only fields
+  content?: string;
 }
 
-// One entry per step
 export interface StoredStepGroup {
-  step: FormStep; // { id, label }
-  fields: StoredField[]; // fields belonging to this step, sorted by order
+  step: FormStep;
+  fields: StoredField[];
 }
 
-// The full stored value — an array of step groups
 export type StoredConfig = StoredStepGroup[];
 
-// Loader response type
 interface LoaderData {
   config: FormConfig;
   storeMissing: boolean;
   savedAt: string | null;
 }
 
-export const COUNTRY_LIST = [
-  "Afghanistan",
-  "Albania",
-  "Algeria",
-  "Andorra",
-  "Angola",
-  "Argentina",
-  "Armenia",
-  "Australia",
-  "Austria",
-  "Azerbaijan",
-  "Bahamas",
-  "Bahrain",
-  "Bangladesh",
-  "Barbados",
-  "Belarus",
-  "Belgium",
-  "Belize",
-  "Bolivia",
-  "Bosnia and Herzegovina",
-  "Botswana",
-  "Brazil",
-  "Brunei",
-  "Bulgaria",
-  "Cambodia",
-  "Cameroon",
-  "Canada",
-  "Chile",
-  "China",
-  "Colombia",
-  "Costa Rica",
-  "Croatia",
-  "Cuba",
-  "Cyprus",
-  "Czech Republic",
-  "Denmark",
-  "Dominican Republic",
-  "Ecuador",
-  "Egypt",
-  "El Salvador",
-  "Estonia",
-  "Ethiopia",
-  "Finland",
-  "France",
-  "Georgia",
-  "Germany",
-  "Ghana",
-  "Greece",
-  "Guatemala",
-  "Honduras",
-  "Hungary",
-  "Iceland",
-  "India",
-  "Indonesia",
-  "Iran",
-  "Iraq",
-  "Ireland",
-  "Israel",
-  "Italy",
-  "Jamaica",
-  "Japan",
-  "Jordan",
-  "Kazakhstan",
-  "Kenya",
-  "Kuwait",
-  "Latvia",
-  "Lebanon",
-  "Libya",
-  "Lithuania",
-  "Luxembourg",
-  "Malaysia",
-  "Maldives",
-  "Malta",
-  "Mexico",
-  "Moldova",
-  "Monaco",
-  "Mongolia",
-  "Montenegro",
-  "Morocco",
-  "Myanmar",
-  "Nepal",
-  "Netherlands",
-  "New Zealand",
-  "Nicaragua",
-  "Nigeria",
-  "Norway",
-  "Oman",
-  "Pakistan",
-  "Palestine",
-  "Panama",
-  "Paraguay",
-  "Peru",
-  "Philippines",
-  "Poland",
-  "Portugal",
-  "Qatar",
-  "Romania",
-  "Russia",
-  "Rwanda",
-  "Saudi Arabia",
-  "Senegal",
-  "Serbia",
-  "Singapore",
-  "Slovakia",
-  "Slovenia",
-  "South Africa",
-  "South Korea",
-  "South Sudan",
-  "Spain",
-  "Sri Lanka",
-  "Sudan",
-  "Sweden",
-  "Switzerland",
-  "Syria",
-  "Taiwan",
-  "Tanzania",
-  "Thailand",
-  "Tunisia",
-  "Turkey",
-  "Uganda",
-  "Ukraine",
-  "United Arab Emirates",
-  "United Kingdom",
-  "United States",
-  "Uruguay",
-  "Uzbekistan",
-  "Venezuela",
-  "Vietnam",
-  "Yemen",
-  "Zambia",
-  "Zimbabwe",
-];
+
 
 export const SECTION_LABELS: Record<string, string> = {
   company: "Company information",
@@ -282,392 +148,72 @@ export const PALETTE: Record<
   }>
 > = {
   general: [
-    {
-      paletteKey: "companyName",
-      label: "Company name",
-      type: "text",
-      key: "companyName",
-      section: "company",
-      required: true,
-      width: "full",
-    },
-    {
-      paletteKey: "taxId",
-      label: "Tax registration ID",
-      type: "text",
-      key: "taxId",
-      section: "company",
-      width: "full",
-    },
-    {
-      paletteKey: "firstName",
-      label: "Contact first name",
-      type: "text",
-      key: "firstName",
-      section: "contact",
-      required: true,
-      width: "half",
-    },
-    {
-      paletteKey: "lastName",
-      label: "Contact last name",
-      type: "text",
-      key: "lastName",
-      section: "contact",
-      width: "half",
-    },
-    {
-      paletteKey: "contactTitle",
-      label: "Contact title",
-      type: "text",
-      key: "contactTitle",
-      section: "contact",
-      width: "full",
-    },
-    {
-      paletteKey: "locationName",
-      label: "Main location name",
-      type: "text",
-      key: "locationName",
-      section: "company",
-      width: "full",
-    },
-    {
-      paletteKey: "email",
-      label: "Email",
-      type: "email",
-      key: "email",
-      section: "contact",
-      required: true,
-      width: "full",
-    },
-    {
-      paletteKey: "phone",
-      label: "Phone",
-      type: "phone",
-      key: "phone",
-      section: "contact",
-      width: "full",
-    },
-    {
-      paletteKey: "website",
-      label: "Website",
-      type: "text",
-      key: "website",
-      section: "company",
-      width: "full",
-    },
-    {
-      paletteKey: "businessType",
-      label: "Business type",
-      type: "text",
-      key: "businessType",
-      section: "company",
-      width: "full",
-    },
-    {
-      paletteKey: "additionalInfo",
-      label: "Additional info",
-      type: "textarea",
-      key: "additionalInfo",
-      width: "full",
-    },
+    { paletteKey: "companyName", label: "Company name", type: "text", key: "companyName", section: "company", required: true, width: "full" },
+    { paletteKey: "taxId", label: "Tax registration ID", type: "text", key: "taxId", section: "company", width: "full" },
+    { paletteKey: "firstName", label: "Contact first name", type: "text", key: "firstName", section: "contact", required: true, width: "half" },
+    { paletteKey: "lastName", label: "Contact last name", type: "text", key: "lastName", section: "contact", width: "half" },
+    { paletteKey: "contactTitle", label: "Contact title", type: "text", key: "contactTitle", section: "contact", width: "full" },
+    { paletteKey: "locationName", label: "Main location name", type: "text", key: "locationName", section: "company", width: "full" },
+    { paletteKey: "email", label: "Email", type: "email", key: "email", section: "contact", required: true, width: "full" },
+    { paletteKey: "phone", label: "Phone", type: "phone", key: "phone", section: "contact", width: "full" },
+    { paletteKey: "website", label: "Website", type: "text", key: "website", section: "company", width: "full" },
+    { paletteKey: "businessType", label: "Business type", type: "text", key: "businessType", section: "company", width: "full" },
+    { paletteKey: "additionalInfo", label: "Additional info", type: "textarea", key: "additionalInfo", width: "full" },
   ],
   shipping: [
-    {
-      paletteKey: "shipDept",
-      label: "Department/attention",
-      type: "text",
-      key: "shipDept",
-      section: "shipping",
-      width: "full",
-    },
-    {
-      paletteKey: "shipFirstName",
-      label: "Shipping first name",
-      type: "text",
-      key: "shipFirstName",
-      section: "shipping",
-      width: "half",
-    },
-    {
-      paletteKey: "shipLastName",
-      label: "Shipping last name",
-      type: "text",
-      key: "shipLastName",
-      section: "shipping",
-      width: "half",
-    },
-    {
-      paletteKey: "shipPhone",
-      label: "Shipping phone",
-      type: "phone",
-      key: "shipPhone",
-      section: "shipping",
-      width: "full",
-    },
-    {
-      paletteKey: "shipAddr1",
-      label: "Shipping address line 1",
-      type: "text",
-      key: "shipAddr1",
-      section: "shipping",
-      width: "full",
-    },
-    {
-      paletteKey: "shipAddr2",
-      label: "Shipping address line 2",
-      type: "text",
-      key: "shipAddr2",
-      section: "shipping",
-      width: "full",
-    },
-    {
-      paletteKey: "shipCity",
-      label: "Shipping city",
-      type: "text",
-      key: "shipCity",
-      section: "shipping",
-      width: "full",
-    },
-    {
-      paletteKey: "shipCountry",
-      label: "Shipping country",
-      type: "country",
-      key: "shipCountry",
-      section: "shipping",
-      width: "full",
-    },
-    {
-      paletteKey: "shipState",
-      label: "Shipping state/province",
-      type: "state",
-      key: "shipState",
-      section: "shipping",
-      width: "full",
-    },
-    {
-      paletteKey: "shipZip",
-      label: "Shipping ZIP/Postal code",
-      type: "text",
-      key: "shipZip",
-      section: "shipping",
-      width: "full",
-    },
+    { paletteKey: "shipDept", label: "Department/attention", type: "text", key: "shipDept", section: "shipping", width: "full" },
+    { paletteKey: "shipFirstName", label: "Shipping first name", type: "text", key: "shipFirstName", section: "shipping", width: "half" },
+    { paletteKey: "shipLastName", label: "Shipping last name", type: "text", key: "shipLastName", section: "shipping", width: "half" },
+    { paletteKey: "shipPhone", label: "Shipping phone", type: "phone", key: "shipPhone", section: "shipping", width: "full" },
+    { paletteKey: "shipAddr1", label: "Shipping address line 1", type: "text", key: "shipAddr1", section: "shipping", width: "full" },
+    { paletteKey: "shipAddr2", label: "Shipping address line 2", type: "text", key: "shipAddr2", section: "shipping", width: "full" },
+    { paletteKey: "shipCity", label: "Shipping city", type: "text", key: "shipCity", section: "shipping", width: "full" },
+    { paletteKey: "shipCountry", label: "Shipping country", type: "country", key: "shipCountry", section: "shipping", width: "full" },
+    { paletteKey: "shipState", label: "Shipping state/province", type: "state", key: "shipState", section: "shipping", width: "full" },
+    { paletteKey: "shipZip", label: "Shipping ZIP/Postal code", type: "text", key: "shipZip", section: "shipping", width: "full" },
   ],
   billing: [
-    {
-      paletteKey: "billSameAsShip",
-      label: "Same as shipping address",
-      type: "checkbox",
-      key: "billSameAsShip",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billDept",
-      label: "Department/attention",
-      type: "text",
-      key: "billDept",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billFirstName",
-      label: "Billing first name",
-      type: "text",
-      key: "billFirstName",
-      section: "billing",
-      width: "half",
-    },
-    {
-      paletteKey: "billLastName",
-      label: "Billing last name",
-      type: "text",
-      key: "billLastName",
-      section: "billing",
-      width: "half",
-    },
-    {
-      paletteKey: "billPhone",
-      label: "Billing phone",
-      type: "phone",
-      key: "billPhone",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billAddr1",
-      label: "Billing address line 1",
-      type: "text",
-      key: "billAddr1",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billAddr2",
-      label: "Billing address line 2",
-      type: "text",
-      key: "billAddr2",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billCity",
-      label: "Billing city",
-      type: "text",
-      key: "billCity",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billCountry",
-      label: "Billing country",
-      type: "country",
-      key: "billCountry",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billState",
-      label: "Billing state/province",
-      type: "state",
-      key: "billState",
-      section: "billing",
-      width: "full",
-    },
-    {
-      paletteKey: "billZip",
-      label: "Billing ZIP/Postal code",
-      type: "text",
-      key: "billZip",
-      section: "billing",
-      width: "full",
-    },
+    { paletteKey: "billSameAsShip", label: "Same as shipping address", type: "checkbox", key: "billSameAsShip", section: "billing", width: "full" },
+    { paletteKey: "billDept", label: "Department/attention", type: "text", key: "billDept", section: "billing", width: "full" },
+    { paletteKey: "billFirstName", label: "Billing first name", type: "text", key: "billFirstName", section: "billing", width: "half" },
+    { paletteKey: "billLastName", label: "Billing last name", type: "text", key: "billLastName", section: "billing", width: "half" },
+    { paletteKey: "billPhone", label: "Billing phone", type: "phone", key: "billPhone", section: "billing", width: "full" },
+    { paletteKey: "billAddr1", label: "Billing address line 1", type: "text", key: "billAddr1", section: "billing", width: "full" },
+    { paletteKey: "billAddr2", label: "Billing address line 2", type: "text", key: "billAddr2", section: "billing", width: "full" },
+    { paletteKey: "billCity", label: "Billing city", type: "text", key: "billCity", section: "billing", width: "full" },
+    { paletteKey: "billCountry", label: "Billing country", type: "country", key: "billCountry", section: "billing", width: "full" },
+    { paletteKey: "billState", label: "Billing state/province", type: "state", key: "billState", section: "billing", width: "full" },
+    { paletteKey: "billZip", label: "Billing ZIP/Postal code", type: "text", key: "billZip", section: "billing", width: "full" },
   ],
   custom: [
-    {
-      paletteKey: "c_text",
-      label: "Single-line text",
-      type: "text",
-      key: "custom_text",
-      width: "full",
-    },
-    {
-      paletteKey: "c_textarea",
-      label: "Multi-line text",
-      type: "textarea",
-      key: "custom_textarea",
-      width: "full",
-    },
-    {
-      paletteKey: "c_number",
-      label: "Number",
-      type: "number",
-      key: "custom_number",
-      width: "full",
-    },
-    {
-      paletteKey: "c_dropdown",
-      label: "Dropdown",
-      type: "select",
-      key: "custom_dropdown",
-      width: "full",
-    },
-    {
-      paletteKey: "c_radio",
-      label: "Radio choices",
-      type: "radio",
-      key: "custom_radio",
-      width: "full",
-    },
-    {
-      paletteKey: "c_checkbox",
-      label: "Checkbox",
-      type: "checkbox",
-      key: "custom_checkbox",
-      width: "full",
-    },
-    {
-      paletteKey: "c_multicheck",
-      label: "Multi-choice list",
-      type: "multi-check",
-      key: "custom_multicheck",
-      width: "full",
-    },
-    {
-      paletteKey: "c_date",
-      label: "Date",
-      type: "date",
-      key: "custom_date",
-      width: "full",
-    },
-    {
-      paletteKey: "c_file",
-      label: "File upload",
-      type: "file",
-      key: "custom_file",
-      width: "full",
-    },
-    {
-      paletteKey: "c_email",
-      label: "Email address",
-      type: "email",
-      key: "custom_email",
-      width: "full",
-    },
-    {
-      paletteKey: "c_phone",
-      label: "Phone number",
-      type: "phone",
-      key: "custom_phone",
-      width: "full",
-    },
+    { paletteKey: "c_text", label: "Single-line text", type: "text", key: "custom_text", width: "full" },
+    { paletteKey: "c_textarea", label: "Multi-line text", type: "textarea", key: "custom_textarea", width: "full" },
+    { paletteKey: "c_number", label: "Number", type: "number", key: "custom_number", width: "full" },
+    { paletteKey: "c_dropdown", label: "Dropdown", type: "select", key: "custom_dropdown", width: "full" },
+    { paletteKey: "c_radio", label: "Radio choices", type: "radio", key: "custom_radio", width: "full" },
+    { paletteKey: "c_checkbox", label: "Checkbox", type: "checkbox", key: "custom_checkbox", width: "full" },
+    { paletteKey: "c_multicheck", label: "Multi-choice list", type: "multi-check", key: "custom_multicheck", width: "full" },
+    { paletteKey: "c_date", label: "Date", type: "date", key: "custom_date", width: "full" },
+    { paletteKey: "c_file", label: "File upload", type: "file", key: "custom_file", width: "full" },
+    { paletteKey: "c_email", label: "Email address", type: "email", key: "custom_email", width: "full" },
+    { paletteKey: "c_phone", label: "Phone number", type: "phone", key: "custom_phone", width: "full" },
   ],
   display: [
-    {
-      paletteKey: "d_heading",
-      label: "Heading",
-      type: "heading",
-      key: "display_heading",
-      isDisplay: true,
-      width: "full",
-    },
-    {
-      paletteKey: "d_paragraph",
-      label: "Paragraph",
-      type: "paragraph",
-      key: "display_paragraph",
-      isDisplay: true,
-      width: "full",
-    },
-    {
-      paletteKey: "d_link",
-      label: "Link",
-      type: "link",
-      key: "display_link",
-      isDisplay: true,
-      width: "full",
-    },
-    {
-      paletteKey: "d_divider",
-      label: "Divider",
-      type: "divider",
-      key: "display_divider",
-      isDisplay: true,
-      width: "full",
-    },
+    { paletteKey: "d_heading", label: "Heading", type: "heading", key: "display_heading", isDisplay: true, width: "full" },
+    { paletteKey: "d_paragraph", label: "Paragraph", type: "paragraph", key: "display_paragraph", isDisplay: true, width: "full" },
+    { paletteKey: "d_link", label: "Link", type: "link", key: "display_link", isDisplay: true, width: "full" },
+    { paletteKey: "d_divider", label: "Divider", type: "divider", key: "display_divider", isDisplay: true, width: "full" },
   ],
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DEFAULT CONFIG — all fields in Step 1
+// DEFAULT CONFIG
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const DEFAULT_CONFIG: FormConfig = {
   steps: [{ id: "step-0", label: "Step 1" }],
   fields: [
-    // Company information
+    // ───────────── GENERAL ─────────────
     {
       id: "f01",
       paletteKey: "companyName",
@@ -693,7 +239,6 @@ export const DEFAULT_CONFIG: FormConfig = {
       stepIndex: 0,
       order: 1,
     },
-    // Contact information
     {
       id: "f03",
       paletteKey: "firstName",
@@ -715,6 +260,7 @@ export const DEFAULT_CONFIG: FormConfig = {
       label: "Last name",
       key: "lastName",
       section: "contact",
+      required: true,
       width: "half",
       stepIndex: 0,
       order: 3,
@@ -731,15 +277,17 @@ export const DEFAULT_CONFIG: FormConfig = {
       stepIndex: 0,
       order: 4,
     },
-    // Shipping address
+
+    // ───────────── SHIPPING (FIXED ORDER) ─────────────
     {
       id: "f06",
-      paletteKey: "shipDept",
+      paletteKey: "shipCountry",
       category: "shipping",
-      type: "text",
-      label: "Department/attention",
-      key: "shipDept",
+      type: "country",
+      label: "Country/region",
+      key: "shipCountry",
       section: "shipping",
+      required: true,
       width: "full",
       stepIndex: 0,
       order: 5,
@@ -752,6 +300,7 @@ export const DEFAULT_CONFIG: FormConfig = {
       label: "First name",
       key: "shipFirstName",
       section: "shipping",
+      required: true,
       width: "half",
       stepIndex: 0,
       order: 6,
@@ -764,47 +313,49 @@ export const DEFAULT_CONFIG: FormConfig = {
       label: "Last name",
       key: "shipLastName",
       section: "shipping",
+      required: true,
       width: "half",
       stepIndex: 0,
       order: 7,
     },
     {
       id: "f09",
-      paletteKey: "shipPhone",
+      paletteKey: "shipDept",
       category: "shipping",
-      type: "phone",
-      label: "Phone",
-      key: "shipPhone",
+      type: "text",
+      label: "Company/attention",
+      key: "shipDept",
       section: "shipping",
       width: "full",
       stepIndex: 0,
       order: 8,
     },
-    {
+     {
       id: "f10",
       paletteKey: "shipAddr1",
       category: "shipping",
       type: "text",
-      label: "Address line 1",
+      label: "Address",
       key: "shipAddr1",
       section: "shipping",
-      width: "full",
-      stepIndex: 0,
-      order: 9,
-    },
-    {
-      id: "f11",
-      paletteKey: "shipAddr2",
-      category: "shipping",
-      type: "text",
-      label: "Address line 2",
-      key: "shipAddr2",
-      section: "shipping",
+      required: true,
       width: "full",
       stepIndex: 0,
       order: 10,
     },
-    {
+      {
+      id: "f11",
+      paletteKey: "shipAddr2",
+      category: "shipping",
+      type: "text",
+      label: "Apartment, suite, etc",
+      key: "shipAddr2",
+      section: "shipping",
+      width: "full",
+      stepIndex: 0,
+      order: 11,
+    },
+     {
       id: "f12",
       paletteKey: "shipCity",
       category: "shipping",
@@ -812,28 +363,17 @@ export const DEFAULT_CONFIG: FormConfig = {
       label: "City",
       key: "shipCity",
       section: "shipping",
-      width: "full",
-      stepIndex: 0,
-      order: 11,
-    },
-    {
-      id: "f13",
-      paletteKey: "shipCountry",
-      category: "shipping",
-      type: "country",
-      label: "Country",
-      key: "shipCountry",
-      section: "shipping",
+      required: true,
       width: "full",
       stepIndex: 0,
       order: 12,
     },
     {
-      id: "f14",
+      id: "f13",
       paletteKey: "shipState",
       category: "shipping",
       type: "state",
-      label: "State/Province",
+      label: "State",
       key: "shipState",
       section: "shipping",
       width: "full",
@@ -841,154 +381,192 @@ export const DEFAULT_CONFIG: FormConfig = {
       order: 13,
     },
     {
-      id: "f15",
+      id: "f14",
       paletteKey: "shipZip",
       category: "shipping",
       type: "text",
-      label: "ZIP/Postal code",
+      label: "PIN code",
       key: "shipZip",
       section: "shipping",
+      required: true,
       width: "full",
       stepIndex: 0,
       order: 14,
     },
-    // Billing address
     {
-      id: "f16",
-      paletteKey: "billSameAsShip",
-      category: "billing",
-      type: "checkbox",
-      label: "Same as shipping address",
-      key: "billSameAsShip",
-      section: "billing",
+      id: "f15",
+      paletteKey: "shipPhone",
+      category: "shipping",
+      type: "phone",
+      label: "Phone",
+      key: "shipPhone",
+      section: "shipping",
+      required: true,
       width: "full",
       stepIndex: 0,
       order: 15,
     },
-    {
-      id: "f17",
-      paletteKey: "billDept",
-      category: "billing",
-      type: "text",
-      label: "Department/attention",
-      key: "billDept",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 16,
-    },
-    {
-      id: "f18",
-      paletteKey: "billFirstName",
-      category: "billing",
-      type: "text",
-      label: "First name",
-      key: "billFirstName",
-      section: "billing",
-      width: "half",
-      stepIndex: 0,
-      order: 17,
-    },
-    {
-      id: "f19",
-      paletteKey: "billLastName",
-      category: "billing",
-      type: "text",
-      label: "Last name",
-      key: "billLastName",
-      section: "billing",
-      width: "half",
-      stepIndex: 0,
-      order: 18,
-    },
-    {
-      id: "f20",
-      paletteKey: "billPhone",
-      category: "billing",
-      type: "phone",
-      label: "Phone",
-      key: "billPhone",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 19,
-    },
-    {
-      id: "f21",
-      paletteKey: "billAddr1",
-      category: "billing",
-      type: "text",
-      label: "Address line 1",
-      key: "billAddr1",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 20,
-    },
-    {
-      id: "f22",
-      paletteKey: "billAddr2",
-      category: "billing",
-      type: "text",
-      label: "Address line 2",
-      key: "billAddr2",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 21,
-    },
-    {
-      id: "f23",
-      paletteKey: "billCity",
-      category: "billing",
-      type: "text",
-      label: "City",
-      key: "billCity",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 22,
-    },
-    {
-      id: "f24",
-      paletteKey: "billCountry",
-      category: "billing",
-      type: "country",
-      label: "Country",
-      key: "billCountry",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 23,
-    },
-    {
-      id: "f25",
-      paletteKey: "billState",
-      category: "billing",
-      type: "state",
-      label: "State/Province",
-      key: "billState",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 24,
-    },
-    {
-      id: "f26",
-      paletteKey: "billZip",
-      category: "billing",
-      type: "text",
-      label: "ZIP/Postal code",
-      key: "billZip",
-      section: "billing",
-      width: "full",
-      stepIndex: 0,
-      order: 25,
-    },
+   
+    // ───────────── BILLING (MATCH SHIPPING) ─────────────
+{
+  id: "f16",
+  paletteKey: "billSameAsShip",
+  category: "billing",
+  type: "checkbox",
+  label: "Same as shipping address",
+  key: "billSameAsShip",
+  section: "billing",
+  width: "full",
+  stepIndex: 0,
+  order: 16,
+},
+
+{
+  id: "f17",
+  paletteKey: "billCountry",
+  category: "billing",
+  type: "country",
+  label: "Country/region",
+  key: "billCountry",
+  section: "billing",
+  required: true,
+  width: "full",
+  stepIndex: 0,
+  order: 17,
+},
+
+{
+  id: "f18",
+  paletteKey: "billFirstName",
+  category: "billing",
+  type: "text",
+  label: "First name",
+  key: "billFirstName",
+  section: "billing",
+  required: true,
+  width: "half",
+  stepIndex: 0,
+  order: 18,
+},
+
+{
+  id: "f19",
+  paletteKey: "billLastName",
+  category: "billing",
+  type: "text",
+  label: "Last name",
+  key: "billLastName",
+  section: "billing",
+  required: true,
+  width: "half",
+  stepIndex: 0,
+  order: 19,
+},
+
+{
+  id: "f20",
+  paletteKey: "billDept",
+  category: "billing",
+  type: "text",
+  label: "Company/attention",
+  key: "billDept",
+  section: "billing",
+  width: "full",
+  stepIndex: 0,
+  order: 20,
+},
+
+{
+  id: "f21",
+  paletteKey: "billAddr1",
+  category: "billing",
+  type: "text",
+  label: "Address",
+  key: "billAddr1",
+  section: "billing",
+  required: true,
+  width: "full",
+  stepIndex: 0,
+  order: 21,
+},
+
+{
+  id: "f22",
+  paletteKey: "billAddr2",
+  category: "billing",
+  type: "text",
+  label: "Apartment, suite, etc",
+  key: "billAddr2",
+  section: "billing",
+  width: "full",
+  stepIndex: 0,
+  order: 22,
+},
+
+{
+  id: "f23",
+  paletteKey: "billCity",
+  category: "billing",
+  type: "text",
+  label: "City",
+  key: "billCity",
+  section: "billing",
+  required: true,
+  width: "full",
+  stepIndex: 0,
+  order: 23,
+},
+
+{
+  id: "f24",
+  paletteKey: "billState",
+  category: "billing",
+  type: "state",
+  label: "State",
+  key: "billState",
+  section: "billing",
+  width: "full",
+  stepIndex: 0,
+  order: 24,
+},
+
+{
+  id: "f25",
+  paletteKey: "billZip",
+  category: "billing",
+  type: "text",
+  label: "PIN code",
+  key: "billZip",
+  section: "billing",
+  required: true,
+  width: "full",
+  stepIndex: 0,
+  order: 25,
+},
+
+{
+  id: "f26",
+  paletteKey: "billPhone",
+  category: "billing",
+  type: "phone",
+  label: "Phone",
+  key: "billPhone",
+  section: "billing",
+  required: true,
+  width: "full",
+  stepIndex: 0,
+  order: 26,
+},
   ],
 };
 
-// Serialize: FormConfig → StoredConfig (array of step-groups, no stepIndex on fields)
+// ✅ Set of paletteKeys that are part of the default config — these fields cannot be deleted
+const DEFAULT_PALETTE_KEYS = new Set(DEFAULT_CONFIG.fields.map((f) => f.paletteKey));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERIALIZE / DESERIALIZE
+// ═══════════════════════════════════════════════════════════════════════════════
+
 function serializeConfig(config: FormConfig): StoredConfig {
   return config.steps.map((step, stepIdx): StoredStepGroup => {
     const stepFields = config.fields
@@ -1012,19 +590,12 @@ function serializeConfig(config: FormConfig): StoredConfig {
           ...(f.content ? { content: f.content } : {}),
         }),
       );
-
     return { step, fields: stepFields };
   });
 }
 
-// Deserialize: StoredConfig (array of step-groups) → FormConfig (flat with stepIndex)
 function deserializeConfig(stored: StoredConfig): FormConfig {
-  const DISPLAY_TYPES: FieldType[] = [
-    "heading",
-    "paragraph",
-    "link",
-    "divider",
-  ];
+  const DISPLAY_TYPES: FieldType[] = ["heading", "paragraph", "link", "divider"];
 
   const inferCategory = (f: StoredField): FieldCategory => {
     if (DISPLAY_TYPES.includes(f.type)) return "display";
@@ -1041,17 +612,15 @@ function deserializeConfig(stored: StoredConfig): FormConfig {
       .sort((a, b) => a.order - b.order)
       .map(
         (f): FieldDef => ({
-          // Runtime-only props — derived, never stored
           id: `_${f.key}_${stepIdx}_${f.order}`,
           paletteKey: f.key,
           category: inferCategory(f),
           isDisplay: DISPLAY_TYPES.includes(f.type),
-          // Stored props
           key: f.key,
           label: f.label,
           type: f.type,
           order: f.order,
-          stepIndex: stepIdx, // ← re-injected from array position
+          stepIndex: stepIdx,
           width: f.width ?? "full",
           required: f.required,
           section: f.section,
@@ -1065,8 +634,11 @@ function deserializeConfig(stored: StoredConfig): FormConfig {
   return { steps, fields };
 }
 
-// Pre-serialized default (array of step-groups) — used for resetConfig
 const STORED_DEFAULT: StoredConfig = serializeConfig(DEFAULT_CONFIG);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LOADER
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -1076,11 +648,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!store) {
-    return Response.json({
-      config: DEFAULT_CONFIG,
-      storeMissing: true,
-      savedAt: null,
-    });
+    return Response.json({ config: DEFAULT_CONFIG, storeMissing: true, savedAt: null });
   }
 
   const formFieldConfig = await prisma.formFieldConfig.findUnique({
@@ -1117,17 +685,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 };
 
-// ✅ Helper: map form data → prisma data
-function mapToRegistrationData(formData: Record<string, any>) {
-  const REGISTRATION_COLUMNS = [
-    "companyName",
-    "email",
-    "firstName",
-    "lastName",
-    "contactTitle",
-    "isPrivacyPolicy",
-  ];
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACTION
+// ═══════════════════════════════════════════════════════════════════════════════
 
+function mapToRegistrationData(formData: Record<string, any>) {
+  const REGISTRATION_COLUMNS = ["companyName", "email", "firstName", "lastName", "contactTitle", "isPrivacyPolicy"];
   const mainData: Record<string, any> = {};
   const customFields: Record<string, any> = {};
   let shipping: Record<string, any> = {};
@@ -1135,124 +698,63 @@ function mapToRegistrationData(formData: Record<string, any>) {
 
   for (const key in formData) {
     const value = formData[key];
-
-    // ✅ direct columns
-    if (REGISTRATION_COLUMNS.includes(key)) {
-      mainData[key] = value;
-      continue;
-    }
-
-    // ✅ shipping
-    if (key.startsWith("ship")) {
-      shipping[key] = value;
-      continue;
-    }
-
-    // ✅ billing
-    if (key.startsWith("bill")) {
-      billing[key] = value;
-      continue;
-    }
-    if (key === "email" || key.startsWith("email")) {
-      mainData.email = value;
-      continue;
-    }
-
+    if (REGISTRATION_COLUMNS.includes(key)) { mainData[key] = value; continue; }
+    if (key.startsWith("ship")) { shipping[key] = value; continue; }
+    if (key.startsWith("bill")) { billing[key] = value; continue; }
+    if (key === "email" || key.startsWith("email")) { mainData.email = value; continue; }
     customFields[key] = value;
   }
 
-  return {
-    ...mainData,
-    shipping,
-    billing,
-    customFields,
-  };
+  return { ...mainData, shipping, billing, customFields };
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
-  const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
-  });
+  const store = await prisma.store.findUnique({ where: { shopDomain: session.shop } });
 
   if (!store) {
-    return Response.json(
-      { success: false, intent: "unknown", error: "Store not found" },
-      { status: 404 },
-    );
+    return Response.json({ success: false, intent: "unknown", error: "Store not found" }, { status: 404 });
   }
 
-  const body = (await request.json()) as {
-    intent: string;
-    config?: FormConfig;
-  };
+  const body = (await request.json()) as { intent: string; config?: FormConfig };
   const { intent, config } = body;
 
-  // ── intent: saveConfig ────────────────────────────────────────────────────
   if (intent === "saveConfig") {
-    if (
-      !config ||
-      !Array.isArray(config.steps) ||
-      !Array.isArray(config.fields)
-    ) {
-      return Response.json(
-        { success: false, intent, error: "Invalid config payload" },
-        { status: 400 },
-      );
+    if (!config || !Array.isArray(config.steps) || !Array.isArray(config.fields)) {
+      return Response.json({ success: false, intent, error: "Invalid config payload" }, { status: 400 });
     }
-
-    // Serialize: strip id/paletteKey/category/isDisplay → minimal StoredConfig
     const toStore: StoredConfig = serializeConfig(config);
-
     const saved = await prisma.formFieldConfig.upsert({
       where: { shopId: store.id },
       update: { fields: toStore as any },
       create: { shopId: store.id, fields: toStore as any },
     });
-
     return Response.json({
-      success: true,
-      intent,
+      success: true, intent,
       savedAt: saved.updatedAt.toISOString(),
-      stepCount: toStore.length, // ✅ array length = number of steps
-      fieldCount: toStore.reduce((sum, g) => sum + g.fields.length, 0), // ✅ sum fields across all step-groups
+      stepCount: toStore.length,
+      fieldCount: toStore.reduce((sum, g) => sum + g.fields.length, 0),
     });
   }
 
-  // ── intent: resetConfig ───────────────────────────────────────────────────
   if (intent === "resetConfig") {
     const saved = await prisma.formFieldConfig.upsert({
       where: { shopId: store.id },
       update: { fields: STORED_DEFAULT as any },
       create: { shopId: store.id, fields: STORED_DEFAULT as any },
     });
-
-    return Response.json({
-      success: true,
-      intent,
-      config: DEFAULT_CONFIG, // full FormConfig back to UI
-      savedAt: saved.updatedAt.toISOString(),
-    });
+    return Response.json({ success: true, intent, config: DEFAULT_CONFIG, savedAt: saved.updatedAt.toISOString() });
   }
 
   if (intent === "submitRegistration") {
-    const formData = body.data;
-
+    const formData = (body as any).data;
     const mapped = mapToRegistrationData(formData);
     console.log(mapped, "mapped....");
-
-    return Response.json({
-      success: true,
-      intent,
-      mappedData: mapped, // 👈 ONLY return mapped result
-    });
+    return Response.json({ success: true, intent, mappedData: mapped });
   }
 
-  return Response.json(
-    { success: false, intent, error: `Unknown intent: ${intent}` },
-    { status: 400 },
-  );
+  return Response.json({ success: false, intent, error: `Unknown intent: ${intent}` }, { status: 400 });
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1268,10 +770,7 @@ function groupBySection(fields: FieldDef[]) {
   const none: FieldDef[] = [];
   for (const f of fields) {
     if (f.section) {
-      if (!seen.has(f.section)) {
-        seen.add(f.section);
-        order.push(f.section);
-      }
+      if (!seen.has(f.section)) { seen.add(f.section); order.push(f.section); }
       (map[f.section] = map[f.section] || []).push(f);
     } else {
       none.push(f);
@@ -1280,18 +779,12 @@ function groupBySection(fields: FieldDef[]) {
   return { map, order, none };
 }
 
-function pairHalfWidths(
-  fields: FieldDef[],
-): Array<FieldDef | [FieldDef, FieldDef]> {
+function pairHalfWidths(fields: FieldDef[]): Array<FieldDef | [FieldDef, FieldDef]> {
   const rows: Array<FieldDef | [FieldDef, FieldDef]> = [];
   let i = 0;
   while (i < fields.length) {
     const f = fields[i];
-    if (
-      f.width === "half" &&
-      i + 1 < fields.length &&
-      fields[i + 1].width === "half"
-    ) {
+    if (f.width === "half" && i + 1 < fields.length && fields[i + 1].width === "half") {
       rows.push([f, fields[i + 1]]);
       i += 2;
     } else {
@@ -1300,12 +793,6 @@ function pairHalfWidths(
     }
   }
   return rows;
-}
-
-function formatSavedAt(iso: string | null): string {
-  if (!iso) return "Never saved";
-  const d = new Date(iso);
-  return `Last saved ${d.toLocaleDateString()} at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1327,156 +814,53 @@ const previewInputStyle: React.CSSProperties = {
 function FieldPreviewInput({ field }: { field: FieldDef }) {
   switch (field.type) {
     case "divider":
-      return (
-        <hr
-          style={{
-            border: "none",
-            borderTop: "1px solid #e5e7eb",
-            margin: "2px 0",
-          }}
-        />
-      );
+      return <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "2px 0" }} />;
     case "heading":
-      return (
-        <div style={{ fontWeight: 700, fontSize: 18, color: "#111827" }}>
-          {field.label}
-        </div>
-      );
+      return <div style={{ fontWeight: 700, fontSize: 18, color: "#111827" }}>{field.label}</div>;
     case "paragraph":
-      return (
-        <div style={{ fontSize: 14, color: "#6b7280", lineHeight: 1.5 }}>
-          {field.content || field.label}
-        </div>
-      );
+      return <div style={{ fontSize: 14, color: "#6b7280", lineHeight: 1.5 }}>{field.content || field.label}</div>;
     case "link":
-      return (
-        <a
-          href="#"
-          style={{ fontSize: 14, color: "#2c6ecb", pointerEvents: "none" }}
-        >
-          {field.label}
-        </a>
-      );
+      return <a href="#" style={{ fontSize: 14, color: "#2c6ecb", pointerEvents: "none" }}>{field.label}</a>;
     case "textarea":
       return <div style={{ ...previewInputStyle, minHeight: 50 }} />;
     case "checkbox":
       return (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "4px 0",
-          }}
-        >
-          <input
-            type="checkbox"
-            disabled
-            style={{ width: 16, height: 16, cursor: "default" }}
-          />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0" }}>
+          <input type="checkbox" disabled style={{ width: 16, height: 16, cursor: "default" }} />
           <span style={{ fontSize: 15, color: "#374151" }}>{field.label}</span>
         </div>
       );
     case "country":
       return (
-        <div
-          style={{
-            ...previewInputStyle,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        <div style={{ ...previewInputStyle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Select a country...</span>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#9ca3af"
-            strokeWidth="2"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
         </div>
       );
     case "state":
       return (
-        <div
-          style={{
-            ...previewInputStyle,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        <div style={{ ...previewInputStyle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>&nbsp;</span>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#9ca3af"
-            strokeWidth="2"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
         </div>
       );
     case "select":
       return (
-        <div
-          style={{
-            ...previewInputStyle,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        <div style={{ ...previewInputStyle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Select an option</span>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#9ca3af"
-            strokeWidth="2"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
         </div>
       );
     case "date":
-      return (
-        <div style={{ ...previewInputStyle, color: "#c4c4c4" }}>dd/mm/yyyy</div>
-      );
+      return <div style={{ ...previewInputStyle, color: "#c4c4c4" }}>dd/mm/yyyy</div>;
     case "file":
-      return (
-        <div style={{ ...previewInputStyle, fontSize: 14 }}>Choose file…</div>
-      );
+      return <div style={{ ...previewInputStyle, fontSize: 14 }}>Choose file…</div>;
     case "radio":
       return (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            padding: "2px 0",
-          }}
-        >
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0" }}>
           {["Option 1", "Option 2"].map((o) => (
-            <label
-              key={o}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 15,
-                color: "#6b7280",
-              }}
-            >
-              <input type="radio" disabled style={{ width: 16, height: 16 }} />{" "}
-              {o}
+            <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 15, color: "#6b7280" }}>
+              <input type="radio" disabled style={{ width: 16, height: 16 }} /> {o}
             </label>
           ))}
         </div>
@@ -1488,6 +872,7 @@ function FieldPreviewInput({ field }: { field: FieldDef }) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CANVAS FIELD ROW
+// ✅ canDelete prop: hides trash icon for default fields
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function CanvasField({
@@ -1497,6 +882,7 @@ function CanvasField({
   onDragOver,
   onDrop,
   isDragOver,
+  canDelete,
 }: {
   field: FieldDef;
   onRemove: () => void;
@@ -1504,26 +890,17 @@ function CanvasField({
   onDragOver: (e: DragEvent, f: FieldDef) => void;
   onDrop: (e: DragEvent, f: FieldDef) => void;
   isDragOver: boolean;
+  canDelete: boolean; // ✅ NEW
 }) {
-  const isDisplay = ["heading", "paragraph", "divider", "link"].includes(
-    field.type,
-  );
+  const isDisplay = ["heading", "paragraph", "divider", "link"].includes(field.type);
   const isCheck = field.type === "checkbox";
 
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, field)}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onDragOver(e, field);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onDrop(e, field);
-      }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onDragOver(e, field); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop(e, field); }}
       style={{
         padding: "6px 6px",
         borderRadius: 6,
@@ -1535,88 +912,81 @@ function CanvasField({
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
         {/* Drag grip */}
-        <div
-          style={{
-            color: "#d1d5db",
-            fontSize: 14,
-            marginTop: 12,
-            flexShrink: 0,
-            lineHeight: 1,
-            cursor: "grab",
-          }}
-        >
+        <div style={{ color: "#d1d5db", fontSize: 14, marginTop: 12, flexShrink: 0, lineHeight: 1, cursor: "grab" }}>
           <svg width="10" height="10" viewBox="0 0 10 16" fill="currentColor">
-            <circle cx="2" cy="2" r="1.5" />
-            <circle cx="8" cy="2" r="1.5" />
-            <circle cx="2" cy="8" r="1.5" />
-            <circle cx="8" cy="8" r="1.5" />
-            <circle cx="2" cy="14" r="1.5" />
-            <circle cx="8" cy="14" r="1.5" />
+            <circle cx="2" cy="2" r="1.5" /><circle cx="8" cy="2" r="1.5" />
+            <circle cx="2" cy="8" r="1.5" /><circle cx="8" cy="8" r="1.5" />
+            <circle cx="2" cy="14" r="1.5" /><circle cx="8" cy="14" r="1.5" />
           </svg>
         </div>
+
         <div style={{ flex: 1, minWidth: 0 }}>
           {!isDisplay && !isCheck && (
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 500,
-                color: "#374151",
-                marginBottom: 4,
-              }}
-            >
+            <div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
               {field.label}
-              {field.required && (
-                <span style={{ color: "#dc2626", marginLeft: 2 }}>*</span>
-              )}
+              {field.required && <span style={{ color: "#dc2626", marginLeft: 2 }}>*</span>}
+              {/* ✅ Lock badge for non-deletable default fields */}
+              {/* {!canDelete && (
+                <span
+                  title="This field is part of the default form and cannot be removed"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                    fontSize: 10,
+                    color: "#6366f1",
+                    background: "#eef2ff",
+                    border: "1px solid #c7d2fe",
+                    borderRadius: 4,
+                    padding: "1px 5px",
+                    fontWeight: 600,
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <rect x="3" y="11" width="18" height="11" rx="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                  Default
+                </span>
+              )} */}
             </div>
           )}
           <FieldPreviewInput field={field} />
         </div>
-        {/* Delete button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          style={{
-            border: "none",
-            background: "none",
-            cursor: "pointer",
-            color: "#dc2626",
-            padding: "8px 4px",
-            flexShrink: 0,
-            borderRadius: 4,
-            opacity: 0.6,
-            transition: "opacity 0.1s",
-            display: "flex",
-            alignItems: "center",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
-          title="Remove field"
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+
+        {/* ✅ Delete button — only shown if canDelete is true */}
+        {canDelete ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            style={{
+              border: "none", background: "none", cursor: "pointer",
+              color: "#dc2626", padding: "8px 4px", flexShrink: 0,
+              borderRadius: 4, opacity: 0.6, transition: "opacity 0.1s",
+              display: "flex", alignItems: "center",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
+            title="Remove field"
           >
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-          </svg>
-        </button>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" /><path d="M14 11v6" />
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            </svg>
+          </button>
+        ) : (
+          /* ✅ Placeholder spacer so layout doesn't shift */
+          <div style={{ width: 22, flexShrink: 0 }} />
+        )}
       </div>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FIELD ROWS (handles half-width pairing)
+// FIELD ROWS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function FieldRows({
@@ -1639,10 +1009,7 @@ function FieldRows({
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {rows.map((row, ri) =>
         Array.isArray(row) ? (
-          <div
-            key={ri}
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
-          >
+          <div key={ri} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {row.map((f) => (
               <CanvasField
                 key={f.id}
@@ -1652,6 +1019,7 @@ function FieldRows({
                 onDragOver={onDragOver}
                 onDrop={onDrop}
                 isDragOver={dragOverId === f.id}
+                canDelete={!DEFAULT_PALETTE_KEYS.has(f.paletteKey)} // ✅
               />
             ))}
           </div>
@@ -1664,6 +1032,7 @@ function FieldRows({
             onDragOver={onDragOver}
             onDrop={onDrop}
             isDragOver={dragOverId === row.id}
+            canDelete={!DEFAULT_PALETTE_KEYS.has(row.paletteKey)} // ✅
           />
         ),
       )}
@@ -1672,7 +1041,8 @@ function FieldRows({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SECTION BLOCK — draggable header with copy + delete actions
+// SECTION BLOCK
+// ✅ canDeleteSection prop: hides section delete button when it contains default fields
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function SectionBlock({
@@ -1692,6 +1062,7 @@ function SectionBlock({
   fieldDragOverId,
   isSectionDragOver,
   onActivate,
+  canDeleteSection, // ✅ NEW
 }: {
   section: string;
   fields: FieldDef[];
@@ -1709,23 +1080,13 @@ function SectionBlock({
   fieldDragOverId: string | null;
   isSectionDragOver: boolean;
   onActivate: () => void;
+  canDeleteSection: boolean; // ✅ NEW
 }) {
   return (
     <div
-      onClick={(e) => {
-        e.stopPropagation();
-        onActivate();
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onSectionDragOver(e, section);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onSectionDrop(e, section);
-      }}
+      onClick={(e) => { e.stopPropagation(); onActivate(); }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onSectionDragOver(e, section); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onSectionDrop(e, section); }}
       style={{
         marginBottom: 12,
         borderRadius: 10,
@@ -1743,19 +1104,14 @@ function SectionBlock({
       {/* Section header */}
       <div
         draggable
-        onDragStart={(e) => {
-          e.stopPropagation();
-          onSectionDragStart(e, section);
-        }}
+        onDragStart={(e) => { e.stopPropagation(); onSectionDragStart(e, section); }}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
           padding: "10px 14px 10px 10px",
           background: isActive ? "#fafafa" : "transparent",
-          borderBottom: isActive
-            ? "1px solid #f3f4f6"
-            : "1px solid transparent",
+          borderBottom: isActive ? "1px solid #f3f4f6" : "1px solid transparent",
           cursor: "grab",
           userSelect: "none",
         }}
@@ -1763,105 +1119,61 @@ function SectionBlock({
         {/* Drag grip */}
         <div style={{ color: "#c4b5fd", flexShrink: 0 }}>
           <svg width="10" height="10" viewBox="0 0 10 16" fill="currentColor">
-            <circle cx="2" cy="2" r="1.5" />
-            <circle cx="8" cy="2" r="1.5" />
-            <circle cx="2" cy="8" r="1.5" />
-            <circle cx="8" cy="8" r="1.5" />
-            <circle cx="2" cy="14" r="1.5" />
-            <circle cx="8" cy="14" r="1.5" />
+            <circle cx="2" cy="2" r="1.5" /><circle cx="8" cy="2" r="1.5" />
+            <circle cx="2" cy="8" r="1.5" /><circle cx="8" cy="8" r="1.5" />
+            <circle cx="2" cy="14" r="1.5" /><circle cx="8" cy="14" r="1.5" />
           </svg>
         </div>
 
         {/* Section title */}
-        <h3
-          style={{
-            flex: 1,
-            margin: 0,
-            fontWeight: 700,
-            fontSize: 17,
-            color: "#111827",
-          }}
-        >
+        <h3 style={{ flex: 1, margin: 0, fontWeight: 700, fontSize: 17, color: "#111827", display: "flex", alignItems: "center", gap: 8 }}>
           {sectionLabel}
+
         </h3>
 
         {/* Duplicate */}
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDuplicateSection(section);
-          }}
+          onClick={(e) => { e.stopPropagation(); onDuplicateSection(section); }}
           title="Duplicate section"
           style={{
-            border: "none",
-            background: "none",
-            cursor: "pointer",
-            color: "#6b7280",
-            padding: "4px 5px",
-            borderRadius: 5,
-            display: "flex",
-            alignItems: "center",
-            transition: "background 0.12s",
+            border: "none", background: "none", cursor: "pointer",
+            color: "#6b7280", padding: "4px 5px", borderRadius: 5,
+            display: "flex", alignItems: "center", transition: "background 0.12s",
           }}
           onMouseEnter={(e) => (e.currentTarget.style.background = "#f3f4f6")}
           onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
         >
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="9" y="9" width="13" height="13" rx="2" />
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
           </svg>
         </button>
 
-        {/* Delete */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemoveSection(section);
-          }}
-          title="Remove section"
-          style={{
-            border: "none",
-            background: "none",
-            cursor: "pointer",
-            color: "#dc2626",
-            padding: "4px 5px",
-            borderRadius: 5,
-            display: "flex",
-            alignItems: "center",
-            opacity: 0.7,
-            transition: "background 0.12s, opacity 0.12s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#fef2f2";
-            e.currentTarget.style.opacity = "1";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "none";
-            e.currentTarget.style.opacity = "0.7";
-          }}
-        >
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+        {/* ✅ Delete — only shown if canDeleteSection */}
+        {canDeleteSection ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemoveSection(section); }}
+            title="Remove section"
+            style={{
+              border: "none", background: "none", cursor: "pointer",
+              color: "#dc2626", padding: "4px 5px", borderRadius: 5,
+              display: "flex", alignItems: "center", opacity: 0.7,
+              transition: "background 0.12s, opacity 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.opacity = "0.7"; }}
           >
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-          </svg>
-        </button>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" /><path d="M14 11v6" />
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            </svg>
+          </button>
+        ) : (
+          /* ✅ Spacer so layout doesn't shift */
+          <div style={{ width: 25, flexShrink: 0 }} />
+        )}
       </div>
 
       {/* Fields */}
@@ -1884,11 +1196,7 @@ function SectionBlock({
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function FormEditor() {
-  const {
-    config: initialConfig,
-    storeMissing,
-    savedAt: initialSavedAt,
-  } = useLoaderData<LoaderData>();
+  const { config: initialConfig, storeMissing, savedAt: initialSavedAt } = useLoaderData<LoaderData>();
 
   const fetcher = useFetcher<{
     success: boolean;
@@ -1901,8 +1209,7 @@ export default function FormEditor() {
 
   const [config, setConfig] = useState<FormConfig>(initialConfig);
   const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
-  const [activeCategory, setActiveCategory] =
-    useState<FieldCategory>("general");
+  const [activeCategory, setActiveCategory] = useState<FieldCategory>("general");
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [editingSteps, setEditingSteps] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -1919,120 +1226,109 @@ export default function FormEditor() {
   >(null);
 
   const isSaving = fetcher.state !== "idle";
-  const isResetting = isSaving && fetcher.formData === undefined;
   const pendingSubmitRef = useRef(false);
 
-  const handleSaveAndSubmit = useCallback(() => {
-    // Step 1: Save config
-    fetcher.submit(
-      JSON.stringify({
-        intent: "saveConfig",
-        config,
-      }),
-      {
-        method: "post",
-        encType: "application/json",
-      },
-    );
+  // ── usedPaletteKeys: which paletteKeys are already placed anywhere in the form ──
+  const usedPaletteKeys = useMemo(
+    () => new Set(config.fields.map((f) => f.paletteKey)),
+    [config.fields],
+  );
 
-    // Mark that after save → we need submit
+  const handleSaveAndSubmit = useCallback(() => {
+    fetcher.submit(
+      JSON.stringify({ intent: "saveConfig", config }),
+      { method: "post", encType: "application/json" },
+    );
     pendingSubmitRef.current = true;
   }, [config, fetcher]);
 
-  // ── Handle fetcher response ────────────────────────────────────────────────
   useEffect(() => {
     if (!fetcher.data) return;
 
-    // ✅ SAVE SUCCESS
     if (fetcher.data.success && fetcher.data.intent === "saveConfig") {
       setSavedAt(fetcher.data.savedAt ?? null);
       setHasUnsaved(false);
       shopify.toast.show?.("Form saved successfully");
 
-      // 👉 STEP 2: Now trigger submitRegistration
       if (pendingSubmitRef.current) {
         pendingSubmitRef.current = false;
-
         const formData: Record<string, any> = {};
-
-        config.fields.forEach((field) => {
-          formData[field.key] = `${field.key}`; // replace with real values
-        });
-
+        config.fields.forEach((field) => { formData[field.key] = `${field.key}`; });
         fetcher.submit(
-          JSON.stringify({
-            intent: "submitRegistration",
-            data: formData,
-          }),
-          {
-            method: "post",
-            encType: "application/json",
-          },
+          JSON.stringify({ intent: "submitRegistration", data: formData }),
+          { method: "post", encType: "application/json" },
         );
       }
-    } else if (
-      fetcher.data.success &&
-      fetcher.data.intent === "submitRegistration"
-    ) {
+    } else if (fetcher.data.success && fetcher.data.intent === "submitRegistration") {
       shopify.toast.show?.("Registration mapped successfully 🎉");
-    }
-
-    // ❌ ERROR
-    else if (!fetcher.data.success) {
+    } else if (!fetcher.data.success) {
       pendingSubmitRef.current = false;
-      shopify.toast.show?.(`Error: ${fetcher.data.error ?? "Unknown error"}`, {
-        isError: true,
-      });
+      shopify.toast.show?.(`Error: ${fetcher.data.error ?? "Unknown error"}`, { isError: true });
     }
   }, [fetcher.data, config, shopify]);
 
+  useEffect(() => {
+  if (config.fields.length === 0) {
+    const shippingFields = PALETTE.shipping.map((item, i) => ({
+      id: uid(),
+      paletteKey: item.paletteKey,
+      category: "shipping",
+      type: item.type,
+      label: item.label,
+      key: `${item.key}_${uid()}`,
+      section: item.section,
+      required: item.required,
+      width: item.width ?? "full",
+      stepIndex: 0,
+      order: i,
+    }));
+
+    setConfig((prev) => ({
+      ...prev,
+      fields: [...prev.fields, ...shippingFields],
+    }));
+  }
+}, []);
+
   // ── Derived ────────────────────────────────────────────────────────────────
   const stepFields = useMemo(
-    () =>
-      config.fields
-        .filter((f) => f.stepIndex === activeStepIndex)
-        .sort((a, b) => a.order - b.order),
+    () => config.fields.filter((f) => f.stepIndex === activeStepIndex).sort((a, b) => a.order - b.order),
     [config.fields, activeStepIndex],
   );
 
-  const {
-    map: sectionMap,
-    order: sectionOrder,
-    none: noSection,
-  } = useMemo(() => groupBySection(stepFields), [stepFields]);
+  const { map: sectionMap, order: sectionOrder, none: noSection } = useMemo(
+    () => groupBySection(stepFields),
+    [stepFields],
+  );
 
-  // Mark unsaved changes whenever config changes (but not on initial load)
   const isFirstRender = useRef(true);
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
     setHasUnsaved(true);
   }, [config]);
 
   // ── Save & Reset ───────────────────────────────────────────────────────────
   const save = useCallback(() => {
-    fetcher.submit(JSON.stringify({ intent: "saveConfig", config }), {
-      method: "post",
-      encType: "application/json",
-    });
+    fetcher.submit(JSON.stringify({ intent: "saveConfig", config }), { method: "post", encType: "application/json" });
   }, [config, fetcher]);
 
   const resetToDefault = useCallback(() => {
-    if (
-      !window.confirm("Reset form to default? All customizations will be lost.")
-    )
-      return;
-    fetcher.submit(JSON.stringify({ intent: "resetConfig" }), {
-      method: "post",
-      encType: "application/json",
-    });
+    if (!window.confirm("Reset form to default? All customizations will be lost.")) return;
+    fetcher.submit(JSON.stringify({ intent: "resetConfig" }), { method: "post", encType: "application/json" });
   }, [fetcher]);
 
   // ── Field management ───────────────────────────────────────────────────────
   const addField = useCallback(
     (paletteItem: (typeof PALETTE.general)[0], afterFieldId?: string) => {
+      // ✅ For non-custom palette items: block adding if already used
+      const isCustomOrDisplay = ["custom", "display"].includes(
+        Object.entries(PALETTE).find(([, items]) =>
+          items.some((i) => i.paletteKey === paletteItem.paletteKey)
+        )?.[0] ?? ""
+      );
+
+      if (!isCustomOrDisplay && usedPaletteKeys.has(paletteItem.paletteKey)) return;
+
       const newField: FieldDef = {
         id: uid(),
         paletteKey: paletteItem.paletteKey,
@@ -2049,9 +1345,7 @@ export default function FormEditor() {
       };
 
       setConfig((prev) => {
-        const stepF = prev.fields
-          .filter((f) => f.stepIndex === activeStepIndex)
-          .sort((a, b) => a.order - b.order);
+        const stepF = prev.fields.filter((f) => f.stepIndex === activeStepIndex).sort((a, b) => a.order - b.order);
 
         if (afterFieldId) {
           const idx = stepF.findIndex((f) => f.id === afterFieldId);
@@ -2070,67 +1364,56 @@ export default function FormEditor() {
         };
       });
     },
-    [activeCategory, activeStepIndex],
+    [activeCategory, activeStepIndex, usedPaletteKeys],
   );
 
   const removeField = useCallback((id: string) => {
     setConfig((prev) => {
-      const si = prev.fields.find((f) => f.id === id)?.stepIndex ?? 0;
+      const field = prev.fields.find((f) => f.id === id);
+      // ✅ Guard: cannot remove default fields
+      if (field && DEFAULT_PALETTE_KEYS.has(field.paletteKey)) return prev;
+
+      const si = field?.stepIndex ?? 0;
       const rest = prev.fields.filter((f) => f.id !== id);
       const reord = rest
         .filter((f) => f.stepIndex === si)
         .sort((a, b) => a.order - b.order)
         .map((f, i) => ({ ...f, order: i }));
-      return {
-        ...prev,
-        fields: [...rest.filter((f) => f.stepIndex !== si), ...reord],
-      };
+      return { ...prev, fields: [...rest.filter((f) => f.stepIndex !== si), ...reord] };
     });
   }, []);
 
   const removeSection = useCallback(
     (section: string) => {
-      if (
-        !window.confirm(
-          `Remove "${SECTION_LABELS[section] || section}" and all its fields?`,
-        )
-      )
-        return;
+      // ✅ Guard: cannot remove a section that has default fields
+      const sectionFields = config.fields.filter(
+        (f) => f.section === section && f.stepIndex === activeStepIndex,
+      );
+      const hasDefault = sectionFields.some((f) => DEFAULT_PALETTE_KEYS.has(f.paletteKey));
+      if (hasDefault) return;
+
+      if (!window.confirm(`Remove "${SECTION_LABELS[section] || section}" and all its fields?`)) return;
       setConfig((prev) => {
-        const rest = prev.fields.filter(
-          (f) => !(f.section === section && f.stepIndex === activeStepIndex),
-        );
+        const rest = prev.fields.filter((f) => !(f.section === section && f.stepIndex === activeStepIndex));
         const reord = rest
           .filter((f) => f.stepIndex === activeStepIndex)
           .sort((a, b) => a.order - b.order)
           .map((f, i) => ({ ...f, order: i }));
-        return {
-          ...prev,
-          fields: [
-            ...rest.filter((f) => f.stepIndex !== activeStepIndex),
-            ...reord,
-          ],
-        };
+        return { ...prev, fields: [...rest.filter((f) => f.stepIndex !== activeStepIndex), ...reord] };
       });
     },
-    [activeStepIndex],
+    [activeStepIndex, config.fields],
   );
 
   const duplicateSection = useCallback(
     (section: string) => {
       setConfig((prev) => {
-        const stepF = prev.fields
-          .filter((f) => f.stepIndex === activeStepIndex)
-          .sort((a, b) => a.order - b.order);
+        const stepF = prev.fields.filter((f) => f.stepIndex === activeStepIndex).sort((a, b) => a.order - b.order);
         const sectionFields = stepF.filter((f) => f.section === section);
         const newKey = `${section}_${uid()}`;
         const lastOrder = stepF[stepF.length - 1]?.order ?? -1;
         const copies = sectionFields.map((f, i) => ({
-          ...f,
-          id: uid(),
-          key: `${f.key}_${uid()}`,
-          section: newKey,
-          order: lastOrder + 1 + i,
+          ...f, id: uid(), key: `${f.key}_${uid()}`, section: newKey, order: lastOrder + 1 + i,
         }));
         return { ...prev, fields: [...prev.fields, ...copies] };
       });
@@ -2168,9 +1451,7 @@ export default function FormEditor() {
         const srcId = payload.field.id;
         if (srcId === targetField.id) return;
         setConfig((prev) => {
-          const stepF = prev.fields
-            .filter((f) => f.stepIndex === activeStepIndex)
-            .sort((a, b) => a.order - b.order);
+          const stepF = prev.fields.filter((f) => f.stepIndex === activeStepIndex).sort((a, b) => a.order - b.order);
           const si = stepF.findIndex((f) => f.id === srcId);
           const ti = stepF.findIndex((f) => f.id === targetField.id);
           if (si === -1 || ti === -1) return prev;
@@ -2190,50 +1471,31 @@ export default function FormEditor() {
     [activeStepIndex, addField],
   );
 
-  const handleSectionDragStart = useCallback(
-    (e: DragEvent, section: string) => {
-      dragPayloadRef.current = { kind: "section", section };
-      e.dataTransfer.effectAllowed = "move";
-    },
-    [],
-  );
+  const handleSectionDragStart = useCallback((e: DragEvent, section: string) => {
+    dragPayloadRef.current = { kind: "section", section };
+    e.dataTransfer.effectAllowed = "move";
+  }, []);
 
-  const handleSectionDragOver = useCallback(
-    (_e: DragEvent, section: string) => {
-      if (
-        dragPayloadRef.current?.kind === "section" &&
-        dragPayloadRef.current.section !== section
-      ) {
-        setSectionDragOver(section);
-      }
-    },
-    [],
-  );
+  const handleSectionDragOver = useCallback((_e: DragEvent, section: string) => {
+    if (dragPayloadRef.current?.kind === "section" && dragPayloadRef.current.section !== section) {
+      setSectionDragOver(section);
+    }
+  }, []);
 
   const handleSectionDrop = useCallback(
     (_e: DragEvent, targetSection: string) => {
       const payload = dragPayloadRef.current;
       setSectionDragOver(null);
-      if (
-        !payload ||
-        payload.kind !== "section" ||
-        payload.section === targetSection
-      )
-        return;
+      if (!payload || payload.kind !== "section" || payload.section === targetSection) return;
 
       const srcSection = payload.section;
       setConfig((prev) => {
-        const stepF = prev.fields
-          .filter((f) => f.stepIndex === activeStepIndex)
-          .sort((a, b) => a.order - b.order);
+        const stepF = prev.fields.filter((f) => f.stepIndex === activeStepIndex).sort((a, b) => a.order - b.order);
         const seen = new Set<string>();
         const secOrder: string[] = [];
         for (const f of stepF) {
           const s = f.section || "__none__";
-          if (!seen.has(s)) {
-            seen.add(s);
-            secOrder.push(s);
-          }
+          if (!seen.has(s)) { seen.add(s); secOrder.push(s); }
         }
         const si = secOrder.indexOf(srcSection);
         const ti = secOrder.indexOf(targetSection);
@@ -2251,8 +1513,7 @@ export default function FormEditor() {
         let order = 0;
         const reordered: FieldDef[] = [];
         for (const sec of copy) {
-          for (const f of bySection[sec] || [])
-            reordered.push({ ...f, order: order++ });
+          for (const f of bySection[sec] || []) reordered.push({ ...f, order: order++ });
         }
 
         return {
@@ -2284,10 +1545,7 @@ export default function FormEditor() {
   const addStep = () =>
     setConfig((prev) => ({
       ...prev,
-      steps: [
-        ...prev.steps,
-        { id: uid(), label: `Step ${prev.steps.length + 1}` },
-      ],
+      steps: [...prev.steps, { id: uid(), label: `Step ${prev.steps.length + 1}` }],
     }));
 
   const removeStep = (idx: number) => {
@@ -2300,13 +1558,9 @@ export default function FormEditor() {
       steps: prev.steps.filter((_, i) => i !== idx),
       fields: prev.fields
         .filter((f) => f.stepIndex !== idx)
-        .map((f) => ({
-          ...f,
-          stepIndex: f.stepIndex > idx ? f.stepIndex - 1 : f.stepIndex,
-        })),
+        .map((f) => ({ ...f, stepIndex: f.stepIndex > idx ? f.stepIndex - 1 : f.stepIndex })),
     }));
-    if (activeStepIndex >= config.steps.length - 1)
-      setActiveStepIndex(Math.max(0, activeStepIndex - 1));
+    if (activeStepIndex >= config.steps.length - 1) setActiveStepIndex(Math.max(0, activeStepIndex - 1));
   };
 
   const updateStepLabel = (idx: number, label: string) =>
@@ -2316,8 +1570,6 @@ export default function FormEditor() {
     }));
 
   const palette = PALETTE[activeCategory];
-  const totalFields = stepFields.length;
-  const totalSections = sectionOrder.length;
 
   // ═════════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -2348,47 +1600,16 @@ export default function FormEditor() {
           gap: 8,
         }}
       >
-        {/* Left: save status + field count */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}></div>
-        {/* Right: buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }} />
         <div style={{ display: "flex", gap: 8 }}>
-          <s-button
-            variant="primary"
-            onClick={handleSaveAndSubmit}
-            loading={isSaving}
-          >
+          <s-button variant="primary" onClick={handleSaveAndSubmit} loading={isSaving}>
             Save & Submit
           </s-button>
         </div>
       </div>
 
       {/* ── Tab bar ────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "flex",
-          borderBottom: "1px solid #e5e7eb",
-          marginBottom: 16,
-        }}
-      >
-        {/* {["Form", "Rules", "Advanced settings"].map((t, ti) => (
-          <button
-            key={t}
-            style={{
-              padding: "8px 20px",
-              border: "none",
-              borderBottom:
-                ti === 0 ? "2px solid #1f2937" : "2px solid transparent",
-              background: "none",
-              fontWeight: ti === 0 ? 600 : 400,
-              fontSize: 14,
-              color: ti === 0 ? "#111827" : "#6b7280",
-              cursor: "pointer",
-            }}
-          >
-            {t}
-          </button>
-        ))} */}
-      </div>
+      <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", marginBottom: 16 }} />
 
       {/* ── 3-column editor ────────────────────────────────────────────────── */}
       <div
@@ -2402,57 +1623,22 @@ export default function FormEditor() {
         }}
       >
         {/* ── Column 1: Category sidebar ─────────────────────────────────── */}
-        <div
-          style={{
-            width: 152,
-            borderRight: "1px solid #e5e7eb",
-            background: "#fafafa",
-            flexShrink: 0,
-          }}
-        >
+        <div style={{ width: 152, borderRight: "1px solid #e5e7eb", background: "#fafafa", flexShrink: 0 }}>
           <div style={{ padding: "14px 0" }}>
-            <div
-              style={{
-                padding: "0 14px 8px",
-                fontSize: 10,
-                fontWeight: 700,
-                color: "#9ca3af",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-              }}
-            >
+            <div style={{ padding: "0 14px 8px", fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.1em" }}>
               Fields
             </div>
-            {(
-              ["general", "shipping", "billing", "custom"] as FieldCategory[]
-            ).map((cat) => (
+            {(["general", "shipping", "billing", "custom"] as FieldCategory[]).map((cat) => (
               <button
                 key={cat}
-                onClick={() => {
-                  setActiveCategory(cat);
-                  setEditingSteps(false);
-                }}
+                onClick={() => { setActiveCategory(cat); setEditingSteps(false); }}
                 style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "8px 14px",
-                  border: "none",
-                  borderLeft:
-                    activeCategory === cat && !editingSteps
-                      ? "3px solid #6366f1"
-                      : "3px solid transparent",
-                  background:
-                    activeCategory === cat && !editingSteps
-                      ? "#f0f0ff"
-                      : "none",
-                  fontWeight:
-                    activeCategory === cat && !editingSteps ? 600 : 400,
-                  fontSize: 13,
-                  color: "#111827",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
+                  width: "100%", textAlign: "left", padding: "8px 14px", border: "none",
+                  borderLeft: activeCategory === cat && !editingSteps ? "3px solid #6366f1" : "3px solid transparent",
+                  background: activeCategory === cat && !editingSteps ? "#f0f0ff" : "none",
+                  fontWeight: activeCategory === cat && !editingSteps ? 600 : 400,
+                  fontSize: 13, color: "#111827", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 8,
                   transition: "background 0.12s, border-color 0.12s",
                 }}
               >
@@ -2461,45 +1647,18 @@ export default function FormEditor() {
               </button>
             ))}
 
-            <div
-              style={{
-                padding: "12px 14px 8px",
-                fontSize: 10,
-                fontWeight: 700,
-                color: "#9ca3af",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-                marginTop: 4,
-              }}
-            >
+            <div style={{ padding: "12px 14px 8px", fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: 4 }}>
               Other
             </div>
             <button
-              onClick={() => {
-                setActiveCategory("display");
-                setEditingSteps(false);
-              }}
+              onClick={() => { setActiveCategory("display"); setEditingSteps(false); }}
               style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "8px 14px",
-                border: "none",
-                borderLeft:
-                  activeCategory === "display" && !editingSteps
-                    ? "3px solid #6366f1"
-                    : "3px solid transparent",
-                background:
-                  activeCategory === "display" && !editingSteps
-                    ? "#f0f0ff"
-                    : "none",
-                fontWeight:
-                  activeCategory === "display" && !editingSteps ? 600 : 400,
-                fontSize: 13,
-                color: "#111827",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
+                width: "100%", textAlign: "left", padding: "8px 14px", border: "none",
+                borderLeft: activeCategory === "display" && !editingSteps ? "3px solid #6366f1" : "3px solid transparent",
+                background: activeCategory === "display" && !editingSteps ? "#f0f0ff" : "none",
+                fontWeight: activeCategory === "display" && !editingSteps ? 600 : 400,
+                fontSize: 13, color: "#111827", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 8,
               }}
             >
               <span style={{ fontSize: 15 }}>🖼️</span>Display
@@ -2507,21 +1666,12 @@ export default function FormEditor() {
             <button
               onClick={() => setEditingSteps(true)}
               style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "8px 14px",
-                border: "none",
-                borderLeft: editingSteps
-                  ? "3px solid #6366f1"
-                  : "3px solid transparent",
+                width: "100%", textAlign: "left", padding: "8px 14px", border: "none",
+                borderLeft: editingSteps ? "3px solid #6366f1" : "3px solid transparent",
                 background: editingSteps ? "#f0f0ff" : "none",
                 fontWeight: editingSteps ? 600 : 400,
-                fontSize: 13,
-                color: "#111827",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
+                fontSize: 13, color: "#111827", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 8,
               }}
             >
               <span style={{ fontSize: 15 }}>📋</span>Form steps
@@ -2532,113 +1682,47 @@ export default function FormEditor() {
         {/* ── Column 2: Palette ──────────────────────────────────────────── */}
         <div
           style={{
-            width: 214,
-            borderRight: "1px solid #e5e7eb",
-            background: "#fff",
-            padding: "16px 12px",
-            flexShrink: 0,
-            overflowY: "auto",
+            width: 214, borderRight: "1px solid #e5e7eb", background: "#fff",
+            padding: "16px 12px", flexShrink: 0, overflowY: "auto",
           }}
         >
           {editingSteps ? (
-            /* ── Steps editor ──────────────────────────────────────────────── */
             <div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 14,
-                }}
-              >
-                <span style={{ fontWeight: 600, fontSize: 13 }}>
-                  Edit form steps
-                </span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>Edit form steps</span>
                 <div style={{ display: "flex", gap: 6 }}>
                   <button
                     onClick={() => setEditingSteps(false)}
-                    style={{
-                      border: "1px solid #e5e7eb",
-                      background: "#fff",
-                      borderRadius: 6,
-                      padding: "4px 10px",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      color: "#6b7280",
-                    }}
+                    style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer", color: "#6b7280" }}
                   >
                     Cancel
                   </button>
                   <button
                     onClick={() => setEditingSteps(false)}
-                    style={{
-                      border: "none",
-                      background: "#1f2937",
-                      borderRadius: 6,
-                      padding: "4px 10px",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      color: "#fff",
-                      fontWeight: 600,
-                    }}
+                    style={{ border: "none", background: "#1f2937", borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer", color: "#fff", fontWeight: 600 }}
                   >
                     Done
                   </button>
                 </div>
               </div>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: "#6b7280",
-                  marginBottom: 14,
-                  lineHeight: 1.5,
-                }}
-              >
-                Create a multi-step form by adding form steps. Assign fields to
-                steps by dragging them to the desired form step tab.
+              <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 14, lineHeight: 1.5 }}>
+                Create a multi-step form by adding form steps. Assign fields to steps by dragging them to the desired form step tab.
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {config.steps.map((step, idx) => (
-                  <div
-                    key={step.id}
-                    style={{ display: "flex", alignItems: "center", gap: 6 }}
-                  >
-                    <span
-                      style={{ color: "#9ca3af", fontSize: 12, cursor: "grab" }}
-                    >
-                      ⠿
-                    </span>
+                  <div key={step.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: "#9ca3af", fontSize: 12, cursor: "grab" }}>⠿</span>
                     <input
                       value={step.label}
                       onChange={(e) => updateStepLabel(idx, e.target.value)}
-                      style={{
-                        flex: 1,
-                        padding: "6px 10px",
-                        border: "1px solid #d1d5db",
-                        borderRadius: 6,
-                        fontSize: 13,
-                      }}
+                      style={{ flex: 1, padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13 }}
                     />
                     {idx > 0 && (
                       <button
                         onClick={() => removeStep(idx)}
-                        style={{
-                          border: "none",
-                          background: "none",
-                          cursor: "pointer",
-                          color: "#dc2626",
-                          padding: "4px",
-                          borderRadius: 4,
-                        }}
+                        style={{ border: "none", background: "none", cursor: "pointer", color: "#dc2626", padding: "4px", borderRadius: 4 }}
                       >
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <polyline points="3 6 5 6 21 6" />
                           <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
                         </svg>
@@ -2650,120 +1734,93 @@ export default function FormEditor() {
               <button
                 onClick={addStep}
                 style={{
-                  marginTop: 12,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  background: "#1f2937",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 7,
-                  padding: "7px 12px",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  fontWeight: 600,
+                  marginTop: 12, display: "flex", alignItems: "center", gap: 6,
+                  background: "#1f2937", color: "#fff", border: "none", borderRadius: 7,
+                  padding: "7px 12px", cursor: "pointer", fontSize: 13, fontWeight: 600,
                 }}
               >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                >
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
                 Add new form step
               </button>
-              <p
-                style={{
-                  fontSize: 11,
-                  color: "#9ca3af",
-                  marginTop: 12,
-                  lineHeight: 1.5,
-                }}
-              >
-                A step with fields cannot be deleted until the fields have been
-                removed from it.
+              <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
+                A step with fields cannot be deleted until the fields have been removed from it.
               </p>
             </div>
           ) : (
-            /* ── Field palette ─────────────────────────────────────────────── */
             <div>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: "#6b7280",
-                  marginBottom: 12,
-                  lineHeight: 1.5,
-                }}
-              >
+              <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 12, lineHeight: 1.5 }}>
                 {CATEGORY_INFO[activeCategory].description}
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                {palette.map((item) => (
-                  <div
-                    key={item.paletteKey}
-                    draggable
-                    onDragStart={(e) => handlePaletteDragStart(e as any, item)}
-                    onClick={() => addField(item)}
-                    style={{
-                      padding: "8px 11px",
-                      background: "#fff",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 7,
-                      cursor: "grab",
-                      fontSize: 13,
-                      color: "#374151",
-                      userSelect: "none",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      transition:
-                        "border-color 0.12s, box-shadow 0.12s, background 0.12s",
-                    }}
-                    onMouseEnter={(e) => {
-                      const el = e.currentTarget as HTMLDivElement;
-                      el.style.borderColor = "#6366f1";
-                      el.style.background = "#fafafe";
-                      el.style.boxShadow = "0 1px 4px rgba(99,102,241,0.12)";
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = e.currentTarget as HTMLDivElement;
-                      el.style.borderColor = "#e5e7eb";
-                      el.style.background = "#fff";
-                      el.style.boxShadow = "none";
-                    }}
-                  >
-                    <span style={{ color: "#9ca3af", fontSize: 11 }}>⠿</span>
-                    {item.label}
-                  </div>
-                ))}
+                {palette.map((item) => {
+                  // ✅ For general/shipping/billing: disable if already used anywhere
+                  const isCustomOrDisplay = activeCategory === "custom" || activeCategory === "display";
+                  const alreadyUsed = !isCustomOrDisplay && usedPaletteKeys.has(item.paletteKey);
+
+                  return (
+                    <div
+                      key={item.paletteKey}
+                      draggable={!alreadyUsed}
+                      onDragStart={!alreadyUsed ? (e) => handlePaletteDragStart(e as any, item) : undefined}
+                      onClick={!alreadyUsed ? () => addField(item) : undefined}
+                      title={alreadyUsed ? "This field is already in the form" : undefined}
+                      style={{
+                        padding: "8px 11px",
+                        background: alreadyUsed ? "#f9fafb" : "#fff",
+                        border: `1px solid ${alreadyUsed ? "#e5e7eb" : "#e5e7eb"}`,
+                        borderRadius: 7,
+                        cursor: alreadyUsed ? "not-allowed" : "grab",
+                        fontSize: 13,
+                        color: alreadyUsed ? "#9ca3af" : "#374151",
+                        opacity: alreadyUsed ? 0.6 : 1,
+                        userSelect: "none",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        pointerEvents: alreadyUsed ? "none" : "auto",
+                        transition: "border-color 0.12s, box-shadow 0.12s, background 0.12s",
+                      }}
+                      onMouseEnter={!alreadyUsed ? (e) => {
+                        const el = e.currentTarget as HTMLDivElement;
+                        el.style.borderColor = "#6366f1";
+                        el.style.background = "#fafafe";
+                        el.style.boxShadow = "0 1px 4px rgba(99,102,241,0.12)";
+                      } : undefined}
+                      onMouseLeave={!alreadyUsed ? (e) => {
+                        const el = e.currentTarget as HTMLDivElement;
+                        el.style.borderColor = "#e5e7eb";
+                        el.style.background = "#fff";
+                        el.style.boxShadow = "none";
+                      } : undefined}
+                    >
+                      <span style={{ color: alreadyUsed ? "#d1d5db" : "#9ca3af", fontSize: 11 }}>⠿</span>
+                      <span style={{ flex: 1 }}>{item.label}</span>
+                      {/* ✅ "✓ Added" badge */}
+                      {alreadyUsed && (
+                        <span style={{
+                          fontSize: 10, color: "#6366f1", background: "#eef2ff",
+                          border: "1px solid #c7d2fe", borderRadius: 4,
+                          padding: "1px 5px", fontWeight: 600, whiteSpace: "nowrap",
+                        }}>
+                          ✓ Added
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               {["general", "shipping", "billing"].includes(activeCategory) && (
                 <button
                   onClick={() => palette.forEach((item) => addField(item))}
                   style={{
-                    marginTop: 14,
-                    width: "100%",
-                    background: "#1f2937",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 7,
-                    padding: "9px 0",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    transition: "background 0.12s",
+                    marginTop: 14, width: "100%", background: "#1f2937", color: "#fff",
+                    border: "none", borderRadius: 7, padding: "9px 0", cursor: "pointer",
+                    fontSize: 13, fontWeight: 600, transition: "background 0.12s",
                   }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "#374151")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "#1f2937")
-                  }
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#374151")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "#1f2937")}
                 >
                   + Add all {CATEGORY_INFO[activeCategory].label.toLowerCase()}
                 </button>
@@ -2774,42 +1831,22 @@ export default function FormEditor() {
 
         {/* ── Column 3: Canvas ───────────────────────────────────────────── */}
         <div
-          style={{
-            flex: 1,
-            background: "#f3f4f6",
-            padding: "16px 14px",
-            overflowY: "auto",
-            minWidth: 0,
-          }}
+          style={{ flex: 1, background: "#f3f4f6", padding: "16px 14px", overflowY: "auto", minWidth: 0 }}
           onClick={() => setActiveSection(null)}
         >
           {/* Step tabs */}
-          <div
-            style={{
-              display: "flex",
-              gap: 3,
-              marginBottom: 0,
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ display: "flex", gap: 3, marginBottom: 0, flexWrap: "wrap" }}>
             {config.steps.map((step, idx) => (
               <button
                 key={step.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveStepIndex(idx);
-                  setEditingSteps(false);
-                }}
+                onClick={(e) => { e.stopPropagation(); setActiveStepIndex(idx); setEditingSteps(false); }}
                 style={{
-                  padding: "6px 18px",
-                  border: "none",
+                  padding: "6px 18px", border: "none",
                   borderRadius: activeStepIndex === idx ? "7px 7px 0 0" : 7,
                   background: activeStepIndex === idx ? "#1f2937" : "#e5e7eb",
                   color: activeStepIndex === idx ? "#fff" : "#374151",
                   fontWeight: activeStepIndex === idx ? 600 : 400,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  transition: "background 0.12s, color 0.12s",
+                  fontSize: 13, cursor: "pointer", transition: "background 0.12s, color 0.12s",
                 }}
               >
                 {step.label}
@@ -2819,49 +1856,26 @@ export default function FormEditor() {
 
           {/* Canvas card */}
           <div
-            style={{
-              background: "#f3f4f6",
-              borderRadius: "0 8px 8px 8px",
-              padding: "14px 0",
-              minHeight: 400,
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setIsDragOverCanvas(true);
-            }}
-            onDragLeave={() => {
-              setIsDragOverCanvas(false);
-              setSectionDragOver(null);
-            }}
+            style={{ background: "#f3f4f6", borderRadius: "0 8px 8px 8px", padding: "14px 0", minHeight: 400 }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragOverCanvas(true); }}
+            onDragLeave={() => { setIsDragOverCanvas(false); setSectionDragOver(null); }}
             onDrop={handleCanvasZoneDrop}
           >
             {stepFields.length === 0 ? (
-              /* Empty state */
               <div
                 style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minHeight: 240,
-                  border: `2px dashed ${isDragOverCanvas ? "#6366f1" : "#d1d5db"}`,
-                  borderRadius: 10,
-                  background: isDragOverCanvas ? "#eef2ff" : "#fff",
-                  color: "#9ca3af",
-                  fontSize: 14,
-                  gap: 10,
-                  transition: "all 0.15s",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  minHeight: 240, border: `2px dashed ${isDragOverCanvas ? "#6366f1" : "#d1d5db"}`,
+                  borderRadius: 10, background: isDragOverCanvas ? "#eef2ff" : "#fff",
+                  color: "#9ca3af", fontSize: 14, gap: 10, transition: "all 0.15s",
                 }}
               >
                 <div style={{ fontSize: 32 }}>📋</div>
                 <div style={{ fontWeight: 500 }}>Drop fields here</div>
-                <div style={{ fontSize: 12 }}>
-                  or click a field in the palette to add it
-                </div>
+                <div style={{ fontSize: 12 }}>or click a field in the palette to add it</div>
               </div>
             ) : (
               <div>
-                {/* Section blocks */}
                 {sectionOrder.map((section) => (
                   <SectionBlock
                     key={section}
@@ -2881,20 +1895,15 @@ export default function FormEditor() {
                     onFieldDrop={handleFieldDrop}
                     fieldDragOverId={fieldDragOverId}
                     isSectionDragOver={sectionDragOver === section}
+                    // ✅ Section cannot be deleted if any field inside is a default field
+                    canDeleteSection={
+                      !(sectionMap[section] || []).some((f) => DEFAULT_PALETTE_KEYS.has(f.paletteKey))
+                    }
                   />
                 ))}
 
-                {/* Fields without a section */}
                 {noSection.length > 0 && (
-                  <div
-                    style={{
-                      background: "#fff",
-                      borderRadius: 10,
-                      padding: "12px",
-                      marginBottom: 12,
-                      border: "2px solid transparent",
-                    }}
-                  >
+                  <div style={{ background: "#fff", borderRadius: 10, padding: "12px", marginBottom: 12, border: "2px solid transparent" }}>
                     <FieldRows
                       fields={noSection}
                       onRemove={removeField}
@@ -2906,18 +1915,12 @@ export default function FormEditor() {
                   </div>
                 )}
 
-                {/* Bottom drop target */}
                 <div
                   style={{
-                    marginTop: 6,
-                    border: `2px dashed ${isDragOverCanvas ? "#6366f1" : "#d1d5db"}`,
-                    borderRadius: 8,
-                    padding: "14px 0",
-                    textAlign: "center",
-                    color: "#9ca3af",
-                    fontSize: 12,
-                    background: isDragOverCanvas ? "#eef2ff" : "transparent",
-                    transition: "all 0.15s",
+                    marginTop: 6, border: `2px dashed ${isDragOverCanvas ? "#6366f1" : "#d1d5db"}`,
+                    borderRadius: 8, padding: "14px 0", textAlign: "center",
+                    color: "#9ca3af", fontSize: 12,
+                    background: isDragOverCanvas ? "#eef2ff" : "transparent", transition: "all 0.15s",
                   }}
                 >
                   Drop here to add at end
@@ -2929,20 +1932,13 @@ export default function FormEditor() {
       </div>
 
       {/* ── Bottom hint ────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          marginTop: 10,
-          fontSize: 12,
-          color: "#9ca3af",
-          textAlign: "center",
-        }}
-      >
-        Fields are saved to <strong>FormFieldConfig</strong> per store ·
-        Registration form reads this config dynamically
+      <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af", textAlign: "center" }}>
+        Fields are saved to <strong>FormFieldConfig</strong> per store · Registration form reads this config dynamically
       </div>
     </s-page>
   );
 }
+
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };

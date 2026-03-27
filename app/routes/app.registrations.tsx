@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionFunctionArgs,
   HeadersFunction,
@@ -101,7 +101,7 @@ const normalizeCustomerId = (id?: string | null) => {
   return id.startsWith("gid://") ? id : `gid://shopify/Customer/${id}`;
 };
 
-const buildUserErrorList = (payload: any) => {
+export function buildUserErrorList(payload: any) {
   const errors: string[] = [];
   if (payload?.errors?.length) {
     errors.push(
@@ -129,7 +129,7 @@ const buildUserErrorList = (payload: any) => {
   }
 
   return errors;
-};
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -619,7 +619,7 @@ function parseFormFields(form: Record<string, any>) {
   return { shipping, billing, customFields };
 }
 // ── Assign shipping/billing address to company location ──
-async function assignLocationAddresses(
+export async function assignLocationAddresses(
   admin: any,
   locationId: string,
   registrationData: any,
@@ -2067,11 +2067,1422 @@ function StepBadge({
     </div>
   );
 }
+// Pipeline steps in order
+type PipelineStep =
+  | "idle"
+  | "checkCustomer"
+  | "checkCompany"
+  | "createCompany"
+  | "assignMainContact"
+  | "sendWelcomeEmail"
+  | "completeApproval"
+  | "done"
+  | "error";
 
+// ─── Progress Step Indicator ──────────────────────────────────────────────────
+const PIPELINE_LABELS: Record<string, string> = {
+  checkCustomer: "Checking customer",
+  checkCompany: "Checking company",
+  createCompany: "Setting up company",
+  assignMainContact: "Assigning contact",
+  sendWelcomeEmail: "Sending welcome email",
+  completeApproval: "Completing approval",
+  done: "Approved!",
+};
+
+const PIPELINE_ORDER: PipelineStep[] = [
+  "checkCustomer",
+  "checkCompany",
+  "createCompany",
+  "assignMainContact",
+  "sendWelcomeEmail",
+  "completeApproval",
+  "done",
+];
+
+function ProgressBar({
+  currentStep,
+  error,
+}: {
+  currentStep: PipelineStep;
+  error?: string;
+}) {
+  const currentIndex = PIPELINE_ORDER.indexOf(currentStep);
+  const steps = PIPELINE_ORDER.filter((s) => s !== "done");
+
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+        {steps.map((step, i) => {
+          const stepIndex = PIPELINE_ORDER.indexOf(step);
+          const isDone = currentIndex > stepIndex;
+          const isActive = currentIndex === stepIndex;
+          const isError = !!error && isActive;
+
+          return (
+            <div
+              key={step}
+              style={{ display: "flex", alignItems: "center", flex: 1 }}
+            >
+              <div
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: "50%",
+                  background: isError
+                    ? "#ef4444"
+                    : isDone
+                      ? "#16a34a"
+                      : isActive
+                        ? "#2c6ecb"
+                        : "#e3e3e3",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: isActive || isDone || isError ? "white" : "#9ca3af",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  transition: "background 0.3s",
+                }}
+              >
+                {isError ? "!" : isDone ? "✓" : i + 1}
+              </div>
+              {i < steps.length - 1 && (
+                <div
+                  style={{
+                    flex: 1,
+                    height: 2,
+                    background: isDone ? "#16a34a" : "#e3e3e3",
+                    transition: "background 0.3s",
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 12, color: error ? "#ef4444" : "#5c5f62" }}>
+        {error
+          ? `⚠ ${error}`
+          : currentStep === "done"
+            ? "✓ All steps completed"
+            : `${PIPELINE_LABELS[currentStep] || currentStep}…`}
+      </div>
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 12px",
+  borderRadius: 8,
+  border: "1px solid #c9ccd0",
+  fontSize: 14,
+  boxSizing: "border-box",
+  background: "white",
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#374151",
+  marginBottom: 5,
+};
+
+const sectionStyle: React.CSSProperties = {
+  border: "1px solid #e3e3e3",
+  borderRadius: 10,
+  padding: "14px 16px",
+  display: "grid",
+  gap: 10,
+};
+
+const sectionHeadingStyle: React.CSSProperties = {
+  margin: "0 0 4px 0",
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#1a1a1a",
+  textTransform: "lowercase",
+};
+
+// ─── Configure Company UI ─────────────────────────────────────────────────────
+function ConfigureCompanyUI({
+  submission,
+  company,
+  customer,
+  paymentTermsTemplates,
+  onApprove,
+  onCancel,
+  isApproving,
+  pipelineStep,
+  pipelineError,
+}: {
+  submission: RegistrationSubmission;
+  company: ActionJson["company"];
+  customer: ActionJson["customer"];
+  paymentTermsTemplates: Array<{
+    id: string;
+    name: string;
+    paymentTermsType: string;
+    dueInDays: number | null;
+  }>;
+  onApprove: (opts: {
+    paymentTermsId: string;
+    requireDeposit: boolean;
+    allowOneTimeAddress: boolean;
+    orderSubmission: "auto" | "draft";
+    taxSetting: string;
+  }) => void;
+  onCancel: () => void;
+  isApproving: boolean;
+  pipelineStep: PipelineStep;
+  pipelineError?: string;
+}) {
+  const [paymentTermsId, setPaymentTermsId] = useState(
+    submission.paymentTerm || "",
+  );
+  const [requireDeposit, setRequireDeposit] = useState(false);
+  const [allowOneTimeAddress, setAllowOneTimeAddress] = useState(false);
+  const [orderSubmission, setOrderSubmission] = useState<"auto" | "draft">(
+    "auto",
+  );
+  const [taxSetting, setTaxSetting] = useState("collect");
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  const s = (submission as any)?.shipping as Record<string, string> | undefined;
+  const b = (submission as any)?.billing as Record<string, string> | undefined;
+
+  const shippingLine1 = s?.Addr1 || "Address line 1";
+  const shippingCity = s?.City || "City";
+  const shippingState = s?.State || "STATE";
+  const shippingZip = s?.Zip || "Postal code";
+  const shippingCountry = s?.Country || "US";
+  const shippingRecipient = s
+    ? `${s.FirstName || ""} ${s.LastName || ""}`.trim() || "Recipient"
+    : "Recipient";
+  const billingSame =
+    !b || (submission as any)?.customFields?.billSameAsShip !== "false";
+
+  const contactName = customer
+    ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
+    : `${submission.firstName || ""} ${submission.lastName || ""}`.trim();
+  const companyDisplayName = company?.name || submission.companyName;
+  const [editForm, setEditForm] = useState({
+    // company
+    companyName: submission.companyName || "",
+    taxRegistrationId:
+      (submission as any)?.customFields?.taxRegistrationId || "",
+    // contact
+    firstName: submission.firstName || "",
+    lastName: submission.lastName || "",
+    jobTitle: (submission as any)?.customFields?.jobTitle || "",
+    contactPhone: (submission as any)?.customFields?.phone || "",
+    // shipping
+    shDepartment: s?.Department || "",
+    shFirstName: s?.FirstName || "",
+    shLastName: s?.LastName || "",
+    shPhone: s?.Phone || "",
+    shAddr1: s?.Addr1 || "",
+    shAddr2: s?.Addr2 || "",
+    shCity: s?.City || "",
+    shCountry: s?.Country || "India",
+    shState: s?.State || "",
+    shZip: s?.Zip || "",
+    // billing toggle
+    useSameAddress: billingSame,
+    biAddr1: b?.Addr1 || "",
+    biAddr2: b?.Addr2 || "",
+    biCity: b?.City || "",
+    biCountry: b?.Country || "India",
+    biState: b?.State || "",
+    biZip: b?.Zip || "",
+  });
+
+  const showProgress = pipelineStep !== "idle" && pipelineStep !== "error";
+  const isDone = pipelineStep === "done";
+  const hasError = pipelineStep === "error";
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(17, 24, 39, 0.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 40,
+      }}
+    >
+      <div
+        style={{
+          width: "min(740px, 96vw)",
+          background: "#f1f1f1",
+          borderRadius: 12,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+          maxHeight: "96vh",
+          overflowY: "auto",
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        }}
+      >
+        {/* ── Header ── */}
+        <div
+          style={{
+            background: "white",
+            padding: "16px 20px",
+            borderBottom: "1px solid #e3e3e3",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+          }}
+        >
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={onCancel}
+                disabled={isApproving}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: isApproving ? "not-allowed" : "pointer",
+                  color: "#5c5f62",
+                  fontSize: 18,
+                  padding: "0 4px 0 0",
+                  lineHeight: 1,
+                  opacity: isApproving ? 0.4 : 1,
+                }}
+              >
+                ←
+              </button>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+                Configure company
+              </h2>
+            </div>
+            <p
+              style={{ margin: "4px 0 0 28px", color: "#5c5f62", fontSize: 13 }}
+            >
+              Review Company settings before approving. You will be able to
+              change these later.
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button
+              onClick={onCancel}
+              disabled={isApproving}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                border: "1px solid #c9ccd0",
+                background: "white",
+                cursor: isApproving ? "not-allowed" : "pointer",
+                fontSize: 14,
+                fontWeight: 500,
+                opacity: isApproving ? 0.4 : 1,
+              }}
+            >
+              {isDone ? "Close" : "Cancel"}
+            </button>
+
+            {!isDone && (
+              <button
+                onClick={() =>
+                  onApprove({
+                    paymentTermsId,
+                    requireDeposit,
+                    allowOneTimeAddress,
+                    orderSubmission,
+                    taxSetting,
+                  })
+                }
+                disabled={isApproving}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: isApproving ? "#6b9fd4" : "#1a1a1a",
+                  color: "white",
+                  cursor: isApproving ? "not-allowed" : "pointer",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  minWidth: 110,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                {isApproving ? (
+                  <>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 13,
+                        height: 13,
+                        border: "2px solid rgba(255,255,255,0.35)",
+                        borderTop: "2px solid white",
+                        borderRadius: "50%",
+                        animation: "spin 0.7s linear infinite",
+                      }}
+                    />
+                    Processing…
+                  </>
+                ) : hasError ? (
+                  "Retry"
+                ) : (
+                  "Approve"
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Progress bar ── */}
+        {(showProgress || hasError) && (
+          <div
+            style={{
+              background: "white",
+              borderBottom: "1px solid #e3e3e3",
+              padding: "14px 20px 12px",
+            }}
+          >
+            <ProgressBar currentStep={pipelineStep} error={pipelineError} />
+          </div>
+        )}
+
+        {/* ── Success banner ── */}
+        {isDone && (
+          <div style={{ padding: "16px 20px 0" }}>
+            <div
+              style={{
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                borderRadius: 10,
+                padding: 16,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  background: "#16a34a",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "white",
+                  fontSize: 18,
+                  flexShrink: 0,
+                }}
+              >
+                ✓
+              </div>
+              <div>
+                <div
+                  style={{ fontWeight: 700, fontSize: 15, color: "#15803d" }}
+                >
+                  Registration Approved Successfully
+                </div>
+                <div style={{ fontSize: 13, color: "#166534", marginTop: 3 }}>
+                  {contactName} has been approved and their account is now
+                  active under <strong>{companyDisplayName}</strong>.
+                </div>
+                <button
+                  onClick={onCancel}
+                  style={{
+                    marginTop: 10,
+                    padding: "6px 16px",
+                    background: "#16a34a",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  Done — Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Error banner ── */}
+        {hasError && pipelineError && (
+          <div style={{ padding: "16px 20px 0" }}>
+            <div
+              style={{
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                borderRadius: 10,
+                padding: 14,
+              }}
+            >
+              <div
+                style={{ fontWeight: 600, color: "#dc2626", marginBottom: 4 }}
+              >
+                Something went wrong
+              </div>
+              <div style={{ fontSize: 13, color: "#7f1d1d" }}>
+                {pipelineError}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Two-column body ── */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 220px",
+            gap: 16,
+            padding: 16,
+            alignItems: "start",
+            opacity: isApproving || isDone ? 0.5 : 1,
+            pointerEvents: isApproving || isDone ? "none" : "auto",
+            transition: "opacity 0.25s",
+          }}
+        >
+          {/* LEFT COLUMN */}
+          <div style={{ display: "grid", gap: 12 }}>
+            {/* Catalogs */}
+            <div
+              style={{
+                background: "white",
+                borderRadius: 10,
+                border: "1px solid #e3e3e3",
+                padding: 16,
+              }}
+            >
+              <h3
+                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
+              >
+                Catalogs
+              </h3>
+              <input
+                placeholder="Search catalogs"
+                value={catalogSearch}
+                onChange={(e) => setCatalogSearch(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  fontSize: 14,
+                  boxSizing: "border-box",
+                  marginBottom: 10,
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "8px 0",
+                  borderTop: "1px solid #f1f1f1",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>Wholesale</div>
+                  <div style={{ fontSize: 12, color: "#5c5f62" }}>
+                    13 products • No overall adjustment
+                  </div>
+                </div>
+                <button
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#5c5f62",
+                    fontSize: 16,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Payment terms */}
+            <div
+              style={{
+                background: "white",
+                borderRadius: 10,
+                border: "1px solid #e3e3e3",
+                padding: 16,
+              }}
+            >
+              <h3
+                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
+              >
+                Payment terms
+              </h3>
+              <select
+                value={paymentTermsId}
+                onChange={(e) => setPaymentTermsId(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  fontSize: 14,
+                  background: "white",
+                  boxSizing: "border-box",
+                  marginBottom: 10,
+                }}
+              >
+                <option value="">No payment terms</option>
+                {paymentTermsTemplates?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+                {(!paymentTermsTemplates ||
+                  paymentTermsTemplates.length === 0) && (
+                  <>
+                    <option value="net15">Within 15 days (Net 15)</option>
+                    <option value="net30">Within 30 days (Net 30)</option>
+                    <option value="net60">Within 60 days (Net 60)</option>
+                  </>
+                )}
+              </select>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  color: "#374151",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={requireDeposit}
+                  onChange={(e) => setRequireDeposit(e.target.checked)}
+                />
+                Require deposit on orders created at checkout
+              </label>
+            </div>
+
+            {/* Checkout */}
+            <div
+              style={{
+                background: "white",
+                borderRadius: 10,
+                border: "1px solid #e3e3e3",
+                padding: 16,
+              }}
+            >
+              <h3
+                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
+              >
+                Checkout
+              </h3>
+              <div style={{ marginBottom: 14 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    marginBottom: 6,
+                    color: "#374151",
+                  }}
+                >
+                  Ship to address
+                </div>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    color: "#374151",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={allowOneTimeAddress}
+                    onChange={(e) => setAllowOneTimeAddress(e.target.checked)}
+                  />
+                  Allow customers to ship to any one-time address
+                </label>
+              </div>
+              <div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    marginBottom: 6,
+                    color: "#374151",
+                  }}
+                >
+                  Order submission
+                </div>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    marginBottom: 6,
+                    color: "#374151",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="orderSubmission"
+                    value="auto"
+                    checked={orderSubmission === "auto"}
+                    onChange={() => setOrderSubmission("auto")}
+                    style={{ marginTop: 2 }}
+                  />
+                  <div>
+                    <div>Automatically submit orders</div>
+                    <div style={{ fontSize: 12, color: "#5c5f62" }}>
+                      Orders without shipping addresses will be submitted as
+                      draft orders
+                    </div>
+                  </div>
+                </label>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    color: "#374151",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="orderSubmission"
+                    value="draft"
+                    checked={orderSubmission === "draft"}
+                    onChange={() => setOrderSubmission("draft")}
+                  />
+                  Submit all orders as drafts for review
+                </label>
+              </div>
+            </div>
+
+            {/* Taxes */}
+            <div
+              style={{
+                background: "white",
+                borderRadius: 10,
+                border: "1px solid #e3e3e3",
+                padding: 16,
+              }}
+            >
+              <h3
+                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
+              >
+                Taxes
+              </h3>
+              <select
+                value={taxSetting}
+                onChange={(e) => setTaxSetting(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  fontSize: 14,
+                  background: "white",
+                  boxSizing: "border-box",
+                }}
+              >
+                <option value="collect">Collect tax</option>
+                <option value="exempt">Tax exempt</option>
+                <option value="custom">Custom tax rate</option>
+              </select>
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN — summary card */}
+          {/* <div
+            style={{
+              background: "white",
+              borderRadius: 10,
+              border: "1px solid #e3e3e3",
+              padding: 16,
+              fontSize: 13,
+              position: "sticky",
+              top: 16,
+            }}
+          >
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>
+              {companyDisplayName}
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div
+                style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}
+              >
+                Customer
+              </div>
+              <div style={{ color: "#374151" }}>{contactName}</div>
+              <div style={{ color: "#2c6ecb", textDecoration: "underline" }}>
+                {customer?.email || submission.email}
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div
+                style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}
+              >
+                Shipping address
+              </div>
+              <div style={{ color: "#374151", lineHeight: 1.6 }}>
+                <div>{shippingRecipient}</div>
+                <div>{shippingLine1}</div>
+                <div>
+                  {shippingCity}, {shippingState} {shippingZip}
+                </div>
+                <div>{shippingCountry}</div>
+              </div>
+            </div>
+            <div>
+              <div
+                style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}
+              >
+                Billing address
+              </div>
+              {billingSame ? (
+                <div style={{ color: "#5c5f62", fontStyle: "italic" }}>
+                  Same as shipping address
+                </div>
+              ) : (
+                <div style={{ color: "#374151", lineHeight: 1.6 }}>
+                  <div>
+                    {b?.FirstName} {b?.LastName}
+                  </div>
+                  <div>{b?.Addr1}</div>
+                  <div>
+                    {b?.City}, {b?.State} {b?.Zip}
+                  </div>
+                  <div>{b?.Country}</div>
+                </div>
+              )}
+            </div>
+          </div> */}
+          {/* RIGHT COLUMN — summary card */}
+          <div
+            style={{
+              background: "white",
+              borderRadius: 10,
+              border: "1px solid #e3e3e3",
+              padding: 16,
+              fontSize: 13,
+              position: "sticky",
+              top: 16,
+            }}
+          >
+            {/* Header row */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                {editForm.companyName || companyDisplayName}
+              </div>
+              <button
+                onClick={() => setShowEditModal(true)}
+                style={{
+                  background: "none",
+                  border: "1px solid #c9ccd0",
+                  borderRadius: 6,
+                  padding: "4px 10px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  color: "#374151",
+                }}
+              >
+                Edit
+              </button>
+            </div>
+
+            {/* Customer */}
+            <div style={{ marginBottom: 12 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#5c5f62",
+                  marginBottom: 3,
+                }}
+              >
+                Customer
+              </div>
+              <div style={{ color: "#374151" }}>
+                {`${editForm.firstName} ${editForm.lastName}`.trim() ||
+                  contactName}
+              </div>
+              <div style={{ color: "#2c6ecb", textDecoration: "underline" }}>
+                {customer?.email || submission.email}
+              </div>
+            </div>
+
+            {/* Shipping */}
+            <div style={{ marginBottom: 12 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#5c5f62",
+                  marginBottom: 3,
+                }}
+              >
+                Shipping address
+              </div>
+              <div style={{ color: "#374151", lineHeight: 1.6 }}>
+                <div>
+                  {`${editForm.firstName} ${editForm.lastName}`.trim() ||
+                    shippingRecipient}
+                </div>
+                <div>{editForm.shAddr1 || shippingLine1}</div>
+                <div>
+                  {editForm.shCity}, {editForm.shState} {editForm.shZip}
+                </div>
+                <div>{editForm.shCountry}</div>
+              </div>
+            </div>
+
+            {/* Billing */}
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#5c5f62",
+                  marginBottom: 3,
+                }}
+              >
+                Billing address
+              </div>
+              {editForm.useSameAddress ? (
+                <div style={{ color: "#5c5f62", fontStyle: "italic" }}>
+                  Same as shipping address
+                </div>
+              ) : (
+                <div style={{ color: "#374151", lineHeight: 1.6 }}>
+                  <div>{editForm.biAddr1}</div>
+                  <div>
+                    {editForm.biCity}, {editForm.biState} {editForm.biZip}
+                  </div>
+                  <div>{editForm.biCountry}</div>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* ── Edit Details Modal ──────────────────────────────────────────── */}
+          {showEditModal && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(17,24,39,0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 50,
+              }}
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setShowEditModal(false);
+              }}
+            >
+              <div
+                style={{
+                  width: "min(560px, 96vw)",
+                  background: "#f8f8f8",
+                  borderRadius: 12,
+                  boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+                  maxHeight: "92vh",
+                  overflowY: "auto",
+                  fontFamily:
+                    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                }}
+              >
+                {/* Header */}
+                <div
+                  style={{
+                    padding: "16px 20px",
+                    borderBottom: "1px solid #e3e3e3",
+                    background: "white",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 1,
+                  }}
+                >
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+                    Edit details
+                  </h3>
+                  <button
+                    onClick={() => setShowEditModal(false)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      fontSize: 20,
+                      cursor: "pointer",
+                      color: "#5c5f62",
+                      lineHeight: 1,
+                      padding: "0 2px",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div style={{ padding: "16px 20px", display: "grid", gap: 14 }}>
+                  {/* ── Company ── */}
+                  <div style={sectionStyle}>
+                    <h4 style={sectionHeadingStyle}>company</h4>
+                    <input
+                      placeholder="Company name"
+                      value={editForm.companyName}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          companyName: e.target.value,
+                        }))
+                      }
+                      style={inputStyle}
+                    />
+                    <input
+                      placeholder="Tax registration ID"
+                      value={editForm.taxRegistrationId}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          taxRegistrationId: e.target.value,
+                        }))
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* ── Contact ── */}
+                  <div style={sectionStyle}>
+                    <h4 style={sectionHeadingStyle}>contact</h4>
+                    <input
+                      placeholder="First name"
+                      value={editForm.firstName}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          firstName: e.target.value,
+                        }))
+                      }
+                      style={inputStyle}
+                    />
+                    <input
+                      placeholder="Last name"
+                      value={editForm.lastName}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, lastName: e.target.value }))
+                      }
+                      style={inputStyle}
+                    />
+                    <input
+                      placeholder="Job title/position"
+                      value={editForm.jobTitle}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, jobTitle: e.target.value }))
+                      }
+                      style={inputStyle}
+                    />
+                    {/* Phone */}
+                    <div style={{ position: "relative" }}>
+                      <input
+                        placeholder="Phone"
+                        value={editForm.contactPhone}
+                        onChange={(e) =>
+                          setEditForm((f) => ({
+                            ...f,
+                            contactPhone: e.target.value,
+                          }))
+                        }
+                        style={{ ...inputStyle, paddingRight: 90 }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          right: 10,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          fontSize: 13,
+                          color: "#374151",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          pointerEvents: "none",
+                        }}
+                      >
+                        <span>🇮🇳</span>
+                        <span>+91</span>
+                        <span style={{ color: "#9ca3af" }}>▾</span>
+                      </div>
+                    </div>
+                    {/* Email — read-only */}
+                    <div>
+                      <input
+                        value={customer?.email || submission.email}
+                        readOnly
+                        placeholder="Email"
+                        style={{
+                          ...inputStyle,
+                          background: "#f3f4f6",
+                          color: "#9ca3af",
+                          cursor: "not-allowed",
+                          border: "1px solid #e5e7eb",
+                        }}
+                      />
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#9ca3af",
+                          marginTop: 3,
+                          paddingLeft: 2,
+                        }}
+                      >
+                        Email cannot be changed
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Shipping ── */}
+                  <div style={sectionStyle}>
+                    <h4 style={sectionHeadingStyle}>shipping</h4>
+                    <input
+                      placeholder="Department/attention"
+                      value={editForm.shDepartment}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          shDepartment: e.target.value,
+                        }))
+                      }
+                      style={inputStyle}
+                    />
+                    <input
+                      placeholder="First name"
+                      value={editForm.shFirstName}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          shFirstName: e.target.value,
+                        }))
+                      }
+                      style={inputStyle}
+                    />
+                    <input
+                      placeholder="Last name"
+                      value={editForm.shLastName}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          shLastName: e.target.value,
+                        }))
+                      }
+                      style={inputStyle}
+                    />
+                    {/* Shipping phone */}
+                    <div style={{ position: "relative" }}>
+                      <input
+                        placeholder="Phone"
+                        value={editForm.shPhone}
+                        onChange={(e) =>
+                          setEditForm((f) => ({
+                            ...f,
+                            shPhone: e.target.value,
+                          }))
+                        }
+                        style={{ ...inputStyle, paddingRight: 90 }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          right: 10,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          fontSize: 13,
+                          color: "#374151",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          pointerEvents: "none",
+                        }}
+                      >
+                        <span>🇮🇳</span>
+                        <span>+91</span>
+                        <span style={{ color: "#9ca3af" }}>▾</span>
+                      </div>
+                    </div>
+                    <input
+                      placeholder="Address line 1"
+                      value={editForm.shAddr1}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, shAddr1: e.target.value }))
+                      }
+                      style={inputStyle}
+                    />
+                    <input
+                      placeholder="Address line 2"
+                      value={editForm.shAddr2}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, shAddr2: e.target.value }))
+                      }
+                      style={inputStyle}
+                    />
+                    <input
+                      placeholder="City"
+                      value={editForm.shCity}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, shCity: e.target.value }))
+                      }
+                      style={inputStyle}
+                    />
+                    <select
+                      value={editForm.shCountry}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          shCountry: e.target.value,
+                        }))
+                      }
+                      style={{ ...inputStyle, background: "white" }}
+                    >
+                      <option value="">Country</option>
+                      <option value="India">India</option>
+                      <option value="US">United States</option>
+                      <option value="GB">United Kingdom</option>
+                      <option value="AU">Australia</option>
+                      <option value="CA">Canada</option>
+                    </select>
+                    <select
+                      value={editForm.shState}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, shState: e.target.value }))
+                      }
+                      style={{ ...inputStyle, background: "white" }}
+                    >
+                      <option value="">State/Province</option>
+                      <option value="Gujarat">Gujarat</option>
+                      <option value="Maharashtra">Maharashtra</option>
+                      <option value="Delhi">Delhi</option>
+                      <option value="Karnataka">Karnataka</option>
+                      <option value="Tamil Nadu">Tamil Nadu</option>
+                      <option value="Rajasthan">Rajasthan</option>
+                      <option value="Uttar Pradesh">Uttar Pradesh</option>
+                    </select>
+                    <input
+                      placeholder="ZIP/Postal code"
+                      value={editForm.shZip}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, shZip: e.target.value }))
+                      }
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* ── Billing ── */}
+                  <div style={sectionStyle}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <h4 style={{ ...sectionHeadingStyle, margin: 0 }}>
+                        billing
+                      </h4>
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 13,
+                          cursor: "pointer",
+                          color: "#374151",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={editForm.useSameAddress}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              useSameAddress: e.target.checked,
+                            }))
+                          }
+                        />
+                        Same as shipping
+                      </label>
+                    </div>
+                    {!editForm.useSameAddress && (
+                      <>
+                        <input
+                          placeholder="Address line 1"
+                          value={editForm.biAddr1}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              biAddr1: e.target.value,
+                            }))
+                          }
+                          style={inputStyle}
+                        />
+                        <input
+                          placeholder="Address line 2"
+                          value={editForm.biAddr2}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              biAddr2: e.target.value,
+                            }))
+                          }
+                          style={inputStyle}
+                        />
+                        <input
+                          placeholder="City"
+                          value={editForm.biCity}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              biCity: e.target.value,
+                            }))
+                          }
+                          style={inputStyle}
+                        />
+                        <select
+                          value={editForm.biCountry}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              biCountry: e.target.value,
+                            }))
+                          }
+                          style={{ ...inputStyle, background: "white" }}
+                        >
+                          <option value="">Country</option>
+                          <option value="India">India</option>
+                          <option value="US">United States</option>
+                          <option value="GB">United Kingdom</option>
+                          <option value="AU">Australia</option>
+                          <option value="CA">Canada</option>
+                        </select>
+                        <select
+                          value={editForm.biState}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              biState: e.target.value,
+                            }))
+                          }
+                          style={{ ...inputStyle, background: "white" }}
+                        >
+                          <option value="">State/Province</option>
+                          <option value="Gujarat">Gujarat</option>
+                          <option value="Maharashtra">Maharashtra</option>
+                          <option value="Delhi">Delhi</option>
+                          <option value="Karnataka">Karnataka</option>
+                          <option value="Tamil Nadu">Tamil Nadu</option>
+                          <option value="Rajasthan">Rajasthan</option>
+                          <option value="Uttar Pradesh">Uttar Pradesh</option>
+                        </select>
+                        <input
+                          placeholder="ZIP/Postal code"
+                          value={editForm.biZip}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              biZip: e.target.value,
+                            }))
+                          }
+                          style={inputStyle}
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div
+                  style={{
+                    padding: "12px 20px",
+                    borderTop: "1px solid #e3e3e3",
+                    background: "white",
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    position: "sticky",
+                    bottom: 0,
+                  }}
+                >
+                  <button
+                    onClick={() => setShowEditModal(false)}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                      background: "white",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 500,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => setShowEditModal(false)}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#1a1a1a",
+                      color: "white",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Save changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function RegistrationApprovals() {
   const { submissions, storeMissing, paymentTermsTemplates } = useLoaderData<{
     submissions: RegistrationSubmission[];
-    companies: CompanyAccount[];
+    companies: any[];
     storeMissing: boolean;
     paymentTermsTemplates: Array<{
       id: string;
@@ -2081,35 +3492,11 @@ export default function RegistrationApprovals() {
     }>;
   }>();
 
-  const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
-  const [step, setStep] = useState<
-    | "check"
-    | "createCustomer"
-    | "updateCompany"
-    | "createCompany"
-    | "assign"
-    | "email"
-    | "complete"
-  >("check");
-  const [customer, setCustomer] = useState<ActionJson["customer"]>(null);
-  const [company, setCompany] = useState<ActionJson["company"]>(null);
-  const [reviewNotes, setReviewNotes] = useState("");
-  const [showCustomerModal, setShowCustomerModal] = useState(false);
-  const [showCompanyModal, setShowCompanyModal] = useState(false);
-  const [editMode, setEditMode] = useState<"create" | "update">("create");
-  const [customerMode, setCustomerMode] = useState<"create" | "update">(
-    "create",
-  );
-  const [creditLimit, setCreditLimit] = useState(0);
-
-  // ── Billing same as shipping toggle (used in createCustomer step) ──
-  const [billSameAsShip, setBillSameAsShip] = useState(true);
-
-  const [searchParams, setSearchParams] = useSearchParams();
+  // ── List state (UNCHANGED) ────────────────────────────────────────────────
+  const [searchParams] = useSearchParams();
   const statusFromUrl = searchParams.get("status");
-
-  const normalizeStatus = (value: string | null) => {
-    switch (value?.toUpperCase()) {
+  const normalizeStatus = (v: string | null) => {
+    switch (v?.toUpperCase()) {
       case "APPROVED":
         return "APPROVED";
       case "REJECTED":
@@ -2118,14 +3505,39 @@ export default function RegistrationApprovals() {
         return "PENDING";
     }
   };
-
   const [statusFilter, setStatusFilter] = useState<
     "PENDING" | "APPROVED" | "REJECTED"
   >(normalizeStatus(statusFromUrl));
-
   useEffect(() => {
     setStatusFilter(normalizeStatus(statusFromUrl));
   }, [statusFromUrl]);
+
+  const filteredSubmissions = useMemo(
+    () => submissions.filter((s) => s.status === statusFilter),
+    [submissions, statusFilter],
+  );
+
+  // ── Pipeline state ────────────────────────────────────────────────────────
+  const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
+  const [showConfigureUI, setShowConfigureUI] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState<PipelineStep>("idle");
+  const [pipelineError, setPipelineError] = useState<string | undefined>();
+  const [customer, setCustomer] = useState<ActionJson["customer"]>(null);
+  const [company, setCompany] = useState<ActionJson["company"]>(null);
+
+  // Store config opts set at Approve click time
+  const configOptsRef = useRef<{
+    paymentTermsId: string;
+    requireDeposit: boolean;
+    allowOneTimeAddress: boolean;
+    orderSubmission: "auto" | "draft";
+    taxSetting: string;
+  } | null>(null);
+
+  // Store resolved customer/company in refs so pipeline useEffect always has latest
+  const customerRef = useRef<ActionJson["customer"]>(null);
+  const companyRef = useRef<ActionJson["company"]>(null);
+  const selectedRef = useRef<RegistrationSubmission | null>(null);
 
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
@@ -2133,196 +3545,249 @@ export default function RegistrationApprovals() {
   const shopify = useAppBridge();
 
   const isFlowLoading = flowFetcher.state !== "idle";
-  const isRejecting = rejectFetcher.state !== "idle";
-  const currentIntent = flowFetcher.formData?.get("intent") as
-    | string
-    | undefined;
-  const isCheckingCustomer = isFlowLoading && currentIntent === "checkCustomer";
-  const isCreatingCustomer =
-    isFlowLoading && currentIntent === "createCustomer";
-  const isUpdatingCustomer =
-    isFlowLoading && currentIntent === "updateCustomer";
-  const isCheckingCompany = isFlowLoading && currentIntent === "checkCompany";
-  const isCreatingCompany = isFlowLoading && currentIntent === "createCompany";
-  const isUpdatingCompany = isFlowLoading && currentIntent === "updateCompany";
-  const isAssigning = isFlowLoading && currentIntent === "assignMainContact";
-  const isSendingEmail = isFlowLoading && currentIntent === "sendWelcomeEmail";
-  const isCompletingApproval =
-    isFlowLoading && currentIntent === "completeApproval";
+  const isCheckingCustomer =
+    isFlowLoading && flowFetcher.formData?.get("intent") === "checkCustomer";
+  const isApproving =
+    pipelineStep !== "idle" &&
+    pipelineStep !== "done" &&
+    pipelineStep !== "error";
 
-  const checkRef = useRef<HTMLDivElement>(null);
-  const createCustomerRef = useRef<HTMLDivElement>(null);
-  const createCompanyRef = useRef<HTMLDivElement>(null);
-  const assignRef = useRef<HTMLDivElement>(null);
-  const emailRef = useRef<HTMLDivElement>(null);
-  const completeRef = useRef<HTMLDivElement>(null);
-
-  const goToStep = (
-    stepName: StepName,
-    ref: React.RefObject<HTMLDivElement>,
-  ) => {
-    setStep(stepName);
-    requestAnimationFrame(() => {
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  };
-
-  const filteredSubmissions = useMemo(
-    () => submissions.filter((s) => s.status === statusFilter),
-    [submissions, statusFilter],
-  );
-
-  // ── When a submission is selected, pre-set billSameAsShip from stored data ──
+  // Keep refs in sync
   useEffect(() => {
-    if (selected) {
-      const storedSame = (selected as any)?.customFields?.billSameAsShip;
-      setBillSameAsShip(storedSame === "false" ? false : true);
-    }
+    customerRef.current = customer;
+  }, [customer]);
+  useEffect(() => {
+    companyRef.current = company;
+  }, [company]);
+  useEffect(() => {
+    selectedRef.current = selected;
   }, [selected]);
 
-  useEffect(() => {
-    if (!flowFetcher.data) return;
-
-    if (
-      flowFetcher.data.intent === "checkCustomer" &&
-      flowFetcher.data.customer
-    ) {
-      setCustomer(flowFetcher.data.customer);
-      return;
-    }
-
-    if (
-      (flowFetcher.data.intent === "createCustomer" ||
-        flowFetcher.data.intent === "updateCustomer") &&
-      flowFetcher.data.success
-    ) {
-      setCustomer(flowFetcher.data.customer || null);
-      setStep("createCompany");
-      setShowCustomerModal(false);
-      shopify.toast.show?.(
-        flowFetcher.data.intent === "createCustomer" ? "Customer created" : "",
-      );
-      return;
-    }
-
-    if (flowFetcher.data.intent === "checkCompany") {
-      setStep("createCompany");
-      setCompany(flowFetcher.data.company ? flowFetcher.data.company : null);
-      return;
-    }
-
-    if (
-      (flowFetcher.data.intent === "createCompany" ||
-        flowFetcher.data.intent === "updateCompany") &&
-      flowFetcher.data.success
-    ) {
-      setCompany(flowFetcher.data.company || null);
-      if (flowFetcher.data.intent === "createCompany") {
-        setStep("assign");
-        setEditMode("create");
-      } else {
-        setEditMode("create");
-      }
-      setShowCompanyModal(false);
-      shopify.toast.show?.(
-        flowFetcher.data.intent === "createCompany"
-          ? "Company created successfully"
-          : "Company updated successfully",
-      );
-      return;
-    }
-
-    if (flowFetcher.data.intent === "assignMainContact") {
-      if (flowFetcher.data.success) {
-        setStep("email");
-        shopify.toast.show?.(
-          (flowFetcher.data as any).wasAlreadyContact
-            ? "Contact already existed — role and main contact updated successfully"
-            : "Main contact assigned successfully",
-        );
-        revalidator.revalidate();
-      }
-      return;
-    }
-
-    if (
-      flowFetcher.data.intent === "sendWelcomeEmail" &&
-      flowFetcher.data.success
-    ) {
-      shopify.toast.show?.("Welcome email sent");
-      return;
-    }
-
-    if (
-      flowFetcher.data.intent === "completeApproval" &&
-      flowFetcher.data.success
-    ) {
-      revalidator.revalidate();
-      shopify.toast.show?.("Registration approved");
-    }
-  }, [flowFetcher, shopify, revalidator]);
-
-  useEffect(() => {
-    if (rejectFetcher.data?.success) {
-      setSelected(null);
-      revalidator.revalidate();
-      shopify.toast.show?.("Registration rejected");
-    }
-  }, [rejectFetcher.data, revalidator, shopify]);
-
-  const startApproval = (submission: RegistrationSubmission) => {
-    setSelected(submission);
+  // ── Reset pipeline ──────────────────────────────────────────────────────
+  const resetPipeline = useCallback(() => {
+    setSelected(null);
+    setShowConfigureUI(false);
+    setPipelineStep("idle");
+    setPipelineError(undefined);
     setCustomer(null);
     setCompany(null);
-    setStep("check");
-    flowFetcher.submit(
-      { intent: "checkCustomer", email: submission.email },
-      { method: "post" },
-    );
+    customerRef.current = null;
+    companyRef.current = null;
+    configOptsRef.current = null;
+  }, []);
+
+  // ── Open Configure UI ───────────────────────────────────────────────────
+  const startApproval = (submission: RegistrationSubmission) => {
+    setSelected(submission);
+    selectedRef.current = submission;
+    setCustomer(null);
+    setCompany(null);
+    customerRef.current = null;
+    companyRef.current = null;
+    setPipelineStep("idle");
+    setPipelineError(undefined);
+    setShowConfigureUI(true);
   };
 
-  const completeApproval = () => {
-    if (!selected || !customer) return;
-    flowFetcher.submit(
-      {
-        intent: "completeApproval",
-        registrationId: selected.id,
-        customerId: customer.id,
-        companyId: company?.id || "",
-        companyName: company?.name || selected.companyName,
-        contactName: `${customer.firstName} ${customer.lastName}`,
-        contactEmail: customer.email,
-        paymentTerm: selected.paymentTerm || "",
-        creditLimit: selected.creditLimit || "",
-        reviewNotes,
-      },
-      { method: "post" },
-    );
-  };
+  // ── User clicks Approve in ConfigureCompanyUI — kick off pipeline ───────
+  const handleConfigureApprove = useCallback(
+    (opts: {
+      paymentTermsId: string;
+      requireDeposit: boolean;
+      allowOneTimeAddress: boolean;
+      orderSubmission: "auto" | "draft";
+      taxSetting: string;
+    }) => {
+      const sub = selectedRef.current;
+      if (!sub) return;
+      configOptsRef.current = opts;
+      setPipelineStep("checkCustomer");
+      setPipelineError(undefined);
 
+      flowFetcher.submit(
+        { intent: "checkCustomer", email: sub.email },
+        { method: "post" },
+      );
+    },
+    [flowFetcher],
+  );
+
+  // ── Pipeline: advance on each successful action response ─────────────────
+  useEffect(() => {
+    const data = flowFetcher.data;
+    if (!data || flowFetcher.state !== "idle") return;
+
+    const sub = selectedRef.current;
+    const opts = configOptsRef.current;
+    if (!sub || !opts) return;
+
+    const fail = (msg: string) => {
+      setPipelineStep("error");
+      setPipelineError(msg);
+    };
+
+    // ── 1. checkCustomer → checkCompany ──────────────────────────────────
+    if (data.intent === "checkCustomer") {
+      if (data.errors?.length) return fail(data.errors[0]);
+
+      const resolvedCustomer = data.customer ?? null;
+      setCustomer(resolvedCustomer);
+      customerRef.current = resolvedCustomer;
+
+      if (!resolvedCustomer) {
+        return fail(
+          "No Shopify customer found for this email. Please create the customer first from the approval flow.",
+        );
+      }
+
+      setPipelineStep("checkCompany");
+      flowFetcher.submit(
+        {
+          intent: "checkCompany",
+          email: resolvedCustomer.email,
+          companyName: sub.companyName,
+        },
+        { method: "post" },
+      );
+      return;
+    }
+
+    // ── 2. checkCompany → createCompany ──────────────────────────────────
+    if (data.intent === "checkCompany") {
+      if (data.errors?.length) return fail(data.errors[0]);
+
+      const resolvedCompany = data.company ?? null;
+      setCompany(resolvedCompany);
+      companyRef.current = resolvedCompany;
+
+      const cust = customerRef.current;
+      if (!cust) return fail("Customer data lost between steps");
+
+      setPipelineStep("createCompany");
+      flowFetcher.submit(
+        {
+          intent: "createCompany",
+          companyName: sub.companyName,
+          paymentTerms: opts.paymentTermsId,
+          creditLimit: sub.creditLimit || "",
+          customerId: cust.id,
+          customerEmail: cust.email,
+          firstName: cust.firstName || sub.firstName || "",
+          lastName: cust.lastName || sub.lastName || "",
+        },
+        { method: "post" },
+      );
+      return;
+    }
+
+    // ── 3. createCompany → assignMainContact ─────────────────────────────
+    if (data.intent === "createCompany") {
+      if (!data.success || data.errors?.length)
+        return fail(data.errors?.[0] || "Failed to create/update company");
+
+      const resolvedCompany = data.company ?? null;
+      setCompany(resolvedCompany);
+      companyRef.current = resolvedCompany;
+
+      const cust = customerRef.current;
+      if (!cust?.id) return fail("Customer ID missing");
+      if (!resolvedCompany?.id || !resolvedCompany?.locationId)
+        return fail("Company or location ID missing after creation");
+
+      setPipelineStep("assignMainContact");
+      flowFetcher.submit(
+        {
+          intent: "assignMainContact",
+          companyId: resolvedCompany.id,
+          customerId: cust.id,
+          locationId: resolvedCompany.locationId,
+          customerFirstName: cust.firstName || "",
+          customerLastName: cust.lastName || "",
+          customerEmail: cust.email,
+        },
+        { method: "post" },
+      );
+      return;
+    }
+
+    // ── 4. assignMainContact → sendWelcomeEmail ───────────────────────────
+    if (data.intent === "assignMainContact") {
+      if (!data.success || data.errors?.length)
+        return fail(data.errors?.[0] || "Failed to assign main contact");
+
+      const cust = customerRef.current;
+      const comp = companyRef.current;
+
+      setPipelineStep("sendWelcomeEmail");
+      flowFetcher.submit(
+        {
+          intent: "sendWelcomeEmail",
+          email: cust?.email || sub.email,
+          companyName: comp?.name || sub.companyName,
+          firstName: cust?.firstName || sub.firstName || "",
+          lastName: cust?.lastName || sub.lastName || "",
+          reviewNotes: "",
+        },
+        { method: "post" },
+      );
+      return;
+    }
+
+    // ── 5. sendWelcomeEmail → completeApproval ────────────────────────────
+    if (data.intent === "sendWelcomeEmail") {
+      // Non-fatal — continue even if email fails
+      const cust = customerRef.current;
+      const comp = companyRef.current;
+
+      setPipelineStep("completeApproval");
+      flowFetcher.submit(
+        {
+          intent: "completeApproval",
+          registrationId: sub.id,
+          customerId: cust?.id || "",
+          companyId: comp?.id || "",
+          companyName: comp?.name || sub.companyName,
+          contactName: cust
+            ? `${cust.firstName || ""} ${cust.lastName || ""}`.trim()
+            : `${sub.firstName || ""} ${sub.lastName || ""}`.trim(),
+          contactEmail: cust?.email || sub.email,
+          paymentTerm: opts.paymentTermsId || sub.paymentTerm || "",
+          creditLimit: sub.creditLimit || "",
+          reviewNotes: "",
+        },
+        { method: "post" },
+      );
+      return;
+    }
+
+    // ── 6. completeApproval → done ────────────────────────────────────────
+    if (data.intent === "completeApproval") {
+      if (!data.success || data.errors?.length)
+        return fail(data.errors?.[0] || "Failed to complete approval");
+
+      setPipelineStep("done");
+      shopify.toast.show?.("Registration approved successfully!");
+      revalidator.revalidate();
+      return;
+    }
+  }, [flowFetcher.data, flowFetcher.state]);
+
+  // ── Reject (unchanged) ───────────────────────────────────────────────────
   const rejectSubmission = (submission: RegistrationSubmission) => {
-    const confirmReject = window.confirm(
-      `Reject registration for ${submission.companyName}?`,
-    );
-    if (!confirmReject) return;
+    if (!window.confirm(`Reject registration for ${submission.companyName}?`))
+      return;
     rejectFetcher.submit(
       { intent: "reject", registrationId: submission.id },
       { method: "post" },
     );
   };
 
-  const contactNameParts = useMemo(() => {
-    if (!selected?.contactName) return { firstName: "", lastName: "" };
-    const [first, ...rest] = selected.contactName.split(" ");
-    return { firstName: first, lastName: rest.join(" ") };
-  }, [selected]);
-
-  // ── Helpers to read shipping/billing/customFields from selected ──────────
-  const s = (selected as any)?.shipping as Record<string, string> | undefined;
-  const b = (selected as any)?.billing as Record<string, string> | undefined;
-  const cf = (selected as any)?.customFields as
-    | Record<string, string>
-    | undefined;
+  useEffect(() => {
+    if (rejectFetcher.data?.success) {
+      revalidator.revalidate();
+      shopify.toast.show?.("Registration rejected");
+    }
+  }, [rejectFetcher.data]);
 
   if (storeMissing) {
     return (
@@ -2342,192 +3807,9 @@ export default function RegistrationApprovals() {
     );
   }
 
-  // ── Shared field style ────────────────────────────────────────────────────
-  const inputStyle: React.CSSProperties = {
-    padding: 10,
-    borderRadius: 8,
-    border: "1px solid #c9ccd0",
-    width: "100%",
-    boxSizing: "border-box",
-  };
-  const labelStyle: React.CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-  };
-  const labelTextStyle: React.CSSProperties = {
-    fontSize: 12,
-    color: "#5c5f62",
-    fontWeight: 500,
-  };
-  const sectionHeadingStyle: React.CSSProperties = {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#374151",
-    margin: "16px 0 8px 0",
-    paddingBottom: 4,
-    borderBottom: "1px solid #e3e3e3",
-  };
-
-  // ── Reusable: address field grid ─────────────────────────────────────────
-  const AddressFields = ({
-    prefix,
-    values,
-    disabled = false,
-  }: {
-    prefix: "ship" | "bill";
-    values?: Record<string, string>;
-    disabled?: boolean;
-  }) => (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: 10,
-        opacity: disabled ? 0.5 : 1,
-        pointerEvents: disabled ? "none" : "auto",
-      }}
-    >
-      {[
-        { label: "Department", name: "Dept", col: "1 / -1" },
-        { label: "First name", name: "FirstName" },
-        { label: "Last name", name: "LastName" },
-        { label: "Phone", name: "Phone" },
-        { label: "Address line 1", name: "Addr1", col: "1 / -1" },
-        { label: "Address line 2", name: "Addr2", col: "1 / -1" },
-        { label: "City", name: "City" },
-        { label: "State / Province", name: "State" },
-        { label: "ZIP / Postal code", name: "Zip" },
-        { label: "Country code", name: "Country" },
-      ].map(({ label, name, col }) => (
-        <label key={name} style={{ ...labelStyle, gridColumn: col as any }}>
-          <span style={labelTextStyle}>{label}</span>
-          <input
-            name={`${prefix}${name}`}
-            defaultValue={values?.[name] ?? ""}
-            style={inputStyle}
-          />
-        </label>
-      ))}
-    </div>
-  );
-
-  // ── Reusable: full customer form body ─────────────────────────────────────
-  // Used in BOTH create and update paths so fields stay consistent.
-  const CustomerFormFields = ({
-    prefillEmail,
-    prefillFirstName,
-    prefillLastName,
-    prefillPhone,
-    prefillContactTitle,
-    prefillTaxId,
-    shipValues,
-    billValues,
-  }: {
-    prefillEmail?: string;
-    prefillFirstName?: string;
-    prefillLastName?: string;
-    prefillPhone?: string;
-    prefillContactTitle?: string;
-    prefillTaxId?: string;
-    shipValues?: Record<string, string>;
-    billValues?: Record<string, string>;
-  }) => (
-    <>
-      {/* ── Core fields ── */}
-      <p style={sectionHeadingStyle}>Contact information</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-          <span style={labelTextStyle}>Email *</span>
-          <input
-            name="email"
-            type="email"
-            required
-            defaultValue={prefillEmail ?? ""}
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>First name *</span>
-          <input
-            name="firstName"
-            required
-            defaultValue={prefillFirstName ?? ""}
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>Last name</span>
-          <input
-            name="lastName"
-            defaultValue={prefillLastName ?? ""}
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>Phone</span>
-          <input
-            name="phone"
-            defaultValue={prefillPhone ?? ""}
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>Contact title</span>
-          <input
-            name="contactTitle"
-            defaultValue={prefillContactTitle ?? ""}
-            style={inputStyle}
-          />
-        </label>
-        <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-          <span style={labelTextStyle}>Tax ID</span>
-          <input
-            name="taxId"
-            defaultValue={prefillTaxId ?? ""}
-            style={inputStyle}
-          />
-        </label>
-      </div>
-
-      {/* ── Shipping address ── */}
-      <p style={sectionHeadingStyle}>Shipping address</p>
-      <AddressFields prefix="ship" values={shipValues} />
-
-      {/* ── Billing address ── */}
-      <p style={sectionHeadingStyle}>Billing address</p>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 10,
-          cursor: "pointer",
-        }}
-      >
-        <input
-          type="checkbox"
-          name="billSameAsShip"
-          checked={billSameAsShip}
-          value="true"
-          onChange={(e) => setBillSameAsShip(e.target.checked)}
-        />
-        <span style={{ fontSize: 13, color: "#374151" }}>
-          Billing address same as shipping
-        </span>
-      </label>
-
-      <AddressFields
-        prefix="bill"
-        values={billSameAsShip ? shipValues : billValues}
-        disabled={billSameAsShip}
-      />
-    </>
-  );
-
   return (
     <s-page heading="Registration submissions">
-      {/* Status Filter Tabs */}
+      {/* ── Status Filter Tabs + Table (COMPLETELY UNCHANGED) ──────────── */}
       <s-section heading="">
         <div
           style={{
@@ -2592,1134 +3874,90 @@ export default function RegistrationApprovals() {
                 </tr>
               </thead>
               <tbody>
-                {filteredSubmissions.map((submission) => {
-                  const isThisRowLoading =
-                    (isFlowLoading || isRejecting) &&
-                    selected?.id === submission.id;
-                  return (
-                    <tr
-                      key={submission.id}
-                      style={{ borderTop: "1px solid #e3e3e3" }}
-                    >
-                      <td style={{ padding: "8px" }}>
-                        {submission.companyName}
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {submission.firstName} {submission.lastName}
-                      </td>
-                      <td style={{ padding: "8px" }}>{submission.email}</td>
-                      <td style={{ padding: "8px" }}>
-                        {(submission as any)?.shipping?.Phone}
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        <s-badge
-                          tone={
-                            submission.status === "APPROVED"
-                              ? "success"
-                              : submission.status === "REJECTED"
-                                ? "critical"
-                                : "warning"
-                          }
-                        >
-                          {submission.status}
-                        </s-badge>
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {formatDate(submission.createdAt)}
-                      </td>
-                      <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                        {submission.status === "PENDING" ? (
-                          <>
+                {filteredSubmissions.map((submission) => (
+                  <tr
+                    key={submission.id}
+                    style={{ borderTop: "1px solid #e3e3e3" }}
+                  >
+                    <td style={{ padding: "8px" }}>{submission.companyName}</td>
+                    <td style={{ padding: "8px" }}>
+                      {submission.firstName} {submission.lastName}
+                    </td>
+                    <td style={{ padding: "8px" }}>{submission.email}</td>
+                    <td style={{ padding: "8px" }}>
+                      {(submission as any)?.shipping?.Phone}
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      <s-badge
+                        tone={
+                          submission.status === "APPROVED"
+                            ? "success"
+                            : submission.status === "REJECTED"
+                              ? "critical"
+                              : "warning"
+                        }
+                      >
+                        {submission.status}
+                      </s-badge>
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {formatDate(submission.createdAt)}
+                    </td>
+                    <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
+                      {submission.status === "PENDING" ? (
+                        <>
+                          <s-button
+                            onClick={() => startApproval(submission)}
+                            {...(isCheckingCustomer &&
+                            selected?.id === submission.id
+                              ? { loading: true }
+                              : {})}
+                          >
+                            Approve
+                          </s-button>
+                          <span style={{ marginLeft: 8 }}>
                             <s-button
-                              onClick={() => startApproval(submission)}
-                              {...(isCheckingCustomer &&
+                              tone="critical"
+                              variant="tertiary"
+                              onClick={() => rejectSubmission(submission)}
+                              {...(rejectFetcher.state !== "idle" &&
                               selected?.id === submission.id
                                 ? { loading: true }
                                 : {})}
                             >
-                              Approve
+                              Reject
                             </s-button>
-                            <span style={{ marginLeft: 8 }}>
-                              <s-button
-                                tone="critical"
-                                variant="tertiary"
-                                onClick={() => rejectSubmission(submission)}
-                                {...(isRejecting &&
-                                selected?.id === submission.id
-                                  ? { loading: true }
-                                  : {})}
-                              >
-                                Reject
-                              </s-button>
-                            </span>
-                          </>
-                        ) : (
-                          <span style={{ color: "#5c5f62", fontSize: 14 }}>
-                            {submission.status === "APPROVED"
-                              ? "Approved"
-                              : "Rejected"}
                           </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </>
+                      ) : (
+                        <span style={{ color: "#5c5f62", fontSize: 14 }}>
+                          {submission.status === "APPROVED"
+                            ? "Approved"
+                            : "Rejected"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
       </s-section>
 
-      {/* ── Customer Create/Update Modal ─────────────────────────────────── */}
-      {showCustomerModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(17, 24, 39, 0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
-          }}
-        >
-          <div
-            style={{
-              width: "min(700px, 90vw)",
-              background: "white",
-              borderRadius: 12,
-              boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
-          >
-            <div
-              style={{
-                padding: "18px 24px",
-                borderBottom: "1px solid #e3e3e3",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <h3 style={{ margin: 0 }}>
-                {editMode === "create" ? "Create Customer" : "Update Customer"}
-              </h3>
-              <s-button
-                variant="tertiary"
-                onClick={() => setShowCustomerModal(false)}
-                disabled={isCreatingCustomer || isUpdatingCustomer}
-              >
-                Close
-              </s-button>
-            </div>
-            <div style={{ padding: "18px 24px" }}>
-              <form
-                style={{ display: "grid", gap: 4 }}
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const data = new FormData(e.currentTarget);
-                  data.append(
-                    "intent",
-                    editMode === "create" ? "createCustomer" : "updateCustomer",
-                  );
-                  if (editMode === "update" && customer?.id) {
-                    data.append("customerId", customer.id);
-                  }
-                  flowFetcher.submit(data, { method: "post" });
-                }}
-              >
-                <CustomerFormFields
-                  prefillEmail={customer?.email || selected?.email || ""}
-                  prefillFirstName={
-                    customer?.firstName || contactNameParts.firstName || ""
-                  }
-                  prefillLastName={
-                    customer?.lastName || contactNameParts.lastName || ""
-                  }
-                  prefillPhone={customer?.phone || s?.Phone || ""}
-                  prefillContactTitle={
-                    (selected as any)?.contactTitle || cf?.contactTitle || ""
-                  }
-                  prefillTaxId={cf?.taxId || ""}
-                  shipValues={s}
-                  billValues={b}
-                />
-                <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                  <s-button
-                    type="submit"
-                    {...(isCreatingCustomer || isUpdatingCustomer
-                      ? { loading: true }
-                      : {})}
-                  >
-                    {editMode === "create"
-                      ? "Create Customer"
-                      : "Update Customer"}
-                  </s-button>
-                  <s-button
-                    variant="tertiary"
-                    onClick={() => setShowCustomerModal(false)}
-                    disabled={isCreatingCustomer || isUpdatingCustomer}
-                  >
-                    Cancel
-                  </s-button>
-                </div>
-              </form>
-              {flowFetcher.data?.errors &&
-                flowFetcher.data.errors.length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <s-banner tone="critical">
-                      <s-unordered-list>
-                        {flowFetcher.data.errors.map((err) => (
-                          <s-list-item key={err}>{err}</s-list-item>
-                        ))}
-                      </s-unordered-list>
-                    </s-banner>
-                  </div>
-                )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Company Create/Update Modal */}
-      {showCompanyModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(17, 24, 39, 0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
-          }}
-        >
-          <div
-            style={{
-              width: "min(700px, 90vw)",
-              background: "white",
-              borderRadius: 12,
-              boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
-          >
-            <div
-              style={{
-                padding: "18px 24px",
-                borderBottom: "1px solid #e3e3e3",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <h3 style={{ margin: 0 }}>
-                {editMode === "create" ? "Create Company" : "Update Company"}
-              </h3>
-              <s-button
-                variant="tertiary"
-                onClick={() => setShowCompanyModal(false)}
-                disabled={isCreatingCompany || isUpdatingCompany}
-              >
-                Close
-              </s-button>
-            </div>
-            <div style={{ padding: "18px 24px" }}>
-              <form
-                style={{ display: "grid", gap: 12 }}
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const data = new FormData(e.currentTarget);
-                  data.append(
-                    "intent",
-                    editMode === "create" ? "createCompany" : "updateCompany",
-                  );
-                  data.append("customerId", customer?.id || "");
-                  data.append(
-                    "customerEmail",
-                    customer?.email || selected?.email || "",
-                  );
-                  if (editMode === "update") {
-                    data.append("companyId", company?.id || "");
-                    data.append("locationId", company?.locationId || "");
-                  }
-                  flowFetcher.submit(data, { method: "post" });
-                }}
-              >
-                <label style={labelStyle}>
-                  <span style={labelTextStyle}>Company name *</span>
-                  <input
-                    name="companyName"
-                    defaultValue={company?.name || selected?.companyName || ""}
-                    required
-                    disabled={editMode === "update"}
-                    style={{
-                      ...inputStyle,
-                      backgroundColor:
-                        editMode === "update" ? "#f3f4f6" : "white",
-                    }}
-                  />
-                </label>
-                {editMode === "create" && (
-                  <label style={labelStyle}>
-                    <span style={labelTextStyle}>Payment terms</span>
-                    <select
-                      name="paymentTerms"
-                      defaultValue={(selected as any)?.paymentTerm}
-                      style={{ ...inputStyle, backgroundColor: "white" }}
-                    >
-                      <option value="">No payment terms</option>
-                      {paymentTermsTemplates?.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label style={labelStyle}>
-                  <span style={labelTextStyle}>Credit limit</span>
-                  <input
-                    name="creditLimit"
-                    defaultValue={company?.creditLimit ?? ""}
-                    required
-                    style={inputStyle}
-                  />
-                </label>
-                <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                  <s-button
-                    type="submit"
-                    {...(isCreatingCompany || isUpdatingCompany
-                      ? { loading: true }
-                      : {})}
-                  >
-                    {editMode === "create"
-                      ? "Create Company"
-                      : "Update Company"}
-                  </s-button>
-                  <s-button
-                    variant="tertiary"
-                    onClick={() => setShowCompanyModal(false)}
-                    disabled={isCreatingCompany || isUpdatingCompany}
-                  >
-                    Cancel
-                  </s-button>
-                </div>
-              </form>
-              {flowFetcher.data?.errors &&
-                flowFetcher.data.errors.length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <s-banner tone="critical">
-                      <s-unordered-list>
-                        {flowFetcher.data.errors.map((err) => (
-                          <s-list-item key={err}>{err}</s-list-item>
-                        ))}
-                      </s-unordered-list>
-                    </s-banner>
-                  </div>
-                )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Main Approval Flow Modal ───────────────────────────────────────── */}
-      {selected && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(17, 24, 39, 0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 40,
-          }}
-        >
-          <div
-            style={{
-              width: "min(860px, 92vw)",
-              background: "white",
-              borderRadius: 12,
-              boxShadow: "0 12px 40px rgba(0,0,0,0.12)",
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
-          >
-            {/* Modal header */}
-            <div
-              style={{
-                padding: "18px 24px",
-                borderBottom: "1px solid #e3e3e3",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <div>
-                <h3 style={{ margin: 0 }}>
-                  Approve {company?.name || selected?.companyName}
-                </h3>
-                <p style={{ margin: "4px 0", color: "#5c5f62" }}>
-                  {customer
-                    ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
-                    : `${selected?.firstName || ""} ${selected?.lastName || ""}`.trim()}{" "}
-                  • {customer?.email || selected?.email}
-                </p>
-              </div>
-              <s-button
-                variant="tertiary"
-                onClick={() => setSelected(null)}
-                disabled={isFlowLoading}
-              >
-                Close
-              </s-button>
-            </div>
-
-            <div style={{ padding: "18px 24px" }}>
-              {/* Step indicator */}
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginBottom: 24,
-                  flexWrap: "wrap",
-                }}
-              >
-                <StepBadge
-                  label="1. Check customer"
-                  active={step === "check"}
-                  onClick={() => goToStep("check", checkRef)}
-                />
-                <StepBadge
-                  label="2. Create company"
-                  active={step === "createCompany"}
-                  onClick={() => goToStep("createCompany", createCompanyRef)}
-                />
-                <StepBadge
-                  label="3. Assign contact"
-                  active={step === "assign"}
-                  onClick={() => goToStep("assign", assignRef)}
-                />
-                <StepBadge
-                  label="4. Welcome email"
-                  active={step === "email"}
-                  onClick={() => goToStep("email", emailRef)}
-                />
-                <StepBadge
-                  label="5. Complete"
-                  active={step === "complete"}
-                  onClick={() => goToStep("complete", completeRef)}
-                />
-              </div>
-
-              {/* ── STEP: Check Customer ──────────────────────────────────── */}
-              {step === "check" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                >
-                  <h4 style={{ margin: 0 }}>Check Customer</h4>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Checking if a customer already exists with email:{" "}
-                    {selected.email}
-                  </p>
-
-                  {isCheckingCustomer ? (
-                    <s-banner tone="info">
-                      <s-text>
-                        Please wait while we search for existing customer.
-                      </s-text>
-                    </s-banner>
-                  ) : customer ? (
-                    <>
-                      <s-banner tone="success">
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                          Customer found
-                        </div>
-                        <s-text>
-                          {customer.firstName || ""} {customer.lastName || ""} ·{" "}
-                          {customer.email}
-                        </s-text>
-                      </s-banner>
-                      <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-                        <s-button
-                          onClick={() => {
-                            setCustomerMode("update");
-                            setStep("createCustomer");
-                          }}
-                        >
-                          Update Customer
-                        </s-button>
-                        <s-button onClick={() => setStep("createCompany")}>
-                          Continue
-                        </s-button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <s-banner tone="warning">
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                          No customer found
-                        </div>
-                        <s-text>
-                          No existing customer found. You will need to create
-                          one.
-                        </s-text>
-                      </s-banner>
-                      <div style={{ marginTop: 12 }}>
-                        <s-button onClick={() => setStep("createCustomer")}>
-                          Create New Customer
-                        </s-button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* ── STEP: Create / Update Customer ───────────────────────── */}
-              {step === "createCustomer" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                  ref={createCustomerRef}
-                >
-                  <h4 style={{ marginTop: 0 }}>
-                    {customer ? "Update Customer" : "Create Customer"}
-                  </h4>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    {customer
-                      ? "Review and update the customer's details including address information."
-                      : "Fill in the customer details and address information below."}
-                  </p>
-
-                  {customer && (
-                    <div style={{ marginBottom: 12 }}>
-                      <s-banner tone="info">
-                        <s-text>
-                          {customer.firstName} {customer.lastName} ·{" "}
-                          {customer.email}
-                        </s-text>
-                      </s-banner>
-                    </div>
-                  )}
-
-                  <form
-                    style={{ display: "grid", gap: 4 }}
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const data = new FormData(e.currentTarget);
-
-                      if (customer) {
-                        // ── UPDATE path ──
-                        data.append("intent", "updateCustomer");
-                        data.append("customerId", customer.id || "");
-                        data.append(
-                          "customerEmail",
-                          customer.email || selected?.email || "",
-                        );
-                      } else {
-                        // ── CREATE path ──
-                        data.append("intent", "createCustomer");
-                      }
-
-                      flowFetcher.submit(data, { method: "post" });
-                    }}
-                  >
-                    <CustomerFormFields
-                      prefillEmail={customer?.email ?? selected.email}
-                      prefillFirstName={
-                        customer?.firstName ?? selected.firstName
-                      }
-                      prefillLastName={
-                        customer?.lastName ?? selected.lastName
-                      }
-                      prefillPhone={customer?.phone ?? s?.Phone ?? ""}
-                      prefillContactTitle={
-                        (selected as any)?.contactTitle ??
-                        cf?.contactTitle ??
-                        ""
-                      }
-                      prefillTaxId={cf?.taxId ?? ""}
-                      shipValues={s}
-                      billValues={b}
-                    />
-
-                    <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                      <s-button
-                        type="submit"
-                        {...(isCreatingCustomer || isUpdatingCustomer
-                          ? { loading: true }
-                          : {})}
-                      >
-                        {customer ? "Update Customer" : "Create Customer"}
-                      </s-button>
-                      <s-button
-                        variant="tertiary"
-                        onClick={() => setStep("check")}
-                        disabled={isCreatingCustomer || isUpdatingCustomer}
-                      >
-                        Back
-                      </s-button>
-                    </div>
-                  </form>
-
-                  {flowFetcher.data?.errors &&
-                    flowFetcher.data.errors.length > 0 && (
-                      <div style={{ marginTop: 16 }}>
-                        <s-banner tone="critical">
-                          <s-unordered-list>
-                            {flowFetcher.data.errors.map((err) => (
-                              <s-list-item key={err}>{err}</s-list-item>
-                            ))}
-                          </s-unordered-list>
-                        </s-banner>
-                      </div>
-                    )}
-                </div>
-              )}
-
-              {/* ── STEP: Create Company ──────────────────────────────────── */}
-              {step === "createCompany" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                  ref={createCompanyRef}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 8,
-                    }}
-                  >
-                    <h4 style={{ margin: 0 }}>Create Company & Location</h4>
-                    {company && editMode !== "update" && (
-                      <s-button
-                        variant="secondary"
-                        onClick={() => setEditMode("update")}
-                      >
-                        Update Company
-                      </s-button>
-                    )}
-                  </div>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Create the company record and main location.
-                  </p>
-
-                  {company ? (
-                    <>
-                      <s-banner tone="success">
-                        <s-text>
-                          {company.name} ·{" "}
-                          {company.locationName || "Main location"}
-                        </s-text>
-                      </s-banner>
-
-                      {editMode !== "update" && (
-                        <div
-                          style={{ marginTop: 12, display: "flex", gap: 10 }}
-                        >
-                          <s-button onClick={() => setStep("assign")}>
-                            Continue
-                          </s-button>
-                          <s-button
-                            variant="secondary"
-                            onClick={() =>
-                              setStep(customer ? "check" : "createCustomer")
-                            }
-                          >
-                            Back
-                          </s-button>
-                        </div>
-                      )}
-
-                      {editMode === "update" && (
-                        <form
-                          style={{
-                            display: "grid",
-                            gap: 12,
-                            marginTop: 16,
-                            padding: 16,
-                            background: "#f9fafb",
-                            borderRadius: 8,
-                            border: "1px solid #e3e3e3",
-                          }}
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            const data = new FormData(e.currentTarget);
-                            data.append("intent", "updateCompany");
-                            data.append("companyId", company?.id || "");
-                            data.append(
-                              "locationId",
-                              company?.locationId || "",
-                            );
-                            data.append(
-                              "customerEmail",
-                              customer?.email || selected?.email || "",
-                            );
-                            flowFetcher.submit(data, { method: "post" });
-                          }}
-                        >
-                          <h5 style={{ margin: "0 0 8px 0" }}>
-                            Edit Company Details
-                          </h5>
-                          <label style={labelStyle}>
-                            <span style={labelTextStyle}>Company name</span>
-                            <input
-                              name="companyName"
-                              defaultValue={company?.name || ""}
-                              required
-                              style={inputStyle}
-                            />
-                          </label>
-                          <label style={labelStyle}>
-                            <span style={labelTextStyle}>Payment terms</span>
-                            <select
-                              name="paymentTerms"
-                              defaultValue={
-                                company?.paymentTermsTemplateId || ""
-                              }
-                              style={{
-                                ...inputStyle,
-                                backgroundColor: "white",
-                              }}
-                            >
-                              <option value="">No payment terms</option>
-                              {paymentTermsTemplates?.map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <div
-                            style={{ display: "flex", gap: 10, marginTop: 8 }}
-                          >
-                            <s-button
-                              type="submit"
-                              {...(isUpdatingCompany ? { loading: true } : {})}
-                            >
-                              Update Company
-                            </s-button>
-                            <s-button
-                              variant="tertiary"
-                              type="button"
-                              onClick={() => setEditMode("create")}
-                              disabled={isUpdatingCompany}
-                            >
-                              Cancel
-                            </s-button>
-                          </div>
-                        </form>
-                      )}
-                    </>
-                  ) : (
-                    <form
-                      style={{ display: "grid", gap: 12, marginTop: 12 }}
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const data = new FormData(e.currentTarget);
-                        data.append("intent", "createCompany");
-                        data.append("customerId", customer?.id || "");
-                        data.append(
-                          "customerEmail",
-                          customer?.email || selected?.email || "",
-                        );
-                        flowFetcher.submit(data, { method: "post" });
-                      }}
-                    >
-                      <label style={labelStyle}>
-                        <span style={labelTextStyle}>Company name *</span>
-                        <input
-                          name="companyName"
-                          defaultValue={selected.companyName}
-                          required
-                          style={inputStyle}
-                        />
-                      </label>
-                      <label style={labelStyle}>
-                        <span style={labelTextStyle}>Payment terms</span>
-                        <select
-                          name="paymentTerms"
-                          defaultValue={
-                            (selected as any).paymentTermsTemplateId
-                          }
-                          style={{ ...inputStyle, backgroundColor: "white" }}
-                        >
-                          <option value="">No payment terms</option>
-                          {paymentTermsTemplates?.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div>
-                        <span
-                          style={{
-                            ...labelTextStyle,
-                            marginBottom: 4,
-                            display: "block",
-                          }}
-                        >
-                          Credit limit
-                        </span>
-                        <input
-                          name="creditLimit"
-                          type="number"
-                          defaultValue={(selected as any).creditLimit}
-                          onChange={(e) =>
-                            setCreditLimit(Number(e.target.value) || 0)
-                          }
-                          required
-                          style={{ ...inputStyle, width: 120 }}
-                        />
-                      </div>
-                      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                        <s-button
-                          type="submit"
-                          {...(isCreatingCompany ? { loading: true } : {})}
-                        >
-                          Create Company
-                        </s-button>
-                        <s-button
-                          variant="tertiary"
-                          onClick={() =>
-                            setStep(customer ? "check" : "createCustomer")
-                          }
-                          disabled={isCreatingCompany}
-                        >
-                          Back
-                        </s-button>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              )}
-
-              {/* ── STEP: Assign ─────────────────────────────────────────── */}
-              {step === "assign" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                  ref={assignRef}
-                >
-                  <h4 style={{ marginTop: 0 }}>Assign Main Contact</h4>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Assign the customer as the main contact for this company.
-                  </p>
-                  <div style={{ marginTop: 12 }}>
-                    <s-banner tone="info">
-                      <s-text>
-                        Customer: {customer?.firstName} {customer?.lastName}  {selected?.firstName} {selected?.lastName} (
-                        {customer?.email})
-                        <br />
-                        Company: {company?.name || selected?.companyName}
-                      </s-text>
-                    </s-banner>
-                  </div>
-                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                    <s-button
-                      onClick={() => {
-                        const companyIdToSend = company?.id || "";
-                        const customerIdToSend = customer?.id || "";
-                        const locationIdToSend = company?.locationId || "";
-                        if (
-                          !companyIdToSend ||
-                          !customerIdToSend ||
-                          !locationIdToSend
-                        ) {
-                          shopify.toast.show?.(
-                            "Company, customer, and location are required",
-                          );
-                          return;
-                        }
-                        flowFetcher.submit(
-                          {
-                            intent: "assignMainContact",
-                            companyId: companyIdToSend,
-                            customerId: customerIdToSend,
-                            locationId: locationIdToSend,
-                            customerFirstName: customer?.firstName || "",
-                            customerLastName: customer?.lastName || "",
-                            customerEmail: customer?.email || "",
-                          },
-                          { method: "post" },
-                        );
-                      }}
-                      {...(isAssigning ? { loading: true } : {})}
-                    >
-                      Assign Main Contact
-                    </s-button>
-                    <s-button
-                      variant="tertiary"
-                      onClick={() => setStep("createCompany")}
-                      disabled={isAssigning}
-                    >
-                      Back
-                    </s-button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── STEP: Welcome Email ───────────────────────────────────── */}
-              {step === "email" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                  ref={emailRef}
-                >
-                  <h4 style={{ marginTop: 0 }}>Send Welcome Email</h4>
-                  <p style={{ color: "#5c5f62", marginTop: 4 }}>
-                    Send a welcome email to notify the customer.
-                  </p>
-                  <div style={{ marginTop: 12 }}>
-                    <s-banner tone="info">
-                      <s-text>
-                        To: {customer?.email || selected.email}
-                        <br />
-                        Contact: {customer?.firstName || selected.firstName} {customer?.lastName || selected.lastName}
-                        <br />
-                        Company: {company?.name || selected?.companyName}
-                      </s-text>
-                    </s-banner>
-                  </div>
-
-                  {flowFetcher.data?.intent === "sendWelcomeEmail" &&
-                    flowFetcher.data?.success && (
-                      <div style={{ marginTop: 12 }}>
-                        <s-banner tone="success">
-                          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                            ✓ Welcome email sent successfully
-                          </div>
-                          <s-text>
-                            Email delivered to{" "}
-                            {customer?.email || selected.email}. Click "Next:
-                            Complete Approval" when ready.
-                          </s-text>
-                        </s-banner>
-                      </div>
-                    )}
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      marginTop: 16,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    {!(
-                      flowFetcher.data?.intent === "sendWelcomeEmail" &&
-                      flowFetcher.data?.success
-                    ) && (
-                      <s-button
-                        onClick={() =>
-                          flowFetcher.submit(
-                            {
-                              intent: "sendWelcomeEmail",
-                              email: customer?.email || selected.email,
-                              companyName:
-                                company?.name || selected.companyName,
-                              reviewNotes,
-                            },
-                            { method: "post" },
-                          )
-                        }
-                        {...(isSendingEmail ? { loading: true } : {})}
-                      >
-                        Send Welcome Email
-                      </s-button>
-                    )}
-
-                    {flowFetcher.data?.intent === "sendWelcomeEmail" &&
-                      flowFetcher.data?.success && (
-                        <s-button
-                          variant="primary"
-                          onClick={() => setStep("complete")}
-                        >
-                          Next: Complete Approval →
-                        </s-button>
-                      )}
-
-                    <s-button
-                      variant="tertiary"
-                      onClick={() => setStep("assign")}
-                      disabled={isSendingEmail}
-                    >
-                      Back
-                    </s-button>
-                    <s-button
-                      variant="tertiary"
-                      onClick={() => setStep("complete")}
-                      disabled={isSendingEmail}
-                    >
-                      Skip Email
-                    </s-button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── STEP: Complete ────────────────────────────────────────── */}
-              {step === "complete" && (
-                <div
-                  style={{
-                    border: "1px solid #e3e3e3",
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                  ref={completeRef}
-                >
-                  <h4 style={{ marginTop: 0 }}>Complete Approval</h4>
-
-                  <div
-                    style={{
-                      background: "#f9fafb",
-                      border: "1px solid #e3e3e3",
-                      borderRadius: 8,
-                      padding: 16,
-                      marginBottom: 16,
-                    }}
-                  >
-                    <strong>Approval Summary:</strong>
-                    <div
-                      style={{ marginTop: 8, fontSize: 14, color: "#5c5f62" }}
-                    >
-                      <div>Email: {customer?.email}</div>
-                      <div>
-                        Company: {company?.name || selected?.companyName}
-                      </div>
-                      {reviewNotes && (
-                        <div style={{ marginTop: 8 }}>
-                          <strong>Review Notes:</strong>
-                          <div
-                            style={{
-                              marginTop: 4,
-                              padding: 8,
-                              background: "white",
-                              borderRadius: 4,
-                              whiteSpace: "pre-wrap",
-                            }}
-                          >
-                            {reviewNotes}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {flowFetcher.data?.intent === "completeApproval" &&
-                  flowFetcher.data?.success ? (
-                    <>
-                      <s-banner tone="success">
-                        <div
-                          style={{
-                            fontWeight: 700,
-                            marginBottom: 6,
-                            fontSize: 15,
-                          }}
-                        >
-                          ✓ Registration Approved Successfully
-                        </div>
-                        <s-text>
-                          {customer?.firstName} {customer?.lastName} has been
-                          approved and their account is now active under{" "}
-                          <strong>
-                            {company?.name || selected?.companyName}
-                          </strong>
-                          .
-                        </s-text>
-                      </s-banner>
-                      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                        <s-button
-                          variant="primary"
-                          onClick={() => {
-                            setSelected(null);
-                            setCustomer(null);
-                            setCompany(null);
-                            setStep("check");
-                            setReviewNotes("");
-                            setEditMode("create");
-                          }}
-                        >
-                          Done — Close
-                        </s-button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <s-banner tone="success">
-                        <strong>Ready to approve</strong>
-                        <div style={{ marginTop: 4 }}>
-                          This will mark the registration as approved and
-                          activate the customer account.
-                        </div>
-                      </s-banner>
-                      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                        <s-button
-                          variant="primary"
-                          onClick={completeApproval}
-                          {...(isCompletingApproval ? { loading: true } : {})}
-                        >
-                          Confirm & Approve
-                        </s-button>
-                        <s-button
-                          variant="tertiary"
-                          onClick={() => setStep("email")}
-                          disabled={isCompletingApproval}
-                        >
-                          Back
-                        </s-button>
-                        <s-button
-                          variant="tertiary"
-                          onClick={() => setSelected(null)}
-                          disabled={isCompletingApproval}
-                        >
-                          Cancel
-                        </s-button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* ── Error Display ─────────────────────────────────────────── */}
-              {flowFetcher.data?.errors &&
-                flowFetcher.data.errors.length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <s-banner tone="critical">
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                        Something went wrong
-                      </div>
-                      <s-unordered-list>
-                        {flowFetcher.data.errors.map((err) => (
-                          <s-list-item key={err}>{err}</s-list-item>
-                        ))}
-                      </s-unordered-list>
-                    </s-banner>
-                  </div>
-                )}
-            </div>
-          </div>
-        </div>
+      {/* ── Configure Company UI ─────────────────────────────────────────── */}
+      {showConfigureUI && selected && (
+        <ConfigureCompanyUI
+          submission={selected}
+          company={company}
+          customer={customer}
+          paymentTermsTemplates={paymentTermsTemplates}
+          onApprove={handleConfigureApprove}
+          onCancel={resetPipeline}
+          isApproving={isApproving}
+          pipelineStep={pipelineStep}
+          pipelineError={pipelineError}
+        />
       )}
     </s-page>
   );
