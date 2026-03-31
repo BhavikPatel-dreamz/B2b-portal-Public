@@ -45,6 +45,13 @@ function deserializeConfig(stored: StoredConfig): FormConfig {
           options: f.options,
           placeholder: f.placeholder,
           content: f.content,
+          headingTag: f.headingTag,
+          headingAlignment: f.headingAlignment,
+          headingWidth: f.headingWidth,
+          paragraphFontSize: f.paragraphFontSize,
+          linkUrl: f.linkUrl,
+          linkOpenInNewTab: f.linkOpenInNewTab,
+          linkAlignment: f.linkAlignment,
         }),
       ),
   );
@@ -186,4 +193,3 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 };
-

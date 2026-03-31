@@ -14,11 +14,26 @@ import {
   boundary,
   AdminApiContext,
 } from "@shopify/shopify-app-react-router/server";
+import {fetchAllCatalogs,fetchPriceLists} from "app/utils/b2b-customer.server";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { sendCompanyAssignmentEmail } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
+import EditDetailsModal, {
+  type CountryOption,
+  type FormField,
+  type FormSection,
+} from "app/components/registrations/EditDetailsModal";
+import {
+  DEFAULT_CONFIG,
+  SECTION_LABELS,
+  deserializeConfig,
+  type FieldDef,
+  type FormConfig,
+  type FieldWidth,
+  type StoredConfig,
+} from "./app.regitration-form";
 
 interface RegistrationSubmission {
   paymentTermsTemplateId: string;
@@ -50,6 +65,7 @@ interface ActionJson {
   success: boolean;
   message?: string;
   errors?: string[];
+  submission?: any;
   customer?: {
     id: string;
     email: string;
@@ -83,17 +99,6 @@ interface ActionJson {
       userErrors: { message: string; field?: string[] }[];
     };
   };
-}
-
-interface CompanyAccount {
-  id: string;
-  name: string;
-  shopifyCompanyId: string | null;
-  contactName: string | null;
-  contactEmail: string | null;
-  creditLimit: string;
-  paymentTerms: string | null;
-  updatedAt: string;
 }
 
 const normalizeCustomerId = (id?: string | null) => {
@@ -145,7 +150,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 
-  // Fetch ALL submissions (PENDING, APPROVED, REJECTED)
+  const formFieldConfig = await prisma.formFieldConfig.findUnique({
+    where: { shopId: store.id },
+  });
+
+  let config = DEFAULT_CONFIG;
+  if (formFieldConfig?.fields) {
+    try {
+      const stored = formFieldConfig.fields as unknown as StoredConfig;
+      if (
+        Array.isArray(stored) &&
+        stored.length > 0 &&
+        stored.every(
+          (g) =>
+            g.step?.id &&
+            g.step?.label &&
+            Array.isArray(g.fields) &&
+            g.fields.every((f) => f.key && f.label && f.type !== undefined),
+        )
+      ) {
+        config = deserializeConfig(stored);
+      }
+    } catch {
+      config = DEFAULT_CONFIG;
+    }
+  }
+
   const [pendingSubmissions, approvedSubmissions, rejectedSubmissions] =
     await Promise.all([
       prisma.registrationSubmission.findMany({
@@ -185,27 +215,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { name: "asc" },
   });
 
-  // Attach Shopify location info for each company (if we have a shopifyCompanyId)
   const companiesWithLocations = await Promise.all(
     companies.map(async (c) => {
-      if (!c.shopifyCompanyId) {
+      if (!c.shopifyCompanyId)
         return { ...c, locationId: null, locationName: null };
-      }
-
       try {
         const locationResp = await admin.graphql(
           `#graphql
           query GetCompanyLocation($companyId: ID!) {
             company(id: $companyId) {
-              locations(first: 1) {
-                nodes { id name }
-              }
+              locations(first: 1) { nodes { id name } }
             }
-          }
-        `,
+          }`,
           { variables: { companyId: c.shopifyCompanyId } },
         );
-
         const locationJson = await locationResp.json();
         const loc = locationJson?.data?.company?.locations?.nodes?.[0] || null;
         return {
@@ -220,41 +243,113 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
   );
 
-  // Fetch payment terms templates
   const paymentTermsResponse = await admin.graphql(
     `#graphql
-    query {
-      paymentTermsTemplates {
-        id
-        name
-        paymentTermsType
-        dueInDays
-        description
-        translatedName
-      }
-    }`,
+    query { paymentTermsTemplates { id name paymentTermsType dueInDays description translatedName } }`,
   );
-
   const paymentTermsData = await paymentTermsResponse.json();
   const paymentTermsTemplates = paymentTermsData.data.paymentTermsTemplates;
 
+  const shippingCountriesResponse = await admin.graphql(
+    `#graphql
+    query GetShippingCountriesWithProvinces {
+      deliveryProfiles(first: 1) {
+        nodes {
+          profileLocationGroups {
+            locationGroupZones(first: 50) {
+              nodes {
+                zone {
+                  countries {
+                    code { countryCode }
+                    provinces { code name }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      shop {
+        countriesInShippingZones { countryCodes includeRestOfWorld }
+      }
+    }`,
+  );
+  const shippingCountriesPayload = await shippingCountriesResponse.json();
+  const validCountryCodes = new Set<string>(
+    shippingCountriesPayload?.data?.shop?.countriesInShippingZones
+      ?.countryCodes || [],
+  );
+
+  type ProvinceOption = { value: string; label: string };
+  const countryProvincesMap = new Map<string, ProvinceOption[]>();
+  const profiles =
+    shippingCountriesPayload?.data?.deliveryProfiles?.nodes || [];
+  for (const profile of profiles) {
+    for (const group of profile.profileLocationGroups || []) {
+      for (const zoneNode of group.locationGroupZones?.nodes || []) {
+        for (const country of zoneNode.zone?.countries || []) {
+          const countryCode: string = country.code?.countryCode;
+          if (!countryCode || !validCountryCodes.has(countryCode)) continue;
+          const provinces: ProvinceOption[] = (country.provinces || []).map(
+            (p: { code: string; name: string }) => ({
+              value: p.code,
+              label: p.name,
+            }),
+          );
+          if (countryProvincesMap.has(countryCode)) {
+            const existing = countryProvincesMap.get(countryCode)!;
+            const existingCodes = new Set(existing.map((e) => e.value));
+            for (const p of provinces) {
+              if (!existingCodes.has(p.value)) existing.push(p);
+            }
+          } else {
+            countryProvincesMap.set(countryCode, provinces);
+          }
+        }
+      }
+    }
+  }
+
+  const shippingCountryOptions: CountryOption[] = Array.from(
+    validCountryCodes,
+  ).map((countryCode: string) => ({
+    value: countryCode,
+    label:
+      new Intl.DisplayNames(["en"], { type: "region" }).of(countryCode) ||
+      countryCode,
+  }));
+  const shippingProvincesByCountry = Object.fromEntries(countryProvincesMap);
+
+  // ── NEW: fetch catalogs + price lists in parallel ──
+  const [allCatalogs, priceLists] = await Promise.all([
+    fetchAllCatalogs(admin),
+    fetchPriceLists(admin),
+  ]);
+
   return Response.json({
-    submissions: submissions.map((submission) => ({
-      ...submission,
-      createdAt: submission.createdAt.toISOString(),
-      // reviewedAt: submission.reviewedAt
-      //   ? submission.reviewedAt.toISOString()
-      //   : null,
+    submissions: submissions.map((s) => ({
+      ...s,
+      createdAt: s.createdAt.toISOString(),
     })),
     companies: companiesWithLocations.map((company) => ({
       ...company,
       creditLimit: company.creditLimit.toString(),
       updatedAt: company.updatedAt.toISOString(),
     })),
+    formConfig: config,
+    shippingCountryOptions:
+      shippingCountryOptions.length > 0
+        ? [{ value: "", label: "Country" }, ...shippingCountryOptions]
+        : DEFAULT_COUNTRY_OPTIONS,
+    shippingProvincesByCountry,
     paymentTermsTemplates,
+    // ── NEW ──
+    allCatalogs,
+    priceLists,
     storeMissing: false,
   });
 };
+
 const parseForm = async (request: Request) => {
   const formData = await request.formData();
   return Object.fromEntries(formData);
@@ -617,6 +712,52 @@ function parseFormFields(form: Record<string, any>) {
   });
 
   return { shipping, billing, customFields };
+}
+
+function mapEditFormAddressKey(key: string) {
+  const shippingMap: Record<string, string> = {
+    shDepartment: "Dept",
+    shFirstName: "FirstName",
+    shLastName: "LastName",
+    shPhone: "Phone",
+    shAddr1: "Addr1",
+    shAddr2: "Addr2",
+    shCity: "City",
+    shCountry: "Country",
+    shState: "State",
+    shZip: "Zip",
+  };
+
+  const billingMap: Record<string, string> = {
+    biDepartment: "Dept",
+    biFirstName: "FirstName",
+    biLastName: "LastName",
+    biPhone: "Phone",
+    biAddr1: "Addr1",
+    biAddr2: "Addr2",
+    biCity: "City",
+    biCountry: "Country",
+    biState: "State",
+    biZip: "Zip",
+  };
+
+  if (key.startsWith("ship")) {
+    return { bucket: "shipping" as const, field: key.replace(/^ship/, "") };
+  }
+
+  if (key.startsWith("bill")) {
+    return { bucket: "billing" as const, field: key.replace(/^bill/, "") };
+  }
+
+  if (shippingMap[key]) {
+    return { bucket: "shipping" as const, field: shippingMap[key] };
+  }
+
+  if (billingMap[key]) {
+    return { bucket: "billing" as const, field: billingMap[key] };
+  }
+
+  return null;
 }
 // ── Assign shipping/billing address to company location ──
 export async function assignLocationAddresses(
@@ -1990,6 +2131,506 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: "Registration rejected",
         });
       }
+      case "updatecustomerCompanyDetails": {
+        const registrationId = (form.registrationId as string)?.trim();
+        const customerId = normalizeCustomerId(form.customerId as string);
+        const incomingCompanyId = (form.companyId as string)?.trim() || null;
+        const incomingLocationId =
+          (form.companyLocationId as string)?.trim() || null;
+        const companyName = (form.companyName as string)?.trim() || "";
+        const locationName =
+          (form.locationName as string)?.trim() || companyName || "";
+        const email = (form.email as string)?.trim() || "";
+        const firstName = (form.firstName as string)?.trim() || "";
+        const lastName = (form.lastName as string)?.trim() || "";
+        const contactTitle =
+          (form.contactTitle as string)?.trim() ||
+          (form.jobTitle as string)?.trim() ||
+          "";
+        const phone =
+          (form.phone as string)?.trim() ||
+          (form.contactPhone as string)?.trim() ||
+          undefined;
+        const useSameAddress =
+          String(form.useSameAddress ?? form.billSameAsShip ?? "") === "true";
+
+        if (!registrationId) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Registration ID is required"],
+          });
+        }
+
+        const existingRegistration =
+          await prisma.registrationSubmission.findUnique({
+            where: { id: registrationId },
+          });
+
+        if (!existingRegistration) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Registration not found"],
+          });
+        }
+        console.log(
+          existingRegistration.shipping,
+          "existingRegistration.shipping5555",
+        );
+        const shipping = {
+          ...((existingRegistration.shipping as Record<string, any>) || {}),
+        };
+        console.log(
+          existingRegistration.billing,
+          "existingRegistration.shipping4444448",
+        );
+        const billing = {
+          ...((existingRegistration.billing as Record<string, any>) || {}),
+        };
+        const customFields = {
+          ...(((existingRegistration.customFields as Record<
+            string,
+            any
+          > | null) || {}) as Record<string, any>),
+        };
+
+        const controlKeys = new Set([
+          "intent",
+          "registrationId",
+          "customerId",
+          "companyId",
+          "companyLocationId",
+        ]);
+
+        Object.entries(form).forEach(([key, rawValue]) => {
+          if (controlKeys.has(key)) return;
+
+          const value =
+            typeof rawValue === "string"
+              ? rawValue.trim()
+              : String(rawValue ?? "");
+
+          const addressKey = mapEditFormAddressKey(key);
+          if (addressKey?.bucket === "shipping") {
+            shipping[addressKey.field] = value;
+            return;
+          }
+
+          if (addressKey?.bucket === "billing") {
+            billing[addressKey.field] = value;
+            return;
+          }
+
+          if (
+            [
+              "companyName",
+              "email",
+              "firstName",
+              "lastName",
+              "contactTitle",
+              "jobTitle",
+              "phone",
+              "contactPhone",
+              "locationName",
+              "useSameAddress",
+            ].includes(key)
+          ) {
+            return;
+          }
+
+          customFields[key] = value;
+        });
+
+        customFields.billSameAsShip = useSameAddress ? "true" : "false";
+        billing.SameAsShip = useSameAddress ? "true" : "false";
+
+        if (customFields.taxId && !customFields.taxRegistrationId) {
+          customFields.taxRegistrationId = customFields.taxId;
+        }
+        if (customFields.taxRegistrationId && !customFields.taxId) {
+          customFields.taxId = customFields.taxRegistrationId;
+        }
+        if (phone) {
+          customFields.phone = phone;
+        }
+        if (contactTitle) {
+          customFields.jobTitle = contactTitle;
+        }
+
+        let updatedCustomer: ActionJson["customer"] = null;
+        if (customerId) {
+          const customerResponse = await admin.graphql(
+            `#graphql
+            mutation UpdateCustomer($input: CustomerInput!) {
+              customerUpdate(input: $input) {
+                customer {
+                  id
+                  email
+                  firstName
+                  lastName
+                  phone
+                }
+                userErrors { field message }
+              }
+            }`,
+            {
+              variables: {
+                input: {
+                  id: customerId,
+                  email: email || undefined,
+                  firstName: firstName || undefined,
+                  lastName: lastName || undefined,
+                  phone,
+                },
+              },
+            },
+          );
+
+          const customerPayload = await customerResponse.json();
+          const customerErrors = buildUserErrorList(customerPayload);
+          if (customerErrors.length) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: customerErrors,
+            });
+          }
+
+          updatedCustomer =
+            customerPayload?.data?.customerUpdate?.customer ?? null;
+        }
+
+        const updatedRegistration = await prisma.registrationSubmission.update({
+          where: { id: registrationId },
+          data: {
+            companyName: companyName || existingRegistration.companyName,
+            email: email || existingRegistration.email,
+            firstName: firstName || existingRegistration.firstName,
+            lastName: lastName || existingRegistration.lastName,
+            contactTitle:
+              contactTitle || existingRegistration.contactTitle || "",
+            shopifyCustomerId:
+              customerId || existingRegistration.shopifyCustomerId,
+            shipping,
+            billing,
+            customFields,
+          },
+        });
+
+        let updatedCompany: ActionJson["company"] = null;
+        let localCompanyId: string | null = null;
+
+        if (companyName) {
+          let companyId = incomingCompanyId;
+          let locationId = incomingLocationId;
+
+          if (!companyId) {
+            const companyLookupResponse = await admin.graphql(
+              `#graphql
+              query CompaniesByName($query: String!) {
+                companies(first: 1, query: $query) {
+                  nodes {
+                    id
+                    name
+                    locations(first: 1) {
+                      nodes { id name }
+                    }
+                  }
+                }
+              }`,
+              {
+                variables: { query: `name:'${companyName}'` },
+              },
+            );
+
+            const companyLookupPayload = await companyLookupResponse.json();
+            const existingShopifyCompany =
+              companyLookupPayload?.data?.companies?.nodes?.[0] || null;
+
+            if (existingShopifyCompany) {
+              companyId = existingShopifyCompany.id;
+              locationId =
+                existingShopifyCompany.locations?.nodes?.[0]?.id || null;
+            } else {
+              const createCompanyResponse = await admin.graphql(
+                `#graphql
+                mutation CompanyCreate($input: CompanyCreateInput!) {
+                  companyCreate(input: $input) {
+                    company { id name }
+                    userErrors { field message }
+                  }
+                }`,
+                {
+                  variables: {
+                    input: {
+                      company: { name: companyName },
+                    },
+                  },
+                },
+              );
+
+              const createCompanyPayload = await createCompanyResponse.json();
+              const createCompanyErrors =
+                buildUserErrorList(createCompanyPayload);
+              if (createCompanyErrors.length) {
+                return Response.json({
+                  intent,
+                  success: false,
+                  errors: createCompanyErrors,
+                });
+              }
+
+              companyId =
+                createCompanyPayload?.data?.companyCreate?.company?.id || null;
+            }
+          }
+
+          if (companyId) {
+            const updateCompanyResponse = await admin.graphql(
+              `#graphql
+              mutation CompanyUpdate($companyId: ID!, $input: CompanyInput!) {
+                companyUpdate(companyId: $companyId, input: $input) {
+                  company { id name }
+                  userErrors { field message }
+                }
+              }`,
+              {
+                variables: {
+                  companyId,
+                  input: { name: companyName },
+                },
+              },
+            );
+
+            const updateCompanyPayload = await updateCompanyResponse.json();
+            const companyErrors = buildUserErrorList(updateCompanyPayload);
+            if (companyErrors.length) {
+              return Response.json({
+                intent,
+                success: false,
+                errors: companyErrors,
+              });
+            }
+
+            const locationPayload = await admin
+              .graphql(
+                `#graphql
+                query GetCompanyLocation($companyId: ID!) {
+                  company(id: $companyId) {
+                    locations(first: 1) {
+                      nodes { id name }
+                    }
+                  }
+                }`,
+                { variables: { companyId } },
+              )
+              .then((res) => res.json());
+
+            const location =
+              locationPayload?.data?.company?.locations?.nodes?.[0] || null;
+
+            if (location?.id) {
+              locationId = location.id;
+
+              const updateLocationResponse = await admin.graphql(
+                `#graphql
+                mutation UpdateCompanyLocation(
+                  $companyLocationId: ID!
+                  $locationName: String
+                ) {
+                  companyLocationUpdate(
+                    companyLocationId: $companyLocationId
+                    input: { name: $locationName }
+                  ) {
+                    companyLocation { id name }
+                    userErrors { field message }
+                  }
+                }`,
+                {
+                  variables: {
+                    companyLocationId: location.id,
+                    locationName: locationName || companyName,
+                  },
+                },
+              );
+
+              const updateLocationPayload = await updateLocationResponse.json();
+              const locationErrors = buildUserErrorList(updateLocationPayload);
+              if (locationErrors.length) {
+                return Response.json({
+                  intent,
+                  success: false,
+                  errors: locationErrors,
+                });
+              }
+
+              await assignLocationAddresses(
+                admin,
+                location.id,
+                updatedRegistration,
+              );
+            }
+
+            const companyAccount = await prisma.companyAccount.upsert({
+              where: {
+                shopId_shopifyCompanyId: {
+                  shopId: store.id,
+                  shopifyCompanyId: companyId,
+                },
+              },
+              update: {
+                name: companyName,
+                contactEmail: email || updatedRegistration.email,
+                contactName:
+                  `${firstName || updatedRegistration.firstName} ${lastName || updatedRegistration.lastName}`.trim(),
+              },
+              create: {
+                shopId: store.id,
+                shopifyCompanyId: companyId,
+                name: companyName,
+                contactEmail: email || updatedRegistration.email,
+                contactName:
+                  `${firstName || updatedRegistration.firstName} ${lastName || updatedRegistration.lastName}`.trim(),
+              },
+            });
+
+            localCompanyId = companyAccount.id;
+            updatedCompany = {
+              id: companyId,
+              name: companyName,
+              locationId: locationId || undefined,
+              locationName: locationName || undefined,
+            };
+          }
+        }
+
+        const userWhere = customerId
+          ? {
+              OR: [
+                { shopifyCustomerId: customerId },
+                { shopId: store.id, email: email || updatedRegistration.email },
+              ],
+            }
+          : {
+              shopId: store.id,
+              email: email || updatedRegistration.email,
+            };
+
+        const existingUser = await prisma.user.findFirst({ where: userWhere });
+
+        if (existingUser) {
+          await prisma.user.update({
+            where: { id: existingUser.id },
+            data: {
+              email: email || updatedRegistration.email,
+              firstName: firstName || updatedRegistration.firstName,
+              lastName: lastName || updatedRegistration.lastName,
+              shopifyCustomerId: customerId || existingUser.shopifyCustomerId,
+              companyId: localCompanyId || existingUser.companyId,
+            },
+          });
+        } else if (email || updatedRegistration.email) {
+          await prisma.user.create({
+            data: {
+              email: email || updatedRegistration.email,
+              firstName: firstName || updatedRegistration.firstName,
+              lastName: lastName || updatedRegistration.lastName,
+              shopifyCustomerId: customerId,
+              shopId: store.id,
+              companyId: localCompanyId,
+              status: "PENDING",
+              role: "STORE_ADMIN",
+              password: "",
+              companyRole: "admin",
+            },
+          });
+        }
+
+        return Response.json({
+          intent,
+          success: true,
+          customer: updatedCustomer,
+          company: updatedCompany,
+          submission: {
+            ...updatedRegistration,
+            createdAt: updatedRegistration.createdAt.toISOString(),
+          },
+          message: "Customer and company details updated",
+        });
+      }
+
+      case "assignCatalog": {
+        const catalogId = (form.catalogId as string)?.trim();
+        const locationId = (form.locationId as string)?.trim();
+        if (!catalogId || !locationId) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["catalogId and locationId required"],
+          });
+        }
+        const res = await admin
+          .graphql(
+            `#graphql
+      mutation CatalogContextUpdate($id: ID!, $contextsToAdd: [ID!]!) {
+        catalogContextUpdate(id: $id, contextsToAdd: $contextsToAdd) {
+          catalog { id title }
+          userErrors { field message }
+        }
+      }`,
+            { variables: { id: catalogId, contextsToAdd: [locationId] } },
+          )
+          .then((r: any) => r.json());
+        const errs = res?.data?.catalogContextUpdate?.userErrors || [];
+        if (errs.length)
+          return Response.json({
+            intent,
+            success: false,
+            errors: errs.map((e: any) => e.message),
+          });
+        return Response.json({
+          intent,
+          success: true,
+          message: "Catalog assigned",
+        });
+      }
+
+      case "removeCatalog": {
+        const catalogId = (form.catalogId as string)?.trim();
+        const locationId = (form.locationId as string)?.trim();
+        if (!catalogId || !locationId) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["catalogId and locationId required"],
+          });
+        }
+        const res = await admin
+          .graphql(
+            `#graphql
+      mutation CatalogContextUpdate($id: ID!, $contextsToRemove: [ID!]!) {
+        catalogContextUpdate(id: $id, contextsToRemove: $contextsToRemove) {
+          catalog { id title }
+          userErrors { field message }
+        }
+      }`,
+            { variables: { id: catalogId, contextsToRemove: [locationId] } },
+          )
+          .then((r: any) => r.json());
+        const errs = res?.data?.catalogContextUpdate?.userErrors || [];
+        if (errs.length)
+          return Response.json({
+            intent,
+            success: false,
+            errors: errs.map((e: any) => e.message),
+          });
+        return Response.json({
+          intent,
+          success: true,
+          message: "Catalog removed",
+        });
+      }
 
       default:
         return Response.json({
@@ -2015,58 +2656,6 @@ const formatDate = (value?: string | null) => {
   const date = new Date(value);
   return date.toLocaleString();
 };
-
-function StepBadge({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    // <div
-    //   onClick={onClick}
-    //   style={{
-    //     padding: "6px 14px",
-    //     borderRadius: 20,
-    //     cursor: "pointer",
-    //     background: active ? "#1f2937" : "#e5e7eb",
-    //     color: active ? "#ffffff" : "#111827",
-    //     fontSize: 13,
-    //     fontWeight: 500,
-    //     userSelect: "none",
-    //   }}
-    // >
-    //   {label}
-    // </div>
-    <div
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick?.();
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      aria-pressed={active}
-      style={{
-        padding: "6px 14px",
-        borderRadius: 20,
-        cursor: "pointer",
-        background: active ? "#1f2937" : "#e5e7eb",
-        color: active ? "#ffffff" : "#111827",
-        fontSize: 13,
-        fontWeight: 500,
-        userSelect: "none",
-      }}
-    >
-      {label}
-    </div>
-  );
-}
 // Pipeline steps in order
 type PipelineStep =
   | "idle"
@@ -2199,20 +2788,797 @@ const sectionStyle: React.CSSProperties = {
   gap: 10,
 };
 
-const sectionHeadingStyle: React.CSSProperties = {
-  margin: "0 0 4px 0",
-  fontSize: 13,
-  fontWeight: 700,
-  color: "#1a1a1a",
-  textTransform: "lowercase",
+export type FieldType =
+  | "text"
+  | "email"
+  | "phone"
+  | "select"
+  | "readonly"
+  | "checkbox"
+  | "textarea";
+
+export interface FormField {
+  key: string; // unique key — used as editForm[key]
+  label: string; // placeholder / label shown to the user
+  type: FieldType;
+  section: string; // which section this field belongs to
+  order: number; // display order within the section
+  width?: FieldWidth;
+  readOnly?: boolean; // disables editing
+  readOnlyHint?: string; // small hint below read-only fields
+  options?: { value: string; label: string }[]; // for "select" type
+  countryCode?: string; // for "phone" type — flag + dial code
+  flagEmoji?: string; // for "phone" type
+  // Maps to a dot-path in submission / company / customer
+  // e.g. "submission.companyName" | "submission.customFields.taxRegistrationId"
+  // e.g. "shipping.Addr1" | "customer.email"
+  sourcePath: string;
+}
+
+export interface FormSection {
+  key: string; // unique section key
+  label: string; // section heading (shown in lowercase in the modal)
+  order: number; // display order of the section
+}
+
+const DEFAULT_COUNTRY_OPTIONS: CountryOption[] = [
+  { value: "", label: "Country" },
+  { value: "India", label: "India" },
+  { value: "US", label: "United States" },
+  { value: "GB", label: "United Kingdom" },
+  { value: "AU", label: "Australia" },
+  { value: "CA", label: "Canada" },
+];
+
+const DEFAULT_STATE_OPTIONS: CountryOption[] = [
+  { value: "", label: "State / Province" },
+];
+
+const COUNTRY_PHONE_META: Record<
+  string,
+  { dialCode: string; flagEmoji: string }
+> = {
+  IN: { dialCode: "+91", flagEmoji: "🇮🇳" },
+  INDIA: { dialCode: "+91", flagEmoji: "🇮🇳" },
+  US: { dialCode: "+1", flagEmoji: "🇺🇸" },
+  USA: { dialCode: "+1", flagEmoji: "🇺🇸" },
+  "UNITED STATES": { dialCode: "+1", flagEmoji: "🇺🇸" },
+  GB: { dialCode: "+44", flagEmoji: "🇬🇧" },
+  UK: { dialCode: "+44", flagEmoji: "🇬🇧" },
+  "UNITED KINGDOM": { dialCode: "+44", flagEmoji: "🇬🇧" },
+  AU: { dialCode: "+61", flagEmoji: "🇦🇺" },
+  AUSTRALIA: { dialCode: "+61", flagEmoji: "🇦🇺" },
+  CA: { dialCode: "+1", flagEmoji: "🇨🇦" },
+  CANADA: { dialCode: "+1", flagEmoji: "🇨🇦" },
 };
 
-// ─── Configure Company UI ─────────────────────────────────────────────────────
+const COUNTRY_CODE_ALIASES: Record<string, string> = {
+  INDIA: "IN",
+  "UNITED STATES": "US",
+  USA: "US",
+  "UNITED KINGDOM": "GB",
+  UK: "GB",
+  AUSTRALIA: "AU",
+  CANADA: "CA",
+};
+
+function normalizeCountryCode(countryValue?: string | null) {
+  const normalized = (countryValue || "").trim().toUpperCase();
+  return COUNTRY_CODE_ALIASES[normalized] || normalized;
+}
+
+function getPhoneMetaForCountry(countryValue?: string | null) {
+  const normalized = normalizeCountryCode(countryValue);
+  return COUNTRY_PHONE_META[normalized] || { dialCode: "+91", flagEmoji: "🇮🇳" };
+}
+
+function getProvinceOptionsForCountry(
+  countryValue?: string | null,
+  shippingProvincesByCountry?: Record<string, CountryOption[]>,
+) {
+  const normalized = normalizeCountryCode(countryValue);
+  const dynamicProvinceOptions = shippingProvincesByCountry?.[normalized] || [];
+
+  if (dynamicProvinceOptions.length > 0) {
+    const hasPlaceholder = dynamicProvinceOptions.some(
+      (option) => option.value === "",
+    );
+
+    return hasPlaceholder
+      ? dynamicProvinceOptions
+      : [{ value: "", label: "State / Province" }, ...dynamicProvinceOptions];
+  }
+  console.log("Using default province options for", normalized);
+
+  return [{ value: "", label: "State / Province" }];
+}
+
+const titleCaseSection = (value: string) =>
+  value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+function getFieldSourcePath(field: FieldDef): string {
+  if (field.section === "shipping" && field.key.startsWith("ship")) {
+    return `shipping.${field.key.replace(/^ship/, "")}`;
+  }
+
+  if (field.section === "billing" && field.key.startsWith("bill")) {
+    return `billing.${field.key.replace(/^bill/, "")}`;
+  }
+
+  switch (field.key) {
+    case "email":
+      return "customer.email";
+    case "companyName":
+    case "firstName":
+    case "lastName":
+    case "website":
+    case "businessType":
+    case "additionalInfo":
+    case "contactTitle":
+    case "locationName":
+    case "phone":
+      return `submission.${field.key}`;
+    case "taxId":
+      return "submission.customFields.taxId";
+    default:
+      return `submission.customFields.${field.key}`;
+  }
+}
+
+function mapConfigFieldToEditField(
+  field: FieldDef,
+  countryOptions: CountryOption[],
+): FormField | null {
+  if (
+    field.isDisplay ||
+    field.type === "heading" ||
+    field.type === "paragraph" ||
+    field.type === "link" ||
+    field.type === "divider" ||
+    field.type === "date" ||
+    field.type === "file" ||
+    field.type === "multi-check"
+  ) {
+    return null;
+  }
+
+  let type: FieldType = "text";
+  let options: FormField["options"];
+  let readOnly = false;
+  let readOnlyHint: string | undefined;
+
+  if (field.key === "email") {
+    type = "readonly";
+    readOnly = true;
+    readOnlyHint = "Email cannot be changed";
+  } else if (field.type === "phone") {
+    type = "phone";
+  } else if (
+    field.type === "country" ||
+    field.type === "state" ||
+    field.type === "select" ||
+    field.type === "radio"
+  ) {
+    type = "select";
+    options =
+      field.options?.map((option) => ({ value: option, label: option })) ||
+      (field.type === "country"
+        ? countryOptions
+        : field.type === "state"
+          ? DEFAULT_STATE_OPTIONS
+          : []);
+  } else if (field.type === "checkbox") {
+    type = "checkbox";
+  } else if (field.type === "textarea") {
+    type = "textarea";
+  } else if (field.type === "email") {
+    type = "email";
+  }
+
+  return {
+    key: field.key,
+    label: field.label,
+    type,
+    section: field.section || "general",
+    order: field.order,
+    width: field.width,
+    readOnly,
+    readOnlyHint,
+    options,
+    sourcePath: getFieldSourcePath(field),
+    countryCode: field.type === "phone" ? "+91" : undefined,
+    flagEmoji: field.type === "phone" ? "🇮🇳" : undefined,
+  };
+}
+
+function buildEditModalConfig(
+  config: FormConfig,
+  countryOptions: CountryOption[],
+): {
+  sections: FormSection[];
+  fields: FormField[];
+} {
+  const fields = [...config.fields]
+    .sort((a, b) => {
+      if (a.stepIndex !== b.stepIndex) return a.stepIndex - b.stepIndex;
+      return a.order - b.order;
+    })
+    .map((field) => mapConfigFieldToEditField(field, countryOptions))
+    .filter((field): field is FormField => field !== null);
+
+  const sectionOrder = new Map<string, number>();
+  fields.forEach((field) => {
+    if (!sectionOrder.has(field.section)) {
+      sectionOrder.set(field.section, sectionOrder.size + 1);
+    }
+  });
+
+  const sections = Array.from(sectionOrder.entries()).map(([key, order]) => ({
+    key,
+    order,
+    label: SECTION_LABELS[key] ?? titleCaseSection(key),
+  }));
+
+  return { sections, fields };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper — resolve initial value from submission / company / customer
+// via the field's sourcePath (e.g. "shipping.Addr1", "customer.email")
+// ─────────────────────────────────────────────────────────────────────────────
+function resolveSourceValue(
+  sourcePath: string,
+  submission: any,
+  customer: any,
+): string {
+  const [root, ...rest] = sourcePath.split(".");
+  const key = rest.join(".");
+
+  if (root === "customer") {
+    return customer?.[key] ?? "";
+  }
+  if (root === "submission") {
+    if (key.startsWith("customFields.")) {
+      const cfKey = key.replace("customFields.", "");
+      if (cfKey === "taxId") {
+        return (
+          (submission as any)?.customFields?.taxId ??
+          (submission as any)?.customFields?.taxRegistrationId ??
+          ""
+        );
+      }
+      return (submission as any)?.customFields?.[cfKey] ?? "";
+    }
+    return (submission as any)?.[key] ?? "";
+  }
+  if (root === "shipping") {
+    const s = (submission as any)?.shipping as
+      | Record<string, string>
+      | undefined;
+    return s?.[key] ?? "";
+  }
+  if (root === "billing") {
+    const b = (submission as any)?.billing as
+      | Record<string, string>
+      | undefined;
+    return b?.[key] ?? "";
+  }
+  return "";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Build initial editForm state from config + data
+// ─────────────────────────────────────────────────────────────────────────────
+export function buildInitialEditForm(
+  submission: any,
+  customer: any,
+  billingSame: boolean,
+  fields: FormField[],
+): Record<string, string | boolean> {
+  const shipping = (submission as any)?.shipping as
+    | Record<string, string>
+    | undefined;
+  const billing = (submission as any)?.billing as
+    | Record<string, string>
+    | undefined;
+  const form: Record<string, string | boolean> = {
+    companyName: submission.companyName || "",
+    taxRegistrationId:
+      (submission as any)?.customFields?.taxRegistrationId ??
+      (submission as any)?.customFields?.taxId ??
+      "",
+    firstName: submission.firstName || "",
+    lastName: submission.lastName || "",
+    jobTitle:
+      (submission as any)?.contactTitle ??
+      (submission as any)?.customFields?.jobTitle ??
+      "",
+    contactPhone:
+      submission.phone ?? (submission as any)?.customFields?.phone ?? "",
+    shDepartment: shipping?.Department || "",
+    shFirstName: shipping?.FirstName || "",
+    shLastName: shipping?.LastName || "",
+    shPhone: shipping?.Phone || "",
+    shAddr1: shipping?.Addr1 || "",
+    shAddr2: shipping?.Addr2 || "",
+    shCity: shipping?.City || "",
+    shCountry: shipping?.Country || "India",
+    shState: shipping?.State || "",
+    shZip: shipping?.Zip || "",
+    biAddr1: billing?.Addr1 || "",
+    biAddr2: billing?.Addr2 || "",
+    biCity: billing?.City || "",
+    biCountry: billing?.Country || "India",
+    biState: billing?.State || "",
+    biZip: billing?.Zip || "",
+    email: customer?.email ?? submission.email ?? "",
+    useSameAddress: billingSame,
+  };
+
+  for (const field of fields) {
+    const rawValue = resolveSourceValue(field.sourcePath, submission, customer);
+    form[field.key] =
+      field.type === "checkbox"
+        ? rawValue === "true" || rawValue === "1" || rawValue === "yes"
+        : rawValue;
+  }
+
+  return form;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DynamicField — renders a single field based on its FieldType
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DynamicField({
+  field,
+  value,
+  onChange,
+}: {
+  field: FormField;
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  const hasValue = value !== undefined && value !== null && value !== "";
+  const showFieldLabel = field.type !== "checkbox";
+
+  // If the field has no value yet, show a subtle "add" placeholder style
+  const addStyle: React.CSSProperties = hasValue
+    ? {}
+    : { borderStyle: "dashed", opacity: 0.75 };
+
+  switch (field.type) {
+    case "readonly":
+      return (
+        <div>
+          {showFieldLabel ? (
+            <label style={labelStyle}>{field.label}</label>
+          ) : null}
+          <input
+            value={value || ""}
+            readOnly
+            placeholder={field.label}
+            style={{
+              ...inputStyle,
+              background: "#f3f4f6",
+              color: "#9ca3af",
+              cursor: "not-allowed",
+              border: "1px solid #e5e7eb",
+            }}
+          />
+          {field.readOnlyHint && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "#9ca3af",
+                marginTop: 3,
+                paddingLeft: 2,
+              }}
+            >
+              {field.readOnlyHint}
+            </div>
+          )}
+        </div>
+      );
+
+    case "phone":
+      return (
+        <div style={{ position: "relative" }}>
+          {showFieldLabel ? (
+            <label style={labelStyle}>{field.label}</label>
+          ) : null}
+          <input
+            placeholder={`Add ${field.label}`}
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ ...inputStyle, paddingRight: 90, ...addStyle }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              right: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              fontSize: 13,
+              color: "#374151",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              pointerEvents: "none",
+            }}
+          >
+            <span>{field.flagEmoji}</span>
+            <span>{field.countryCode}</span>
+            <span style={{ color: "#9ca3af" }}>▾</span>
+          </div>
+        </div>
+      );
+
+    case "select":
+      return (
+        <div>
+          {showFieldLabel ? (
+            <label style={labelStyle}>{field.label}</label>
+          ) : null}
+          <select
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ ...inputStyle, ...addStyle }}
+          >
+            {field.options?.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+
+    case "checkbox":
+      return (
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            minHeight: 44,
+            color: "#374151",
+            fontSize: 14,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={value === "true" || value === "1" || value === "yes"}
+            onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+          />
+          {field.label}
+        </label>
+      );
+
+    case "textarea":
+      return (
+        <div>
+          {showFieldLabel ? (
+            <label style={labelStyle}>{field.label}</label>
+          ) : null}
+          <textarea
+            placeholder={`Add ${field.label}`}
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            style={{
+              ...inputStyle,
+              ...addStyle,
+              minHeight: 92,
+              resize: "vertical",
+              paddingTop: 10,
+            }}
+          />
+        </div>
+      );
+
+    case "text":
+    case "email":
+    default:
+      return (
+        <div>
+          {showFieldLabel ? (
+            <label style={labelStyle}>{field.label}</label>
+          ) : null}
+          <input
+            placeholder={`Add ${field.label}`}
+            value={value || ""}
+            type={field.type === "email" ? "email" : "text"}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ ...inputStyle, ...addStyle }}
+          />
+        </div>
+      );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DynamicEditModal — renders all sections and fields from config
+// Drop-in replacement for the hardcoded edit modal body
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sectionHeadingStyle: React.CSSProperties = {
+  margin: "0 0 4px",
+  fontSize: 11,
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#5c5f62",
+};
+
+export function DynamicEditModal({
+  editForm,
+  setEditForm,
+  onClose,
+  onSave,
+  customer,
+  submission,
+  sections = [],
+  fields = [],
+  shippingProvincesByCountry = {},
+}: {
+  editForm: Record<string, any>;
+  setEditForm: React.Dispatch<React.SetStateAction<Record<string, any>>>;
+  onClose: () => void;
+  onSave: () => void;
+  customer: any;
+  submission: any;
+  sections?: FormSection[];
+  fields?: FormField[];
+  shippingProvincesByCountry?: Record<string, CountryOption[]>;
+}) {
+  // Sort sections by order
+  const sortedSections = [...sections].sort((a, b) => a.order - b.order);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(17,24,39,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 50,
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        style={{
+          width: "min(560px, 96vw)",
+          background: "#f8f8f8",
+          borderRadius: 12,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+          maxHeight: "92vh",
+          overflowY: "auto",
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        }}
+      >
+        {/* ── Header ── */}
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: "1px solid #e3e3e3",
+            background: "white",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            position: "sticky",
+            top: 0,
+            zIndex: 1,
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+            Edit details
+          </h3>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: 20,
+              cursor: "pointer",
+              color: "#5c5f62",
+              lineHeight: 1,
+              padding: "0 2px",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* ── Body: dynamic sections ── */}
+        <div style={{ padding: "16px 20px", display: "grid", gap: 14 }}>
+          {sortedSections.map((section) => {
+            // Fields belonging to this section, sorted by order
+            const sectionFields = fields
+              .filter((f) => f.section === section.key)
+              .sort((a, b) => a.order - b.order);
+
+            if (sectionFields.length === 0) return null;
+
+            // Billing section gets special "same as shipping" toggle
+            const isBilling = section.key === "billing";
+
+            return (
+              <div key={section.key} style={sectionStyle}>
+                {/* Section heading row */}
+                {isBilling ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <h4 style={{ ...sectionHeadingStyle, margin: 0 }}>
+                      {section.label}
+                    </h4>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 13,
+                        cursor: "pointer",
+                        color: "#374151",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!editForm.useSameAddress}
+                        onChange={(e) =>
+                          setEditForm((f) => ({
+                            ...f,
+                            useSameAddress: e.target.checked,
+                          }))
+                        }
+                      />
+                      Same as shipping
+                    </label>
+                  </div>
+                ) : (
+                  <h4 style={sectionHeadingStyle}>{section.label}</h4>
+                )}
+
+                {/* For billing: only render fields if not "same as shipping" */}
+                {isBilling && editForm.useSameAddress ? null : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {sectionFields.map((field) =>
+                      (() => {
+                        const countryValue =
+                          field.section === "billing"
+                            ? (editForm.biCountry ?? editForm.billCountry)
+                            : field.section === "shipping"
+                              ? (editForm.shCountry ?? editForm.shipCountry)
+                              : (editForm.shCountry ?? editForm.shipCountry);
+                        const phoneMeta =
+                          field.type === "phone"
+                            ? getPhoneMetaForCountry(String(countryValue ?? ""))
+                            : null;
+                        const stateOptions =
+                          field.type === "select" && /state/i.test(field.key)
+                            ? getProvinceOptionsForCountry(
+                                String(countryValue ?? ""),
+                                shippingProvincesByCountry,
+                              )
+                            : null;
+
+                        return (
+                          <div
+                            key={field.key}
+                            style={{
+                              gridColumn:
+                                field.width === "full" ? "1 / -1" : undefined,
+                            }}
+                          >
+                            <DynamicField
+                              field={{
+                                ...field,
+                                ...(phoneMeta
+                                  ? {
+                                      countryCode: phoneMeta.dialCode,
+                                      flagEmoji: phoneMeta.flagEmoji,
+                                    }
+                                  : {}),
+                                ...(stateOptions
+                                  ? { options: stateOptions }
+                                  : {}),
+                              }}
+                              value={String(editForm[field.key] ?? "")}
+                              onChange={(val) =>
+                                setEditForm((f) => ({ ...f, [field.key]: val }))
+                              }
+                            />
+                          </div>
+                        );
+                      })(),
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Footer ── */}
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid #e3e3e3",
+            background: "white",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            position: "sticky",
+            bottom: 0,
+          }}
+        >
+          <button
+            onClick={onClose}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "1px solid #c9ccd0",
+              background: "white",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSave}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "none",
+              background: "#1a1a1a",
+              color: "white",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 600,
+            }}
+          >
+            Save changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function ConfigureCompanyUI({
   submission,
   company,
   customer,
+  formConfig,
+  shippingCountryOptions,
+  shippingProvincesByCountry,
+  onSubmissionUpdated,
   paymentTermsTemplates,
+  // ── NEW props ──
+  allCatalogs = [],
+  priceLists = [],
   onApprove,
   onCancel,
   isApproving,
@@ -2222,89 +3588,177 @@ function ConfigureCompanyUI({
   submission: RegistrationSubmission;
   company: ActionJson["company"];
   customer: ActionJson["customer"];
+  formConfig: FormConfig;
+  shippingCountryOptions: CountryOption[];
+  shippingProvincesByCountry: Record<string, CountryOption[]>;
+  onSubmissionUpdated: (submission: any) => void;
   paymentTermsTemplates: Array<{
     id: string;
     name: string;
     paymentTermsType: string;
     dueInDays: number | null;
   }>;
+  // ── NEW ──
+  allCatalogs?: CatalogNode[];
+  priceLists?: PriceListNode[];
   onApprove: (opts: {
     paymentTermsId: string;
     requireDeposit: boolean;
     allowOneTimeAddress: boolean;
     orderSubmission: "auto" | "draft";
     taxSetting: string;
+    selectedCatalogIds: string[];
   }) => void;
   onCancel: () => void;
   isApproving: boolean;
   pipelineStep: PipelineStep;
   pipelineError?: string;
 }) {
-  const [paymentTermsId, setPaymentTermsId] = useState(
-    submission.paymentTerm || "",
-  );
-  const [requireDeposit, setRequireDeposit] = useState(false);
+  const [paymentTermsId, setPaymentTermsId]     = useState(submission.paymentTerm || "");
+  const [requireDeposit, setRequireDeposit]       = useState(false);
   const [allowOneTimeAddress, setAllowOneTimeAddress] = useState(false);
-  const [orderSubmission, setOrderSubmission] = useState<"auto" | "draft">(
-    "auto",
-  );
-  const [taxSetting, setTaxSetting] = useState("collect");
-  const [catalogSearch, setCatalogSearch] = useState("");
-  const [showEditModal, setShowEditModal] = useState(false);
-
+  const [orderSubmission, setOrderSubmission]     = useState<"auto" | "draft">("auto");
+  const [taxSetting, setTaxSetting]               = useState("collect");
+  const [showEditModal, setShowEditModal]         = useState(false);
+ 
+  // ── Catalog state ──
+  const [catalogSearch, setCatalogSearch]         = useState("");
+  const [selectedCatalogIds, setSelectedCatalogIds] = useState<string[]>([]);
+  const [showCatalogDropdown, setShowCatalogDropdown] = useState(false);
+  const catalogFetcher = useFetcher<{ intent: string; success: boolean; errors?: string[]; message?: string }>();
+ 
+  const editFetcher = useFetcher<ActionJson>();
+  const shopify     = useAppBridge();
+ 
   const s = (submission as any)?.shipping as Record<string, string> | undefined;
-  const b = (submission as any)?.billing as Record<string, string> | undefined;
-
-  const shippingLine1 = s?.Addr1 || "Address line 1";
-  const shippingCity = s?.City || "City";
-  const shippingState = s?.State || "STATE";
-  const shippingZip = s?.Zip || "Postal code";
-  const shippingCountry = s?.Country || "US";
+  const b = (submission as any)?.billing  as Record<string, string> | undefined;
+ 
+  const shippingLine1    = s?.Addr1 || "Address line 1";
   const shippingRecipient = s
     ? `${s.FirstName || ""} ${s.LastName || ""}`.trim() || "Recipient"
     : "Recipient";
   const billingSame =
     !b || (submission as any)?.customFields?.billSameAsShip !== "false";
-
+ 
+  const { sections: editSections, fields: editFields } = useMemo(
+    () => buildEditModalConfig(formConfig, shippingCountryOptions),
+    [formConfig, shippingCountryOptions],
+  );
+ 
   const contactName = customer
     ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
     : `${submission.firstName || ""} ${submission.lastName || ""}`.trim();
   const companyDisplayName = company?.name || submission.companyName;
-  const [editForm, setEditForm] = useState({
-    // company
-    companyName: submission.companyName || "",
-    taxRegistrationId:
-      (submission as any)?.customFields?.taxRegistrationId || "",
-    // contact
-    firstName: submission.firstName || "",
-    lastName: submission.lastName || "",
-    jobTitle: (submission as any)?.customFields?.jobTitle || "",
-    contactPhone: (submission as any)?.customFields?.phone || "",
-    // shipping
-    shDepartment: s?.Department || "",
-    shFirstName: s?.FirstName || "",
-    shLastName: s?.LastName || "",
-    shPhone: s?.Phone || "",
-    shAddr1: s?.Addr1 || "",
-    shAddr2: s?.Addr2 || "",
-    shCity: s?.City || "",
-    shCountry: s?.Country || "India",
-    shState: s?.State || "",
-    shZip: s?.Zip || "",
-    // billing toggle
-    useSameAddress: billingSame,
-    biAddr1: b?.Addr1 || "",
-    biAddr2: b?.Addr2 || "",
-    biCity: b?.City || "",
-    biCountry: b?.Country || "India",
-    biState: b?.State || "",
-    biZip: b?.Zip || "",
-  });
-
+ 
+  const [editForm, setEditForm] = useState(() =>
+    buildInitialEditForm(submission, customer, billingSame, editFields),
+  );
+  useEffect(() => {
+    setEditForm(buildInitialEditForm(submission, customer, billingSame, editFields));
+  }, [submission, customer, billingSame, editFields]);
+ 
+  // ── Pre-select catalogs already assigned to this location ──
+  useEffect(() => {
+    if (!company?.locationId) return;
+    const preSelected = allCatalogs
+      .filter((c) =>
+        c.companyLocations?.nodes?.some((loc) => loc.id === company.locationId),
+      )
+      .map((c) => c.id);
+    setSelectedCatalogIds(preSelected);
+  }, [allCatalogs, company?.locationId]);
+ 
+  // ── Catalog helpers ──
+  const activeCatalogs = allCatalogs.filter((c) => c.status === "ACTIVE");
+ 
+  const filteredCatalogs = activeCatalogs.filter((c) =>
+    c.title.toLowerCase().includes(catalogSearch.toLowerCase()),
+  );
+ 
+  const selectedCatalogs = activeCatalogs.filter((c) =>
+    selectedCatalogIds.includes(c.id),
+  );
+ 
+  const toggleCatalog = useCallback(
+    (catalogId: string) => {
+      const locationId = company?.locationId;
+      if (!locationId) return;
+ 
+      const isCurrentlySelected = selectedCatalogIds.includes(catalogId);
+ 
+      // Optimistic UI update
+      setSelectedCatalogIds((prev) =>
+        isCurrentlySelected
+          ? prev.filter((id) => id !== catalogId)
+          : [...prev, catalogId],
+      );
+ 
+      // Fire action to sync with Shopify
+      catalogFetcher.submit(
+        {
+          intent: isCurrentlySelected ? "removeCatalog" : "assignCatalog",
+          catalogId,
+          locationId,
+        },
+        { method: "post" },
+      );
+    },
+    [catalogFetcher, company?.locationId, selectedCatalogIds],
+  );
+ 
+  const removeCatalog = useCallback(
+    (catalogId: string) => {
+      const locationId = company?.locationId;
+      if (!locationId) return;
+      setSelectedCatalogIds((prev) => prev.filter((id) => id !== catalogId));
+      catalogFetcher.submit(
+        { intent: "removeCatalog", catalogId, locationId },
+        { method: "post" },
+      );
+    },
+    [catalogFetcher, company?.locationId],
+  );
+ 
+  // ── Toast on catalog action ──
+  useEffect(() => {
+    if (catalogFetcher.state !== "idle" || !catalogFetcher.data) return;
+    if (!catalogFetcher.data.success && catalogFetcher.data.errors?.length) {
+      shopify.toast.show?.(catalogFetcher.data.errors[0]);
+    }
+  }, [catalogFetcher.data, catalogFetcher.state, shopify]);
+ 
+  // ── Edit modal save ──
+  const handleSaveEditDetails = useCallback(() => {
+    editFetcher.submit(
+      {
+        intent: "updatecustomerCompanyDetails",
+        registrationId: submission.id,
+        customerId: customer?.id || submission.shopifyCustomerId || "",
+        companyId: company?.id || "",
+        companyLocationId: company?.locationId || "",
+        ...Object.fromEntries(
+          Object.entries(editForm).map(([key, value]) => [key, String(value ?? "")]),
+        ),
+      },
+      { method: "post" },
+    );
+  }, [company, customer, editFetcher, editForm, submission]);
+ 
+  useEffect(() => {
+    if (editFetcher.state !== "idle" || !editFetcher.data) return;
+    if (editFetcher.data.success) {
+      if (editFetcher.data.submission) onSubmissionUpdated(editFetcher.data.submission);
+      setShowEditModal(false);
+      shopify.toast.show?.(editFetcher.data.message || "Details updated");
+      return;
+    }
+    if (editFetcher.data.errors?.length) shopify.toast.show?.(editFetcher.data.errors[0]);
+  }, [editFetcher.data, editFetcher.state, onSubmissionUpdated, shopify]);
+ 
   const showProgress = pipelineStep !== "idle" && pipelineStep !== "error";
-  const isDone = pipelineStep === "done";
-  const hasError = pipelineStep === "error";
-
+  const isDone       = pipelineStep === "done";
+  const hasError     = pipelineStep === "error";
+ 
   return (
     <div
       style={{
@@ -2325,8 +3779,7 @@ function ConfigureCompanyUI({
           boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
           maxHeight: "96vh",
           overflowY: "auto",
-          fontFamily:
-            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         }}
       >
         {/* ── Header ── */}
@@ -2346,13 +3799,10 @@ function ConfigureCompanyUI({
                 onClick={onCancel}
                 disabled={isApproving}
                 style={{
-                  background: "none",
-                  border: "none",
+                  background: "none", border: "none",
                   cursor: isApproving ? "not-allowed" : "pointer",
-                  color: "#5c5f62",
-                  fontSize: 18,
-                  padding: "0 4px 0 0",
-                  lineHeight: 1,
+                  color: "#5c5f62", fontSize: 18,
+                  padding: "0 4px 0 0", lineHeight: 1,
                   opacity: isApproving ? 0.4 : 1,
                 }}
               >
@@ -2362,32 +3812,26 @@ function ConfigureCompanyUI({
                 Configure company
               </h2>
             </div>
-            <p
-              style={{ margin: "4px 0 0 28px", color: "#5c5f62", fontSize: 13 }}
-            >
-              Review Company settings before approving. You will be able to
-              change these later.
+            <p style={{ margin: "4px 0 0 28px", color: "#5c5f62", fontSize: 13 }}>
+              Review Company settings before approving. You will be able to change these later.
             </p>
           </div>
-
+ 
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <button
               onClick={onCancel}
               disabled={isApproving}
               style={{
-                padding: "8px 16px",
-                borderRadius: 8,
-                border: "1px solid #c9ccd0",
-                background: "white",
+                padding: "8px 16px", borderRadius: 8,
+                border: "1px solid #c9ccd0", background: "white",
                 cursor: isApproving ? "not-allowed" : "pointer",
-                fontSize: 14,
-                fontWeight: 500,
+                fontSize: 14, fontWeight: 500,
                 opacity: isApproving ? 0.4 : 1,
               }}
             >
               {isDone ? "Close" : "Cancel"}
             </button>
-
+ 
             {!isDone && (
               <button
                 onClick={() =>
@@ -2397,32 +3841,24 @@ function ConfigureCompanyUI({
                     allowOneTimeAddress,
                     orderSubmission,
                     taxSetting,
+                    selectedCatalogIds, // ← passed to parent
                   })
                 }
                 disabled={isApproving}
                 style={{
-                  padding: "8px 16px",
-                  borderRadius: 8,
-                  border: "none",
+                  padding: "8px 16px", borderRadius: 8, border: "none",
                   background: isApproving ? "#6b9fd4" : "#1a1a1a",
                   color: "white",
                   cursor: isApproving ? "not-allowed" : "pointer",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  minWidth: 110,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
+                  fontSize: 14, fontWeight: 600, minWidth: 110,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 }}
               >
                 {isApproving ? (
                   <>
                     <span
                       style={{
-                        display: "inline-block",
-                        width: 13,
-                        height: 13,
+                        display: "inline-block", width: 13, height: 13,
                         border: "2px solid rgba(255,255,255,0.35)",
                         borderTop: "2px solid white",
                         borderRadius: "50%",
@@ -2431,81 +3867,53 @@ function ConfigureCompanyUI({
                     />
                     Processing…
                   </>
-                ) : hasError ? (
-                  "Retry"
-                ) : (
-                  "Approve"
-                )}
+                ) : hasError ? "Retry" : "Approve"}
               </button>
             )}
           </div>
         </div>
-
+ 
         {/* ── Progress bar ── */}
         {(showProgress || hasError) && (
-          <div
-            style={{
-              background: "white",
-              borderBottom: "1px solid #e3e3e3",
-              padding: "14px 20px 12px",
-            }}
-          >
+          <div style={{ background: "white", borderBottom: "1px solid #e3e3e3", padding: "14px 20px 12px" }}>
             <ProgressBar currentStep={pipelineStep} error={pipelineError} />
           </div>
         )}
-
+ 
         {/* ── Success banner ── */}
         {isDone && (
           <div style={{ padding: "16px 20px 0" }}>
             <div
               style={{
-                background: "#f0fdf4",
-                border: "1px solid #bbf7d0",
-                borderRadius: 10,
-                padding: 16,
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 12,
+                background: "#f0fdf4", border: "1px solid #bbf7d0",
+                borderRadius: 10, padding: 16,
+                display: "flex", alignItems: "flex-start", gap: 12,
               }}
             >
               <div
                 style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: "50%",
-                  background: "#16a34a",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "white",
-                  fontSize: 18,
-                  flexShrink: 0,
+                  width: 36, height: 36, borderRadius: "50%", background: "#16a34a",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "white", fontSize: 18, flexShrink: 0,
                 }}
               >
                 ✓
               </div>
               <div>
-                <div
-                  style={{ fontWeight: 700, fontSize: 15, color: "#15803d" }}
-                >
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#15803d" }}>
                   Registration Approved Successfully
                 </div>
                 <div style={{ fontSize: 13, color: "#166534", marginTop: 3 }}>
-                  {contactName} has been approved and their account is now
-                  active under <strong>{companyDisplayName}</strong>.
+                  {contactName} has been approved and their account is now active under{" "}
+                  <strong>{companyDisplayName}</strong>.
                 </div>
                 <button
                   onClick={onCancel}
                   style={{
-                    marginTop: 10,
-                    padding: "6px 16px",
-                    background: "#16a34a",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
+                    marginTop: 10, padding: "6px 16px",
+                    background: "#16a34a", color: "white",
+                    border: "none", borderRadius: 6,
+                    cursor: "pointer", fontSize: 13, fontWeight: 600,
                   }}
                 >
                   Done — Close
@@ -2514,138 +3922,270 @@ function ConfigureCompanyUI({
             </div>
           </div>
         )}
-
+ 
         {/* ── Error banner ── */}
         {hasError && pipelineError && (
           <div style={{ padding: "16px 20px 0" }}>
             <div
               style={{
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-                borderRadius: 10,
-                padding: 14,
+                background: "#fef2f2", border: "1px solid #fecaca",
+                borderRadius: 10, padding: 14,
               }}
             >
-              <div
-                style={{ fontWeight: 600, color: "#dc2626", marginBottom: 4 }}
-              >
+              <div style={{ fontWeight: 600, color: "#dc2626", marginBottom: 4 }}>
                 Something went wrong
               </div>
-              <div style={{ fontSize: 13, color: "#7f1d1d" }}>
-                {pipelineError}
-              </div>
+              <div style={{ fontSize: 13, color: "#7f1d1d" }}>{pipelineError}</div>
             </div>
           </div>
         )}
-
+ 
         {/* ── Two-column body ── */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 220px",
-            gap: 16,
-            padding: 16,
+            gap: 16, padding: 16,
             alignItems: "start",
             opacity: isApproving || isDone ? 0.5 : 1,
             pointerEvents: isApproving || isDone ? "none" : "auto",
             transition: "opacity 0.25s",
           }}
         >
-          {/* LEFT COLUMN */}
+          {/* ── LEFT COLUMN ── */}
           <div style={{ display: "grid", gap: 12 }}>
-            {/* Catalogs */}
+ 
+            {/* ───────────────────────────────────────────────────
+                CATALOGS SECTION — fully wired with real data
+            ─────────────────────────────────────────────────── */}
             <div
               style={{
-                background: "white",
-                borderRadius: 10,
-                border: "1px solid #e3e3e3",
-                padding: 16,
+                background: "white", borderRadius: 10,
+                border: "1px solid #e3e3e3", padding: 16,
               }}
             >
-              <h3
-                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
-              >
-                Catalogs
-              </h3>
-              <input
-                placeholder="Search catalogs"
-                value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9ccd0",
-                  fontSize: 14,
-                  boxSizing: "border-box",
-                  marginBottom: 10,
-                }}
-              />
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "8px 0",
-                  borderTop: "1px solid #f1f1f1",
+                  display: "flex", justifyContent: "space-between",
+                  alignItems: "center", marginBottom: 12,
                 }}
               >
-                <div>
-                  <div style={{ fontWeight: 500, fontSize: 14 }}>Wholesale</div>
-                  <div style={{ fontSize: 12, color: "#5c5f62" }}>
-                    13 products • No overall adjustment
-                  </div>
-                </div>
-                <button
+                <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+                  Catalogs
+                </h3>
+                {!company?.locationId && (
+                  <span style={{ fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 4, padding: "2px 7px" }}>
+                    Save company first to assign catalogs
+                  </span>
+                )}
+              </div>
+ 
+              {/* Search + dropdown */}
+              <div style={{ position: "relative", marginBottom: 10 }}>
+                <input
+                  placeholder={
+                    activeCatalogs.length === 0
+                      ? "No catalogs available"
+                      : "Search catalogs to add…"
+                  }
+                  value={catalogSearch}
+                  disabled={!company?.locationId || activeCatalogs.length === 0}
+                  onChange={(e) => {
+                    setCatalogSearch(e.target.value);
+                    setShowCatalogDropdown(true);
+                  }}
+                  onFocus={() => setShowCatalogDropdown(true)}
                   style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#5c5f62",
-                    fontSize: 16,
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #c9ccd0",
+                    fontSize: 14,
+                    boxSizing: "border-box",
+                    background: !company?.locationId || activeCatalogs.length === 0 ? "#f9fafb" : "white",
+                  }}
+                />
+ 
+                {/* Dropdown list */}
+                {showCatalogDropdown && company?.locationId && filteredCatalogs.length > 0 && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      background: "white",
+                      border: "1px solid #e3e3e3",
+                      borderRadius: 8,
+                      boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
+                      zIndex: 10,
+                      maxHeight: 200,
+                      overflowY: "auto",
+                      marginTop: 4,
+                    }}
+                  >
+                    {filteredCatalogs.map((catalog) => {
+                      const isSelected = selectedCatalogIds.includes(catalog.id);
+                      return (
+                        <div
+                          key={catalog.id}
+                          onClick={() => {
+                            toggleCatalog(catalog.id);
+                            setCatalogSearch("");
+                            setShowCatalogDropdown(false);
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "9px 12px",
+                            cursor: "pointer",
+                            background: isSelected ? "#f0f9ff" : "white",
+                            borderBottom: "1px solid #f3f4f6",
+                          }}
+                          onMouseEnter={(e) =>
+                            ((e.currentTarget as HTMLDivElement).style.background =
+                              isSelected ? "#e0f2fe" : "#f9fafb")
+                          }
+                          onMouseLeave={(e) =>
+                            ((e.currentTarget as HTMLDivElement).style.background =
+                              isSelected ? "#f0f9ff" : "white")
+                          }
+                        >
+                          {/* Checkbox-style indicator */}
+                          <div
+                            style={{
+                              width: 16,
+                              height: 16,
+                              borderRadius: 4,
+                              border: `2px solid ${isSelected ? "#1a1a1a" : "#c9ccd0"}`,
+                              background: isSelected ? "#1a1a1a" : "white",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              color: "white",
+                              fontSize: 11,
+                            }}
+                          >
+                            {isSelected && "✓"}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1a" }}>
+                              {catalog.title}
+                            </div>
+                            {catalog.priceList?.name && (
+                              <div style={{ fontSize: 11, color: "#5c5f62" }}>
+                                {catalog.priceList.name} · {catalog.priceList.currency}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+ 
+              {/* Click-away to close dropdown */}
+              {showCatalogDropdown && (
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 9 }}
+                  onClick={() => setShowCatalogDropdown(false)}
+                />
+              )}
+ 
+              {/* Selected / assigned catalogs list */}
+              {selectedCatalogs.length === 0 ? (
+                <div
+                  style={{
+                    padding: "12px 0",
+                    textAlign: "center",
+                    color: "#9ca3af",
+                    fontSize: 13,
                   }}
                 >
-                  ×
-                </button>
-              </div>
+                  No catalogs assigned — search above to add one.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {selectedCatalogs.map((catalog) => (
+                    <div
+                      key={catalog.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 10px",
+                        background: "#f9fafb",
+                        borderRadius: 7,
+                        border: "1px solid #e3e3e3",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: 13 }}>
+                          {catalog.title}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#5c5f62" }}>
+                          {catalog.priceList?.name
+                            ? `${catalog.priceList.name} · ${catalog.priceList.currency}`
+                            : "No price list"}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => removeCatalog(catalog.id)}
+                        disabled={catalogFetcher.state !== "idle"}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: catalogFetcher.state !== "idle" ? "not-allowed" : "pointer",
+                          color: "#9ca3af",
+                          fontSize: 18,
+                          lineHeight: 1,
+                          padding: "0 2px",
+                          opacity: catalogFetcher.state !== "idle" ? 0.4 : 1,
+                        }}
+                        title="Remove catalog"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+ 
+              {/* Loading indicator */}
+              {catalogFetcher.state !== "idle" && (
+                <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 8, textAlign: "center" }}>
+                  Syncing with Shopify…
+                </div>
+              )}
             </div>
-
+ 
             {/* Payment terms */}
             <div
               style={{
-                background: "white",
-                borderRadius: 10,
-                border: "1px solid #e3e3e3",
-                padding: 16,
+                background: "white", borderRadius: 10,
+                border: "1px solid #e3e3e3", padding: 16,
               }}
             >
-              <h3
-                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
-              >
+              <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}>
                 Payment terms
               </h3>
               <select
                 value={paymentTermsId}
                 onChange={(e) => setPaymentTermsId(e.target.value)}
                 style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9ccd0",
-                  fontSize: 14,
-                  background: "white",
-                  boxSizing: "border-box",
-                  marginBottom: 10,
+                  width: "100%", padding: "8px 12px", borderRadius: 8,
+                  border: "1px solid #c9ccd0", fontSize: 14,
+                  background: "white", boxSizing: "border-box", marginBottom: 10,
                 }}
               >
                 <option value="">No payment terms</option>
                 {paymentTermsTemplates?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
+                  <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
-                {(!paymentTermsTemplates ||
-                  paymentTermsTemplates.length === 0) && (
+                {(!paymentTermsTemplates || paymentTermsTemplates.length === 0) && (
                   <>
                     <option value="net15">Within 15 days (Net 15)</option>
                     <option value="net30">Within 30 days (Net 30)</option>
@@ -2655,12 +4195,8 @@ function ConfigureCompanyUI({
               </select>
               <label
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  color: "#374151",
+                  display: "flex", alignItems: "center",
+                  gap: 8, fontSize: 13, cursor: "pointer", color: "#374151",
                 }}
               >
                 <input
@@ -2671,40 +4207,25 @@ function ConfigureCompanyUI({
                 Require deposit on orders created at checkout
               </label>
             </div>
-
+ 
             {/* Checkout */}
             <div
               style={{
-                background: "white",
-                borderRadius: 10,
-                border: "1px solid #e3e3e3",
-                padding: 16,
+                background: "white", borderRadius: 10,
+                border: "1px solid #e3e3e3", padding: 16,
               }}
             >
-              <h3
-                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
-              >
+              <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}>
                 Checkout
               </h3>
               <div style={{ marginBottom: 14 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    marginBottom: 6,
-                    color: "#374151",
-                  }}
-                >
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: "#374151" }}>
                   Ship to address
                 </div>
                 <label
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    color: "#374151",
+                    display: "flex", alignItems: "center",
+                    gap: 8, fontSize: 13, cursor: "pointer", color: "#374151",
                   }}
                 >
                   <input
@@ -2716,31 +4237,18 @@ function ConfigureCompanyUI({
                 </label>
               </div>
               <div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    marginBottom: 6,
-                    color: "#374151",
-                  }}
-                >
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: "#374151" }}>
                   Order submission
                 </div>
                 <label
                   style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 8,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    marginBottom: 6,
-                    color: "#374151",
+                    display: "flex", alignItems: "flex-start",
+                    gap: 8, fontSize: 13, cursor: "pointer",
+                    marginBottom: 6, color: "#374151",
                   }}
                 >
                   <input
-                    type="radio"
-                    name="orderSubmission"
-                    value="auto"
+                    type="radio" name="orderSubmission" value="auto"
                     checked={orderSubmission === "auto"}
                     onChange={() => setOrderSubmission("auto")}
                     style={{ marginTop: 2 }}
@@ -2748,25 +4256,18 @@ function ConfigureCompanyUI({
                   <div>
                     <div>Automatically submit orders</div>
                     <div style={{ fontSize: 12, color: "#5c5f62" }}>
-                      Orders without shipping addresses will be submitted as
-                      draft orders
+                      Orders without shipping addresses will be submitted as draft orders
                     </div>
                   </div>
                 </label>
                 <label
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    color: "#374151",
+                    display: "flex", alignItems: "center",
+                    gap: 8, fontSize: 13, cursor: "pointer", color: "#374151",
                   }}
                 >
                   <input
-                    type="radio"
-                    name="orderSubmission"
-                    value="draft"
+                    type="radio" name="orderSubmission" value="draft"
                     checked={orderSubmission === "draft"}
                     onChange={() => setOrderSubmission("draft")}
                   />
@@ -2774,32 +4275,24 @@ function ConfigureCompanyUI({
                 </label>
               </div>
             </div>
-
+ 
             {/* Taxes */}
             <div
               style={{
-                background: "white",
-                borderRadius: 10,
-                border: "1px solid #e3e3e3",
-                padding: 16,
+                background: "white", borderRadius: 10,
+                border: "1px solid #e3e3e3", padding: 16,
               }}
             >
-              <h3
-                style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}
-              >
+              <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}>
                 Taxes
               </h3>
               <select
                 value={taxSetting}
                 onChange={(e) => setTaxSetting(e.target.value)}
                 style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9ccd0",
-                  fontSize: 14,
-                  background: "white",
-                  boxSizing: "border-box",
+                  width: "100%", padding: "8px 12px", borderRadius: 8,
+                  border: "1px solid #c9ccd0", fontSize: 14,
+                  background: "white", boxSizing: "border-box",
                 }}
               >
                 <option value="collect">Collect tax</option>
@@ -2808,91 +4301,19 @@ function ConfigureCompanyUI({
               </select>
             </div>
           </div>
-
-          {/* RIGHT COLUMN — summary card */}
-          {/* <div
-            style={{
-              background: "white",
-              borderRadius: 10,
-              border: "1px solid #e3e3e3",
-              padding: 16,
-              fontSize: 13,
-              position: "sticky",
-              top: 16,
-            }}
-          >
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>
-              {companyDisplayName}
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <div
-                style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}
-              >
-                Customer
-              </div>
-              <div style={{ color: "#374151" }}>{contactName}</div>
-              <div style={{ color: "#2c6ecb", textDecoration: "underline" }}>
-                {customer?.email || submission.email}
-              </div>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <div
-                style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}
-              >
-                Shipping address
-              </div>
-              <div style={{ color: "#374151", lineHeight: 1.6 }}>
-                <div>{shippingRecipient}</div>
-                <div>{shippingLine1}</div>
-                <div>
-                  {shippingCity}, {shippingState} {shippingZip}
-                </div>
-                <div>{shippingCountry}</div>
-              </div>
-            </div>
-            <div>
-              <div
-                style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}
-              >
-                Billing address
-              </div>
-              {billingSame ? (
-                <div style={{ color: "#5c5f62", fontStyle: "italic" }}>
-                  Same as shipping address
-                </div>
-              ) : (
-                <div style={{ color: "#374151", lineHeight: 1.6 }}>
-                  <div>
-                    {b?.FirstName} {b?.LastName}
-                  </div>
-                  <div>{b?.Addr1}</div>
-                  <div>
-                    {b?.City}, {b?.State} {b?.Zip}
-                  </div>
-                  <div>{b?.Country}</div>
-                </div>
-              )}
-            </div>
-          </div> */}
-          {/* RIGHT COLUMN — summary card */}
+ 
+          {/* ── RIGHT COLUMN — summary card ── */}
           <div
             style={{
-              background: "white",
-              borderRadius: 10,
-              border: "1px solid #e3e3e3",
-              padding: 16,
-              fontSize: 13,
-              position: "sticky",
-              top: 16,
+              background: "white", borderRadius: 10,
+              border: "1px solid #e3e3e3", padding: 16,
+              fontSize: 13, position: "sticky", top: 16,
             }}
           >
-            {/* Header row */}
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 12,
+                display: "flex", justifyContent: "space-between",
+                alignItems: "center", marginBottom: 12,
               }}
             >
               <div style={{ fontWeight: 600, fontSize: 14 }}>
@@ -2901,57 +4322,37 @@ function ConfigureCompanyUI({
               <button
                 onClick={() => setShowEditModal(true)}
                 style={{
-                  background: "none",
-                  border: "1px solid #c9ccd0",
-                  borderRadius: 6,
-                  padding: "4px 10px",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  color: "#374151",
+                  background: "none", border: "1px solid #c9ccd0",
+                  borderRadius: 6, padding: "4px 10px",
+                  fontSize: 12, fontWeight: 500,
+                  cursor: "pointer", color: "#374151",
                 }}
               >
                 Edit
               </button>
             </div>
-
+ 
             {/* Customer */}
             <div style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#5c5f62",
-                  marginBottom: 3,
-                }}
-              >
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}>
                 Customer
               </div>
               <div style={{ color: "#374151" }}>
-                {`${editForm.firstName} ${editForm.lastName}`.trim() ||
-                  contactName}
+                {`${editForm.firstName} ${editForm.lastName}`.trim() || contactName}
               </div>
               <div style={{ color: "#2c6ecb", textDecoration: "underline" }}>
                 {customer?.email || submission.email}
               </div>
             </div>
-
+ 
             {/* Shipping */}
             <div style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#5c5f62",
-                  marginBottom: 3,
-                }}
-              >
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}>
                 Shipping address
               </div>
               <div style={{ color: "#374151", lineHeight: 1.6 }}>
                 <div>
-                  {`${editForm.firstName} ${editForm.lastName}`.trim() ||
-                    shippingRecipient}
+                  {`${editForm.shFirstName} ${editForm.shLastName}`.trim() || shippingRecipient}
                 </div>
                 <div>{editForm.shAddr1 || shippingLine1}</div>
                 <div>
@@ -2960,17 +4361,10 @@ function ConfigureCompanyUI({
                 <div>{editForm.shCountry}</div>
               </div>
             </div>
-
+ 
             {/* Billing */}
-            <div>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#5c5f62",
-                  marginBottom: 3,
-                }}
-              >
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}>
                 Billing address
               </div>
               {editForm.useSameAddress ? (
@@ -2987,502 +4381,68 @@ function ConfigureCompanyUI({
                 </div>
               )}
             </div>
-          </div>
-          {/* ── Edit Details Modal ──────────────────────────────────────────── */}
-          {showEditModal && (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(17,24,39,0.45)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 50,
-              }}
-              onClick={(e) => {
-                if (e.target === e.currentTarget) setShowEditModal(false);
-              }}
-            >
-              <div
-                style={{
-                  width: "min(560px, 96vw)",
-                  background: "#f8f8f8",
-                  borderRadius: 12,
-                  boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
-                  maxHeight: "92vh",
-                  overflowY: "auto",
-                  fontFamily:
-                    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-                }}
-              >
-                {/* Header */}
-                <div
-                  style={{
-                    padding: "16px 20px",
-                    borderBottom: "1px solid #e3e3e3",
-                    background: "white",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    position: "sticky",
-                    top: 0,
-                    zIndex: 1,
-                  }}
-                >
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-                    Edit details
-                  </h3>
-                  <button
-                    onClick={() => setShowEditModal(false)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      fontSize: 20,
-                      cursor: "pointer",
-                      color: "#5c5f62",
-                      lineHeight: 1,
-                      padding: "0 2px",
-                    }}
-                  >
-                    ×
-                  </button>
+ 
+            {/* Assigned catalogs summary */}
+            {selectedCatalogs.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 4 }}>
+                  Catalogs ({selectedCatalogs.length})
                 </div>
-
-                {/* Body */}
-                <div style={{ padding: "16px 20px", display: "grid", gap: 14 }}>
-                  {/* ── Company ── */}
-                  <div style={sectionStyle}>
-                    <h4 style={sectionHeadingStyle}>company</h4>
-                    <input
-                      placeholder="Company name"
-                      value={editForm.companyName}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          companyName: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      placeholder="Tax registration ID"
-                      value={editForm.taxRegistrationId}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          taxRegistrationId: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  {/* ── Contact ── */}
-                  <div style={sectionStyle}>
-                    <h4 style={sectionHeadingStyle}>contact</h4>
-                    <input
-                      placeholder="First name"
-                      value={editForm.firstName}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          firstName: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      placeholder="Last name"
-                      value={editForm.lastName}
-                      onChange={(e) =>
-                        setEditForm((f) => ({ ...f, lastName: e.target.value }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      placeholder="Job title/position"
-                      value={editForm.jobTitle}
-                      onChange={(e) =>
-                        setEditForm((f) => ({ ...f, jobTitle: e.target.value }))
-                      }
-                      style={inputStyle}
-                    />
-                    {/* Phone */}
-                    <div style={{ position: "relative" }}>
-                      <input
-                        placeholder="Phone"
-                        value={editForm.contactPhone}
-                        onChange={(e) =>
-                          setEditForm((f) => ({
-                            ...f,
-                            contactPhone: e.target.value,
-                          }))
-                        }
-                        style={{ ...inputStyle, paddingRight: 90 }}
-                      />
-                      <div
-                        style={{
-                          position: "absolute",
-                          right: 10,
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          fontSize: 13,
-                          color: "#374151",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 4,
-                          pointerEvents: "none",
-                        }}
-                      >
-                        <span>🇮🇳</span>
-                        <span>+91</span>
-                        <span style={{ color: "#9ca3af" }}>▾</span>
-                      </div>
-                    </div>
-                    {/* Email — read-only */}
-                    <div>
-                      <input
-                        value={customer?.email || submission.email}
-                        readOnly
-                        placeholder="Email"
-                        style={{
-                          ...inputStyle,
-                          background: "#f3f4f6",
-                          color: "#9ca3af",
-                          cursor: "not-allowed",
-                          border: "1px solid #e5e7eb",
-                        }}
-                      />
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#9ca3af",
-                          marginTop: 3,
-                          paddingLeft: 2,
-                        }}
-                      >
-                        Email cannot be changed
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ── Shipping ── */}
-                  <div style={sectionStyle}>
-                    <h4 style={sectionHeadingStyle}>shipping</h4>
-                    <input
-                      placeholder="Department/attention"
-                      value={editForm.shDepartment}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          shDepartment: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      placeholder="First name"
-                      value={editForm.shFirstName}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          shFirstName: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      placeholder="Last name"
-                      value={editForm.shLastName}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          shLastName: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                    {/* Shipping phone */}
-                    <div style={{ position: "relative" }}>
-                      <input
-                        placeholder="Phone"
-                        value={editForm.shPhone}
-                        onChange={(e) =>
-                          setEditForm((f) => ({
-                            ...f,
-                            shPhone: e.target.value,
-                          }))
-                        }
-                        style={{ ...inputStyle, paddingRight: 90 }}
-                      />
-                      <div
-                        style={{
-                          position: "absolute",
-                          right: 10,
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          fontSize: 13,
-                          color: "#374151",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 4,
-                          pointerEvents: "none",
-                        }}
-                      >
-                        <span>🇮🇳</span>
-                        <span>+91</span>
-                        <span style={{ color: "#9ca3af" }}>▾</span>
-                      </div>
-                    </div>
-                    <input
-                      placeholder="Address line 1"
-                      value={editForm.shAddr1}
-                      onChange={(e) =>
-                        setEditForm((f) => ({ ...f, shAddr1: e.target.value }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      placeholder="Address line 2"
-                      value={editForm.shAddr2}
-                      onChange={(e) =>
-                        setEditForm((f) => ({ ...f, shAddr2: e.target.value }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      placeholder="City"
-                      value={editForm.shCity}
-                      onChange={(e) =>
-                        setEditForm((f) => ({ ...f, shCity: e.target.value }))
-                      }
-                      style={inputStyle}
-                    />
-                    <select
-                      value={editForm.shCountry}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          shCountry: e.target.value,
-                        }))
-                      }
-                      style={{ ...inputStyle, background: "white" }}
-                    >
-                      <option value="">Country</option>
-                      <option value="India">India</option>
-                      <option value="US">United States</option>
-                      <option value="GB">United Kingdom</option>
-                      <option value="AU">Australia</option>
-                      <option value="CA">Canada</option>
-                    </select>
-                    <select
-                      value={editForm.shState}
-                      onChange={(e) =>
-                        setEditForm((f) => ({ ...f, shState: e.target.value }))
-                      }
-                      style={{ ...inputStyle, background: "white" }}
-                    >
-                      <option value="">State/Province</option>
-                      <option value="Gujarat">Gujarat</option>
-                      <option value="Maharashtra">Maharashtra</option>
-                      <option value="Delhi">Delhi</option>
-                      <option value="Karnataka">Karnataka</option>
-                      <option value="Tamil Nadu">Tamil Nadu</option>
-                      <option value="Rajasthan">Rajasthan</option>
-                      <option value="Uttar Pradesh">Uttar Pradesh</option>
-                    </select>
-                    <input
-                      placeholder="ZIP/Postal code"
-                      value={editForm.shZip}
-                      onChange={(e) =>
-                        setEditForm((f) => ({ ...f, shZip: e.target.value }))
-                      }
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  {/* ── Billing ── */}
-                  <div style={sectionStyle}>
-                    <div
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {selectedCatalogs.map((c) => (
+                    <span
+                      key={c.id}
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
+                        fontSize: 11,
+                        background: "#f0f9ff",
+                        border: "1px solid #bae6fd",
+                        borderRadius: 4,
+                        padding: "2px 7px",
+                        color: "#0369a1",
                       }}
                     >
-                      <h4 style={{ ...sectionHeadingStyle, margin: 0 }}>
-                        billing
-                      </h4>
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          fontSize: 13,
-                          cursor: "pointer",
-                          color: "#374151",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={editForm.useSameAddress}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              useSameAddress: e.target.checked,
-                            }))
-                          }
-                        />
-                        Same as shipping
-                      </label>
-                    </div>
-                    {!editForm.useSameAddress && (
-                      <>
-                        <input
-                          placeholder="Address line 1"
-                          value={editForm.biAddr1}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              biAddr1: e.target.value,
-                            }))
-                          }
-                          style={inputStyle}
-                        />
-                        <input
-                          placeholder="Address line 2"
-                          value={editForm.biAddr2}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              biAddr2: e.target.value,
-                            }))
-                          }
-                          style={inputStyle}
-                        />
-                        <input
-                          placeholder="City"
-                          value={editForm.biCity}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              biCity: e.target.value,
-                            }))
-                          }
-                          style={inputStyle}
-                        />
-                        <select
-                          value={editForm.biCountry}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              biCountry: e.target.value,
-                            }))
-                          }
-                          style={{ ...inputStyle, background: "white" }}
-                        >
-                          <option value="">Country</option>
-                          <option value="India">India</option>
-                          <option value="US">United States</option>
-                          <option value="GB">United Kingdom</option>
-                          <option value="AU">Australia</option>
-                          <option value="CA">Canada</option>
-                        </select>
-                        <select
-                          value={editForm.biState}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              biState: e.target.value,
-                            }))
-                          }
-                          style={{ ...inputStyle, background: "white" }}
-                        >
-                          <option value="">State/Province</option>
-                          <option value="Gujarat">Gujarat</option>
-                          <option value="Maharashtra">Maharashtra</option>
-                          <option value="Delhi">Delhi</option>
-                          <option value="Karnataka">Karnataka</option>
-                          <option value="Tamil Nadu">Tamil Nadu</option>
-                          <option value="Rajasthan">Rajasthan</option>
-                          <option value="Uttar Pradesh">Uttar Pradesh</option>
-                        </select>
-                        <input
-                          placeholder="ZIP/Postal code"
-                          value={editForm.biZip}
-                          onChange={(e) =>
-                            setEditForm((f) => ({
-                              ...f,
-                              biZip: e.target.value,
-                            }))
-                          }
-                          style={inputStyle}
-                        />
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div
-                  style={{
-                    padding: "12px 20px",
-                    borderTop: "1px solid #e3e3e3",
-                    background: "white",
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    position: "sticky",
-                    bottom: 0,
-                  }}
-                >
-                  <button
-                    onClick={() => setShowEditModal(false)}
-                    style={{
-                      padding: "8px 16px",
-                      borderRadius: 8,
-                      border: "1px solid #c9ccd0",
-                      background: "white",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      fontWeight: 500,
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => setShowEditModal(false)}
-                    style={{
-                      padding: "8px 16px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "#1a1a1a",
-                      color: "white",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Save changes
-                  </button>
+                      {c.title}
+                    </span>
+                  ))}
                 </div>
               </div>
-            </div>
+            )}
+          </div>
+ 
+          {/* ── Edit Details Modal ── */}
+          {showEditModal && (
+            <EditDetailsModal
+              editForm={editForm}
+              setEditForm={setEditForm}
+              onClose={() => setShowEditModal(false)}
+              onSave={handleSaveEditDetails}
+              sections={editSections}
+              fields={editFields}
+              shippingProvincesByCountry={shippingProvincesByCountry}
+            />
           )}
         </div>
       </div>
-
+ 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function RegistrationApprovals() {
-  const { submissions, storeMissing, paymentTermsTemplates } = useLoaderData<{
+  const {
+    submissions,
+    storeMissing,
+    formConfig,
+    shippingCountryOptions,
+    shippingProvincesByCountry,
+    paymentTermsTemplates,
+  } = useLoaderData<{
     submissions: RegistrationSubmission[];
     companies: any[];
+    formConfig: FormConfig;
+    shippingCountryOptions: CountryOption[];
+    shippingProvincesByCountry: Record<string, CountryOption[]>;
     storeMissing: boolean;
     paymentTermsTemplates: Array<{
       id: string;
@@ -3574,6 +4534,11 @@ export default function RegistrationApprovals() {
     customerRef.current = null;
     companyRef.current = null;
     configOptsRef.current = null;
+  }, []);
+
+  const handleSubmissionUpdated = useCallback((updatedSubmission: any) => {
+    setSelected(updatedSubmission);
+    selectedRef.current = updatedSubmission;
   }, []);
 
   // ── Open Configure UI ───────────────────────────────────────────────────
@@ -3951,6 +4916,10 @@ export default function RegistrationApprovals() {
           submission={selected}
           company={company}
           customer={customer}
+          formConfig={formConfig}
+          shippingCountryOptions={shippingCountryOptions}
+          shippingProvincesByCountry={shippingProvincesByCountry}
+          onSubmissionUpdated={handleSubmissionUpdated}
           paymentTermsTemplates={paymentTermsTemplates}
           onApprove={handleConfigureApprove}
           onCancel={resetPipeline}

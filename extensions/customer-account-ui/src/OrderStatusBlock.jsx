@@ -22,6 +22,7 @@ function Extension() {
   const [shopDomain, setShopDomain] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [countriesData, setCountriesData] = useState([]);
 
   const getCustomerMetafieldQuery = {
     query: `query {
@@ -79,8 +80,8 @@ function Extension() {
       { value: "NSW", label: "New South Wales" },
       { value: "VIC", label: "Victoria" },
       { value: "QLD", label: "Queensland" },
-      { value: "WA",  label: "Western Australia" },
-      { value: "SA",  label: "South Australia" },
+      { value: "WA", label: "Western Australia" },
+      { value: "SA", label: "South Australia" },
     ],
   };
 
@@ -157,9 +158,9 @@ function Extension() {
               } else if (f.type === "checkbox") {
                 initial[f.key] = false;
               } else if (f.type === "country") {
-                initial[f.key] = "IN"; // ✅ default country
+                initial[f.key] = "IN";
               } else if (f.type === "state") {
-                initial[f.key] = COUNTRY_STATES["IN"][0].value; // ✅ default state = "GJ"
+                initial[f.key] = getProvinceOptions("IN")[0]?.value ?? "";
               } else {
                 initial[f.key] = "";
               }
@@ -176,6 +177,25 @@ function Extension() {
     };
     fetchAccountStatus();
   }, [shopDomain, customerId]);
+
+  useEffect(() => {
+    if (!shopDomain) return;
+
+    const fetchCountries = async () => {
+      try {
+        const res = await fetch(
+          `${API_URL}/api/proxy/shipping-zones?shop=${shopDomain}`,
+          { method: "GET", headers: { Accept: "application/json" } }
+        );
+        const { countries } = await res.json();
+        setCountriesData(countries || []);
+      } catch (err) {
+        console.error("Countries fetch error:", err);
+      }
+    };
+
+    fetchCountries();
+  }, [shopDomain]);
 
   // =========================
   // HANDLE CHANGE
@@ -228,6 +248,14 @@ function Extension() {
     return variants.find((v) => v in formData) ?? null;
   };
 
+  const getCountryOptions = () => countriesData.map(c => ({ value: c.value, label: c.label }));
+
+  // Replaces COUNTRY_STATES[code] usage
+  const getProvinceOptions = (countryCode) => {
+    const found = countriesData.find(c => c.value === countryCode);
+    return found?.provinces || [];
+  };
+
   // =========================
   // RENDER SINGLE FIELD
   // =========================
@@ -272,7 +300,9 @@ function Extension() {
         );
 
       case "country": {
-        const countryOptions = field.options || DUMMY_COUNTRIES;
+        const countryOptions = field.options?.length
+          ? field.options
+          : getCountryOptions();
         const selectedCountry = formData[field.key] ?? "IN";
 
         return (
@@ -284,7 +314,7 @@ function Extension() {
               const stateKey = findPairedKey(field.key, "country", "state");
               if (stateKey) {
                 const firstState = val
-                  ? COUNTRY_STATES[val]?.[0]?.value || ""
+                  ? getProvinceOptions(val)?.[0]?.value ?? ""
                   : "";
                 handleChange(stateKey, firstState);
               }
@@ -308,8 +338,9 @@ function Extension() {
         const countryKey = findPairedKey(field.key, "state", "country");
         const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
 
-        const stateOptions =
-          field.options || (selectedCountry ? COUNTRY_STATES[selectedCountry] || [] : []);
+        const stateOptions = field.options?.length
+          ? field.options
+          : getProvinceOptions(selectedCountry);
 
         const selectedState =
           formData[field.key] ?? stateOptions[0]?.value ?? "";
@@ -578,7 +609,7 @@ function Extension() {
           >
             {loading ? "Submitting…" : "Register"}
           </s-button>
- 
+
           {loading && (
             <s-text tone="subdued">
               Please wait while we process your request…
@@ -586,10 +617,10 @@ function Extension() {
           )}
         </s-stack>
       </s-box>
- 
+
     </s-stack>
   );
 }
- 
+
 
 
