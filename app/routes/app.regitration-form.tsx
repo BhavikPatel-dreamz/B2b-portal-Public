@@ -1842,6 +1842,12 @@ export default function FormEditor() {
     [config.fields],
   );
 
+  // ── Check if all palette items in the active category are already used ──
+  const allCategoryFieldsUsed = useMemo(() => {
+    const palette = PALETTE[activeCategory];
+    return palette.every((item) => usedPaletteKeys.has(item.paletteKey));
+  }, [activeCategory, usedPaletteKeys]);
+
   const handleSaveAndSubmit = useCallback(() => {
     fetcher.submit(
       JSON.stringify({ intent: "saveConfig", config }),
@@ -3977,15 +3983,16 @@ export default function FormEditor() {
               {["general", "shipping", "billing"].includes(activeCategory) && (
                 <button
                   onClick={() => palette.forEach((item) => addField(item))}
+                  disabled={allCategoryFieldsUsed}
                   style={{
-                    marginTop: 14, width: "100%", background: "#1f2937", color: "#fff",
-                    border: "none", borderRadius: 7, padding: "9px 0", cursor: "pointer",
+                    marginTop: 14, width: "100%", background: allCategoryFieldsUsed ? "#9ca3af" : "#1f2937", color: "#fff",
+                    border: "none", borderRadius: 7, padding: "9px 0", cursor: allCategoryFieldsUsed ? "not-allowed" : "pointer",
                     fontSize: 13, fontWeight: 600, transition: "background 0.12s",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#374151")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "#1f2937")}
+                  onMouseEnter={(e) => { if (!allCategoryFieldsUsed) e.currentTarget.style.background = "#374151"; }}
+                  onMouseLeave={(e) => { if (!allCategoryFieldsUsed) e.currentTarget.style.background = "#1f2937"; }}
                 >
-                  + Add all {CATEGORY_INFO[activeCategory].label.toLowerCase()}
+                  + {allCategoryFieldsUsed ? "All fields added" : `Add all ${CATEGORY_INFO[activeCategory].label.toLowerCase()}`}
                 </button>
               )}
             </div>
