@@ -89,6 +89,7 @@ export interface FormConfig {
 }
 
 export interface StoredField {
+  paletteKey?: string;
   key: string;
   label: string;
   description?: string;
@@ -614,6 +615,7 @@ export function serializeConfig(config: FormConfig): StoredConfig {
       .sort((a, b) => a.order - b.order)
       .map(
         (f): StoredField => ({
+          paletteKey: f.paletteKey,
           key: f.key,
           label: f.label,
           ...(f.description ? { description: f.description } : {}),
@@ -673,7 +675,7 @@ export function deserializeConfig(stored: StoredConfig): FormConfig {
       .map(
         (f): FieldDef => ({
           id: `_${f.key}_${stepIdx}_${f.order}`,
-          paletteKey: f.key,
+          paletteKey: resolveStoredPaletteKey(f),
           category: inferCategory(f),
           isDisplay: DISPLAY_TYPES.includes(f.type),
           key: f.key,
@@ -712,6 +714,23 @@ export function deserializeConfig(stored: StoredConfig): FormConfig {
   );
 
   return { steps, fields };
+}
+
+function resolveStoredPaletteKey(field: StoredField) {
+  if (field.paletteKey) return field.paletteKey;
+
+  const paletteMatch = Object.values(PALETTE)
+    .flat()
+    .find((item) => item.key === field.key);
+
+  if (paletteMatch) return paletteMatch.paletteKey;
+
+  const keyWithoutGeneratedSuffix = field.key.replace(/_[a-z0-9]+$/i, "");
+  const inferredMatch = Object.values(PALETTE)
+    .flat()
+    .find((item) => item.key === keyWithoutGeneratedSuffix);
+
+  return inferredMatch?.paletteKey ?? field.key;
 }
 
 const STORED_DEFAULT: StoredConfig = serializeConfig(DEFAULT_CONFIG);
@@ -1601,37 +1620,32 @@ function SectionBlock({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onClick={(e) => { e.stopPropagation(); onActivate(); }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          e.stopPropagation();
-          onActivate();
-        }
-      }}
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onSectionDragOver(e, section); }}
       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onSectionDrop(e, section); }}
       style={{
         marginBottom: 20,
         borderRadius: 0,
         background: "transparent",
-        border: isSectionDragOver
-          ? "2px dashed #c5ccd5"
-          : isActive
-            ? "2px solid #d4dae1"
-            : "2px solid transparent",
+        border: "none",
         boxShadow: "none",
-        overflow: "hidden",
-        transition: "border-color 0.15s, box-shadow 0.15s",
+        overflow: "visible",
       }}
     >
       {showHeading ? (
         <div
+          role="button"
+          tabIndex={0}
           draggable
+          onClick={(e) => { e.stopPropagation(); onActivate(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              onActivate();
+            }
+          }}
           onDragStart={(e) => { e.stopPropagation(); onSectionDragStart(e, section); }}
           style={{
             display: "flex",
@@ -1639,13 +1653,18 @@ function SectionBlock({
             gap: 8,
             width: `${headerWidth}%`,
             margin: headerMargin,
-            padding: "0 0 16px",
+            padding: "0 0 14px",
             background: "transparent",
-            border: "none",
+            border: isSectionDragOver
+              ? "2px dashed #c5ccd5"
+              : isActive
+                ? "2px solid #d4dae1"
+                : "2px solid transparent",
             borderRadius: 0,
             cursor: "grab",
             userSelect: "none",
             boxSizing: "border-box",
+            transition: "border-color 0.15s",
           }}
         >
           <div style={{ color: "#bfc6cf", flexShrink: 0 }}>
@@ -1665,7 +1684,7 @@ function SectionBlock({
 
           <button
             onClick={(e) => { e.stopPropagation(); onDuplicateSection(section); }}
-            title="Copy heading"
+            title="Copy section heading"
             style={{
               border: "none", background: "none", cursor: "pointer",
               color: "#7c8897", padding: "4px 5px", borderRadius: 5,
@@ -1685,7 +1704,7 @@ function SectionBlock({
           {canDeleteSection ? (
             <button
               onClick={(e) => { e.stopPropagation(); onRemoveSection(section); }}
-              title="Remove heading"
+              title="Remove section heading"
               style={{
                 border: "none", background: "none", cursor: "pointer",
                 color: "#c91d2e", padding: "4px 5px", borderRadius: 5,
@@ -1710,7 +1729,7 @@ function SectionBlock({
       ) : null}
 
       {/* Fields */}
-      <div style={{ padding: 0 }}>
+      <div style={{ padding: 0, marginTop: showHeading ? 2 : 0 }}>
         <FieldRows
           fields={fields}
           onRemove={onRemoveField}
@@ -2093,6 +2112,17 @@ export default function FormEditor() {
             return { ...prev, fields: [...prev.fields, newField] };
           }
         } else {
+          if (paletteItem.isDisplay) {
+            return {
+              ...prev,
+              fields: [
+                ...prev.fields.filter((f) => f.stepIndex !== activeStepIndex),
+                newField,
+                ...stepF.map((f, i) => ({ ...f, order: i + 1 })),
+              ],
+            };
+          }
+
           newField.order = stepF.length;
           return { ...prev, fields: [...prev.fields, newField] };
         }
@@ -3769,7 +3799,7 @@ export default function FormEditor() {
           ) : activeSection ? (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>Edit heading field</span>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>Edit section heading</span>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     onClick={closeSectionEditor}
@@ -4052,6 +4082,21 @@ export default function FormEditor() {
               </div>
             ) : (
               <div style={{ background: "#fff", borderRadius: 0, padding: "30px 22px 24px", height: "calc(100vh - 280px)", minHeight: 580, overflowY: "auto", borderLeft: "1px solid #eceff3" }}>
+                {noSection.length > 0 && (
+                  <div style={{ background: "#fff", borderRadius: 10, padding: 0, marginBottom: 12, border: "2px solid transparent" }}>
+                    <FieldRows
+                      fields={noSection}
+                      onRemove={removeField}
+                      onDragStart={handleFieldDragStart}
+                      onDragOver={handleFieldDragOver}
+                      onDrop={handleFieldDrop}
+                      dragOverId={fieldDragOverId}
+                      activeFieldId={activeFieldId}
+                      onActivateField={(id) => { setActiveFieldId(id); setActiveSection(null); }}
+                    />
+                  </div>
+                )}
+
                 {sectionOrder.map((section) => (
                   <SectionBlock
                     key={section}
@@ -4100,21 +4145,6 @@ export default function FormEditor() {
                     onActivateField={(id) => { setActiveFieldId(id); setActiveSection(null); }}
                   />
                 ))}
-
-                {noSection.length > 0 && (
-                  <div style={{ background: "#fff", borderRadius: 10, padding: 0, marginBottom: 12, border: "2px solid transparent" }}>
-                    <FieldRows
-                      fields={noSection}
-                      onRemove={removeField}
-                      onDragStart={handleFieldDragStart}
-                      onDragOver={handleFieldDragOver}
-                      onDrop={handleFieldDrop}
-                      dragOverId={fieldDragOverId}
-                      activeFieldId={activeFieldId}
-                      onActivateField={(id) => { setActiveFieldId(id); setActiveSection(null); }}
-                    />
-                  </div>
-                )}
 
                 <div
                   style={{
