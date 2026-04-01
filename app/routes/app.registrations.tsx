@@ -22,8 +22,7 @@ import { sendCompanyAssignmentEmail } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
 import EditDetailsModal, {
   type CountryOption,
-  type FormField,
-  type FormSection,
+  type DisplayBlock,
 } from "app/components/registrations/EditDetailsModal";
 import {
   DEFAULT_CONFIG,
@@ -3348,6 +3347,7 @@ function buildEditModalConfig(
   config: FormConfig,
   countryOptions: CountryOption[],
 ): {
+  displayBlocks: DisplayBlock[];
   sections: FormSection[];
   fields: FormField[];
 } {
@@ -3355,6 +3355,21 @@ function buildEditModalConfig(
     if (a.stepIndex !== b.stepIndex) return a.stepIndex - b.stepIndex;
     return a.order - b.order;
   });
+
+  const displayBlocks = rawFields
+    .filter(
+      (field) =>
+        field.type === "heading" || field.type === "paragraph",
+    )
+    .map((field) => ({
+      key: field.key,
+      type: field.type,
+      order: field.order,
+      content: field.content,
+      label: field.label,
+      headingTag: field.headingTag,
+      headingAlignment: field.headingAlignment,
+    }));
 
   const sectionLabels = new Map<string, string>();
   rawFields.forEach((field) => {
@@ -3389,7 +3404,7 @@ function buildEditModalConfig(
     label: sectionLabels.get(key) ?? titleCaseSection(key),
   }));
 
-  return { sections, fields };
+  return { displayBlocks, sections, fields };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4018,6 +4033,9 @@ function ConfigureCompanyUI({
   const [orderSubmission, setOrderSubmission]     = useState<"auto" | "draft">("auto");
   const [taxSetting, setTaxSetting]               = useState("collect");
   const [showEditModal, setShowEditModal]         = useState(false);
+  const [activeStep, setActiveStep]               = useState<"details" | "configuration">("details");
+  const [isDetailsEditing, setIsDetailsEditing]   = useState(false);
+  const advanceToConfigurationRef                 = useRef(false);
  
   // ── Catalog state ──
   const [catalogSearch, setCatalogSearch]         = useState("");
@@ -4038,7 +4056,11 @@ function ConfigureCompanyUI({
   const billingSame =
     !b || (submission as any)?.customFields?.billSameAsShip !== "false";
  
-  const { sections: editSections, fields: editFields } = useMemo(
+  const {
+    displayBlocks: editDisplayBlocks,
+    sections: editSections,
+    fields: editFields,
+  } = useMemo(
     () => buildEditModalConfig(formConfig, shippingCountryOptions),
     [formConfig, shippingCountryOptions],
   );
@@ -4054,6 +4076,12 @@ function ConfigureCompanyUI({
   useEffect(() => {
     setEditForm(buildInitialEditForm(submission, customer, billingSame, editFields));
   }, [submission, customer, billingSame, editFields]);
+  useEffect(() => {
+    setActiveStep("details");
+    setShowEditModal(false);
+    setIsDetailsEditing(false);
+    advanceToConfigurationRef.current = false;
+  }, [submission.id]);
  
   // ── Pre-select catalogs already assigned to this location ──
   useEffect(() => {
@@ -4148,15 +4176,31 @@ function ConfigureCompanyUI({
       { method: "post" },
     );
   }, [company, customer, editFetcher, editFields, editForm, submission]);
+
+  const handleContinueToConfiguration = useCallback(() => {
+    if (!isDetailsEditing) {
+      setActiveStep("configuration");
+      return;
+    }
+
+    advanceToConfigurationRef.current = true;
+    handleSaveEditDetails();
+  }, [handleSaveEditDetails, isDetailsEditing]);
  
   useEffect(() => {
     if (editFetcher.state !== "idle" || !editFetcher.data) return;
     if (editFetcher.data.success) {
       if (editFetcher.data.submission) onSubmissionUpdated(editFetcher.data.submission);
       setShowEditModal(false);
+      setIsDetailsEditing(false);
+      if (advanceToConfigurationRef.current) {
+        setActiveStep("configuration");
+      }
+      advanceToConfigurationRef.current = false;
       shopify.toast.show?.(editFetcher.data.message || "Details updated");
       return;
     }
+    advanceToConfigurationRef.current = false;
     if (editFetcher.data.errors?.length) shopify.toast.show?.(editFetcher.data.errors[0]);
   }, [editFetcher.data, editFetcher.state, onSubmissionUpdated, shopify]);
  
@@ -4198,10 +4242,14 @@ function ConfigureCompanyUI({
             alignItems: "flex-start",
           }}
         >
-          <div>
+          <div style={{ minHeight: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
-                onClick={onCancel}
+                onClick={() =>
+                  activeStep === "configuration" && !isDone
+                    ? setActiveStep("details")
+                    : onCancel()
+                }
                 disabled={isApproving}
                 style={{
                   background: "none", border: "none",
@@ -4213,16 +4261,41 @@ function ConfigureCompanyUI({
               >
                 ←
               </button>
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-                Configure company
-              </h2>
+              {activeStep === "configuration" ? (
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+                  Configure company
+                </h2>
+              ) : null}
             </div>
-            <p style={{ margin: "4px 0 0 28px", color: "#5c5f62", fontSize: 13 }}>
-              Review Company settings before approving. You will be able to change these later.
-            </p>
+            {activeStep === "configuration" ? (
+              <p style={{ margin: "4px 0 0 28px", color: "#5c5f62", fontSize: 13 }}>
+                Review company settings before approving. You will be able to change these later.
+              </p>
+            ) : null}
           </div>
  
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            {activeStep === "details" && !isDone && !isDetailsEditing ? (
+              <button
+                onClick={() => setIsDetailsEditing(true)}
+                disabled={isApproving || editFetcher.state !== "idle"}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  background: "white",
+                  cursor:
+                    isApproving || editFetcher.state !== "idle"
+                      ? "not-allowed"
+                      : "pointer",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  opacity: isApproving || editFetcher.state !== "idle" ? 0.4 : 1,
+                }}
+              >
+                Edit
+              </button>
+            ) : null}
             <button
               onClick={onCancel}
               disabled={isApproving}
@@ -4237,44 +4310,6 @@ function ConfigureCompanyUI({
               {isDone ? "Close" : "Cancel"}
             </button>
  
-            {!isDone && (
-              <button
-                onClick={() =>
-                  onApprove({
-                    paymentTermsId,
-                    requireDeposit,
-                    allowOneTimeAddress,
-                    orderSubmission,
-                    taxSetting,
-                    selectedCatalogIds, // ← passed to parent
-                  })
-                }
-                disabled={isApproving}
-                style={{
-                  padding: "8px 16px", borderRadius: 8, border: "none",
-                  background: isApproving ? "#6b9fd4" : "#1a1a1a",
-                  color: "white",
-                  cursor: isApproving ? "not-allowed" : "pointer",
-                  fontSize: 14, fontWeight: 600, minWidth: 110,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                }}
-              >
-                {isApproving ? (
-                  <>
-                    <span
-                      style={{
-                        display: "inline-block", width: 13, height: 13,
-                        border: "2px solid rgba(255,255,255,0.35)",
-                        borderTop: "2px solid white",
-                        borderRadius: "50%",
-                        animation: "spin 0.7s linear infinite",
-                      }}
-                    />
-                    Processing…
-                  </>
-                ) : hasError ? "Retry" : "Approve"}
-              </button>
-            )}
           </div>
         </div>
  
@@ -4349,7 +4384,7 @@ function ConfigureCompanyUI({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 220px",
+            gridTemplateColumns: "1fr",
             gap: 16, padding: 16,
             alignItems: "start",
             opacity: isApproving || isDone ? 0.5 : 1,
@@ -4357,6 +4392,26 @@ function ConfigureCompanyUI({
             transition: "opacity 0.25s",
           }}
         >
+          {activeStep === "details" ? (
+            <EditDetailsModal
+              editForm={editForm}
+              setEditForm={setEditForm}
+              onClose={() => undefined}
+              onSave={handleContinueToConfiguration}
+              isSaving={editFetcher.state !== "idle"}
+              sections={editSections}
+              fields={editFields}
+              displayBlocks={editDisplayBlocks}
+              shippingProvincesByCountry={shippingProvincesByCountry}
+              mode="inline"
+              primaryActionLabel="Next"
+              savingActionLabel="Saving..."
+              hideSecondaryAction
+              isEditingEnabled={isDetailsEditing}
+              hideHeader
+            />
+          ) : (
+          <>
           {/* ── LEFT COLUMN ── */}
           <div style={{ display: "grid", gap: 12 }}>
  
@@ -4707,112 +4762,100 @@ function ConfigureCompanyUI({
             </div>
           </div>
  
-          {/* ── RIGHT COLUMN — summary card ── */}
-          <div
-            style={{
-              background: "white", borderRadius: 10,
-              border: "1px solid #e3e3e3", padding: 16,
-              fontSize: 13, position: "sticky", top: 16,
-            }}
-          >
+          {!isDone && activeStep === "configuration" ? (
             <div
               style={{
-                display: "flex", justifyContent: "space-between",
-                alignItems: "center", marginBottom: 12,
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
               }}
             >
-              <div style={{ fontWeight: 600, fontSize: 14 }}>
-                {editForm.companyName || companyDisplayName}
-              </div>
               <button
-                onClick={() => setShowEditModal(true)}
+                onClick={() => setActiveStep("details")}
+                disabled={isApproving || editFetcher.state !== "idle"}
                 style={{
-                  background: "none", border: "1px solid #c9ccd0",
-                  borderRadius: 6, padding: "4px 10px",
-                  fontSize: 12, fontWeight: 500,
-                  cursor: "pointer", color: "#374151",
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  background: "white",
+                  cursor:
+                    isApproving || editFetcher.state !== "idle"
+                      ? "not-allowed"
+                      : "pointer",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  opacity: isApproving || editFetcher.state !== "idle" ? 0.4 : 1,
                 }}
               >
-                Edit
+                Back
+              </button>
+              <button
+                onClick={() => {
+                  onApprove({
+                    paymentTermsId,
+                    requireDeposit,
+                    allowOneTimeAddress,
+                    orderSubmission,
+                    taxSetting,
+                    selectedCatalogIds,
+                  });
+                }}
+                disabled={isApproving || editFetcher.state !== "idle"}
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  border: "none",
+                  background:
+                    isApproving || editFetcher.state !== "idle"
+                      ? "#6b9fd4"
+                      : "#1a1a1a",
+                  color: "white",
+                  cursor:
+                    isApproving || editFetcher.state !== "idle"
+                      ? "not-allowed"
+                      : "pointer",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                {editFetcher.state !== "idle" ? (
+                  <>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 13,
+                        height: 13,
+                        border: "2px solid rgba(255,255,255,0.35)",
+                        borderTop: "2px solid white",
+                        borderRadius: "50%",
+                        animation: "spin 0.7s linear infinite",
+                      }}
+                    />
+                    Saving…
+                  </>
+                ) : isApproving ? (
+                  <>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 13,
+                        height: 13,
+                        border: "2px solid rgba(255,255,255,0.35)",
+                        borderTop: "2px solid white",
+                        borderRadius: "50%",
+                        animation: "spin 0.7s linear infinite",
+                      }}
+                    />
+                    Processing…
+                  </>
+                ) : hasError ? "Retry" : "Approve"}
               </button>
             </div>
- 
-            {/* Customer */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}>
-                Customer
-              </div>
-              <div style={{ color: "#374151" }}>
-                {`${editForm.firstName} ${editForm.lastName}`.trim() || contactName}
-              </div>
-              <div style={{ color: "#2c6ecb", textDecoration: "underline" }}>
-                {customer?.email || submission.email}
-              </div>
-            </div>
- 
-            {/* Shipping */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}>
-                Shipping address
-              </div>
-              <div style={{ color: "#374151", lineHeight: 1.6 }}>
-                <div>
-                  {`${editForm.shFirstName} ${editForm.shLastName}`.trim() || shippingRecipient}
-                </div>
-                <div>{editForm.shAddr1 || shippingLine1}</div>
-                <div>
-                  {editForm.shCity}, {editForm.shState} {editForm.shZip}
-                </div>
-                <div>{editForm.shCountry}</div>
-              </div>
-            </div>
- 
-            {/* Billing */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 3 }}>
-                Billing address
-              </div>
-              {editForm.useSameAddress ? (
-                <div style={{ color: "#5c5f62", fontStyle: "italic" }}>
-                  Same as shipping address
-                </div>
-              ) : (
-                <div style={{ color: "#374151", lineHeight: 1.6 }}>
-                  <div>{editForm.biAddr1}</div>
-                  <div>
-                    {editForm.biCity}, {editForm.biState} {editForm.biZip}
-                  </div>
-                  <div>{editForm.biCountry}</div>
-                </div>
-              )}
-            </div>
- 
-            {/* Assigned catalogs summary */}
-            {selectedCatalogs.length > 0 && (
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#5c5f62", marginBottom: 4 }}>
-                  Catalogs ({selectedCatalogs.length})
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {selectedCatalogs.map((c) => (
-                    <span
-                      key={c.id}
-                      style={{
-                        fontSize: 11,
-                        background: "#f0f9ff",
-                        border: "1px solid #bae6fd",
-                        borderRadius: 4,
-                        padding: "2px 7px",
-                        color: "#0369a1",
-                      }}
-                    >
-                      {c.title}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          ) : null}
  
           {/* ── Edit Details Modal ── */}
           {showEditModal && (
@@ -4824,8 +4867,11 @@ function ConfigureCompanyUI({
               isSaving={editFetcher.state !== "idle"}
               sections={editSections}
               fields={editFields}
+              displayBlocks={editDisplayBlocks}
               shippingProvincesByCountry={shippingProvincesByCountry}
             />
+          )}
+          </>
           )}
         </div>
       </div>
