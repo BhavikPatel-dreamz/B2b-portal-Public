@@ -20,6 +20,7 @@ const SECTION_LABELS = {
 function Extension() {
   const [fields, setFields] = useState([]);
   const [formData, setFormData] = useState({});
+  const [customerDetails, setCustomerDetails] = useState(null);
   const [isLegacyApplePay, setIsLegacyApplePay] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -133,6 +134,35 @@ function Extension() {
   }, [shopDomain, customerId]);
 
   useEffect(() => {
+    if (!shopDomain || !customerId) return;
+
+    const customerIdWithoutPrefix = customerId.replace(
+      "gid://shopify/Customer/",
+      ""
+    );
+
+    const fetchCustomerDetails = async () => {
+      try {
+        const res = await fetch(
+          `${API_URL}/api/proxy/customer-detail?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
+          { method: "GET", headers: { Accept: "application/json" } }
+        );
+        const result = await res.json();
+
+        if (!res.ok) {
+          throw new Error(result?.error || "Failed to fetch customer details");
+        }
+
+        setCustomerDetails(result?.customer || null);
+      } catch (err) {
+        console.error("Customer detail API Error:", err);
+      }
+    };
+
+    fetchCustomerDetails();
+  }, [shopDomain, customerId]);
+
+  useEffect(() => {
     if (!shopDomain) return;
 
     const fetchCountries = async () => {
@@ -225,6 +255,64 @@ function Extension() {
       .replace(/&quot;/gi, '"')
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+
+  const normalizeFieldText = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+  const getAutofillValue = (field) => {
+    if (!customerDetails) return "";
+
+    const key = normalizeFieldText(field?.key);
+    const label = normalizeFieldText(field?.label);
+    const fieldType = normalizeFieldText(field?.type);
+    const combined = `${key}${label}${fieldType}`;
+
+    if (fieldType === "email" || combined.includes("email")) {
+      return customerDetails.email || "";
+    }
+
+    if (combined.includes("firstname")) {
+      return customerDetails.firstName || "";
+    }
+
+    if (combined.includes("lastname")) {
+      return customerDetails.lastName || "";
+    }
+
+    return "";
+  };
+
+  useEffect(() => {
+    if (!fields.length || !customerDetails) return;
+
+    setFormData((prev) => {
+      const updated = { ...prev };
+      let hasChanges = false;
+
+      const applyAutofill = (items) => {
+        items.forEach((field) => {
+          if (field.type === "group") {
+            applyAutofill(field.fields || []);
+            return;
+          }
+
+          const autofillValue = getAutofillValue(field);
+          if (!autofillValue) return;
+
+          const currentValue = updated[field.key];
+          if (currentValue === undefined || currentValue === null || currentValue === "") {
+            updated[field.key] = autofillValue;
+            hasChanges = true;
+          }
+        });
+      };
+
+      applyAutofill(fields);
+      return hasChanges ? updated : prev;
+    });
+  }, [fields, customerDetails]);
 
   const getSectionMeta = (section, sectionFields) => {
     const fieldWithSectionLabel = sectionFields.find(

@@ -35,6 +35,7 @@ export default [
     route("wishlist", "routes/api.proxy/wishlist.tsx"),
     route("privacy-policy", "routes/api.proxy/privacy-policy.tsx"),
     route("customer-account", "routes/api.proxy/customer-account.tsx"),
+    route("customer-detail", "routes/api.proxy/customer-detail.tsx"),
     route("shipping-zones", "routes/api.proxy/shipping-zones.tsx"),
   ]),
 

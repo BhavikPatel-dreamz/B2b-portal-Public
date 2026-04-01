@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
-import prisma from "app/db.server";
+import { getStoreByDomain } from "app/services/store.server";
+import { apiVersion } from "app/shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
@@ -9,23 +10,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return Response.json({ error: "Missing shop parameter" }, { status: 400 });
   }
 
-  // ── 1. Get stored access token for this shop ──────────────────────────
-  const session = await prisma.session.findFirst({
-    where: { shop },
-  });
+  // Resolve the current offline token from the Store table, which is kept
+  // in sync when Shopify installs or refreshes the app session.
+  const store = await getStoreByDomain(shop);
+  console.log(store?.accessToken, "<--- Access token from store");
 
-  if (!session?.accessToken) {
-    return Response.json({ error: "No session found for shop" }, { status: 401 });
+  if (!store) {
+    return Response.json({ error: "Store not found for shop" }, { status: 404 });
+  }
+
+  if (!store.accessToken) {
+    return Response.json({ error: "Store access token not available" }, { status: 401 });
   }
 
   // ── 2. Call Admin GraphQL directly with the token ─────────────────────
   const graphqlRes = await fetch(
-  `https://${shop}/admin/api/2024-10/graphql.json`,
+  `https://${shop}/admin/api/${apiVersion}/graphql.json`,
   {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": session.accessToken,
+      "X-Shopify-Access-Token": store.accessToken,
     },
     body: JSON.stringify({
       query: `
@@ -62,7 +67,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 );
 
 const json = await graphqlRes.json();
-console.log(json,"<--- GraphQL response");
+console.log(json, "<--- GraphQL response");
+
+if (!graphqlRes.ok) {
+  return Response.json(
+    {
+      error: "Shopify Admin API request failed",
+      status: graphqlRes.status,
+      details: json?.errors ?? json,
+    },
+    { status: graphqlRes.status }
+  );
+}
 
 if (json.errors) {
   return Response.json({ errors: json.errors }, { status: 500 });

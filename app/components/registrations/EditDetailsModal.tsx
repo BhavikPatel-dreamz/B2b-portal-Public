@@ -115,55 +115,8 @@ function getProvinceOptionsForCountry(
   return [{ value: "", label: "State / Province" }];
 }
 
-const shippingBillingFieldLabels: Record<string, string> = {
-  shipCountry: "Country/region",
-  billCountry: "Country/region",
-  shCountry: "Country/region",
-  biCountry: "Country/region",
-  shipFirstName: "First name",
-  billFirstName: "First name",
-  shFirstName: "First name",
-  biFirstName: "First name",
-  shipLastName: "Last name",
-  billLastName: "Last name",
-  shLastName: "Last name",
-  biLastName: "Last name",
-  shipDept: "Company/attention",
-  billDept: "Company/attention",
-  shDepartment: "Company/attention",
-  biDepartment: "Company/attention",
-  shipAddr1: "Address",
-  billAddr1: "Address",
-  shAddr1: "Address",
-  biAddr1: "Address",
-  shipAddr2: "Apartment, suite, etc",
-  billAddr2: "Apartment, suite, etc",
-  shAddr2: "Apartment, suite, etc",
-  biAddr2: "Apartment, suite, etc",
-  shipCity: "City",
-  billCity: "City",
-  shCity: "City",
-  biCity: "City",
-  shipState: "State",
-  billState: "State",
-  shState: "State",
-  biState: "State",
-  shipZip: "PIN code",
-  billZip: "PIN code",
-  shZip: "PIN code",
-  biZip: "PIN code",
-  shipPhone: "Phone",
-  billPhone: "Phone",
-  shPhone: "Phone",
-  biPhone: "Phone",
-};
-
-function getFieldLabel(field: FormField) {
-  return shippingBillingFieldLabels[field.key] || field.label;
-}
-
 function getFieldPlaceholder(field: FormField) {
-  const label = getFieldLabel(field);
+  const label = field.label;
   if (/state/i.test(field.key)) return "Select a state";
   if (/addr1/i.test(field.key)) return "";
   return `Add ${label}`;
@@ -217,18 +170,17 @@ function DynamicField({
   const hasValue = value !== undefined && value !== null && value !== "";
   const showFieldLabel = field.type !== "checkbox";
   const addStyle: CSSProperties = hasValue ? {} : { borderStyle: "dashed", opacity: 0.75 };
-  const displayLabel = getFieldLabel(field);
   const placeholder = getFieldPlaceholder(field);
 
   switch (field.type) {
     case "readonly":
       return (
         <div>
-          {showFieldLabel ? <label style={labelStyle}>{displayLabel}</label> : null}
+          {showFieldLabel ? <label style={labelStyle}>{field.label}</label> : null}
           <input
             value={value || ""}
             readOnly
-            placeholder={displayLabel}
+            placeholder={field.label}
             style={{
               ...inputStyle,
               background: "#f3f4f6",
@@ -248,7 +200,7 @@ function DynamicField({
     case "phone":
       return (
         <div>
-          {showFieldLabel ? <label style={labelStyle}>{displayLabel}</label> : null}
+          {showFieldLabel ? <label style={labelStyle}>{field.label}</label> : null}
           <div
             style={{
               display: "grid",
@@ -283,7 +235,7 @@ function DynamicField({
     case "select":
       return (
         <div>
-          {showFieldLabel ? <label style={labelStyle}>{displayLabel}</label> : null}
+          {showFieldLabel ? <label style={labelStyle}>{field.label}</label> : null}
           <select
             value={value || ""}
             onChange={(e) => onChange(e.target.value)}
@@ -322,7 +274,7 @@ function DynamicField({
     case "textarea":
       return (
         <div>
-          {showFieldLabel ? <label style={labelStyle}>{displayLabel}</label> : null}
+          {showFieldLabel ? <label style={labelStyle}>{field.label}</label> : null}
           <textarea
             placeholder={placeholder}
             value={value || ""}
@@ -341,7 +293,7 @@ function DynamicField({
     default:
       return (
         <div>
-          {showFieldLabel ? <label style={labelStyle}>{displayLabel}</label> : null}
+          {showFieldLabel ? <label style={labelStyle}>{field.label}</label> : null}
           <input
             placeholder={placeholder}
             value={value || ""}
@@ -359,6 +311,7 @@ export default function EditDetailsModal({
   setEditForm,
   onClose,
   onSave,
+  isSaving = false,
   sections = [],
   fields = [],
   shippingProvincesByCountry = {},
@@ -367,6 +320,7 @@ export default function EditDetailsModal({
   setEditForm: Dispatch<SetStateAction<Record<string, any>>>;
   onClose: () => void;
   onSave: () => void;
+  isSaving?: boolean;
   sections?: FormSection[];
   fields?: FormField[];
   shippingProvincesByCountry?: Record<string, CountryOption[]>;
@@ -440,10 +394,17 @@ export default function EditDetailsModal({
             if (sectionFields.length === 0) return null;
 
             const isBilling = section.key === "billing";
+            const sameAsShippingField = isBilling
+              ? sectionFields.find((field) => field.key === "billSameAsShip")
+              : null;
+            const visibleSectionFields =
+              sameAsShippingField == null
+                ? sectionFields
+                : sectionFields.filter((field) => field.key !== sameAsShippingField.key);
 
             return (
               <div key={section.key} style={sectionStyle}>
-                {isBilling ? (
+                {isBilling && sameAsShippingField ? (
                   <div
                     style={{
                       display: "flex",
@@ -469,14 +430,14 @@ export default function EditDetailsModal({
                           setEditForm((f) => ({ ...f, useSameAddress: e.target.checked }))
                         }
                       />
-                      Same as shipping
+                      {sameAsShippingField.label}
                     </label>
                   </div>
                 ) : (
                   <h4 style={sectionHeadingStyle}>{section.label}</h4>
                 )}
 
-                {isBilling && editForm.useSameAddress ? null : (
+                {isBilling && sameAsShippingField && editForm.useSameAddress ? null : (
                   <div
                     style={{
                       display: "grid",
@@ -484,7 +445,7 @@ export default function EditDetailsModal({
                       gap: 10,
                     }}
                   >
-                    {sectionFields.map((field) => {
+                    {visibleSectionFields.map((field) => {
                       const countryValue =
                         field.section === "billing"
                           ? editForm.billCountry ??
@@ -553,12 +514,14 @@ export default function EditDetailsModal({
         >
           <button
             onClick={onClose}
+            disabled={isSaving}
             style={{
               padding: "8px 16px",
               borderRadius: 8,
               border: "1px solid #c9ccd0",
               background: "white",
-              cursor: "pointer",
+              cursor: isSaving ? "not-allowed" : "pointer",
+              opacity: isSaving ? 0.6 : 1,
               fontSize: 14,
               fontWeight: 500,
             }}
@@ -567,18 +530,21 @@ export default function EditDetailsModal({
           </button>
           <button
             onClick={onSave}
+            disabled={isSaving}
             style={{
               padding: "8px 16px",
               borderRadius: 8,
               border: "none",
               background: "#1a1a1a",
               color: "white",
-              cursor: "pointer",
+              cursor: isSaving ? "not-allowed" : "pointer",
+              opacity: isSaving ? 0.8 : 1,
               fontSize: 14,
               fontWeight: 600,
+              minWidth: 120,
             }}
           >
-            Save changes
+            {isSaving ? "Saving..." : "Save changes"}
           </button>
         </div>
       </div>

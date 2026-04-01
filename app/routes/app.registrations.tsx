@@ -3254,6 +3254,10 @@ const titleCaseSection = (value: string) =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
 function getFieldSourcePath(field: FieldDef): string {
+  if (field.type === "email") {
+    return "customer.email";
+  }
+
   if (field.section === "shipping" && field.key.startsWith("ship")) {
     return `shipping.${field.key.replace(/^ship/, "")}`;
   }
@@ -3301,14 +3305,8 @@ function mapConfigFieldToEditField(
 
   let type: FieldType = "text";
   let options: FormField["options"];
-  let readOnly = false;
-  let readOnlyHint: string | undefined;
 
-  if (field.key === "email") {
-    type = "readonly";
-    readOnly = true;
-    readOnlyHint = "Email cannot be changed";
-  } else if (field.type === "phone") {
+  if (field.type === "phone") {
     type = "phone";
   } else if (
     field.type === "country" ||
@@ -3339,8 +3337,6 @@ function mapConfigFieldToEditField(
     section: field.section || "general",
     order: field.order,
     width: field.width,
-    readOnly,
-    readOnlyHint,
     options,
     sourcePath: getFieldSourcePath(field),
     countryCode: field.type === "phone" ? "+91" : undefined,
@@ -3355,7 +3351,24 @@ function buildEditModalConfig(
   sections: FormSection[];
   fields: FormField[];
 } {
-  const fields = [...config.fields]
+  const rawFields = [...config.fields].sort((a, b) => {
+    if (a.stepIndex !== b.stepIndex) return a.stepIndex - b.stepIndex;
+    return a.order - b.order;
+  });
+
+  const sectionLabels = new Map<string, string>();
+  rawFields.forEach((field) => {
+    const sectionKey = field.section || "general";
+    if (sectionLabels.has(sectionKey)) return;
+
+    const customLabel = field.sectionLabel?.trim();
+    sectionLabels.set(
+      sectionKey,
+      customLabel || SECTION_LABELS[sectionKey] || titleCaseSection(sectionKey),
+    );
+  });
+
+  const fields = rawFields
     .sort((a, b) => {
       if (a.stepIndex !== b.stepIndex) return a.stepIndex - b.stepIndex;
       return a.order - b.order;
@@ -3373,7 +3386,7 @@ function buildEditModalConfig(
   const sections = Array.from(sectionOrder.entries()).map(([key, order]) => ({
     key,
     order,
-    label: SECTION_LABELS[key] ?? titleCaseSection(key),
+    label: sectionLabels.get(key) ?? titleCaseSection(key),
   }));
 
   return { sections, fields };
@@ -3392,6 +3405,9 @@ function resolveSourceValue(
   const key = rest.join(".");
 
   if (root === "customer") {
+    if (key === "email") {
+      return customer?.email ?? submission?.email ?? "";
+    }
     return customer?.[key] ?? "";
   }
   if (root === "submission") {
@@ -3432,6 +3448,7 @@ export function buildInitialEditForm(
   billingSame: boolean,
   fields: FormField[],
 ): Record<string, string | boolean> {
+  const resolvedEmail = customer?.email ?? submission?.email ?? "";
   const shipping = (submission as any)?.shipping as
     | Record<string, string>
     | undefined;
@@ -3468,7 +3485,7 @@ export function buildInitialEditForm(
     biCountry: billing?.Country || "India",
     biState: billing?.State || "",
     biZip: billing?.Zip || "",
-    email: customer?.email ?? submission.email ?? "",
+    email: resolvedEmail,
     useSameAddress: billingSame,
   };
 
@@ -3480,7 +3497,34 @@ export function buildInitialEditForm(
         : rawValue;
   }
 
+  for (const field of fields) {
+    if (field.type === "email" && !String(form[field.key] ?? "").trim()) {
+      form[field.key] = resolvedEmail;
+    }
+  }
+
+  form.email = resolvedEmail || String(form.email ?? "");
+
   return form;
+}
+
+function resolveEditFormEmail(
+  editForm: Record<string, any>,
+  fields: FormField[],
+  fallback = "",
+) {
+  const directEmail = String(editForm.email ?? "").trim();
+  if (directEmail) return directEmail;
+
+  const configuredEmailField = fields.find(
+    (field) => field.type === "email" && String(editForm[field.key] ?? "").trim(),
+  );
+
+  if (configuredEmailField) {
+    return String(editForm[configuredEmailField.key] ?? "").trim();
+  }
+
+  return fallback;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4083,6 +4127,12 @@ function ConfigureCompanyUI({
  
   // ── Edit modal save ──
   const handleSaveEditDetails = useCallback(() => {
+    const resolvedEmail = resolveEditFormEmail(
+      editForm,
+      editFields,
+      customer?.email || submission.email || "",
+    );
+
     editFetcher.submit(
       {
         intent: "updatecustomerCompanyDetails",
@@ -4093,10 +4143,11 @@ function ConfigureCompanyUI({
         ...Object.fromEntries(
           Object.entries(editForm).map(([key, value]) => [key, String(value ?? "")]),
         ),
+        email: resolvedEmail,
       },
       { method: "post" },
     );
-  }, [company, customer, editFetcher, editForm, submission]);
+  }, [company, customer, editFetcher, editFields, editForm, submission]);
  
   useEffect(() => {
     if (editFetcher.state !== "idle" || !editFetcher.data) return;
@@ -4770,6 +4821,7 @@ function ConfigureCompanyUI({
               setEditForm={setEditForm}
               onClose={() => setShowEditModal(false)}
               onSave={handleSaveEditDetails}
+              isSaving={editFetcher.state !== "idle"}
               sections={editSections}
               fields={editFields}
               shippingProvincesByCountry={shippingProvincesByCountry}

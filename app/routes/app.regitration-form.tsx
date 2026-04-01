@@ -873,7 +873,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "submitRegistration") {
     const formData = (body as any).data;
     const mapped = mapToRegistrationData(formData);
-    console.log(mapped, "mapped....");
     return Response.json({ success: true, intent, mappedData: mapped });
   }
 
