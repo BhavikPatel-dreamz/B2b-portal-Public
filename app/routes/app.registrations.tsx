@@ -1987,6 +1987,362 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
+      case "approveRegistration": {
+        const registrationId = (form.registrationId as string)?.trim();
+        const customerId = normalizeCustomerId(form.customerId as string);
+        const companyName = (form.companyName as string)?.trim();
+        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+        const creditLimit = (form.creditLimit as string)?.trim();
+        const customerEmail = (form.customerEmail as string)?.trim();
+        const firstName = (form.firstName as string)?.trim();
+        const lastName = (form.lastName as string)?.trim();
+        const reviewNotes = (form.reviewNotes as string)?.trim() || null;
+
+        if (!registrationId || !customerId || !companyName || !customerEmail) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [
+              "Registration, customer, company name, and customer email are required",
+            ],
+          });
+        }
+
+        const registrationData = await prisma.registrationSubmission.findFirst({
+          where: { id: registrationId, shopId: store.id },
+        });
+
+        if (!registrationData) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: ["Registration not found"],
+          });
+        }
+
+        const existingShopifyResponse = await admin.graphql(
+          `#graphql
+          query CompaniesByName($query: String!) {
+            companies(first: 1, query: $query) {
+              nodes {
+                id
+                name
+                locations(first: 1) {
+                  nodes {
+                    id
+                    name
+                  }
+                }
+              }
+            }
+          }`,
+          {
+            variables: { query: `name:'${companyName}'` },
+          },
+        );
+
+        const existingShopifyPayload = await existingShopifyResponse.json();
+        const existingShopifyCompany =
+          existingShopifyPayload?.data?.companies?.nodes?.[0] || null;
+
+        let companyId: string;
+        let locationId: string;
+        let locationName: string;
+
+        if (existingShopifyCompany) {
+          companyId = existingShopifyCompany.id;
+          const existingLocation =
+            existingShopifyCompany.locations?.nodes?.[0] || null;
+
+          if (!existingLocation) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: ["Existing company location not found"],
+            });
+          }
+
+          locationId = existingLocation.id;
+          locationName = existingLocation.name;
+
+          await Promise.all([
+            creditLimit
+              ? updateCompanyMetafield(admin, companyId, {
+                  namespace: "custom",
+                  key: "company_credit_limit",
+                  value: creditLimit.toString(),
+                  type: "number_decimal",
+                })
+              : Promise.resolve(),
+
+            paymentTermsTemplateId
+              ? admin
+                  .graphql(
+                    `#graphql
+                    mutation UpdateCompanyLocation(
+                      $companyLocationId: ID!
+                      $paymentTermsTemplateId: ID!
+                    ) {
+                      companyLocationUpdate(
+                        companyLocationId: $companyLocationId
+                        input: {
+                          buyerExperienceConfiguration: {
+                            paymentTermsTemplateId: $paymentTermsTemplateId
+                          }
+                        }
+                      ) {
+                        companyLocation { id }
+                        userErrors { field message }
+                      }
+                    }`,
+                    {
+                      variables: {
+                        companyLocationId: locationId,
+                        paymentTermsTemplateId,
+                      },
+                    },
+                  )
+                  .then((res) => res.json())
+              : Promise.resolve(),
+          ]);
+
+          await assignLocationAddresses(admin, locationId, registrationData);
+        } else {
+          const createCompanyResponse = await admin.graphql(
+            `#graphql
+            mutation CompanyCreate($input: CompanyCreateInput!) {
+              companyCreate(input: $input) {
+                company { id name }
+                userErrors { field message }
+              }
+            }`,
+            {
+              variables: {
+                input: {
+                  company: { name: companyName },
+                },
+              },
+            },
+          );
+
+          const companyPayload = await createCompanyResponse.json();
+          const companyErrors = buildUserErrorList(companyPayload);
+
+          if (companyErrors.length) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: companyErrors,
+            });
+          }
+
+          companyId = companyPayload.data.companyCreate.company.id;
+
+          const [locationPayload] = await Promise.all([
+            admin
+              .graphql(
+                `#graphql
+                query GetCompanyLocation($companyId: ID!) {
+                  company(id: $companyId) {
+                    locations(first: 1) {
+                      nodes { id name }
+                    }
+                  }
+                }`,
+                { variables: { companyId } },
+              )
+              .then((res) => res.json()),
+
+            creditLimit
+              ? updateCompanyMetafield(admin, companyId, {
+                  namespace: "custom",
+                  key: "company_credit_limit",
+                  value: creditLimit.toString(),
+                  type: "number_decimal",
+                })
+              : Promise.resolve(),
+          ]);
+
+          const newLocation =
+            locationPayload?.data?.company?.locations?.nodes?.[0];
+          if (!newLocation) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: ["Company location not found after creation"],
+            });
+          }
+
+          locationId = newLocation.id;
+          locationName = newLocation.name;
+
+          if (paymentTermsTemplateId) {
+            const updateLocationResponse = await admin.graphql(
+              `#graphql
+              mutation UpdateCompanyLocation(
+                $companyLocationId: ID!
+                $paymentTermsTemplateId: ID!
+              ) {
+                companyLocationUpdate(
+                  companyLocationId: $companyLocationId
+                  input: {
+                    buyerExperienceConfiguration: {
+                      paymentTermsTemplateId: $paymentTermsTemplateId
+                    }
+                  }
+                ) {
+                  companyLocation { id }
+                  userErrors { field message }
+                }
+              }`,
+              {
+                variables: {
+                  companyLocationId: locationId,
+                  paymentTermsTemplateId,
+                },
+              },
+            );
+
+            const updateLocationPayload = await updateLocationResponse.json();
+            const locationErrors = buildUserErrorList(updateLocationPayload);
+            if (locationErrors.length) {
+              return Response.json({
+                intent,
+                success: false,
+                errors: locationErrors,
+              });
+            }
+          }
+
+          await assignLocationAddresses(admin, locationId, registrationData);
+        }
+
+        const companyAccount = await prisma.companyAccount.upsert({
+          where: {
+            shopId_shopifyCompanyId: {
+              shopId: store.id,
+              shopifyCompanyId: companyId,
+            },
+          },
+          update: {
+            name: companyName,
+            paymentTerm: paymentTermsTemplateId || null,
+            creditLimit: creditLimit ? new Prisma.Decimal(creditLimit) : undefined,
+            contactEmail: customerEmail,
+            contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
+          },
+          create: {
+            shopId: store.id,
+            name: companyName,
+            shopifyCompanyId: companyId,
+            paymentTerm: paymentTermsTemplateId || null,
+            creditLimit: creditLimit ? new Prisma.Decimal(creditLimit) : undefined,
+            contactEmail: customerEmail,
+            contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
+          },
+        });
+
+        const linkedUser = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { shopId: store.id, email: customerEmail },
+              { shopifyCustomerId: customerId },
+            ],
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (linkedUser) {
+          await prisma.user.update({
+            where: { id: linkedUser.id },
+            data: { companyId: companyAccount.id },
+          });
+        }
+
+        const assignmentResult = await assignCompanyToCustomer(
+          admin,
+          customerId,
+          companyId,
+          locationId,
+        );
+
+        if (!assignmentResult.success) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [`${assignmentResult.step}: ${assignmentResult.error}`],
+          });
+        }
+
+        await prisma.user.upsert({
+          where: {
+            shopId_email: { shopId: store.id, email: customerEmail },
+          },
+          update: {
+            firstName: registrationData.firstName || firstName || null,
+            lastName: registrationData.lastName || lastName || null,
+            shopifyCustomerId: customerId,
+            companyId: companyAccount.id,
+            companyRole: "admin",
+            role: "STORE_ADMIN",
+            status: "APPROVED",
+            isActive: true,
+            userCreditLimit: creditLimit
+              ? new Prisma.Decimal(creditLimit)
+              : undefined,
+          },
+          create: {
+            email: customerEmail,
+            firstName: registrationData.firstName || firstName || null,
+            lastName: registrationData.lastName || lastName || null,
+            password: "",
+            shopifyCustomerId: customerId,
+            shopId: store.id,
+            companyId: companyAccount.id,
+            companyRole: "admin",
+            role: "STORE_ADMIN",
+            status: "APPROVED",
+            isActive: true,
+            userCreditLimit: creditLimit
+              ? new Prisma.Decimal(creditLimit)
+              : undefined,
+          },
+        });
+
+        await sendCompanyAssignmentEmail(
+          store.shopName || "Shop Name",
+          store.shopDomain || "shop-domain.myshopify.com",
+          store.storeOwnerName || "Store Owner",
+          customerEmail,
+          companyName,
+          `${registrationData?.firstName || firstName || ""} ${registrationData?.lastName || lastName || ""}`.trim(),
+          reviewNotes,
+        );
+
+        await prisma.registrationSubmission.update({
+          where: { id: registrationId },
+          data: {
+            status: "APPROVED",
+            shopifyCustomerId: customerId,
+            workflowCompleted: true,
+          },
+        });
+
+        return Response.json({
+          intent,
+          success: true,
+          company: {
+            id: companyId,
+            name: companyName,
+            locationId,
+            locationName,
+            paymentTermsTemplateId: paymentTermsTemplateId || null,
+            creditLimit: creditLimit ? Number(creditLimit) : null,
+          },
+          message: "Registration approved",
+        });
+      }
+
       case "completeApproval": {
         const registrationId = (form.registrationId as string)?.trim();
         const customerId = normalizeCustomerId(
@@ -2660,6 +3016,7 @@ const formatDate = (value?: string | null) => {
 type PipelineStep =
   | "idle"
   | "checkCustomer"
+  | "approveRegistration"
   | "checkCompany"
   | "createCompany"
   | "assignMainContact"
@@ -2671,6 +3028,7 @@ type PipelineStep =
 // ─── Progress Step Indicator ──────────────────────────────────────────────────
 const PIPELINE_LABELS: Record<string, string> = {
   checkCustomer: "Checking customer",
+  approveRegistration: "Approving registration",
   checkCompany: "Checking company",
   createCompany: "Setting up company",
   assignMainContact: "Assigning contact",
@@ -2681,11 +3039,7 @@ const PIPELINE_LABELS: Record<string, string> = {
 
 const PIPELINE_ORDER: PipelineStep[] = [
   "checkCustomer",
-  "checkCompany",
-  "createCompany",
-  "assignMainContact",
-  "sendWelcomeEmail",
-  "completeApproval",
+  "approveRegistration",
   "done",
 ];
 
@@ -4591,7 +4945,7 @@ export default function RegistrationApprovals() {
       setPipelineError(msg);
     };
 
-    // ── 1. checkCustomer → checkCompany ──────────────────────────────────
+    // ── 1. checkCustomer → approveRegistration ───────────────────────────
     if (data.intent === "checkCustomer") {
       if (data.errors?.length) return fail(data.errors[0]);
 
@@ -4605,130 +4959,33 @@ export default function RegistrationApprovals() {
         );
       }
 
-      setPipelineStep("checkCompany");
+      setPipelineStep("approveRegistration");
       flowFetcher.submit(
         {
-          intent: "checkCompany",
-          email: resolvedCustomer.email,
-          companyName: sub.companyName,
-        },
-        { method: "post" },
-      );
-      return;
-    }
-
-    // ── 2. checkCompany → createCompany ──────────────────────────────────
-    if (data.intent === "checkCompany") {
-      if (data.errors?.length) return fail(data.errors[0]);
-
-      const resolvedCompany = data.company ?? null;
-      setCompany(resolvedCompany);
-      companyRef.current = resolvedCompany;
-
-      const cust = customerRef.current;
-      if (!cust) return fail("Customer data lost between steps");
-
-      setPipelineStep("createCompany");
-      flowFetcher.submit(
-        {
-          intent: "createCompany",
+          intent: "approveRegistration",
+          registrationId: sub.id,
+          customerId: resolvedCustomer.id,
           companyName: sub.companyName,
           paymentTerms: opts.paymentTermsId,
           creditLimit: sub.creditLimit || "",
-          customerId: cust.id,
-          customerEmail: cust.email,
-          firstName: cust.firstName || sub.firstName || "",
-          lastName: cust.lastName || sub.lastName || "",
+          customerEmail: resolvedCustomer.email,
+          firstName: resolvedCustomer.firstName || sub.firstName || "",
+          lastName: resolvedCustomer.lastName || sub.lastName || "",
+          reviewNotes: "",
         },
         { method: "post" },
       );
       return;
     }
 
-    // ── 3. createCompany → assignMainContact ─────────────────────────────
-    if (data.intent === "createCompany") {
+    // ── 2. approveRegistration → done ────────────────────────────────────
+    if (data.intent === "approveRegistration") {
       if (!data.success || data.errors?.length)
-        return fail(data.errors?.[0] || "Failed to create/update company");
+        return fail(data.errors?.[0] || "Failed to approve registration");
 
       const resolvedCompany = data.company ?? null;
       setCompany(resolvedCompany);
       companyRef.current = resolvedCompany;
-
-      const cust = customerRef.current;
-      if (!cust?.id) return fail("Customer ID missing");
-      if (!resolvedCompany?.id || !resolvedCompany?.locationId)
-        return fail("Company or location ID missing after creation");
-
-      setPipelineStep("assignMainContact");
-      flowFetcher.submit(
-        {
-          intent: "assignMainContact",
-          companyId: resolvedCompany.id,
-          customerId: cust.id,
-          locationId: resolvedCompany.locationId,
-          customerFirstName: cust.firstName || "",
-          customerLastName: cust.lastName || "",
-          customerEmail: cust.email,
-        },
-        { method: "post" },
-      );
-      return;
-    }
-
-    // ── 4. assignMainContact → sendWelcomeEmail ───────────────────────────
-    if (data.intent === "assignMainContact") {
-      if (!data.success || data.errors?.length)
-        return fail(data.errors?.[0] || "Failed to assign main contact");
-
-      const cust = customerRef.current;
-      const comp = companyRef.current;
-
-      setPipelineStep("sendWelcomeEmail");
-      flowFetcher.submit(
-        {
-          intent: "sendWelcomeEmail",
-          email: cust?.email || sub.email,
-          companyName: comp?.name || sub.companyName,
-          firstName: cust?.firstName || sub.firstName || "",
-          lastName: cust?.lastName || sub.lastName || "",
-          reviewNotes: "",
-        },
-        { method: "post" },
-      );
-      return;
-    }
-
-    // ── 5. sendWelcomeEmail → completeApproval ────────────────────────────
-    if (data.intent === "sendWelcomeEmail") {
-      // Non-fatal — continue even if email fails
-      const cust = customerRef.current;
-      const comp = companyRef.current;
-
-      setPipelineStep("completeApproval");
-      flowFetcher.submit(
-        {
-          intent: "completeApproval",
-          registrationId: sub.id,
-          customerId: cust?.id || "",
-          companyId: comp?.id || "",
-          companyName: comp?.name || sub.companyName,
-          contactName: cust
-            ? `${cust.firstName || ""} ${cust.lastName || ""}`.trim()
-            : `${sub.firstName || ""} ${sub.lastName || ""}`.trim(),
-          contactEmail: cust?.email || sub.email,
-          paymentTerm: opts.paymentTermsId || sub.paymentTerm || "",
-          creditLimit: sub.creditLimit || "",
-          reviewNotes: "",
-        },
-        { method: "post" },
-      );
-      return;
-    }
-
-    // ── 6. completeApproval → done ────────────────────────────────────────
-    if (data.intent === "completeApproval") {
-      if (!data.success || data.errors?.length)
-        return fail(data.errors?.[0] || "Failed to complete approval");
 
       setPipelineStep("done");
       shopify.toast.show?.("Registration approved successfully!");

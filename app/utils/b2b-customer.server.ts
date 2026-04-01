@@ -2596,291 +2596,75 @@ async function assignRoleAndLocations(
     };
   }
 }
-// export async function getCompanyLocations(
-//   companyId: string,
-//   shopName: string,
-//   accessToken: string,
-// ) {
-//   try {
-//     const query = `
-//   query {
-//     company(id: "${companyId}") {
-//       id
-//       name
-//       contacts(first: 250) {
-//         edges {
-//           node {
-//             id
-//             title
-//             customer {
-//               id
-//               firstName
-//               lastName
-//               email
-//               phone
-//             }
-//             roleAssignments(first: 10) {
-//               edges {
-//                 node {
-//                   role {
-//                     name
-//                   }
-//                   companyLocation {
-//                     id
-//                     name
-//                   }
-//                 }
-//               }
-//             }
-//           }
-//         }
-//       }
-//       locations(first: 50) {
-//         edges {
-//           node {
-//             id
-//             name
-//             note
-//             phone
-//             externalId
-//             shippingAddress {
-//               address1
-//               address2
-//               city
-//               province
-//               zip
-//               country
-//             }
-//             billingAddress {
-//               address1
-//               address2
-//               city
-//               province
-//               zip
-//               country
-//             }
-//           }
-//         }
-//       }
-//     }
-//   }
-// `;
-//     const response = await fetch(
-//       `https://${shopName}/admin/api/2025-01/graphql.json`,
-//       {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//           "X-Shopify-Access-Token": accessToken,
-//         },
-//         body: JSON.stringify({ query }),
-//       },
-//     );
-//     const data = await response.json();
-
-//     if (data.errors) {
-//       console.error("GraphQL Errors:", data.errors);
-//       return { error: data.errors };
-//     }
-
-//     const company = data.data.company;
-//     // Get all contacts with their location assignments
-//     const contacts = company.contacts.edges.map(
-//       (edge: {
-//         node: {
-//           id: string;
-//           title: string;
-//           customer: { id: string };
-//           roleAssignments: {
-//             edges: Array<{
-//               node: {
-//                 companyLocation: { id: string; name: string };
-//                 role: { name: string };
-//               };
-//             }>;
-//           };
-//         };
-//       }) => {
-//         const node = edge.node;
-//         const locationAssignments =
-//           node.roleAssignments?.edges
-//             ?.map(
-//               (r: {
-//                 node: {
-//                   companyLocation: { id: string; name: string };
-//                   role: { name: string };
-//                 };
-//               }) => ({
-//                 locationId: r.node.companyLocation?.id,
-//                 locationName: r.node.companyLocation?.name,
-//                 roleName: r.node.role?.name,
-//               }),
-//             )
-//             .filter((la: { locationId: string }) => la.locationId) || [];
-
-//         return {
-//           id: node.id,
-//           title: node.title,
-//           customer: node.customer,
-//           locationAssignments: locationAssignments,
-//         };
-//       },
-//     );
-
-//     // Count customers per location
-//     const locationCustomerCount: Record<
-//       string,
-//       { name: string; count: number; customerIds: string[] }
-//     > = {};
-
-//     contacts.forEach(
-//       (contact: {
-//         locationAssignments: { locationId: string; locationName: string }[];
-//         customer: { id: string };
-//       }) => {
-//         contact.locationAssignments.forEach((assignment) => {
-//           if (!locationCustomerCount[assignment.locationId]) {
-//             locationCustomerCount[assignment.locationId] = {
-//               name: assignment.locationName,
-//               count: 0,
-//               customerIds: [],
-//             };
-//           }
-
-//           // Only count unique customers per location
-//           if (
-//             !locationCustomerCount[assignment.locationId].customerIds.includes(
-//               contact.customer.id,
-//             )
-//           ) {
-//             locationCustomerCount[assignment.locationId].count++;
-//             locationCustomerCount[assignment.locationId].customerIds.push(
-//               contact.customer.id,
-//             );
-//           }
-//         });
-//       },
-//     );
-
-//     // Get locations with customer count
-//     const locations = company.locations.edges.map(
-//       (edge: {
-//         node: {
-//           id: string;
-//           name: string;
-//           shippingAddress: {
-//             address1: string;
-//             city: string;
-//             province: string;
-//             zip: string;
-//           };
-//         };
-//       }) => {
-//         const location = edge.node;
-
-//         const customerInfo = locationCustomerCount[location.id] || {
-//           count: 0,
-//           customerIds: [],
-//         };
-//         const shippingAddress = location.shippingAddress;
-//         const formattedAddress = shippingAddress
-//           ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
-//           : "No address provided";
-//         return {
-//           id: location.id,
-//           name: location.name,
-//           note: location.note,
-//           phone: location.phone,
-//           externalId: location.externalId,
-//           shippingAddress: location.shippingAddress,
-//           billingAddress: location.billingAddress,
-//           assignedUsers: customerInfo.count,
-//           address: formattedAddress,
-//         };
-//       },
-//     );
-
-//     return {
-//       companyId: company.id,
-//       companyName: company.name,
-//       contacts: contacts,
-//       locations: locations,
-//       locationCustomerCount: locationCustomerCount,
-//     };
-//   } catch (error: unknown) {
-//     console.error("Error fetching company locations:", error);
-//     return { error: error instanceof Error ? error.message : "Unknown error" };
-//   }
-// }
-
 export async function getCompanyLocations(
   companyId: string,
   shopName: string,
   accessToken: string,
 ) {
   try {
-    /* -----------------------------------------
-       1. FETCH COMPANY + LOCATIONS
-    ----------------------------------------- */
     const query = `
-      query {
-        company(id: "${companyId}") {
-          id
-          name
-          contacts(first: 250) {
-            edges {
-              node {
-                id
-                title
-                customer {
-                  id
-                  firstName
-                  lastName
-                  email
-                  phone
-                }
-                roleAssignments(first: 10) {
-                  edges {
-                    node {
-                      role { name }
-                      companyLocation { id name }
-                    }
-                  }
-                }
-              }
+  query {
+    company(id: "${companyId}") {
+      id
+      name
+      contacts(first: 250) {
+        edges {
+          node {
+            id
+            title
+            customer {
+              id
+              firstName
+              lastName
+              email
+              phone
             }
-          }
-          locations(first: 50) {
-            edges {
-              node {
-                id
-                name
-                note
-                phone
-                externalId
-                shippingAddress {
-                  address1
-                  address2
-                  city
-                  province
-                  zip
-                  country
-                }
-                billingAddress {
-                  address1
-                  address2
-                  city
-                  province
-                  zip
-                  country
+            roleAssignments(first: 10) {
+              edges {
+                node {
+                  role {
+                    name
+                  }
+                  companyLocation {
+                    id
+                    name
+                  }
                 }
               }
             }
           }
         }
       }
-    `;
-
+      locations(first: 50) {
+        edges {
+          node {
+            id
+            name
+            note
+            phone
+            externalId
+            shippingAddress {
+              address1
+              address2
+              city
+              province
+              zip
+              country
+            }
+            billingAddress {
+              address1
+              address2
+              city
+              province
+              zip
+              country
+            }
+          }
+        }
+      }
+    }
+  }
+`;
     const response = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
       {
@@ -2892,7 +2676,6 @@ export async function getCompanyLocations(
         body: JSON.stringify({ query }),
       },
     );
-
     const data = await response.json();
 
     if (data.errors) {
@@ -2901,216 +2684,433 @@ export async function getCompanyLocations(
     }
 
     const company = data.data.company;
+    // Get all contacts with their location assignments
+    const contacts = company.contacts.edges.map(
+      (edge: {
+        node: {
+          id: string;
+          title: string;
+          customer: { id: string };
+          roleAssignments: {
+            edges: Array<{
+              node: {
+                companyLocation: { id: string; name: string };
+                role: { name: string };
+              };
+            }>;
+          };
+        };
+      }) => {
+        const node = edge.node;
+        const locationAssignments =
+          node.roleAssignments?.edges
+            ?.map(
+              (r: {
+                node: {
+                  companyLocation: { id: string; name: string };
+                  role: { name: string };
+                };
+              }) => ({
+                locationId: r.node.companyLocation?.id,
+                locationName: r.node.companyLocation?.name,
+                roleName: r.node.role?.name,
+              }),
+            )
+            .filter((la: { locationId: string }) => la.locationId) || [];
 
-    /* -----------------------------------------
-       2. FETCH SHIPPING COUNTRIES + PROVINCES
-    ----------------------------------------- */
-    const shippingCountriesResponse = await fetch(
-      `https://${shopName}/admin/api/2025-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          query: `#graphql
-          query GetShippingCountriesWithProvinces {
-            deliveryProfiles(first: 1) {
-              nodes {
-                profileLocationGroups {
-                  locationGroupZones(first: 50) {
-                    nodes {
-                      zone {
-                        countries {
-                          code { countryCode }
-                          provinces { code name }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-            shop {
-              countriesInShippingZones { countryCodes }
-            }
-          }`,
-        }),
+        return {
+          id: node.id,
+          title: node.title,
+          customer: node.customer,
+          locationAssignments: locationAssignments,
+        };
       },
     );
 
-    const shippingCountriesPayload =
-      await shippingCountriesResponse.json();
-
-    const validCountryCodes = new Set<string>(
-      shippingCountriesPayload?.data?.shop?.countriesInShippingZones
-        ?.countryCodes || [],
-    );
-
-    type ProvinceOption = { value: string; label: string };
-    const countryProvincesMap = new Map<string, ProvinceOption[]>();
-
-    const profiles =
-      shippingCountriesPayload?.data?.deliveryProfiles?.nodes || [];
-
-    for (const profile of profiles) {
-      for (const group of profile.profileLocationGroups || []) {
-        for (const zoneNode of group.locationGroupZones?.nodes || []) {
-          for (const country of zoneNode.zone?.countries || []) {
-            const countryCode: string = country.code?.countryCode;
-
-            if (!countryCode || !validCountryCodes.has(countryCode))
-              continue;
-
-            const provinces: ProvinceOption[] = (
-              country.provinces || []
-            ).map((p: { code: string; name: string }) => ({
-              value: p.code,
-              label: p.name,
-            }));
-
-            if (countryProvincesMap.has(countryCode)) {
-              const existing = countryProvincesMap.get(countryCode)!;
-              const existingCodes = new Set(
-                existing.map((e) => e.value),
-              );
-
-              for (const p of provinces) {
-                if (!existingCodes.has(p.value)) existing.push(p);
-              }
-            } else {
-              countryProvincesMap.set(countryCode, provinces);
-            }
-          }
-        }
-      }
-    }
-
-    /* -----------------------------------------
-       3. PROCESS CONTACTS
-    ----------------------------------------- */
-    const contacts = company.contacts.edges.map((edge: any) => {
-      const node = edge.node;
-
-      const locationAssignments =
-        node.roleAssignments?.edges
-          ?.map((r: any) => ({
-            locationId: r.node.companyLocation?.id,
-            locationName: r.node.companyLocation?.name,
-            roleName: r.node.role?.name,
-          }))
-          .filter((la: any) => la.locationId) || [];
-
-      return {
-        id: node.id,
-        title: node.title,
-        customer: node.customer,
-        locationAssignments,
-      };
-    });
-
-    /* -----------------------------------------
-       4. COUNT CUSTOMERS PER LOCATION
-    ----------------------------------------- */
+    // Count customers per location
     const locationCustomerCount: Record<
       string,
       { name: string; count: number; customerIds: string[] }
     > = {};
 
-    contacts.forEach((contact: any) => {
-      contact.locationAssignments.forEach((assignment: any) => {
-        if (!locationCustomerCount[assignment.locationId]) {
-          locationCustomerCount[assignment.locationId] = {
-            name: assignment.locationName,
-            count: 0,
-            customerIds: [],
+    contacts.forEach(
+      (contact: {
+        locationAssignments: { locationId: string; locationName: string }[];
+        customer: { id: string };
+      }) => {
+        contact.locationAssignments.forEach((assignment) => {
+          if (!locationCustomerCount[assignment.locationId]) {
+            locationCustomerCount[assignment.locationId] = {
+              name: assignment.locationName,
+              count: 0,
+              customerIds: [],
+            };
+          }
+
+          // Only count unique customers per location
+          if (
+            !locationCustomerCount[assignment.locationId].customerIds.includes(
+              contact.customer.id,
+            )
+          ) {
+            locationCustomerCount[assignment.locationId].count++;
+            locationCustomerCount[assignment.locationId].customerIds.push(
+              contact.customer.id,
+            );
+          }
+        });
+      },
+    );
+
+    // Get locations with customer count
+    const locations = company.locations.edges.map(
+      (edge: {
+        node: {
+          id: string;
+          name: string;
+          shippingAddress: {
+            address1: string;
+            city: string;
+            province: string;
+            zip: string;
           };
-        }
+        };
+      }) => {
+        const location = edge.node;
 
-        if (
-          !locationCustomerCount[
-            assignment.locationId
-          ].customerIds.includes(contact.customer.id)
-        ) {
-          locationCustomerCount[assignment.locationId].count++;
-          locationCustomerCount[assignment.locationId].customerIds.push(
-            contact.customer.id,
-          );
-        }
-      });
-    });
+        const customerInfo = locationCustomerCount[location.id] || {
+          count: 0,
+          customerIds: [],
+        };
+        const shippingAddress = location.shippingAddress;
+        const formattedAddress = shippingAddress
+          ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
+          : "No address provided";
+        return {
+          id: location.id,
+          name: location.name,
+          note: location.note,
+          phone: location.phone,
+          externalId: location.externalId,
+          shippingAddress: location.shippingAddress,
+          billingAddress: location.billingAddress,
+          assignedUsers: customerInfo.count,
+          address: formattedAddress,
+        };
+      },
+    );
 
-    /* -----------------------------------------
-       5. FORMAT LOCATIONS WITH COUNTRY + PROVINCES
-    ----------------------------------------- */
-    const regionNames = new Intl.DisplayNames(["en"], {
-      type: "region",
-    });
-
-    const locations = company.locations.edges.map((edge: any) => {
-      const location = edge.node;
-
-      const customerInfo = locationCustomerCount[location.id] || {
-        count: 0,
-        customerIds: [],
-      };
-
-      const shippingAddress = location.shippingAddress;
-
-      // Handle country (name OR code)
-      let countryCode: string | null = shippingAddress?.country || null;
-
-      if (countryCode && countryCode.length !== 2) {
-        // convert country name → code
-        const match = [...countryProvincesMap.keys()].find(
-          (code) => regionNames.of(code) === countryCode,
-        );
-        countryCode = match || null;
-      }
-
-      const provinces = countryCode
-        ? countryProvincesMap.get(countryCode) || []
-        : [];
-
-      const formattedAddress = shippingAddress
-        ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
-        : "No address provided";
-
-      return {
-        id: location.id,
-        name: location.name,
-        note: location.note,
-        phone: location.phone,
-        externalId: location.externalId,
-        shippingAddress: location.shippingAddress,
-        billingAddress: location.billingAddress,
-        assignedUsers: customerInfo.count,
-        address: formattedAddress,
-
-        // ✅ NEW
-        countryCode,
-        provinces,
-      };
-    });
-
-    /* -----------------------------------------
-       6. FINAL RESPONSE
-    ----------------------------------------- */
     return {
       companyId: company.id,
       companyName: company.name,
-      contacts,
-      locations,
-      locationCustomerCount,
+      contacts: contacts,
+      locations: locations,
+      locationCustomerCount: locationCustomerCount,
     };
   } catch (error: unknown) {
     console.error("Error fetching company locations:", error);
-    return {
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
+    return { error: error instanceof Error ? error.message : "Unknown error" };
   }
 }
+
+// export async function getCompanyLocations(
+//   companyId: string,
+//   shopName: string,
+//   accessToken: string,
+// ) {
+//   try {
+//     /* -----------------------------------------
+//        1. FETCH COMPANY + LOCATIONS
+//     ----------------------------------------- */
+//     const query = `
+//       query {
+//         company(id: "${companyId}") {
+//           id
+//           name
+//           contacts(first: 250) {
+//             edges {
+//               node {
+//                 id
+//                 title
+//                 customer {
+//                   id
+//                   firstName
+//                   lastName
+//                   email
+//                   phone
+//                 }
+//                 roleAssignments(first: 10) {
+//                   edges {
+//                     node {
+//                       role { name }
+//                       companyLocation { id name }
+//                     }
+//                   }
+//                 }
+//               }
+//             }
+//           }
+//           locations(first: 50) {
+//             edges {
+//               node {
+//                 id
+//                 name
+//                 note
+//                 phone
+//                 externalId
+//                 shippingAddress {
+//                   address1
+//                   address2
+//                   city
+//                   province
+//                   zip
+//                   country
+//                 }
+//                 billingAddress {
+//                   address1
+//                   address2
+//                   city
+//                   province
+//                   zip
+//                   country
+//                 }
+//               }
+//             }
+//           }
+//         }
+//       }
+//     `;
+
+//     const response = await fetch(
+//       `https://${shopName}/admin/api/2025-01/graphql.json`,
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-Shopify-Access-Token": accessToken,
+//         },
+//         body: JSON.stringify({ query }),
+//       },
+//     );
+
+//     const data = await response.json();
+
+//     if (data.errors) {
+//       console.error("GraphQL Errors:", data.errors);
+//       return { error: data.errors };
+//     }
+
+//     const company = data.data.company;
+
+//     /* -----------------------------------------
+//        2. FETCH SHIPPING COUNTRIES + PROVINCES
+//     ----------------------------------------- */
+//     const shippingCountriesResponse = await fetch(
+//       `https://${shopName}/admin/api/2025-01/graphql.json`,
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-Shopify-Access-Token": accessToken,
+//         },
+//         body: JSON.stringify({
+//           query: `#graphql
+//           query GetShippingCountriesWithProvinces {
+//             deliveryProfiles(first: 1) {
+//               nodes {
+//                 profileLocationGroups {
+//                   locationGroupZones(first: 50) {
+//                     nodes {
+//                       zone {
+//                         countries {
+//                           code { countryCode }
+//                           provinces { code name }
+//                         }
+//                       }
+//                     }
+//                   }
+//                 }
+//               }
+//             }
+//             shop {
+//               countriesInShippingZones { countryCodes }
+//             }
+//           }`,
+//         }),
+//       },
+//     );
+
+//     const shippingCountriesPayload =
+//       await shippingCountriesResponse.json();
+
+//     const validCountryCodes = new Set<string>(
+//       shippingCountriesPayload?.data?.shop?.countriesInShippingZones
+//         ?.countryCodes || [],
+//     );
+
+//     type ProvinceOption = { value: string; label: string };
+//     const countryProvincesMap = new Map<string, ProvinceOption[]>();
+
+//     const profiles =
+//       shippingCountriesPayload?.data?.deliveryProfiles?.nodes || [];
+
+//     for (const profile of profiles) {
+//       for (const group of profile.profileLocationGroups || []) {
+//         for (const zoneNode of group.locationGroupZones?.nodes || []) {
+//           for (const country of zoneNode.zone?.countries || []) {
+//             const countryCode: string = country.code?.countryCode;
+
+//             if (!countryCode || !validCountryCodes.has(countryCode))
+//               continue;
+
+//             const provinces: ProvinceOption[] = (
+//               country.provinces || []
+//             ).map((p: { code: string; name: string }) => ({
+//               value: p.code,
+//               label: p.name,
+//             }));
+
+//             if (countryProvincesMap.has(countryCode)) {
+//               const existing = countryProvincesMap.get(countryCode)!;
+//               const existingCodes = new Set(
+//                 existing.map((e) => e.value),
+//               );
+
+//               for (const p of provinces) {
+//                 if (!existingCodes.has(p.value)) existing.push(p);
+//               }
+//             } else {
+//               countryProvincesMap.set(countryCode, provinces);
+//             }
+//           }
+//         }
+//       }
+//     }
+
+//     /* -----------------------------------------
+//        3. PROCESS CONTACTS
+//     ----------------------------------------- */
+//     const contacts = company.contacts.edges.map((edge: any) => {
+//       const node = edge.node;
+
+//       const locationAssignments =
+//         node.roleAssignments?.edges
+//           ?.map((r: any) => ({
+//             locationId: r.node.companyLocation?.id,
+//             locationName: r.node.companyLocation?.name,
+//             roleName: r.node.role?.name,
+//           }))
+//           .filter((la: any) => la.locationId) || [];
+
+//       return {
+//         id: node.id,
+//         title: node.title,
+//         customer: node.customer,
+//         locationAssignments,
+//       };
+//     });
+
+//     /* -----------------------------------------
+//        4. COUNT CUSTOMERS PER LOCATION
+//     ----------------------------------------- */
+//     const locationCustomerCount: Record<
+//       string,
+//       { name: string; count: number; customerIds: string[] }
+//     > = {};
+
+//     contacts.forEach((contact: any) => {
+//       contact.locationAssignments.forEach((assignment: any) => {
+//         if (!locationCustomerCount[assignment.locationId]) {
+//           locationCustomerCount[assignment.locationId] = {
+//             name: assignment.locationName,
+//             count: 0,
+//             customerIds: [],
+//           };
+//         }
+
+//         if (
+//           !locationCustomerCount[
+//             assignment.locationId
+//           ].customerIds.includes(contact.customer.id)
+//         ) {
+//           locationCustomerCount[assignment.locationId].count++;
+//           locationCustomerCount[assignment.locationId].customerIds.push(
+//             contact.customer.id,
+//           );
+//         }
+//       });
+//     });
+
+//     /* -----------------------------------------
+//        5. FORMAT LOCATIONS WITH COUNTRY + PROVINCES
+//     ----------------------------------------- */
+//     const regionNames = new Intl.DisplayNames(["en"], {
+//       type: "region",
+//     });
+
+//     const locations = company.locations.edges.map((edge: any) => {
+//       const location = edge.node;
+
+//       const customerInfo = locationCustomerCount[location.id] || {
+//         count: 0,
+//         customerIds: [],
+//       };
+
+//       const shippingAddress = location.shippingAddress;
+
+//       // Handle country (name OR code)
+//       let countryCode: string | null = shippingAddress?.country || null;
+
+//       if (countryCode && countryCode.length !== 2) {
+//         // convert country name → code
+//         const match = [...countryProvincesMap.keys()].find(
+//           (code) => regionNames.of(code) === countryCode,
+//         );
+//         countryCode = match || null;
+//       }
+
+//       const provinces = countryCode
+//         ? countryProvincesMap.get(countryCode) || []
+//         : [];
+
+//       const formattedAddress = shippingAddress
+//         ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
+//         : "No address provided";
+
+//       return {
+//         id: location.id,
+//         name: location.name,
+//         note: location.note,
+//         phone: location.phone,
+//         externalId: location.externalId,
+//         shippingAddress: location.shippingAddress,
+//         billingAddress: location.billingAddress,
+//         assignedUsers: customerInfo.count,
+//         address: formattedAddress,
+
+//         // ✅ NEW
+//         countryCode,
+//         provinces,
+//       };
+//     });
+
+//     /* -----------------------------------------
+//        6. FINAL RESPONSE
+//     ----------------------------------------- */
+//     return {
+//       companyId: company.id,
+//       companyName: company.name,
+//       contacts,
+//       locations,
+//       locationCustomerCount,
+//     };
+//   } catch (error: unknown) {
+//     console.error("Error fetching company locations:", error);
+//     return {
+//       error: error instanceof Error ? error.message : "Unknown error",
+//     };
+//   }
+// }
 
 export async function getCompanyLocationById(
   locationId: string,

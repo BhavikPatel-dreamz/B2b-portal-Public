@@ -612,9 +612,23 @@ export function serializeConfig(config: FormConfig): StoredConfig {
   return config.steps.map((step, stepIdx): StoredStepGroup => {
     const stepFields = config.fields
       .filter((f) => f.stepIndex === stepIdx)
-      .sort((a, b) => a.order - b.order)
+      .sort((a, b) => a.order - b.order);
+    const { map: sectionMap } = groupBySection(stepFields);
+
+    const storedFields = stepFields
       .map(
-        (f): StoredField => ({
+        (f): StoredField => {
+          const sectionFields = f.section ? sectionMap[f.section] || [] : [];
+          const sectionLabel =
+            f.section && sectionFields.length > 0
+              ? getSectionDisplayLabel(sectionFields, f.section)
+              : f.sectionLabel;
+          const sectionHeadingSettings =
+            f.section && sectionFields.length > 0
+              ? getSectionHeadingSettings(sectionFields, f.section)
+              : null;
+
+          return {
           paletteKey: f.paletteKey,
           key: f.key,
           label: f.label,
@@ -629,12 +643,12 @@ export function serializeConfig(config: FormConfig): StoredConfig {
           ...(f.linkUrl ? { linkUrl: f.linkUrl } : {}),
           ...(typeof f.linkOpenInNewTab === "boolean" ? { linkOpenInNewTab: f.linkOpenInNewTab } : {}),
           ...(f.linkAlignment ? { linkAlignment: f.linkAlignment } : {}),
-          ...(f.sectionLabel ? { sectionLabel: f.sectionLabel } : {}),
-          ...(f.sectionHeadingLabel ? { sectionHeadingLabel: f.sectionHeadingLabel } : {}),
-          ...(f.sectionHeadingTag ? { sectionHeadingTag: f.sectionHeadingTag } : {}),
-          ...(f.sectionHeadingAlignment ? { sectionHeadingAlignment: f.sectionHeadingAlignment } : {}),
-          ...(typeof f.sectionHeadingWidth === "number" ? { sectionHeadingWidth: f.sectionHeadingWidth } : {}),
-          ...(f.sectionHeadingHidden ? { sectionHeadingHidden: f.sectionHeadingHidden } : {}),
+          ...(sectionLabel ? { sectionLabel } : {}),
+          ...(sectionHeadingSettings?.label ? { sectionHeadingLabel: sectionHeadingSettings.label } : {}),
+          ...(sectionHeadingSettings?.headingTag ? { sectionHeadingTag: sectionHeadingSettings.headingTag } : {}),
+          ...(sectionHeadingSettings?.alignment ? { sectionHeadingAlignment: sectionHeadingSettings.alignment } : {}),
+          ...(typeof sectionHeadingSettings?.width === "number" ? { sectionHeadingWidth: sectionHeadingSettings.width } : {}),
+          ...(typeof sectionHeadingSettings?.hidden === "boolean" ? { sectionHeadingHidden: sectionHeadingSettings.hidden } : {}),
           type: f.type,
           order: f.order,
           ...(f.required ? { required: f.required } : {}),
@@ -650,9 +664,10 @@ export function serializeConfig(config: FormConfig): StoredConfig {
           ...(f.metafieldTarget ? { metafieldTarget: f.metafieldTarget } : {}),
           ...(f.metafieldDefinition ? { metafieldDefinition: f.metafieldDefinition } : {}),
           ...(f.phoneDefaultCountry ? { phoneDefaultCountry: f.phoneDefaultCountry } : {}),
-        }),
+        };
+      },
       );
-    return { step, fields: stepFields };
+    return { step, fields: storedFields };
   });
 }
 
@@ -1867,13 +1882,102 @@ export default function FormEditor() {
     return palette.every((item) => usedPaletteKeys.has(item.paletteKey));
   }, [activeCategory, usedPaletteKeys]);
 
+  const getConfigWithPendingEditorChanges = useCallback(() => {
+    let nextConfig = config;
+
+    if (activeFieldId) {
+      const editingField = config.fields.find((field) => field.id === activeFieldId);
+      if (editingField) {
+        const nextLabel = fieldEditorDraft.label.trim() || editingField.label;
+        const nextContent =
+          editingField.type === "paragraph"
+            ? normalizeParagraphHtml(fieldEditorDraft.content)
+            : fieldEditorDraft.content.trim();
+        const nextLinkUrl = fieldEditorDraft.linkUrl.trim();
+
+        nextConfig = {
+          ...nextConfig,
+          fields: nextConfig.fields.map((field) =>
+            field.id === editingField.id
+              ? {
+                  ...field,
+                  label: nextLabel,
+                  description: fieldEditorDraft.description.trim() || undefined,
+                  defaultValue: fieldEditorDraft.defaultValue,
+                  validationMessage: fieldEditorDraft.validationMessage.trim() || undefined,
+                  hideTypedCharacters: fieldEditorDraft.hideTypedCharacters,
+                  required: fieldEditorDraft.required,
+                  width: fieldEditorDraft.width >= 60 ? "full" : "half",
+                  metafieldTarget: fieldEditorDraft.metafieldTarget,
+                  metafieldDefinition: fieldEditorDraft.metafieldDefinition || undefined,
+                  phoneDefaultCountry: fieldEditorDraft.phoneDefaultCountry,
+                  ...(editingField.type === "heading"
+                    ? {
+                        content: nextContent,
+                        headingTag: fieldEditorDraft.headingTag,
+                        headingAlignment: fieldEditorDraft.alignment,
+                        headingWidth: fieldEditorDraft.width,
+                      }
+                    : editingField.type === "paragraph"
+                      ? {
+                          content: nextContent,
+                          paragraphFontSize: fieldEditorDraft.paragraphFontSize,
+                        }
+                      : editingField.type === "link"
+                        ? {
+                            content: nextContent,
+                            linkUrl: nextLinkUrl,
+                            linkOpenInNewTab: fieldEditorDraft.linkOpenInNewTab,
+                            linkAlignment: fieldEditorDraft.alignment,
+                          }
+                        : {}),
+                }
+              : field,
+          ),
+        };
+      }
+    }
+
+    if (activeSection) {
+      const nextContent = sectionEditorDraft.content.trim();
+      const nextLabel = sectionEditorDraft.label.trim();
+
+      nextConfig = {
+        ...nextConfig,
+        fields: nextConfig.fields.map((field) =>
+          field.section === activeSection && field.stepIndex === activeStepIndex
+            ? {
+                ...field,
+                sectionLabel: nextContent || field.sectionLabel,
+                sectionHeadingLabel: nextLabel || field.sectionHeadingLabel,
+                sectionHeadingTag: sectionEditorDraft.headingTag,
+                sectionHeadingAlignment: sectionEditorDraft.alignment,
+                sectionHeadingWidth: sectionEditorDraft.width,
+              }
+            : field,
+        ),
+      };
+    }
+
+    return nextConfig;
+  }, [
+    activeFieldId,
+    activeSection,
+    activeStepIndex,
+    config,
+    fieldEditorDraft,
+    sectionEditorDraft,
+  ]);
+
   const handleSaveAndSubmit = useCallback(() => {
+    const nextConfig = getConfigWithPendingEditorChanges();
+    setConfig(nextConfig);
     fetcher.submit(
-      JSON.stringify({ intent: "saveConfig", config }),
+      JSON.stringify({ intent: "saveConfig", config: nextConfig }),
       { method: "post", encType: "application/json" },
     );
     pendingSubmitRef.current = true;
-  }, [config, fetcher]);
+  }, [fetcher, getConfigWithPendingEditorChanges]);
 
   useEffect(() => {
     if (!fetcher.data) return;
@@ -2030,8 +2134,10 @@ export default function FormEditor() {
 
   // ── Save & Reset ───────────────────────────────────────────────────────────
   const save = useCallback(() => {
-    fetcher.submit(JSON.stringify({ intent: "saveConfig", config }), { method: "post", encType: "application/json" });
-  }, [config, fetcher]);
+    const nextConfig = getConfigWithPendingEditorChanges();
+    setConfig(nextConfig);
+    fetcher.submit(JSON.stringify({ intent: "saveConfig", config: nextConfig }), { method: "post", encType: "application/json" });
+  }, [fetcher, getConfigWithPendingEditorChanges]);
 
   const resetToDefault = useCallback(() => {
     if (!window.confirm("Reset form to default? All customizations will be lost.")) return;

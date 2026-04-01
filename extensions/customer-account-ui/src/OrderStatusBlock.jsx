@@ -10,6 +10,13 @@ const API_URL = "https://b2b-portal-public.vercel.app";
 // "https://dd-79.dynamicdreamz.com"
 // "https://b2b-portal-public.vercel.app";
 
+const SECTION_LABELS = {
+  company: "Company information",
+  contact: "Contact information",
+  shipping: "Shipping address",
+  billing: "Billing address",
+};
+
 function Extension() {
   const [fields, setFields] = useState([]);
   const [formData, setFormData] = useState({});
@@ -40,58 +47,6 @@ function Extension() {
       }
     }`,
   };
-
-  // ── Country → States mapping ──────────────────────────────────────────────
-  const COUNTRY_STATES = {
-    IN: [
-      { value: "GJ", label: "Gujarat" },
-      { value: "MH", label: "Maharashtra" },
-      { value: "RJ", label: "Rajasthan" },
-      { value: "DL", label: "Delhi" },
-      { value: "KA", label: "Karnataka" },
-      { value: "TN", label: "Tamil Nadu" },
-      { value: "UP", label: "Uttar Pradesh" },
-      { value: "WB", label: "West Bengal" },
-    ],
-    US: [
-      { value: "CA", label: "California" },
-      { value: "TX", label: "Texas" },
-      { value: "NY", label: "New York" },
-      { value: "FL", label: "Florida" },
-      { value: "IL", label: "Illinois" },
-      { value: "WA", label: "Washington" },
-      { value: "AZ", label: "Arizona" },
-      { value: "GA", label: "Georgia" },
-    ],
-    CA: [
-      { value: "ON", label: "Ontario" },
-      { value: "BC", label: "British Columbia" },
-      { value: "AB", label: "Alberta" },
-      { value: "QC", label: "Quebec" },
-      { value: "MB", label: "Manitoba" },
-    ],
-    UK: [
-      { value: "ENG", label: "England" },
-      { value: "SCT", label: "Scotland" },
-      { value: "WLS", label: "Wales" },
-      { value: "NIR", label: "Northern Ireland" },
-    ],
-    AU: [
-      { value: "NSW", label: "New South Wales" },
-      { value: "VIC", label: "Victoria" },
-      { value: "QLD", label: "Queensland" },
-      { value: "WA", label: "Western Australia" },
-      { value: "SA", label: "South Australia" },
-    ],
-  };
-
-  const DUMMY_COUNTRIES = [
-    { value: "IN", label: "India" },
-    { value: "US", label: "United States" },
-    { value: "CA", label: "Canada" },
-    { value: "UK", label: "United Kingdom" },
-    { value: "AU", label: "Australia" },
-  ];
 
   // ───────────────────────────
   // 1. FETCH SHOP & CUSTOMER DATA
@@ -136,7 +91,6 @@ function Extension() {
         );
         const result = await res.json();
         const { config, message, redirectTo } = result;
-
         if (redirectTo) {
           setIsRedirecting(true);
           window.location.href = redirectTo;
@@ -256,10 +210,182 @@ function Extension() {
     return found?.provinces || [];
   };
 
+  const stripHtml = (value) =>
+    (value || "")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&#39;/gi, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+  const getSectionMeta = (section, sectionFields) => {
+    const fieldWithSectionLabel = sectionFields.find(
+      (field) =>
+        typeof field.sectionLabel === "string" && field.sectionLabel.trim() !== ""
+    );
+    console.log(fieldWithSectionLabel?.sectionLabel,"testttt");
+    const fieldWithHeadingWidth = sectionFields.find(
+      (field) => typeof field.sectionHeadingWidth === "number"
+    );
+    const fieldWithHeadingAlignment = sectionFields.find(
+      (field) => field.sectionHeadingAlignment
+    );
+    const fieldWithHeadingHidden = sectionFields.find(
+      (field) => typeof field.sectionHeadingHidden === "boolean"
+    );
+    console.log(sectionFields ,"fieldWithHeadingWidth?.sectionHeadingWidth ");
+
+    return {
+      title:
+        fieldWithSectionLabel?.sectionLabel?.trim() ||
+        SECTION_LABELS[section] ||
+        section,
+      width: Math.min(
+        100,
+        Math.max(25, fieldWithHeadingWidth?.sectionHeadingWidth ?? 100)
+      ),
+      alignment: fieldWithHeadingAlignment?.sectionHeadingAlignment || "left",
+      hidden: fieldWithHeadingHidden?.sectionHeadingHidden ?? false,
+    };
+  };
+
+  const shouldShowSectionHeading = (section, sectionFields) => {
+    return !getSectionMeta(section, sectionFields).hidden;
+  };
+
+  const getInlineAlignment = (alignment) => {
+    if (alignment === "center") return "center";
+    if (alignment === "right") return "end";
+    return "start";
+  };
+
+  const getFieldWidthPercent = (field) => {
+    if (field?.type === "group") return 100;
+    if (typeof field?.width === "number") {
+      return Math.min(100, Math.max(25, field.width));
+    }
+    if (field?.width === "half") return 50;
+    return 100;
+  };
+
+  const buildFieldRows = (sectionFields) => {
+    const rows = [];
+    let currentRow = [];
+    let currentWidth = 0;
+
+    sectionFields.forEach((field) => {
+      const fieldWidth = getFieldWidthPercent(field);
+
+      if (fieldWidth >= 100) {
+        if (currentRow.length) {
+          rows.push([...currentRow]);
+          currentRow = [];
+          currentWidth = 0;
+        }
+        rows.push([field]);
+        return;
+      }
+
+      if (currentWidth + fieldWidth > 100) {
+        console.log(currentRow,"currentRow1111");
+        rows.push([...currentRow]);
+        currentRow = [];
+        currentWidth = 0;
+      }
+
+      currentRow.push(field);
+      currentWidth += fieldWidth;
+    });
+
+    if (currentRow.length) rows.push([...currentRow]);
+    return rows;
+  };
+
+  const getRowColumns = (row) => {
+    if (row.length <= 1) return null;
+    const columns = row
+      .map((field) => `${getFieldWidthPercent(field)}fr`)
+      .join(" ");
+
+    return `@container (inline-size > 480px) '${columns}', '1fr'`;
+  };
+
+  const getFieldMinHeight = (field) => {
+    switch (field?.type) {
+      case "textarea":
+      case "paragraph":
+        return 120;
+      case "checkbox":
+      case "divider":
+        return "auto";
+      case "heading":
+        return 40;
+      case "link":
+        return 28;
+      default:
+        return 72;
+    }
+  };
+
+  const renderFieldBox = (field, key) => (
+    <s-box key={key}>
+      <s-stack direction="block" gap={getFieldMinHeight(field) >= 120 ? "base" : "none"}>
+        {field?.type === "group" ? renderGroup(field) : renderField(field)}
+      </s-stack>
+    </s-box>
+  );
+
+  const renderDisplayField = (field) => {
+    if (field.type === "divider") {
+      return <s-divider />;
+    }
+
+    if (field.type === "heading") {
+      return (
+        <s-box inlineSize={`${Math.min(100, Math.max(25, field.headingWidth ?? 100))}%`}>
+          <s-stack direction="block" gap="none" inlineAlignment={getInlineAlignment(field.headingAlignment)}>
+            <s-heading>{field.content || field.label}</s-heading>
+          </s-stack>
+        </s-box>
+      );
+    }
+
+    if (field.type === "paragraph") {
+      const paragraphText = stripHtml(field.content || field.label);
+      return paragraphText ? (
+        <s-text>{paragraphText}</s-text>
+      ) : null;
+    }
+
+    if (field.type === "link") {
+      return (
+        <s-stack direction="block" gap="none" inlineAlignment={getInlineAlignment(field.linkAlignment)}>
+          <s-link href={field.linkUrl || "#"} target={field.linkOpenInNewTab ? "_blank" : "_self"}>
+            {field.content || field.label}
+          </s-link>
+        </s-stack>
+      );
+    }
+
+    return null;
+  };
+
   // =========================
   // RENDER SINGLE FIELD
   // =========================
   const renderField = (field) => {
+    if (["heading", "paragraph", "link", "divider"].includes(field.type)) {
+      return renderDisplayField(field);
+    }
+
     switch (field.type) {
 
       case "select":
@@ -412,7 +538,10 @@ function Extension() {
   // ───────────────────────────
   // GROUP FIELDS BY SECTION KEY
   // ───────────────────────────
-  const grouped = fields.reduce((acc, field) => {
+  const topLevelFields = fields.filter((field) => !field.section);
+  const sectionFieldsOnly = fields.filter((field) => field.section);
+
+  const grouped = sectionFieldsOnly.reduce((acc, field) => {
     const section = field.section || "General";
     if (!acc[section]) acc[section] = [];
     acc[section].push(field);
@@ -544,20 +673,25 @@ function Extension() {
 
   return (
     <s-stack direction="block" gap="large">
-
-      {/* ── Page header ── */}
-      <s-box padding="base">
-        <s-stack direction="block" gap="small">
-          <s-heading>
-            {isLegacyApplePay ? "Legacy Apple Pay" : "Company Registration"}
-          </s-heading>
-          <s-text tone="subdued">
-            {isLegacyApplePay
-              ? "Your account is configured with Legacy Apple Pay."
-              : "Fill in the details below to register your company and unlock wholesale access."}
-          </s-text>
-        </s-stack>
-      </s-box>
+      {topLevelFields.length > 0 && (
+        <s-box padding="base">
+          <s-stack direction="block" gap="base">
+            {buildFieldRows(topLevelFields).map((row, rowIndex) =>
+              row.length > 1 ? (
+                <s-query-container key={rowIndex}>
+                  <s-grid columns={getRowColumns(row)} gap="base">
+                    {row.map((field, fieldIndex) =>
+                      renderFieldBox(field, `${rowIndex}-${field.key || fieldIndex}`)
+                    )}
+                  </s-grid>
+                </s-query-container>
+              ) : (
+                renderFieldBox(row[0], `${rowIndex}-${row[0]?.key || rowIndex}`)
+              )
+            )}
+          </s-stack>
+        </s-box>
+      )}
 
       {/* ── Legacy Apple Pay notice ── */}
       {isLegacyApplePay && (
@@ -577,26 +711,41 @@ function Extension() {
       )}
 
       {/* ── One s-section card per section group ── */}
-      {Object.entries(grouped).map(([section, sectionFields]) => (
+      {Object.entries(grouped).map(([section, sectionFields]) => {
+        const sectionMeta = getSectionMeta(section, sectionFields);
+
+        return (
         <s-section key={section} padding>
           <s-stack direction="block" gap="base">
-
-            <s-heading>{section}</s-heading>
-            <s-divider />
+            {shouldShowSectionHeading(section, sectionFields) && (
+              <s-box inlineSize={`${sectionMeta.width}%`}>
+                <s-stack direction="block" gap="base" inlineAlignment={getInlineAlignment(sectionMeta.alignment)}>
+                  <s-heading>{sectionMeta.title}</s-heading>
+                  <s-divider />
+                </s-stack>
+              </s-box>
+            )}
 
             <s-stack direction="block" gap="base">
-              {sectionFields.map((field, i) =>
-                field.type === "group" ? (
-                  <s-box key={i}>{renderGroup(field)}</s-box>
+              {buildFieldRows(sectionFields).map((row, rowIndex) =>
+                row.length > 1 ? (
+                  <s-query-container key={rowIndex}>
+                    <s-grid columns={getRowColumns(row)} gap="base">
+                      {row.map((field, fieldIndex) =>
+                        renderFieldBox(field, `${rowIndex}-${field.key || fieldIndex}`)
+                      )}
+                    </s-grid>
+                  </s-query-container>
                 ) : (
-                  <s-box key={i}>{renderField(field)}</s-box>
+                  renderFieldBox(row[0], `${rowIndex}-${row[0]?.key || rowIndex}`)
                 )
               )}
             </s-stack>
 
           </s-stack>
         </s-section>
-      ))}
+        );
+      })}
 
       {/* ── Submit button row ── */}
       <s-box>
@@ -621,6 +770,3 @@ function Extension() {
     </s-stack>
   );
 }
-
-
-

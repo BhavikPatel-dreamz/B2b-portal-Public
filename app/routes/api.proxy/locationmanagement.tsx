@@ -11,22 +11,6 @@ import {
   checkLocationHasUsers,
 } from "../../utils/b2b-customer.server";
 
-/**
- * API Proxy Route for Location Management
- *
- * Endpoints:
- * - GET: List locations
- * - POST: Create, Edit, Delete locations based on action type
- *
- * Access via: /apps/b2b-portal/api/proxy/locationmanagement
- *
- * Required Permissions:
- * - GET: canViewReports (all users can view locations)
- * - POST (create/edit/delete): canManageLocations
- *
- * Allowed Roles: Company Admin, Main Contact (for write operations)
- */
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { companyId, store, shop } =
@@ -35,33 +19,151 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     if (!store.accessToken) {
       return Response.json(
         { error: "Store access token not available" },
-        { status: 500 },
+        { status: 500 }
       );
     }
-    // Fetch all locations
+
     const locationsData = await getCompanyLocations(
       companyId,
       shop,
-      store.accessToken,
+      store.accessToken
     );
 
     if (locationsData.error) {
       return Response.json(
         { error: "Failed to fetch locations" },
-        { status: 500 },
+        { status: 500 }
       );
     }
+
+    const graphqlRes = await fetch(
+      `https://${shop}/admin/api/2024-10/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": store.accessToken,
+        },
+        body: JSON.stringify({
+          query: `
+            query {
+              shop {
+                countriesInShippingZones {
+                  countryCodes
+                  includeRestOfWorld
+                }
+              }
+              deliveryProfiles(first: 10) {
+                nodes {
+                  profileLocationGroups {
+                    locationGroupZones(first: 100) {
+                      nodes {
+                        zone {
+                          countries {
+                            code { countryCode }
+                            name
+                            provinces { code name }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+        }),
+      }
+    );
+
+    const gql = await graphqlRes.json();
+
+    if (gql.errors) {
+      console.error("GraphQL Error:", gql.errors);
+      return Response.json(
+        { error: "Failed to fetch shipping data" },
+        { status: 500 }
+      );
+    }
+
+    const validCodes = new Set<string>(
+      gql.data?.shop?.countriesInShippingZones?.countryCodes || []
+    );
+
+    const provincesData: {
+      countryCode: string;
+      countryName: string;
+      provinces: { value: string; label: string }[];
+    }[] = [];
+
+    for (const profile of gql.data?.deliveryProfiles?.nodes || []) {
+      for (const group of profile.profileLocationGroups || []) {
+        for (const zoneNode of group.locationGroupZones?.nodes || []) {
+          for (const country of zoneNode.zone?.countries || []) {
+            const code = country.code?.countryCode;
+
+            // ❌ skip invalid / rest of world
+            if (!code || !validCodes.has(code)) continue;
+
+            const provinces = (country.provinces || []).map(
+              (p: { code: string; name: string }) => ({
+                value: p.code,
+                label: p.name,
+              })
+            );
+
+            // 🔁 Deduplicate
+            const existing = provincesData.find(
+              (c) => c.countryCode === code
+            );
+
+            if (existing) {
+              const existingCodes = new Set(
+                existing.provinces.map((p) => p.value)
+              );
+
+              for (const p of provinces) {
+                if (!existingCodes.has(p.value)) {
+                  existing.provinces.push(p);
+                }
+              }
+            } else {
+              provincesData.push({
+                countryCode: code,
+                countryName: country.name,
+                provinces,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    for (const c of provincesData) {
+      c.provinces.sort((a, b) =>
+        a.label.localeCompare(b.label)
+      );
+    }
+
+    provincesData.sort((a, b) =>
+      a.countryName.localeCompare(b.countryName)
+    );
 
     return Response.json({
       success: true,
       locations: locationsData.locations || [],
       companyName: locationsData.companyName,
+      ShippingAddressProvince: provincesData,
     });
+
   } catch (error) {
-    console.error("Proxy error (GET):", error);
+    console.error("Loader error:", error);
+
     return Response.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 },
+      {
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
     );
   }
 };
@@ -76,14 +178,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { companyId, store, shop, userContext } =
       await authenticateApiProxyWithPermissions(request);
 
-    // Check if user has permission to manage locations
     requirePermission(
       userContext,
       "canManageLocations",
       "You do not have permission to manage locations. Only Company Admins and Main Contacts can create, edit, or delete locations.",
     );
 
-    // Ensure accessToken is available
     if (!store.accessToken) {
       return Response.json(
         { error: "Store access token not available" },
@@ -91,7 +191,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    // Parse the body for action and other data
     const body = await request.json();
     const { action: actionType } = body;
 
@@ -117,7 +216,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             condition: !address1,
             message: "Address field is required",
           },
-          { condition: !phone, message: "Phone number is required" },
           { condition: !externalId, message: "External ID is required" },
           {
             condition: !city,
@@ -179,7 +277,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               error: result.error,
               details: result.details,
             },
-            { status: 400 }, // Changed from 500 to 400 for better error handling
+            { status: 400 },
           );
         }
 

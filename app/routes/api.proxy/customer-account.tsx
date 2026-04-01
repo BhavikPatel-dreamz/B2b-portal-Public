@@ -52,6 +52,12 @@ function deserializeConfig(stored: StoredConfig): FormConfig {
           linkUrl: f.linkUrl,
           linkOpenInNewTab: f.linkOpenInNewTab,
           linkAlignment: f.linkAlignment,
+          sectionLabel: f.sectionLabel,
+          sectionHeadingLabel: f.sectionHeadingLabel,
+          sectionHeadingTag: f.sectionHeadingTag,
+          sectionHeadingAlignment: f.sectionHeadingAlignment,
+          sectionHeadingWidth: f.sectionHeadingWidth,
+          sectionHeadingHidden: f.sectionHeadingHidden,
         }),
       ),
   );
@@ -152,7 +158,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const formFieldConfig = await prisma.formFieldConfig.findUnique({
       where: { shopId: store.id },
     });
-    console.log(formFieldConfig,"formFieldConfig");
+    console.log(formFieldConfig,"formFieldConfig11111");
  
     let config;
  
