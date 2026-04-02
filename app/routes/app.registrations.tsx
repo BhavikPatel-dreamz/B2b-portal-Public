@@ -301,11 +301,7 @@ async function syncCompanyTaxDetails(
     );
   }
 
-  if (
-    companyLocationId &&
-    normalizedTaxId &&
-    shouldSyncTexasTaxDetails(submission)
-  ) {
+  if (companyLocationId && normalizedTaxId) {
     tasks.push(
       updateCompanyLocationTaxSettings(admin, {
         companyLocationId,
