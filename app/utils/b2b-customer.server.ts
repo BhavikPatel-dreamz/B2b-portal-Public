@@ -2641,7 +2641,6 @@ export async function getCompanyLocations(
           node {
             id
             name
-            note
             phone
             externalId
             shippingAddress {
@@ -2773,7 +2772,6 @@ export async function getCompanyLocations(
         node: {
           id: string;
           name: string;
-          note: string;
           phone: string;
           externalId: string;
           shippingAddress: {
@@ -2804,6 +2802,9 @@ export async function getCompanyLocations(
           customerIds: [],
         };
         
+        // Get the root level phone number
+        const rootPhone = location.phone || "";
+        
         // Check if billing address matches shipping address
         const shippingAddr = location.shippingAddress;
         const billingAddr = location.billingAddress;
@@ -2821,8 +2822,6 @@ export async function getCompanyLocations(
         return {
           id: location.id,
           name: location.name,
-          note: location.note,
-          phone: location.phone,
           externalId: location.externalId,
           shippingAddress: {
             address1: location.shippingAddress?.address1 || "",
@@ -2833,6 +2832,7 @@ export async function getCompanyLocations(
             country: location.shippingAddress?.country || "",
             firstName: location.shippingAddress?.firstName || "",
             lastName: location.shippingAddress?.lastName || "",
+            phone: rootPhone
           },
           billingAddress: {
             address1: location.billingAddress?.address1 || "",
@@ -2843,8 +2843,9 @@ export async function getCompanyLocations(
             country: location.billingAddress?.country || "",
             firstName: location.billingAddress?.firstName || "",
             lastName: location.billingAddress?.lastName || "",
+            phone: rootPhone
           },
-          billingSameAsShipping, // Calculate this based on address comparison
+          billingSameAsShipping,
           assignedUsers: customerInfo.count,
           address: location.shippingAddress 
             ? `${location.shippingAddress.address1}, ${location.shippingAddress.city}, ${location.shippingAddress.province} ${location.shippingAddress.zip}`
@@ -5936,9 +5937,10 @@ export interface CatalogActionResponse {
 }
 
 export interface CatalogNode {
+  __typename?: string;
   id: string;
   title: string;
-  status: "ACTIVE" | "ARCHIVED";
+  status: "ACTIVE" | "ARCHIVED" | "DRAFT";
   priceList?: { id: string; name: string; currency: string } | null;
   companyLocations?: { nodes: Array<{ id: string; name: string }> };
 }
@@ -5956,6 +5958,7 @@ export async function fetchAllCatalogs(admin: any): Promise<CatalogNode[]> {
     query GetAllCatalogs($first: Int!) {
       catalogs(first: $first) {
         nodes {
+          __typename
           id
           title
           status
@@ -5971,7 +5974,11 @@ export async function fetchAllCatalogs(admin: any): Promise<CatalogNode[]> {
     { variables: { first: 50 } },
   );
   const payload = await response.json();
-  return payload?.data?.catalogs?.nodes || [];
+  const catalogs = payload?.data?.catalogs?.nodes || [];
+
+  return catalogs.filter(
+    (catalog: CatalogNode) => catalog.__typename === "CompanyLocationCatalog",
+  );
 }
 
 export async function fetchPriceLists(admin: any): Promise<PriceListNode[]> {
@@ -6093,29 +6100,35 @@ export async function assignCatalogToLocation(
 ): Promise<{ success: boolean; errors: string[] }> {
   console.log("🔗 Assigning catalog to location:", { catalogId, locationId });
 
-  const response = await admin.graphql(
-    `#graphql
-    mutation CatalogContextUpdate($id: ID!, $contextsToAdd: [ID!]!) {
-      catalogContextUpdate(id: $id, contextsToAdd: $contextsToAdd) {
-        catalog {
-          id
-          title
-          ... on CompanyLocationCatalog {
-            companyLocations(first: 20) {
-              nodes { id name }
-            }
+const response = await admin.graphql(
+  `#graphql
+  mutation CatalogContextUpdate($catalogId: ID!, $contextsToAdd: CatalogContextInput) {
+    catalogContextUpdate(catalogId: $catalogId, contextsToAdd: $contextsToAdd) {
+      catalog {
+        id
+        title
+        ... on CompanyLocationCatalog {
+          companyLocations(first: 20) {
+            nodes { id name }
           }
         }
-        userErrors { field message code }
       }
-    }`,
-    { variables: { id: catalogId, contextsToAdd: [locationId] } },
-  );
+      userErrors { field message code }
+    }
+  }`,
+  {
+    variables: {
+      catalogId: catalogId,
+      contextsToAdd: { companyLocationIds: [locationId] },
+    },
+  },
+);
 
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =
     payload?.data?.catalogContextUpdate?.userErrors || [];
 
+    console.log(userErrors,"userErrors");
   if (userErrors.length > 0) {
     console.error("❌ catalogContextUpdate (assign) userErrors:", userErrors);
     return { success: false, errors: userErrors.map((e) => e.message) };
@@ -6138,24 +6151,28 @@ export async function removeCatalogFromLocation(
 ): Promise<{ success: boolean; errors: string[] }> {
   console.log("🔗 Removing catalog from location:", { catalogId, locationId });
 
-  const response = await admin.graphql(
-    `#graphql
-    mutation CatalogContextUpdate($id: ID!, $contextsToRemove: [ID!]!) {
-      catalogContextUpdate(id: $id, contextsToRemove: $contextsToRemove) {
-        catalog {
-          id
-          title
-          ... on CompanyLocationCatalog {
-            companyLocations(first: 20) {
-              nodes { id name }
-            }
-          }
-        }
-        userErrors { field message code }
+const response = await admin.graphql(
+  `#graphql
+  mutation CatalogContextUpdate($catalogId: ID!, $contextsToAdd: [ID!]!) {
+    catalogContextUpdate(catalogId: $catalogId, contextsToAdd: $contextsToAdd) {
+      catalog {
+        id
+        title
       }
-    }`,
-    { variables: { id: catalogId, contextsToRemove: [locationId] } },
-  );
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }`,
+  {
+    variables: {
+      catalogId: catalogId,
+      contextsToAdd: [locationId],
+    },
+  }
+);
 
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =

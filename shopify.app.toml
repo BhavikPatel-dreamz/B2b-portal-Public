@@ -61,12 +61,12 @@ api_version = "2026-01"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,write_companies,write_customers,write_draft_orders,write_locations,write_orders,write_products,write_validations"
+scopes = "customer_read_customers,read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,write_companies,write_customers,write_draft_orders,write_locations,write_orders,write_products,write_validations,write_content,write_online_store_navigation,read_shipping"
 
 [auth]
 redirect_urls = [ "https://b2b-portal-public.vercel.app/api/auth" ]
 
 [app_proxy]
 url = "https://b2b-portal-public.vercel.app"
-subpath = "b2b-portal"
+subpath = "b2b-portal-public"
 prefix = "apps"

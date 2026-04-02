@@ -15,7 +15,7 @@
       if (window.ShopifyCompanyApp && window.ShopifyCompanyApp.init) {
         window.ShopifyCompanyApp.init({
           containerId: 'shopify-company-app-root',
-          proxyUrl: '/apps/b2b-portal/api/proxy',
+          proxyUrl: '/apps/b2b-portal-public/api/proxy',
           customerId: {{ customer.id | json }},
           shop: {{ shop.permanent_domain | json }}
         });
