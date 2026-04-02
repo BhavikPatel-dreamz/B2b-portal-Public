@@ -142,7 +142,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         customFields[key] = value;
       }
     });
- 
+    const regitrationData = await prisma.registrationSubmission.findFirst({
+      where: { shopId: store.id, email },
+    });
+
+    if(regitrationData?.companyName === companyName){
+      return json({ success: false, error: "Company already registered." }, { status: 409 });
+    }
+
     // ✅ Save in DB
     const registration = await prisma.registrationSubmission.create({
       data: {
@@ -158,6 +165,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopifyCustomerId: allFields.shopifyCustomerId || null,
       },
     });
+
 
         if (store.submissionEmail) {
         const emailResult = await sendRegistrationEmail(

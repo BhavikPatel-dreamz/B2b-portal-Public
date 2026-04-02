@@ -197,7 +197,7 @@ export const PALETTE: Record<
 > = {
   general: [
     { paletteKey: "companyName", label: "Company name", type: "text", key: "companyName", section: "company", required: true, width: "full" },
-    { paletteKey: "taxId", label: "Tax registration ID", type: "text", key: "taxId", section: "company", width: "full" },
+    { paletteKey: "taxId", label: "Tax ID", type: "text", key: "taxId", section: "company", width: "full" },
     { paletteKey: "firstName", label: "Contact first name", type: "text", key: "firstName", section: "contact", required: true, width: "half" },
     { paletteKey: "lastName", label: "Contact last name", type: "text", key: "lastName", section: "contact", width: "half" },
     { paletteKey: "contactTitle", label: "Contact title", type: "text", key: "contactTitle", section: "contact", width: "full" },
@@ -276,7 +276,7 @@ export const DEFAULT_CONFIG: FormConfig = {
       paletteKey: "taxId",
       category: "general",
       type: "text",
-      label: "Tax registration ID",
+      label: "Tax ID",
       key: "taxId",
       section: "company",
       width: "full",

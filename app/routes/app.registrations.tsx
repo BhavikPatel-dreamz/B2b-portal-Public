@@ -14,7 +14,11 @@ import {
   boundary,
   AdminApiContext,
 } from "@shopify/shopify-app-react-router/server";
-import {fetchAllCatalogs,fetchPriceLists} from "app/utils/b2b-customer.server";
+import {
+  assignCatalogToLocation,
+  fetchAllCatalogs,
+  fetchPriceLists,
+} from "app/utils/b2b-customer.server";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -133,6 +137,195 @@ export function buildUserErrorList(payload: any) {
   }
 
   return errors;
+}
+
+const US_COUNTRY_ALIASES = new Set([
+  "US",
+  "USA",
+  "UNITED STATES",
+  "UNITED STATES OF AMERICA",
+]);
+
+const TEXAS_STATE_ALIASES = new Set(["TX", "TEXAS"]);
+
+function getSubmissionTaxId(submission: any): string {
+  return (
+    submission?.customFields?.taxId ??
+    submission?.customFields?.taxRegistrationId ??
+    ""
+  );
+}
+
+function isTexasAddress(address?: Record<string, any> | null) {
+  if (!address) return false;
+
+  const state = String(address.State ?? address.state ?? "")
+    .trim()
+    .toUpperCase();
+  const country = String(address.Country ?? address.country ?? "")
+    .trim()
+    .toUpperCase();
+
+  return TEXAS_STATE_ALIASES.has(state) && US_COUNTRY_ALIASES.has(country);
+}
+
+function shouldSyncTexasTaxDetails(submission: any) {
+  return (
+    isTexasAddress(submission?.shipping as Record<string, any> | null) ||
+    isTexasAddress(submission?.billing as Record<string, any> | null)
+  );
+}
+
+async function updateCompanyLocationSettings(
+  admin: AdminApiContext,
+  {
+    companyLocationId,
+    locationName,
+    paymentTermsTemplateId,
+  }: {
+    companyLocationId: string;
+    locationName?: string | null;
+    paymentTermsTemplateId?: string | null;
+  },
+) {
+  const input: Record<string, any> = {};
+
+  if (locationName !== undefined) {
+    input.name = locationName;
+  }
+
+  if (paymentTermsTemplateId !== undefined) {
+    input.buyerExperienceConfiguration = {
+      paymentTermsTemplateId,
+    };
+  }
+
+  if (Object.keys(input).length === 0) {
+    return null;
+  }
+
+  const response = await admin.graphql(
+    `#graphql
+    mutation UpdateCompanyLocationSettings(
+      $companyLocationId: ID!
+      $input: CompanyLocationUpdateInput!
+    ) {
+      companyLocationUpdate(
+        companyLocationId: $companyLocationId
+        input: $input
+      ) {
+        companyLocation { id name }
+        userErrors { field message }
+      }
+    }`,
+    {
+      variables: {
+        companyLocationId,
+        input,
+      },
+    },
+  );
+
+  return response.json();
+}
+
+async function updateCompanyLocationTaxSettings(
+  admin: AdminApiContext,
+  {
+    companyLocationId,
+    taxRegistrationId,
+  }: {
+    companyLocationId: string;
+    taxRegistrationId: string;
+  },
+) {
+  const response = await admin.graphql(
+    `#graphql
+    mutation UpdateCompanyLocationTaxSettings(
+      $companyLocationId: ID!
+      $taxRegistrationId: String!
+    ) {
+      companyLocationTaxSettingsUpdate(
+        companyLocationId: $companyLocationId
+        taxRegistrationId: $taxRegistrationId
+      ) {
+        companyLocation {
+          id
+          name
+          taxSettings {
+            taxRegistrationId
+          }
+        }
+        userErrors { field message }
+      }
+    }`,
+    {
+      variables: {
+        companyLocationId,
+        taxRegistrationId,
+      },
+    },
+  );
+
+  return response.json();
+}
+
+async function syncCompanyTaxDetails(
+  admin: AdminApiContext,
+  {
+    companyId,
+    companyLocationId,
+    submission,
+    taxId,
+    taxSetting,
+  }: {
+    companyId: string;
+    companyLocationId?: string | null;
+    submission: any;
+    taxId?: string | null;
+    taxSetting?: string | null;
+  },
+) {
+  const normalizedTaxId = (taxId || "").trim();
+  const normalizedTaxSetting = (taxSetting || "").trim();
+  const tasks: Promise<any>[] = [];
+
+  if (normalizedTaxSetting) {
+    tasks.push(
+      updateCompanyMetafield(admin, companyId, {
+        namespace: "custom",
+        key: "company_tax_setting",
+        value: normalizedTaxSetting,
+        type: "single_line_text_field",
+      }),
+    );
+  }
+
+  if (
+    companyLocationId &&
+    normalizedTaxId &&
+    shouldSyncTexasTaxDetails(submission)
+  ) {
+    tasks.push(
+      updateCompanyLocationTaxSettings(admin, {
+        companyLocationId,
+        taxRegistrationId: normalizedTaxId,
+      }),
+    );
+  }
+
+  if (!tasks.length) return;
+
+  const results = await Promise.all(tasks);
+
+  for (const result of results) {
+    if (result?.data || result?.errors) {
+      const errors = buildUserErrorList(result);
+      if (errors.length) {
+        throw new Error(errors[0]);
+      }
+    }
+  }
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -324,6 +517,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     fetchAllCatalogs(admin),
     fetchPriceLists(admin),
   ]);
+  console.log(allCatalogs,"allCatalogs111");
 
   return Response.json({
     submissions: submissions.map((s) => ({
@@ -1412,33 +1606,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               : Promise.resolve(),
 
             paymentTermsTemplateId
-              ? admin
-                  .graphql(
-                    `#graphql
-                    mutation UpdateCompanyLocation(
-                      $companyLocationId: ID!
-                      $paymentTermsTemplateId: ID!
-                    ) {
-                      companyLocationUpdate(
-                        companyLocationId: $companyLocationId
-                        input: {
-                          buyerExperienceConfiguration: {
-                            paymentTermsTemplateId: $paymentTermsTemplateId
-                          }
-                        }
-                      ) {
-                        companyLocation { id }
-                        userErrors { field message }
-                      }
-                    }`,
-                    {
-                      variables: {
-                        companyLocationId: locationId,
-                        paymentTermsTemplateId,
-                      },
-                    },
-                  )
-                  .then((res) => res.json())
+              ? updateCompanyLocationSettings(admin, {
+                  companyLocationId: locationId,
+                  paymentTermsTemplateId,
+                })
               : Promise.resolve(),
           ]);
 
@@ -1517,33 +1688,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           locationName = newLocation.name;
 
           if (paymentTermsTemplateId) {
-            const updateLocationResponse = await admin.graphql(
-              `#graphql
-              mutation UpdateCompanyLocation(
-                $companyLocationId: ID!
-                $paymentTermsTemplateId: ID!
-              ) {
-                companyLocationUpdate(
-                  companyLocationId: $companyLocationId
-                  input: {
-                    buyerExperienceConfiguration: {
-                      paymentTermsTemplateId: $paymentTermsTemplateId
-                    }
-                  }
-                ) {
-                  companyLocation { id }
-                  userErrors { field message }
-                }
-              }`,
+            const updateLocationPayload = await updateCompanyLocationSettings(
+              admin,
               {
-                variables: {
-                  companyLocationId: locationId,
-                  paymentTermsTemplateId,
-                },
+                companyLocationId: locationId,
+                paymentTermsTemplateId,
               },
             );
-
-            const updateLocationPayload = await updateLocationResponse.json();
             const locationErrors = buildUserErrorList(updateLocationPayload);
             if (locationErrors.length) {
               return Response.json({
@@ -1991,6 +2142,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const customerId = normalizeCustomerId(form.customerId as string);
         const companyName = (form.companyName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+        const taxId = (form.taxId as string)?.trim();
+        const taxSetting = (form.taxSetting as string)?.trim() || "collect";
+        const selectedCatalogIds = (() => {
+          const rawValue = (form.selectedCatalogIds as string)?.trim();
+          if (!rawValue) return [] as string[];
+
+          try {
+            const parsed = JSON.parse(rawValue);
+            return Array.isArray(parsed)
+              ? parsed.map((value) => String(value).trim()).filter(Boolean)
+              : [];
+          } catch {
+            return [];
+          }
+        })();
         const creditLimit = (form.creditLimit as string)?.trim();
         const customerEmail = (form.customerEmail as string)?.trim();
         const firstName = (form.firstName as string)?.trim();
@@ -2075,33 +2241,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               : Promise.resolve(),
 
             paymentTermsTemplateId
-              ? admin
-                  .graphql(
-                    `#graphql
-                    mutation UpdateCompanyLocation(
-                      $companyLocationId: ID!
-                      $paymentTermsTemplateId: ID!
-                    ) {
-                      companyLocationUpdate(
-                        companyLocationId: $companyLocationId
-                        input: {
-                          buyerExperienceConfiguration: {
-                            paymentTermsTemplateId: $paymentTermsTemplateId
-                          }
-                        }
-                      ) {
-                        companyLocation { id }
-                        userErrors { field message }
-                      }
-                    }`,
-                    {
-                      variables: {
-                        companyLocationId: locationId,
-                        paymentTermsTemplateId,
-                      },
-                    },
-                  )
-                  .then((res) => res.json())
+              ? updateCompanyLocationSettings(admin, {
+                  companyLocationId: locationId,
+                  paymentTermsTemplateId,
+                })
               : Promise.resolve(),
           ]);
 
@@ -2176,33 +2319,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           locationName = newLocation.name;
 
           if (paymentTermsTemplateId) {
-            const updateLocationResponse = await admin.graphql(
-              `#graphql
-              mutation UpdateCompanyLocation(
-                $companyLocationId: ID!
-                $paymentTermsTemplateId: ID!
-              ) {
-                companyLocationUpdate(
-                  companyLocationId: $companyLocationId
-                  input: {
-                    buyerExperienceConfiguration: {
-                      paymentTermsTemplateId: $paymentTermsTemplateId
-                    }
-                  }
-                ) {
-                  companyLocation { id }
-                  userErrors { field message }
-                }
-              }`,
+            const updateLocationPayload = await updateCompanyLocationSettings(
+              admin,
               {
-                variables: {
-                  companyLocationId: locationId,
-                  paymentTermsTemplateId,
-                },
+                companyLocationId: locationId,
+                paymentTermsTemplateId,
               },
             );
-
-            const updateLocationPayload = await updateLocationResponse.json();
             const locationErrors = buildUserErrorList(updateLocationPayload);
             if (locationErrors.length) {
               return Response.json({
@@ -2214,6 +2337,47 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
 
           await assignLocationAddresses(admin, locationId, registrationData);
+        }
+
+        try {
+          await syncCompanyTaxDetails(admin, {
+            companyId,
+            companyLocationId: locationId,
+            submission: registrationData,
+            taxId,
+            taxSetting,
+          });
+        } catch (error) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [
+              error instanceof Error
+                ? error.message
+                : "Failed to sync company tax details",
+            ],
+          });
+        }
+
+        if (locationId && selectedCatalogIds.length > 0) {
+          for (const catalogId of selectedCatalogIds) {
+            const result = await assignCatalogToLocation(
+              admin,
+              catalogId,
+              locationId,
+            );
+
+            if (!result.success) {
+              return Response.json({
+                intent,
+                success: false,
+                errors:
+                  result.errors.length > 0
+                    ? result.errors
+                    : ["Failed to assign catalog to company location"],
+              });
+            }
+          }
         }
 
         const companyAccount = await prisma.companyAccount.upsert({
@@ -2506,6 +2670,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           (form.phone as string)?.trim() ||
           (form.contactPhone as string)?.trim() ||
           undefined;
+        const taxId =
+          (form.taxId as string)?.trim() ||
+          (form.taxRegistrationId as string)?.trim() ||
+          "";
         const useSameAddress =
           String(form.useSameAddress ?? form.billSameAsShip ?? "") === "true";
 
@@ -2788,29 +2956,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             if (location?.id) {
               locationId = location.id;
 
-              const updateLocationResponse = await admin.graphql(
-                `#graphql
-                mutation UpdateCompanyLocation(
-                  $companyLocationId: ID!
-                  $locationName: String
-                ) {
-                  companyLocationUpdate(
-                    companyLocationId: $companyLocationId
-                    input: { name: $locationName }
-                  ) {
-                    companyLocation { id name }
-                    userErrors { field message }
-                  }
-                }`,
+              const updateLocationPayload = await updateCompanyLocationSettings(
+                admin,
                 {
-                  variables: {
-                    companyLocationId: location.id,
-                    locationName: locationName || companyName,
-                  },
+                  companyLocationId: location.id,
+                  locationName: locationName || companyName,
                 },
               );
-
-              const updateLocationPayload = await updateLocationResponse.json();
               const locationErrors = buildUserErrorList(updateLocationPayload);
               if (locationErrors.length) {
                 return Response.json({
@@ -2825,6 +2977,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 location.id,
                 updatedRegistration,
               );
+
+              try {
+                await syncCompanyTaxDetails(admin, {
+                  companyId,
+                  companyLocationId: location.id,
+                  submission: updatedRegistration,
+                  taxId,
+                  taxSetting: "collect",
+                });
+              } catch (error) {
+                return Response.json({
+                  intent,
+                  success: false,
+                  errors: [
+                    error instanceof Error
+                      ? error.message
+                      : "Failed to sync company tax details",
+                  ],
+                });
+              }
             }
 
             const companyAccount = await prisma.companyAccount.upsert({
@@ -3331,7 +3503,10 @@ function mapConfigFieldToEditField(
 
   return {
     key: field.key,
-    label: field.label,
+    label:
+      field.key === "taxId" || field.key === "taxRegistrationId"
+        ? "Tax ID"
+        : field.label,
     type,
     section: field.section || "general",
     order: field.order,
@@ -3472,7 +3647,7 @@ export function buildInitialEditForm(
     | undefined;
   const form: Record<string, string | boolean> = {
     companyName: submission.companyName || "",
-    taxRegistrationId:
+    taxId:
       (submission as any)?.customFields?.taxRegistrationId ??
       (submission as any)?.customFields?.taxId ??
       "",
@@ -3838,6 +4013,7 @@ export function DynamicEditModal({
                       {section.label}
                     </h4>
                     <label
+                      htmlFor="company-tax-id"
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -4020,6 +4196,7 @@ function ConfigureCompanyUI({
     allowOneTimeAddress: boolean;
     orderSubmission: "auto" | "draft";
     taxSetting: string;
+    taxId: string;
     selectedCatalogIds: string[];
   }) => void;
   onCancel: () => void;
@@ -4032,15 +4209,15 @@ function ConfigureCompanyUI({
   const [allowOneTimeAddress, setAllowOneTimeAddress] = useState(false);
   const [orderSubmission, setOrderSubmission]     = useState<"auto" | "draft">("auto");
   const [taxSetting, setTaxSetting]               = useState("collect");
+  const [taxId, setTaxId]                         = useState(() => getSubmissionTaxId(submission));
   const [showEditModal, setShowEditModal]         = useState(false);
   const [activeStep, setActiveStep]               = useState<"details" | "configuration">("details");
   const [isDetailsEditing, setIsDetailsEditing]   = useState(false);
   const advanceToConfigurationRef                 = useRef(false);
  
   // ── Catalog state ──
-  const [catalogSearch, setCatalogSearch]         = useState("");
   const [selectedCatalogIds, setSelectedCatalogIds] = useState<string[]>([]);
-  const [showCatalogDropdown, setShowCatalogDropdown] = useState(false);
+  const [showCatalogList, setShowCatalogList] = useState(false);
   const catalogFetcher = useFetcher<{ intent: string; success: boolean; errors?: string[]; message?: string }>();
  
   const editFetcher = useFetcher<ActionJson>();
@@ -4069,7 +4246,6 @@ function ConfigureCompanyUI({
     ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
     : `${submission.firstName || ""} ${submission.lastName || ""}`.trim();
   const companyDisplayName = company?.name || submission.companyName;
- 
   const [editForm, setEditForm] = useState(() =>
     buildInitialEditForm(submission, customer, billingSame, editFields),
   );
@@ -4077,9 +4253,13 @@ function ConfigureCompanyUI({
     setEditForm(buildInitialEditForm(submission, customer, billingSame, editFields));
   }, [submission, customer, billingSame, editFields]);
   useEffect(() => {
+    setTaxId(getSubmissionTaxId(submission));
+  }, [submission]);
+  useEffect(() => {
     setActiveStep("details");
     setShowEditModal(false);
     setIsDetailsEditing(false);
+    setShowCatalogList(false);
     advanceToConfigurationRef.current = false;
   }, [submission.id]);
  
@@ -4097,18 +4277,18 @@ function ConfigureCompanyUI({
   // ── Catalog helpers ──
   const activeCatalogs = allCatalogs.filter((c) => c.status === "ACTIVE");
  
-  const filteredCatalogs = activeCatalogs.filter((c) =>
-    c.title.toLowerCase().includes(catalogSearch.toLowerCase()),
+  const availableCatalogs = activeCatalogs.filter(
+    (catalog) => !selectedCatalogIds.includes(catalog.id),
   );
  
   const selectedCatalogs = activeCatalogs.filter((c) =>
     selectedCatalogIds.includes(c.id),
   );
+
  
   const toggleCatalog = useCallback(
     (catalogId: string) => {
       const locationId = company?.locationId;
-      if (!locationId) return;
  
       const isCurrentlySelected = selectedCatalogIds.includes(catalogId);
  
@@ -4118,7 +4298,11 @@ function ConfigureCompanyUI({
           ? prev.filter((id) => id !== catalogId)
           : [...prev, catalogId],
       );
- 
+
+      if (!locationId) {
+        return;
+      }
+
       // Fire action to sync with Shopify
       catalogFetcher.submit(
         {
@@ -4135,8 +4319,10 @@ function ConfigureCompanyUI({
   const removeCatalog = useCallback(
     (catalogId: string) => {
       const locationId = company?.locationId;
-      if (!locationId) return;
       setSelectedCatalogIds((prev) => prev.filter((id) => id !== catalogId));
+
+      if (!locationId) return;
+
       catalogFetcher.submit(
         { intent: "removeCatalog", catalogId, locationId },
         { method: "post" },
@@ -4426,134 +4612,128 @@ function ConfigureCompanyUI({
             >
               <div
                 style={{
-                  display: "flex", justifyContent: "space-between",
-                  alignItems: "center", marginBottom: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 14,
                 }}
               >
-                <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+                <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#2f2f2f" }}>
                   Catalogs
                 </h3>
                 {!company?.locationId && (
-                  <span style={{ fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 4, padding: "2px 7px" }}>
-                    Save company first to assign catalogs
+                  <span style={{ fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, padding: "3px 8px" }}>
+                    You can select now and assign on approve
                   </span>
                 )}
               </div>
  
-              {/* Search + dropdown */}
-              <div style={{ position: "relative", marginBottom: 10 }}>
-                <input
-                  placeholder={
-                    activeCatalogs.length === 0
-                      ? "No catalogs available"
-                      : "Search catalogs to add…"
-                  }
-                  value={catalogSearch}
-                  disabled={!company?.locationId || activeCatalogs.length === 0}
-                  onChange={(e) => {
-                    setCatalogSearch(e.target.value);
-                    setShowCatalogDropdown(true);
-                  }}
-                  onFocus={() => setShowCatalogDropdown(true)}
+              <button
+                type="button"
+                onClick={() => setShowCatalogList((open) => !open)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 10px",
+                  border: "none",
+                  borderRadius: 10,
+                  background: "#f1f1f1",
+                  color: "#3f3f46",
+                  fontSize: 13,
+                  fontWeight: 400,
+                  cursor: "pointer",
+                }}
+              >
+                <span
                   style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #c9ccd0",
-                    fontSize: 14,
-                    boxSizing: "border-box",
-                    background: !company?.locationId || activeCatalogs.length === 0 ? "#f9fafb" : "white",
+                    width: 16,
+                    height: 16,
+                    borderRadius: "50%",
+                    border: "1.5px solid #6b7280",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#6b7280",
+                    fontSize: 12,
+                    lineHeight: 1,
+                    flexShrink: 0,
                   }}
-                />
- 
-                {/* Dropdown list */}
-                {showCatalogDropdown && company?.locationId && filteredCatalogs.length > 0 && (
+                >
+                  +
+                </span>
+                Add a catalog
+              </button>
+
+              {showCatalogList ? (
+              <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                {availableCatalogs.length === 0 ? (
                   <div
                     style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      background: "white",
-                      border: "1px solid #e3e3e3",
-                      borderRadius: 8,
-                      boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
-                      zIndex: 10,
-                      maxHeight: 200,
-                      overflowY: "auto",
-                      marginTop: 4,
+                      padding: "12px 0",
+                      textAlign: "center",
+                      color: "#9ca3af",
+                      fontSize: 13,
+                      border: "1px dashed #d1d5db",
+                      borderRadius: 10,
+                      background: "#fafafa",
                     }}
                   >
-                    {filteredCatalogs.map((catalog) => {
-                      const isSelected = selectedCatalogIds.includes(catalog.id);
-                      return (
-                        <div
-                          key={catalog.id}
-                          onClick={() => {
-                            toggleCatalog(catalog.id);
-                            setCatalogSearch("");
-                            setShowCatalogDropdown(false);
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: "9px 12px",
-                            cursor: "pointer",
-                            background: isSelected ? "#f0f9ff" : "white",
-                            borderBottom: "1px solid #f3f4f6",
-                          }}
-                          onMouseEnter={(e) =>
-                            ((e.currentTarget as HTMLDivElement).style.background =
-                              isSelected ? "#e0f2fe" : "#f9fafb")
-                          }
-                          onMouseLeave={(e) =>
-                            ((e.currentTarget as HTMLDivElement).style.background =
-                              isSelected ? "#f0f9ff" : "white")
-                          }
-                        >
-                          {/* Checkbox-style indicator */}
-                          <div
-                            style={{
-                              width: 16,
-                              height: 16,
-                              borderRadius: 4,
-                              border: `2px solid ${isSelected ? "#1a1a1a" : "#c9ccd0"}`,
-                              background: isSelected ? "#1a1a1a" : "white",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flexShrink: 0,
-                              color: "white",
-                              fontSize: 11,
-                            }}
-                          >
-                            {isSelected && "✓"}
+                    No more catalogs available.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {availableCatalogs.map((catalog) => (
+                      <button
+                        type="button"
+                        key={catalog.id}
+                        onClick={() => toggleCatalog(catalog.id)}
+                        style={{
+                          display: "flex",
+                          width: "100%",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          padding: "10px 12px",
+                          cursor: "pointer",
+                          background: "white",
+                          border: "1px solid #e3e3e3",
+                          borderRadius: 10,
+                          textAlign: "left",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1a" }}>
+                            {catalog.title}
                           </div>
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1a" }}>
-                              {catalog.title}
-                            </div>
-                            {catalog.priceList?.name && (
-                              <div style={{ fontSize: 11, color: "#5c5f62" }}>
-                                {catalog.priceList.name} · {catalog.priceList.currency}
-                              </div>
-                            )}
+                          <div style={{ fontSize: 11, color: "#5c5f62" }}>
+                            {catalog.priceList?.name
+                              ? `${catalog.priceList.name} · ${catalog.priceList.currency}`
+                              : "No price list"}
                           </div>
                         </div>
-                      );
-                    })}
+                        <span
+                          style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: "50%",
+                            border: "1.5px solid #9ca3af",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#6b7280",
+                            fontSize: 14,
+                            flexShrink: 0,
+                          }}
+                        >
+                          +
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
- 
-              {/* Click-away to close dropdown */}
-              {showCatalogDropdown && (
-                <div
-                  style={{ position: "fixed", inset: 0, zIndex: 9 }}
-                  onClick={() => setShowCatalogDropdown(false)}
-                />
-              )}
+              ) : null}
  
               {/* Selected / assigned catalogs list */}
               {selectedCatalogs.length === 0 ? (
@@ -4565,7 +4745,7 @@ function ConfigureCompanyUI({
                     fontSize: 13,
                   }}
                 >
-                  No catalogs assigned — search above to add one.
+                  No catalogs assigned.
                 </div>
               ) : (
                 <div style={{ display: "grid", gap: 6 }}>
@@ -4744,21 +4924,71 @@ function ConfigureCompanyUI({
               }}
             >
               <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}>
-                Taxes
+                Tax details
               </h3>
-              <select
-                value={taxSetting}
-                onChange={(e) => setTaxSetting(e.target.value)}
-                style={{
-                  width: "100%", padding: "8px 12px", borderRadius: 8,
-                  border: "1px solid #c9ccd0", fontSize: 14,
-                  background: "white", boxSizing: "border-box",
-                }}
-              >
-                <option value="collect">Collect tax</option>
-                <option value="exempt">Tax exempt</option>
-                <option value="custom">Custom tax rate</option>
-              </select>
+              <div style={{ display: "grid", gap: 14 }}>
+                <div>
+                  <label
+                    htmlFor="company-tax-id"
+                    style={{
+                      display: "block",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: "#374151",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Tax ID
+                  </label>
+                  <input
+                    id="company-tax-id"
+                    type="text"
+                    value={taxId}
+                    onChange={(e) => setTaxId(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                      fontSize: 14,
+                      background: "white",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="company-tax-setting"
+                    style={{
+                      display: "block",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: "#374151",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Tax settings
+                  </label>
+                  <select
+                    id="company-tax-setting"
+                    value={taxSetting}
+                    onChange={(e) => setTaxSetting(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9ccd0",
+                      fontSize: 14,
+                      background: "white",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <option value="collect">Collect tax</option>
+                    <option value="exempt">Tax exempt</option>
+                    <option value="custom">Custom tax rate</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
  
@@ -4797,6 +5027,7 @@ function ConfigureCompanyUI({
                     allowOneTimeAddress,
                     orderSubmission,
                     taxSetting,
+                    taxId,
                     selectedCatalogIds,
                   });
                 }}
@@ -4889,6 +5120,8 @@ export default function RegistrationApprovals() {
     shippingCountryOptions,
     shippingProvincesByCountry,
     paymentTermsTemplates,
+    allCatalogs,
+    priceLists,
   } = useLoaderData<{
     submissions: RegistrationSubmission[];
     companies: any[];
@@ -4896,6 +5129,8 @@ export default function RegistrationApprovals() {
     shippingCountryOptions: CountryOption[];
     shippingProvincesByCountry: Record<string, CountryOption[]>;
     storeMissing: boolean;
+    allCatalogs: CatalogNode[];
+    priceLists: PriceListNode[];
     paymentTermsTemplates: Array<{
       id: string;
       name: string;
@@ -4944,6 +5179,7 @@ export default function RegistrationApprovals() {
     allowOneTimeAddress: boolean;
     orderSubmission: "auto" | "draft";
     taxSetting: string;
+    taxId: string;
   } | null>(null);
 
   // Store resolved customer/company in refs so pipeline useEffect always has latest
@@ -5014,6 +5250,7 @@ export default function RegistrationApprovals() {
       allowOneTimeAddress: boolean;
       orderSubmission: "auto" | "draft";
       taxSetting: string;
+      taxId: string;
     }) => {
       const sub = selectedRef.current;
       if (!sub) return;
@@ -5069,6 +5306,9 @@ export default function RegistrationApprovals() {
           customerEmail: resolvedCustomer.email,
           firstName: resolvedCustomer.firstName || sub.firstName || "",
           lastName: resolvedCustomer.lastName || sub.lastName || "",
+          taxId: opts.taxId,
+          taxSetting: opts.taxSetting,
+          selectedCatalogIds: JSON.stringify(opts.selectedCatalogIds),
           reviewNotes: "",
         },
         { method: "post" },
@@ -5276,6 +5516,8 @@ export default function RegistrationApprovals() {
           shippingProvincesByCountry={shippingProvincesByCountry}
           onSubmissionUpdated={handleSubmissionUpdated}
           paymentTermsTemplates={paymentTermsTemplates}
+          allCatalogs={allCatalogs}
+          priceLists={priceLists}
           onApprove={handleConfigureApprove}
           onCancel={resetPipeline}
           isApproving={isApproving}
