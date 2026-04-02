@@ -90,23 +90,23 @@ export async function checkCustomerExists(
 
 type CheckCompanyResult =
   | {
-      success: true;
-      exists: true;
-      company: {
-        id: string;
-        name: string;
-        externalId?: string | null;
-      };
-    }
-  | {
-      success: true;
-      exists: false;
-      company: null;
-    }
-  | {
-      success: false;
-      error: string;
+    success: true;
+    exists: true;
+    company: {
+      id: string;
+      name: string;
+      externalId?: string | null;
     };
+  }
+  | {
+    success: true;
+    exists: false;
+    company: null;
+  }
+  | {
+    success: false;
+    error: string;
+  };
 
 export async function checkCompanyExists(
   admin: AdminApiContext,
@@ -2596,6 +2596,7 @@ async function assignRoleAndLocations(
     };
   }
 }
+
 export async function getCompanyLocations(
   companyId: string,
   shopName: string,
@@ -2650,6 +2651,8 @@ export async function getCompanyLocations(
               province
               zip
               country
+              firstName
+              lastName
             }
             billingAddress {
               address1
@@ -2658,6 +2661,8 @@ export async function getCompanyLocations(
               province
               zip
               country
+              firstName
+              lastName
             }
           }
         }
@@ -2768,34 +2773,82 @@ export async function getCompanyLocations(
         node: {
           id: string;
           name: string;
+          note: string;
+          phone: string;
+          externalId: string;
           shippingAddress: {
             address1: string;
+            address2: string;
             city: string;
             province: string;
             zip: string;
+            country: string;
+            firstName: string;
+            lastName: string;
+          };
+          billingAddress: {
+            address1: string;
+            address2: string;
+            city: string;
+            province: string;
+            zip: string;
+            country: string;
+            firstName: string;
+            lastName: string;
           };
         };
       }) => {
         const location = edge.node;
-
         const customerInfo = locationCustomerCount[location.id] || {
           count: 0,
           customerIds: [],
         };
-        const shippingAddress = location.shippingAddress;
-        const formattedAddress = shippingAddress
-          ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
-          : "No address provided";
+        
+        // Check if billing address matches shipping address
+        const shippingAddr = location.shippingAddress;
+        const billingAddr = location.billingAddress;
+        const billingSameAsShipping = billingAddr && shippingAddr ? (
+          billingAddr.address1 === shippingAddr.address1 &&
+          billingAddr.address2 === shippingAddr.address2 &&
+          billingAddr.city === shippingAddr.city &&
+          billingAddr.province === shippingAddr.province &&
+          billingAddr.zip === shippingAddr.zip &&
+          billingAddr.country === shippingAddr.country &&
+          billingAddr.firstName === shippingAddr.firstName &&
+          billingAddr.lastName === shippingAddr.lastName
+        ) : false;
+        
         return {
           id: location.id,
           name: location.name,
           note: location.note,
           phone: location.phone,
           externalId: location.externalId,
-          shippingAddress: location.shippingAddress,
-          billingAddress: location.billingAddress,
+          shippingAddress: {
+            address1: location.shippingAddress?.address1 || "",
+            address2: location.shippingAddress?.address2 || "",
+            city: location.shippingAddress?.city || "",
+            province: location.shippingAddress?.province || "",
+            zip: location.shippingAddress?.zip || "",
+            country: location.shippingAddress?.country || "",
+            firstName: location.shippingAddress?.firstName || "",
+            lastName: location.shippingAddress?.lastName || "",
+          },
+          billingAddress: {
+            address1: location.billingAddress?.address1 || "",
+            address2: location.billingAddress?.address2 || "",
+            city: location.billingAddress?.city || "",
+            province: location.billingAddress?.province || "",
+            zip: location.billingAddress?.zip || "",
+            country: location.billingAddress?.country || "",
+            firstName: location.billingAddress?.firstName || "",
+            lastName: location.billingAddress?.lastName || "",
+          },
+          billingSameAsShipping, // Calculate this based on address comparison
           assignedUsers: customerInfo.count,
-          address: formattedAddress,
+          address: location.shippingAddress 
+            ? `${location.shippingAddress.address1}, ${location.shippingAddress.city}, ${location.shippingAddress.province} ${location.shippingAddress.zip}`
+            : "No address provided",
         };
       },
     );
@@ -3510,11 +3563,11 @@ async function smartRoleUpdate(
         };
       })
       .filter(Boolean) as Array<{
-      roleId: string;
-      roleName: string;
-      locationId: string | null;
-      locationName: string | null;
-    }>;
+        roleId: string;
+        roleName: string;
+        locationId: string | null;
+        locationName: string | null;
+      }>;
 
     console.log("🔍 Normalized new roles:", normalizedNewRoles);
     console.log("🔍 Existing assignments:", existingAssignments);
@@ -4246,6 +4299,9 @@ export async function createCompanyLocation(
     phone?: string;
     externalId?: string;
     note?: string;
+    firstName?: string;
+    lastName?: string;
+    billingSameAsShipping?: boolean;
   },
 ) {
   try {
@@ -4266,6 +4322,8 @@ export async function createCompanyLocation(
               zip
               province
               country
+              firstName
+              lastName
             }
             billingAddress {
               address1
@@ -4274,6 +4332,8 @@ export async function createCompanyLocation(
               zip
               province
               country
+              firstName
+              lastName
             }
           }
           userErrors {
@@ -4296,6 +4356,8 @@ export async function createCompanyLocation(
         zip: string;
         zoneCode?: string;
         countryCode: string;
+        firstName?: string;
+        lastName?: string;
       };
       shippingAddress?: {
         address1: string;
@@ -4304,12 +4366,13 @@ export async function createCompanyLocation(
         zip: string;
         zoneCode?: string;
         countryCode: string;
+        firstName?: string;
+        lastName?: string;
       };
     } = {
       name: locationData.name,
     };
 
-   
     if (locationData.externalId) {
       input.externalId = locationData.externalId;
     }
@@ -4318,12 +4381,21 @@ export async function createCompanyLocation(
     }
 
     if (locationData.phone) {
-     input.phone = locationData.phone;
-   }
+      input.phone = locationData.phone;
+    }
 
     // Add billing and shipping address if provided
     if (locationData.address1 || locationData.city) {
-      const addressData = {
+      const addressData: {
+        address1: string;
+        address2?: string;
+        city: string;
+        zip: string;
+        zoneCode?: string;
+        countryCode: string;
+        firstName?: string;
+        lastName?: string;
+      } = {
         address1: locationData.address1 || "",
         address2: locationData.address2,
         city: locationData.city || "",
@@ -4331,6 +4403,14 @@ export async function createCompanyLocation(
         zoneCode: locationData.province || "GJ",
         countryCode: locationData.country || "IN",
       };
+
+      // Add firstName and lastName to address if provided
+      if (locationData.firstName) {
+        addressData.firstName = locationData.firstName;
+      }
+      if (locationData.lastName) {
+        addressData.lastName = locationData.lastName;
+      }
 
       input.billingAddress = addressData;
       input.shippingAddress = addressData;
@@ -4801,6 +4881,9 @@ export async function createLocationAndAssignToContact(
   accessToken: string,
   locationData: {
     name: string;
+    externalId?: string;
+    firstName?: string;
+    lastName?: string;
     address1?: string;
     address2?: string;
     city?: string;
@@ -4808,8 +4891,7 @@ export async function createLocationAndAssignToContact(
     zip?: string;
     country?: string;
     phone?: string;
-    externalId?: string;
-    note?: string;
+    billingSameAsShipping?: boolean;
   },
 ) {
   console.log("🚀 Starting complete workflow...");
@@ -4820,6 +4902,7 @@ export async function createLocationAndAssignToContact(
     accessToken,
     locationData,
   );
+  console.log("🚀 ~ createLocationAndAssignToContact ~ locationResult:", locationResult)
 
   if (!locationResult.success || !locationResult.locationId) {
     return {
@@ -4908,7 +4991,10 @@ export async function updateCompanyLocation(
   shopName: string,
   accessToken: string,
   locationData: {
-    name?: string;
+    name: string;
+    externalId?: string;
+    firstName?: string;
+    lastName?: string;
     address1?: string;
     address2?: string;
     city?: string;
@@ -4916,8 +5002,8 @@ export async function updateCompanyLocation(
     zip?: string;
     country?: string;
     phone?: string;
-    externalId?: string;
     note?: string;
+    billingSameAsShipping?: boolean;
   },
 ) {
   try {
@@ -5430,12 +5516,12 @@ export async function getAdvancedCompanyOrders(
       customerId?: string | string[];
       dateRange?: {
         preset?:
-          | "last_week"
-          | "current_month"
-          | "last_month"
-          | "last_3_months"
-          | "custom"
-          | "all";
+        | "last_week"
+        | "current_month"
+        | "last_month"
+        | "last_3_months"
+        | "custom"
+        | "all";
         start?: string;
         end?: string;
       };
@@ -5763,11 +5849,11 @@ export async function getAdvancedCompanyOrders(
 
         const isAllowed = normalizedAllowedIds.includes(orderLocationId);
 
-        if (!isAllowed) {
-          console.log(
-            `🚫 RBAC filter: Excluded order ${order.name} (location: ${orderLocationId})`,
-          );
-        }
+        // if (!isAllowed) {
+        //   console.log(
+        //     `🚫 RBAC filter: Excluded order ${order.name} (location: ${orderLocationId})`,
+        //   );
+        // }
 
         return isAllowed;
       });
@@ -5836,9 +5922,9 @@ export async function getCompanyOrdersCount(
 }
 
 
- 
 
- 
+
+
 export interface CatalogActionResponse {
   intent: string;
   success: boolean;
@@ -5848,7 +5934,7 @@ export interface CatalogActionResponse {
   priceLists?: PriceListNode[];
   message?: string;
 }
- 
+
 export interface CatalogNode {
   id: string;
   title: string;
@@ -5856,14 +5942,14 @@ export interface CatalogNode {
   priceList?: { id: string; name: string; currency: string } | null;
   companyLocations?: { nodes: Array<{ id: string; name: string }> };
 }
- 
+
 export interface PriceListNode {
   id: string;
   name: string;
   currency: string;
   fixedPricesCount: number;
 }
- 
+
 export async function fetchAllCatalogs(admin: any): Promise<CatalogNode[]> {
   const response = await admin.graphql(
     `#graphql
@@ -5887,7 +5973,7 @@ export async function fetchAllCatalogs(admin: any): Promise<CatalogNode[]> {
   const payload = await response.json();
   return payload?.data?.catalogs?.nodes || [];
 }
- 
+
 export async function fetchPriceLists(admin: any): Promise<PriceListNode[]> {
   const response = await admin.graphql(
     `#graphql
@@ -5931,11 +6017,11 @@ export async function fetchCatalogsForLocation(
     }`,
     { variables: { locationId } },
   );
- 
+
   const payload = await response.json();
   return payload?.data?.companyLocation?.catalogs?.nodes || [];
 }
- 
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. CREATE A CATALOG
@@ -5979,11 +6065,11 @@ export async function createCatalog(
       },
     },
   );
- 
+
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =
     payload?.data?.catalogCreate?.userErrors || [];
- 
+
   if (userErrors.length > 0) {
     console.error("❌ catalogCreate userErrors:", userErrors);
     return {
@@ -5991,12 +6077,12 @@ export async function createCatalog(
       errors: userErrors.map((e) => e.message),
     };
   }
- 
+
   const catalog = payload?.data?.catalogCreate?.catalog || null;
   console.log("✅ Catalog created:", catalog?.id, catalog?.title);
   return { catalog, errors: [] };
 }
- 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. ASSIGN A CATALOG TO A LOCATION
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6006,7 +6092,7 @@ export async function assignCatalogToLocation(
   locationId: string,
 ): Promise<{ success: boolean; errors: string[] }> {
   console.log("🔗 Assigning catalog to location:", { catalogId, locationId });
- 
+
   const response = await admin.graphql(
     `#graphql
     mutation CatalogContextUpdate($id: ID!, $contextsToAdd: [ID!]!) {
@@ -6025,23 +6111,23 @@ export async function assignCatalogToLocation(
     }`,
     { variables: { id: catalogId, contextsToAdd: [locationId] } },
   );
- 
+
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =
     payload?.data?.catalogContextUpdate?.userErrors || [];
- 
+
   if (userErrors.length > 0) {
     console.error("❌ catalogContextUpdate (assign) userErrors:", userErrors);
     return { success: false, errors: userErrors.map((e) => e.message) };
   }
- 
+
   console.log(
     "✅ Catalog assigned successfully:",
     payload?.data?.catalogContextUpdate?.catalog,
   );
   return { success: true, errors: [] };
 }
- 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. REMOVE A CATALOG FROM A LOCATION
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6051,7 +6137,7 @@ export async function removeCatalogFromLocation(
   locationId: string,
 ): Promise<{ success: boolean; errors: string[] }> {
   console.log("🔗 Removing catalog from location:", { catalogId, locationId });
- 
+
   const response = await admin.graphql(
     `#graphql
     mutation CatalogContextUpdate($id: ID!, $contextsToRemove: [ID!]!) {
@@ -6070,20 +6156,20 @@ export async function removeCatalogFromLocation(
     }`,
     { variables: { id: catalogId, contextsToRemove: [locationId] } },
   );
- 
+
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =
     payload?.data?.catalogContextUpdate?.userErrors || [];
- 
+
   if (userErrors.length > 0) {
     console.error("❌ catalogContextUpdate (remove) userErrors:", userErrors);
     return { success: false, errors: userErrors.map((e) => e.message) };
   }
- 
+
   console.log("✅ Catalog removed from location:", locationId);
   return { success: true, errors: [] };
 }
- 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. DELETE A CATALOG ENTIRELY
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6101,20 +6187,20 @@ export async function deleteCatalog(
     }`,
     { variables: { id: catalogId } },
   );
- 
+
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =
     payload?.data?.catalogDelete?.userErrors || [];
- 
+
   if (userErrors.length > 0) {
     console.error("❌ catalogDelete userErrors:", userErrors);
     return { success: false, errors: userErrors.map((e) => e.message) };
   }
- 
+
   console.log("✅ Catalog deleted:", catalogId);
   return { success: true, errors: [] };
 }
- 
+
 
 /**
  * Create or update a local user for a company customer

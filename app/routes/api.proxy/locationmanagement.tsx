@@ -28,6 +28,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shop,
       store.accessToken
     );
+    console.log("🚀 ~ loader ~ locationsData:", locationsData)
 
     if (locationsData.error) {
       return Response.json(
@@ -199,40 +200,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "create": {
         const {
           name,
+          externalId,
+          country,
+          firstName,
+          lastName,
           address1,
           address2,
           city,
           province,
           zip,
-          country,
           phone,
-          externalId,
-          note,
+          billingSameAsShipping,
         } = body;
 
         const validations = [
-          { condition: !name, message: "Location name is required" },
-          {
-            condition: !address1,
-            message: "Address field is required",
-          },
-          { condition: !externalId, message: "External ID is required" },
-          {
-            condition: !city,
-            message: "City field is required",
-          },
-          {
-            condition: !country,
-            message: "Country field is required",
-          },
-          {
-            condition: !zip,
-            message: "Zip field is required",
-          },
+          { field: "name", value: name, message: "Location name is required" },
+          { field: "externalId", value: externalId, message: "External ID is required" },
+          { field: "firstName", value: firstName, message: "First name is required" },
+          { field: "lastName", value: lastName, message: "Last name is required" },
+          { field: "address1", value: address1, message: "Address line 1 is required" },
+          { field: "address2", value: address1, message: "Address line 1 is required" },
+          { field: "city", value: city, message: "City is required" },
+          { field: "province", value: province, message: "Province/State is required" },
+          { field: "country", value: country, message: "Country is required" },
+          { field: "zip", value: zip, message: "Zip/Postal code is required" },
         ];
 
         for (const v of validations) {
-          if (v.condition) {
+          if (!v.value || v.value.toString().trim() === "") {
             return Response.json({ error: v.message }, { status: 400 });
           }
         }
@@ -257,16 +252,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shop,
           store.accessToken,
           {
-            name,
+            name: name || "",
+            externalId: externalId || "",
+            country: country || "IN",
+            firstName: firstName?.trim() || "",
+            lastName: lastName?.trim() || "",
             address1: address1 || "",
             address2: address2 || "",
             city: city || "",
             province: province || "GJ",
             zip: zip || "",
-            country: country || "IN",
             phone: phone || "",
-            externalId: externalId || "",
-            note: note || "",
+            billingSameAsShipping: billingSameAsShipping,
           },
         );
 
@@ -288,15 +285,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const {
           locationId,
           name,
+          externalId,
+          country,
+          firstName,
+          lastName,
           address1,
           address2,
           city,
           province,
           zip,
-          country,
           phone,
-          externalId,
-          note,
+          billingSameAsShipping,
         } = body;
 
         if (!locationId) {
@@ -311,16 +310,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shop,
           store.accessToken,
           {
+
             name: name || undefined,
+            externalId: externalId || undefined,
+            country: country || undefined,
+            firstName: firstName?.trim() || undefined,
+            lastName: lastName?.trim() || undefined,
             address1: address1 || undefined,
             address2: address2 || undefined,
             city: city || undefined,
             province: province || undefined,
             zip: zip || undefined,
-            country: country || undefined,
             phone: phone || undefined,
-            externalId: externalId || undefined,
-            note: note || undefined,
+            billingSameAsShipping: billingSameAsShipping || undefined,
           },
         );
 
@@ -356,7 +358,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         if (orderCheck.error) {
-         
+
           return Response.json(
             { error: orderCheck.message || "Failed to verify location status" },
             { status: 500 },
@@ -396,7 +398,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           userContext?.customerEmail &&
           userCheck?.assignedEmails?.includes(userContext.customerEmail);
 
-      
+
         const canDelete =
           !userCheck.hasUsers ||
           (userContext?.isMainContact === true &&
