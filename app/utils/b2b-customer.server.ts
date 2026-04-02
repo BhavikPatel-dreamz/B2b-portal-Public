@@ -1028,8 +1028,6 @@ export async function checkCustomerIsB2BInShopifyByREST(
   }
 }
 
-// Function to get customer company information with role details
-// Function to get customer company information with role details
 export async function getCustomerCompanyInfo(
   customerId: string,
   shopName: string,
@@ -1574,7 +1572,6 @@ async function assignRoleToCompanyContact(
   return { success: true };
 }
 
-// Helper to assign locations to company contact
 async function assignLocationsToCompanyContact(
   contactId: string,
   locationIds: string[],
@@ -1607,9 +1604,6 @@ async function assignLocationsToCompanyContact(
   return { success: true };
 }
 
-/**
- * Helper: Find existing customer by email
- */
 async function findCustomerByEmail(
   email: string,
   shopName: string,
@@ -1656,9 +1650,6 @@ async function findCustomerByEmail(
   }
 }
 
-/**
- * Helper: Create a new Shopify customer
- */
 async function createCustomer(
   customerData: {
     firstName: string;
@@ -1726,9 +1717,6 @@ async function createCustomer(
   }
 }
 
-/**
- * Helper: Get or create customer (checks if exists first, creates if not)
- */
 async function getOrCreateCustomer(
   customerData: {
     firstName: string;
@@ -1768,9 +1756,6 @@ async function getOrCreateCustomer(
   }
 }
 
-/**
- * Helper: Check if customer is already a company contact
- */
 async function checkCompanyContactExists(
   companyId: string,
   customerId: string,
@@ -2397,7 +2382,6 @@ async function createCompanyContact(
   }
 }
 
-// Helper function to set both credit metafields
 async function setCustomerCreditMetafields(
   customerId: string,
   credit: number,
@@ -2481,9 +2465,6 @@ async function setCustomerCreditMetafields(
   }
 }
 
-/**
- * Helper: Assign role and locations to company contact
- */
 async function assignRoleAndLocations(
   contactId: string,
   companyId: string,
@@ -2867,305 +2848,6 @@ export async function getCompanyLocations(
   }
 }
 
-// export async function getCompanyLocations(
-//   companyId: string,
-//   shopName: string,
-//   accessToken: string,
-// ) {
-//   try {
-//     /* -----------------------------------------
-//        1. FETCH COMPANY + LOCATIONS
-//     ----------------------------------------- */
-//     const query = `
-//       query {
-//         company(id: "${companyId}") {
-//           id
-//           name
-//           contacts(first: 250) {
-//             edges {
-//               node {
-//                 id
-//                 title
-//                 customer {
-//                   id
-//                   firstName
-//                   lastName
-//                   email
-//                   phone
-//                 }
-//                 roleAssignments(first: 10) {
-//                   edges {
-//                     node {
-//                       role { name }
-//                       companyLocation { id name }
-//                     }
-//                   }
-//                 }
-//               }
-//             }
-//           }
-//           locations(first: 50) {
-//             edges {
-//               node {
-//                 id
-//                 name
-//                 note
-//                 phone
-//                 externalId
-//                 shippingAddress {
-//                   address1
-//                   address2
-//                   city
-//                   province
-//                   zip
-//                   country
-//                 }
-//                 billingAddress {
-//                   address1
-//                   address2
-//                   city
-//                   province
-//                   zip
-//                   country
-//                 }
-//               }
-//             }
-//           }
-//         }
-//       }
-//     `;
-
-//     const response = await fetch(
-//       `https://${shopName}/admin/api/2025-01/graphql.json`,
-//       {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//           "X-Shopify-Access-Token": accessToken,
-//         },
-//         body: JSON.stringify({ query }),
-//       },
-//     );
-
-//     const data = await response.json();
-
-//     if (data.errors) {
-//       console.error("GraphQL Errors:", data.errors);
-//       return { error: data.errors };
-//     }
-
-//     const company = data.data.company;
-
-//     /* -----------------------------------------
-//        2. FETCH SHIPPING COUNTRIES + PROVINCES
-//     ----------------------------------------- */
-//     const shippingCountriesResponse = await fetch(
-//       `https://${shopName}/admin/api/2025-01/graphql.json`,
-//       {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//           "X-Shopify-Access-Token": accessToken,
-//         },
-//         body: JSON.stringify({
-//           query: `#graphql
-//           query GetShippingCountriesWithProvinces {
-//             deliveryProfiles(first: 1) {
-//               nodes {
-//                 profileLocationGroups {
-//                   locationGroupZones(first: 50) {
-//                     nodes {
-//                       zone {
-//                         countries {
-//                           code { countryCode }
-//                           provinces { code name }
-//                         }
-//                       }
-//                     }
-//                   }
-//                 }
-//               }
-//             }
-//             shop {
-//               countriesInShippingZones { countryCodes }
-//             }
-//           }`,
-//         }),
-//       },
-//     );
-
-//     const shippingCountriesPayload =
-//       await shippingCountriesResponse.json();
-
-//     const validCountryCodes = new Set<string>(
-//       shippingCountriesPayload?.data?.shop?.countriesInShippingZones
-//         ?.countryCodes || [],
-//     );
-
-//     type ProvinceOption = { value: string; label: string };
-//     const countryProvincesMap = new Map<string, ProvinceOption[]>();
-
-//     const profiles =
-//       shippingCountriesPayload?.data?.deliveryProfiles?.nodes || [];
-
-//     for (const profile of profiles) {
-//       for (const group of profile.profileLocationGroups || []) {
-//         for (const zoneNode of group.locationGroupZones?.nodes || []) {
-//           for (const country of zoneNode.zone?.countries || []) {
-//             const countryCode: string = country.code?.countryCode;
-
-//             if (!countryCode || !validCountryCodes.has(countryCode))
-//               continue;
-
-//             const provinces: ProvinceOption[] = (
-//               country.provinces || []
-//             ).map((p: { code: string; name: string }) => ({
-//               value: p.code,
-//               label: p.name,
-//             }));
-
-//             if (countryProvincesMap.has(countryCode)) {
-//               const existing = countryProvincesMap.get(countryCode)!;
-//               const existingCodes = new Set(
-//                 existing.map((e) => e.value),
-//               );
-
-//               for (const p of provinces) {
-//                 if (!existingCodes.has(p.value)) existing.push(p);
-//               }
-//             } else {
-//               countryProvincesMap.set(countryCode, provinces);
-//             }
-//           }
-//         }
-//       }
-//     }
-
-//     /* -----------------------------------------
-//        3. PROCESS CONTACTS
-//     ----------------------------------------- */
-//     const contacts = company.contacts.edges.map((edge: any) => {
-//       const node = edge.node;
-
-//       const locationAssignments =
-//         node.roleAssignments?.edges
-//           ?.map((r: any) => ({
-//             locationId: r.node.companyLocation?.id,
-//             locationName: r.node.companyLocation?.name,
-//             roleName: r.node.role?.name,
-//           }))
-//           .filter((la: any) => la.locationId) || [];
-
-//       return {
-//         id: node.id,
-//         title: node.title,
-//         customer: node.customer,
-//         locationAssignments,
-//       };
-//     });
-
-//     /* -----------------------------------------
-//        4. COUNT CUSTOMERS PER LOCATION
-//     ----------------------------------------- */
-//     const locationCustomerCount: Record<
-//       string,
-//       { name: string; count: number; customerIds: string[] }
-//     > = {};
-
-//     contacts.forEach((contact: any) => {
-//       contact.locationAssignments.forEach((assignment: any) => {
-//         if (!locationCustomerCount[assignment.locationId]) {
-//           locationCustomerCount[assignment.locationId] = {
-//             name: assignment.locationName,
-//             count: 0,
-//             customerIds: [],
-//           };
-//         }
-
-//         if (
-//           !locationCustomerCount[
-//             assignment.locationId
-//           ].customerIds.includes(contact.customer.id)
-//         ) {
-//           locationCustomerCount[assignment.locationId].count++;
-//           locationCustomerCount[assignment.locationId].customerIds.push(
-//             contact.customer.id,
-//           );
-//         }
-//       });
-//     });
-
-//     /* -----------------------------------------
-//        5. FORMAT LOCATIONS WITH COUNTRY + PROVINCES
-//     ----------------------------------------- */
-//     const regionNames = new Intl.DisplayNames(["en"], {
-//       type: "region",
-//     });
-
-//     const locations = company.locations.edges.map((edge: any) => {
-//       const location = edge.node;
-
-//       const customerInfo = locationCustomerCount[location.id] || {
-//         count: 0,
-//         customerIds: [],
-//       };
-
-//       const shippingAddress = location.shippingAddress;
-
-//       // Handle country (name OR code)
-//       let countryCode: string | null = shippingAddress?.country || null;
-
-//       if (countryCode && countryCode.length !== 2) {
-//         // convert country name → code
-//         const match = [...countryProvincesMap.keys()].find(
-//           (code) => regionNames.of(code) === countryCode,
-//         );
-//         countryCode = match || null;
-//       }
-
-//       const provinces = countryCode
-//         ? countryProvincesMap.get(countryCode) || []
-//         : [];
-
-//       const formattedAddress = shippingAddress
-//         ? `${shippingAddress.address1}, ${shippingAddress.city}, ${shippingAddress.province} ${shippingAddress.zip}`
-//         : "No address provided";
-
-//       return {
-//         id: location.id,
-//         name: location.name,
-//         note: location.note,
-//         phone: location.phone,
-//         externalId: location.externalId,
-//         shippingAddress: location.shippingAddress,
-//         billingAddress: location.billingAddress,
-//         assignedUsers: customerInfo.count,
-//         address: formattedAddress,
-
-//         // ✅ NEW
-//         countryCode,
-//         provinces,
-//       };
-//     });
-
-//     /* -----------------------------------------
-//        6. FINAL RESPONSE
-//     ----------------------------------------- */
-//     return {
-//       companyId: company.id,
-//       companyName: company.name,
-//       contacts,
-//       locations,
-//       locationCustomerCount,
-//     };
-//   } catch (error: unknown) {
-//     console.error("Error fetching company locations:", error);
-//     return {
-//       error: error instanceof Error ? error.message : "Unknown error",
-//     };
-//   }
-// }
-
 export async function getCompanyLocationById(
   locationId: string,
   companyId: string,
@@ -3275,7 +2957,6 @@ export async function getCompanyLocationById(
   }
 }
 
-// Function to update a company customer
 export async function updateCompanyCustomer(
   contactId: string,
   companyId: string,
@@ -3852,7 +3533,6 @@ async function makeGraphQLRequest(
   return await response.json();
 }
 
-// Fetch company roles
 async function fetchCompanyRoless(
   companyId: string,
   shopName: string,
@@ -3909,7 +3589,6 @@ async function fetchCompanyRoless(
   }
 }
 
-// Fetch company locations
 async function fetchCompanyLocationss(
   companyId: string,
   shopName: string,
@@ -3963,7 +3642,6 @@ async function fetchCompanyLocationss(
   }
 }
 
-// Assign single role to contact
 async function assignRoleToContacts(
   contactId: string,
   roleId: string,
@@ -4057,7 +3735,6 @@ type ServiceResult<T> =
   | { ok: true; data: T; message?: string }
   | { ok: false; status: number; message: string };
 
-// Function to delete a company customer
 export async function deleteCompanyCustomer(
   contactId: string,
   shopName: string,
@@ -4284,7 +3961,6 @@ function normalizePhone(phone: string): string {
   return normalized;
 }
 
-// Function to create a company location
 export async function createCompanyLocation(
   companyId: string,
   shopName: string,
@@ -4992,7 +4668,7 @@ export async function updateCompanyLocation(
   shopName: string,
   accessToken: string,
   locationData: {
-    name: string;
+    name?: string;
     externalId?: string;
     firstName?: string;
     lastName?: string;
@@ -5002,7 +4678,7 @@ export async function updateCompanyLocation(
     province?: string;
     zip?: string;
     country?: string;
-    phone?: string;
+    phone?: string | null;
     note?: string;
     billingSameAsShipping?: boolean;
   },
@@ -5040,7 +4716,7 @@ export async function updateCompanyLocation(
 
       const input: {
         name?: string;
-        phone?: string;
+        phone?: string | null;
         externalId?: string;
         note?: string;
       } = {};
@@ -5048,9 +4724,12 @@ export async function updateCompanyLocation(
       if (locationData.name !== undefined) {
         input.name = locationData.name;
       }
+      
+      // Handle phone field - can be string, null, or undefined
       if (locationData.phone !== undefined) {
-        input.phone = locationData.phone;
+        input.phone = locationData.phone === "" ? null : locationData.phone;
       }
+      
       if (locationData.externalId !== undefined) {
         input.externalId = locationData.externalId;
       }
@@ -5088,14 +4767,16 @@ export async function updateCompanyLocation(
       }
     }
 
-    // Step 2: Update address if any address field is provided
+    // Step 2: Update address if any address field is provided (including firstName and lastName)
     const hasAddressUpdate =
       locationData.address1 !== undefined ||
       locationData.address2 !== undefined ||
       locationData.city !== undefined ||
       locationData.province !== undefined ||
       locationData.zip !== undefined ||
-      locationData.country !== undefined;
+      locationData.country !== undefined ||
+      locationData.firstName !== undefined ||
+      locationData.lastName !== undefined;
 
     if (hasAddressUpdate) {
       // First, get existing address
@@ -5110,6 +4791,8 @@ export async function updateCompanyLocation(
               zip
               province
               country
+              firstName
+              lastName
             }
           }
         }
@@ -5135,7 +4818,7 @@ export async function updateCompanyLocation(
       const existingShipping = existingLocation?.shippingAddress || {};
       console.log("🏠 Existing address:", existingShipping);
 
-      // Build address input object - only include fields with actual values
+      // Build address input object - include firstName and lastName
       const addressInput: {
         address1: string;
         address2?: string;
@@ -5143,6 +4826,8 @@ export async function updateCompanyLocation(
         zip: string;
         zoneCode?: string;
         countryCode: string;
+        firstName?: string;
+        lastName?: string;
       } = {
         address1:
           locationData.address1 !== undefined
@@ -5161,6 +4846,20 @@ export async function updateCompanyLocation(
             ? locationData.country
             : existingShipping.country || "US",
       };
+
+      // Add firstName if provided
+      if (locationData.firstName !== undefined) {
+        addressInput.firstName = locationData.firstName;
+      } else if (existingShipping.firstName) {
+        addressInput.firstName = existingShipping.firstName;
+      }
+
+      // Add lastName if provided
+      if (locationData.lastName !== undefined) {
+        addressInput.lastName = locationData.lastName;
+      } else if (existingShipping.lastName) {
+        addressInput.lastName = existingShipping.lastName;
+      }
 
       // Only add address2 if it exists (not empty string)
       const address2Value =
@@ -5181,7 +4880,7 @@ export async function updateCompanyLocation(
       }
 
       console.log(
-        "📍 Updating address:",
+        "📍 Updating address with firstName/lastName:",
         JSON.stringify(addressInput, null, 2),
       );
 
@@ -5196,6 +4895,8 @@ export async function updateCompanyLocation(
               zip
               province
               country
+              firstName
+              lastName
             }
             userErrors {
               field
@@ -5256,7 +4957,6 @@ export async function updateCompanyLocation(
   }
 }
 
-// Function to delete a company location
 export async function deleteCompanyLocation(
   locationId: string,
   shopName: string,
@@ -5338,8 +5038,6 @@ export async function deleteCompanyLocation(
     };
   }
 }
-
-// First, add this function to check if location has orders
 
 export async function checkLocationHasOrders(
   locationId: string,
@@ -5503,8 +5201,6 @@ interface OrderNode {
   financialStatus: string;
   fulfillmentStatus: string;
 }
-
-// Function to get advanced company orders with filtering and pagination
 
 export async function getAdvancedCompanyOrders(
   shopName: string,
@@ -5883,7 +5579,7 @@ export async function getAdvancedCompanyOrders(
     };
   }
 }
-// Function to get company orders count based on a query string
+
 export async function getCompanyOrdersCount(
   shopName: string,
   accessToken: string,
@@ -5921,10 +5617,6 @@ export async function getCompanyOrdersCount(
 
   return data.data?.ordersCount?.count ?? 0;
 }
-
-
-
-
 
 export interface CatalogActionResponse {
   intent: string;
@@ -5993,9 +5685,7 @@ export async function fetchPriceLists(admin: any): Promise<PriceListNode[]> {
   const payload = await response.json();
   return payload?.data?.priceLists?.nodes || [];
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. FETCH CATALOGS FOR A SPECIFIC LOCATION
-// ─────────────────────────────────────────────────────────────────────────────
+
 export async function fetchCatalogsForLocation(
   admin: any,
   locationId: string,
@@ -6029,10 +5719,6 @@ export async function fetchCatalogsForLocation(
   return payload?.data?.companyLocation?.catalogs?.nodes || [];
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. CREATE A CATALOG
-// ─────────────────────────────────────────────────────────────────────────────
 export async function createCatalog(
   admin: any,
   opts: {
@@ -6090,9 +5776,6 @@ export async function createCatalog(
   return { catalog, errors: [] };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. ASSIGN A CATALOG TO A LOCATION
-// ─────────────────────────────────────────────────────────────────────────────
 export async function assignCatalogToLocation(
   admin: any,
   catalogId: string,
@@ -6141,9 +5824,6 @@ const response = await admin.graphql(
   return { success: true, errors: [] };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 6. REMOVE A CATALOG FROM A LOCATION
-// ─────────────────────────────────────────────────────────────────────────────
 export async function removeCatalogFromLocation(
   admin: any,
   catalogId: string,
@@ -6187,9 +5867,6 @@ const response = await admin.graphql(
   return { success: true, errors: [] };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 7. DELETE A CATALOG ENTIRELY
-// ─────────────────────────────────────────────────────────────────────────────
 export async function deleteCatalog(
   admin: any,
   catalogId: string,
@@ -6217,7 +5894,6 @@ export async function deleteCatalog(
   console.log("✅ Catalog deleted:", catalogId);
   return { success: true, errors: [] };
 }
-
 
 /**
  * Create or update a local user for a company customer

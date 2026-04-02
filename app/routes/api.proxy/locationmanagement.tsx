@@ -193,6 +193,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const body = await request.json();
+    console.log("🚀 ~ action ~ body:", body);
     const { action: actionType } = body;
 
     // Handle different actions
@@ -219,7 +220,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           { field: "firstName", value: firstName, message: "First name is required" },
           { field: "lastName", value: lastName, message: "Last name is required" },
           { field: "address1", value: address1, message: "Address line 1 is required" },
-          { field: "address2", value: address1, message: "Address line 1 is required" },
           { field: "city", value: city, message: "City is required" },
           { field: "province", value: province, message: "Province/State is required" },
           { field: "country", value: country, message: "Country is required" },
@@ -246,6 +246,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        const phoneValue = phone && phone.trim() !== "" ? phone : "";
+
         const result = await createLocationAndAssignToContact(
           companyId,
           `gid://shopify/Customer/${userContext.customerId}`,
@@ -262,12 +264,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             city: city || "",
             province: province || "GJ",
             zip: zip || "",
-            phone: phone || "",
+            phone: phoneValue,
             billingSameAsShipping: billingSameAsShipping,
           },
         );
 
-        // FIX: Check for error and return proper status code
         if (result.error) {
           return Response.json(
             {
@@ -305,12 +306,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
+        let phoneValue: string | null | undefined = undefined;
+        
+        if (phone !== undefined) {
+          if (phone === "") {
+            phoneValue = null;
+          } else {
+            phoneValue = phone;
+          }
+        }
+
         const result = await updateCompanyLocation(
           locationId,
           shop,
           store.accessToken,
           {
-
             name: name || undefined,
             externalId: externalId || undefined,
             country: country || undefined,
@@ -321,12 +331,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             city: city || undefined,
             province: province || undefined,
             zip: zip || undefined,
-            phone: phone || undefined,
+            phone: phoneValue,
             billingSameAsShipping: billingSameAsShipping || undefined,
           },
         );
 
-        // FIX: Proper error handling
         if (result.error) {
           return Response.json(
             {
@@ -358,7 +367,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         if (orderCheck.error) {
-
           return Response.json(
             { error: orderCheck.message || "Failed to verify location status" },
             { status: 500 },
@@ -397,7 +405,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const isUserAssignedToLocation =
           userContext?.customerEmail &&
           userCheck?.assignedEmails?.includes(userContext.customerEmail);
-
 
         const canDelete =
           !userCheck.hasUsers ||
