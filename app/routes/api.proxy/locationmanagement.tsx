@@ -216,6 +216,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           { field: "firstName", value: firstName, message: "First name is required" },
           { field: "lastName", value: lastName, message: "Last name is required" },
           { field: "address1", value: address1, message: "Street address is required" },
+          { field: "address2", value: address2, message: "Apartment, suite, etc is required" },
+          { field: "recipient", value: recipient, message: "Company/Attention is required" },
           { field: "city", value: city, message: "City is required" },
           { field: "province", value: province, message: "Province/State is required" },
           { field: "country", value: country, message: "Country is required" },
