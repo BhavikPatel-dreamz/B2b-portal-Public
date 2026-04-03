@@ -3216,6 +3216,7 @@ const PIPELINE_LABELS: Record<string, string> = {
 const PIPELINE_ORDER: PipelineStep[] = [
   "checkCustomer",
   "approveRegistration",
+  "sendWelcomeEmail",
   "done",
 ];
 

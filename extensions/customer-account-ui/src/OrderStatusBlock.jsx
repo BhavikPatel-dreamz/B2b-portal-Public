@@ -17,6 +17,39 @@ const SECTION_LABELS = {
   billing: "Billing address",
 };
 
+const COUNTRY_PHONE_META = {
+  IN: { dialCode: "+91", flagEmoji: "🇮🇳" },
+  INDIA: { dialCode: "+91", flagEmoji: "🇮🇳" },
+  US: { dialCode: "+1", flagEmoji: "🇺🇸" },
+  USA: { dialCode: "+1", flagEmoji: "🇺🇸" },
+  "UNITED STATES": { dialCode: "+1", flagEmoji: "🇺🇸" },
+  CA: { dialCode: "+1", flagEmoji: "🇨🇦" },
+  CANADA: { dialCode: "+1", flagEmoji: "🇨🇦" },
+  GB: { dialCode: "+44", flagEmoji: "🇬🇧" },
+  UK: { dialCode: "+44", flagEmoji: "🇬🇧" },
+  "UNITED KINGDOM": { dialCode: "+44", flagEmoji: "🇬🇧" },
+  AU: { dialCode: "+61", flagEmoji: "🇦🇺" },
+  AUSTRALIA: { dialCode: "+61", flagEmoji: "🇦🇺" },
+  NZ: { dialCode: "+64", flagEmoji: "🇳🇿" },
+  "NEW ZEALAND": { dialCode: "+64", flagEmoji: "🇳🇿" },
+  SG: { dialCode: "+65", flagEmoji: "🇸🇬" },
+  SINGAPORE: { dialCode: "+65", flagEmoji: "🇸🇬" },
+  AE: { dialCode: "+971", flagEmoji: "🇦🇪" },
+  "UNITED ARAB EMIRATES": { dialCode: "+971", flagEmoji: "🇦🇪" },
+  SA: { dialCode: "+966", flagEmoji: "🇸🇦" },
+  "SAUDI ARABIA": { dialCode: "+966", flagEmoji: "🇸🇦" },
+  DE: { dialCode: "+49", flagEmoji: "🇩🇪" },
+  GERMANY: { dialCode: "+49", flagEmoji: "🇩🇪" },
+  FR: { dialCode: "+33", flagEmoji: "🇫🇷" },
+  FRANCE: { dialCode: "+33", flagEmoji: "🇫🇷" },
+  IT: { dialCode: "+39", flagEmoji: "🇮🇹" },
+  ITALY: { dialCode: "+39", flagEmoji: "🇮🇹" },
+  ES: { dialCode: "+34", flagEmoji: "🇪🇸" },
+  SPAIN: { dialCode: "+34", flagEmoji: "🇪🇸" },
+  NL: { dialCode: "+31", flagEmoji: "🇳🇱" },
+  NETHERLANDS: { dialCode: "+31", flagEmoji: "🇳🇱" },
+};
+
 function Extension() {
   const [fields, setFields] = useState([]);
   const [formData, setFormData] = useState({});
@@ -62,7 +95,7 @@ function Extension() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(getCustomerMetafieldQuery),
-          }
+          },
         );
         const { data } = await res.json();
         setShopDomain(data?.shop?.myshopifyDomain || "");
@@ -82,7 +115,7 @@ function Extension() {
     if (!shopDomain || !customerId) return;
     const customerIdWithoutPrefix = customerId.replace(
       "gid://shopify/Customer/",
-      ""
+      "",
     );
 
     const fetchAccountStatus = async () => {
@@ -90,7 +123,7 @@ function Extension() {
         setAccountCheckComplete(false);
         const res = await fetch(
           `${API_URL}/api/proxy/customer-account?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
-          { method: "GET", headers: { Accept: "application/json" } }
+          { method: "GET", headers: { Accept: "application/json" } },
         );
         const result = await res.json();
         const { config, message, redirectTo } = result;
@@ -136,19 +169,21 @@ function Extension() {
   }, [shopDomain, customerId]);
 
   useEffect(() => {
-    if (!shopDomain || !customerId || !accountCheckComplete || isRedirecting) return;
+    if (!shopDomain || !customerId || !accountCheckComplete || isRedirecting)
+      return;
     const customerIdWithoutPrefix = customerId.replace(
       "gid://shopify/Customer/",
-      ""
+      "",
     );
     const fetchCustomerDetails = async () => {
       try {
         const res = await fetch(
           `${API_URL}/api/proxy/customer-detail?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
-          { method: "GET", headers: { Accept: "application/json" } }
+          { method: "GET", headers: { Accept: "application/json" } },
         );
         const result = await res.json();
-        if (!res.ok) throw new Error(result?.error || "Failed to fetch customer details");
+        if (!res.ok)
+          throw new Error(result?.error || "Failed to fetch customer details");
         setCustomerDetails(result?.customer || null);
       } catch (err) {
         console.error("Customer detail API Error:", err);
@@ -163,9 +198,10 @@ function Extension() {
       try {
         const res = await fetch(
           `${API_URL}/api/proxy/shipping-zones?shop=${shopDomain}`,
-          { method: "GET", headers: { Accept: "application/json" } }
+          { method: "GET", headers: { Accept: "application/json" } },
         );
         const { countries } = await res.json();
+        console.log(countries, "countries from API");
         setCountriesData(countries || []);
       } catch (err) {
         console.error("Countries fetch error:", err);
@@ -181,7 +217,7 @@ function Extension() {
     const finalValue =
       value?.target?.checked !== undefined
         ? value.target.checked
-        : value?.target?.value ?? value?.value ?? value ?? "";
+        : (value?.target?.value ?? value?.value ?? value ?? "");
 
     setFormData((prev) => {
       const updated = { ...prev, [key]: finalValue };
@@ -211,11 +247,11 @@ function Extension() {
       sourceKey.replace(new RegExp(findWord, "i"), replaceWord),
       sourceKey.replace(
         new RegExp(findWord, "i"),
-        replaceWord.charAt(0).toUpperCase() + replaceWord.slice(1)
+        replaceWord.charAt(0).toUpperCase() + replaceWord.slice(1),
       ),
       sourceKey.replace(
         new RegExp(findWord.charAt(0).toUpperCase() + findWord.slice(1)),
-        replaceWord.charAt(0).toUpperCase() + replaceWord.slice(1)
+        replaceWord.charAt(0).toUpperCase() + replaceWord.slice(1),
       ),
     ];
     return variants.find((v) => v in formData) ?? null;
@@ -249,6 +285,29 @@ function Extension() {
     String(value || "")
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "");
+
+  const normalizeCountryCode = (value) =>
+    String(value || "")
+      .trim()
+      .toUpperCase();
+
+  const getPhoneMetaForCountry = (countryValue) =>
+    
+    COUNTRY_PHONE_META[normalizeCountryCode(countryValue)] || {
+      dialCode: "+91",
+      flagEmoji: "🇮🇳",
+    };
+
+  const isOnlyDialCode = (phoneValue, dialCode) => {
+    const phone = String(phoneValue || "").trim();
+    const code = String(dialCode || "").trim();
+    if (!phone) return true;
+    if (!code) return false;
+    const phoneDigits = phone.replace(/[^\d]/g, "");
+    const codeDigits = code.replace(/[^\d]/g, "");
+
+    return phoneDigits === codeDigits;
+  };
 
   const getAutofillValue = (field) => {
     if (!customerDetails) return "";
@@ -302,7 +361,11 @@ function Extension() {
           const autofillValue = getAutofillValue(field);
           if (!autofillValue) return;
           const currentValue = updated[field.key];
-          if (currentValue === undefined || currentValue === null || currentValue === "") {
+          if (
+            currentValue === undefined ||
+            currentValue === null ||
+            currentValue === ""
+          ) {
             updated[field.key] = autofillValue;
             hasChanges = true;
           }
@@ -315,23 +378,26 @@ function Extension() {
 
   const getSectionMeta = (section, sectionFields) => {
     const fieldWithSectionLabel = sectionFields.find(
-      (f) => typeof f.sectionLabel === "string" && f.sectionLabel.trim() !== ""
+      (f) => typeof f.sectionLabel === "string" && f.sectionLabel.trim() !== "",
     );
     const fieldWithHeadingWidth = sectionFields.find(
-      (f) => typeof f.sectionHeadingWidth === "number"
+      (f) => typeof f.sectionHeadingWidth === "number",
     );
     const fieldWithHeadingAlignment = sectionFields.find(
-      (f) => f.sectionHeadingAlignment
+      (f) => f.sectionHeadingAlignment,
     );
     const fieldWithHeadingHidden = sectionFields.find(
-      (f) => typeof f.sectionHeadingHidden === "boolean"
+      (f) => typeof f.sectionHeadingHidden === "boolean",
     );
     return {
       title:
         fieldWithSectionLabel?.sectionLabel?.trim() ||
         SECTION_LABELS[section] ||
         section,
-      width: Math.min(100, Math.max(25, fieldWithHeadingWidth?.sectionHeadingWidth ?? 100)),
+      width: Math.min(
+        100,
+        Math.max(25, fieldWithHeadingWidth?.sectionHeadingWidth ?? 100),
+      ),
       alignment: fieldWithHeadingAlignment?.sectionHeadingAlignment || "left",
       hidden: fieldWithHeadingHidden?.sectionHeadingHidden ?? false,
     };
@@ -373,8 +439,16 @@ function Extension() {
 
     // Always full width types
     if (
-      ["heading", "paragraph", "link", "divider", "textarea", "checkbox"].includes(field?.type)
-    ) return 100;
+      [
+        "heading",
+        "paragraph",
+        "link",
+        "divider",
+        "textarea",
+        "checkbox",
+      ].includes(field?.type)
+    )
+      return 100;
 
     // Full-width address fields
     if (
@@ -389,8 +463,8 @@ function Extension() {
       combined.includes("suite") ||
       combined.includes("company") ||
       combined.includes("email")
-      
-    ) return 100;
+    )
+      return 100;
 
     // Half width — firstName & lastName side by side
     if (combined.includes("firstname") || combined.includes("lastname"))
@@ -406,7 +480,8 @@ function Extension() {
       combined.includes("postal") ||
       type === "phone" ||
       combined.includes("phone")
-    ) return 24;
+    )
+      return 24;
 
     return 100;
   };
@@ -473,7 +548,9 @@ function Extension() {
               key={field.key || `${rowIndex}-${fieldIndex}`}
               inlineSize={`${w}%`}
             >
-              {field?.type === "group" ? renderGroup(field) : renderField(field)}
+              {field?.type === "group"
+                ? renderGroup(field)
+                : renderField(field)}
             </s-box>
           );
         })}
@@ -486,8 +563,14 @@ function Extension() {
 
     if (field.type === "heading") {
       return (
-        <s-box inlineSize={`${Math.min(100, Math.max(25, field.headingWidth ?? 100))}%`}>
-          <s-stack direction="block" gap="none" inlineAlignment={getInlineAlignment(field.headingAlignment)}>
+        <s-box
+          inlineSize={`${Math.min(100, Math.max(25, field.headingWidth ?? 100))}%`}
+        >
+          <s-stack
+            direction="block"
+            gap="none"
+            inlineAlignment={getInlineAlignment(field.headingAlignment)}
+          >
             <s-heading>{field.content || field.label}</s-heading>
           </s-stack>
         </s-box>
@@ -501,7 +584,11 @@ function Extension() {
 
     if (field.type === "link") {
       return (
-        <s-stack direction="block" gap="none" inlineAlignment={getInlineAlignment(field.linkAlignment)}>
+        <s-stack
+          direction="block"
+          gap="none"
+          inlineAlignment={getInlineAlignment(field.linkAlignment)}
+        >
           <s-link
             href={field.linkUrl || "#"}
             target={field.linkOpenInNewTab ? "_blank" : "_self"}
@@ -571,13 +658,23 @@ function Extension() {
             label={field.label}
             value={selectedCountry}
             onChange={(val) => {
+              const previousCountry = formData[field.key] ?? "IN";
               handleChange(field.key, val);
               const stateKey = findPairedKey(field.key, "country", "state");
               if (stateKey) {
                 const firstState = val
-                  ? getProvinceOptions(val)?.[0]?.value ?? ""
+                  ? (getProvinceOptions(val)?.[0]?.value ?? "")
                   : "";
                 handleChange(stateKey, firstState);
+              }
+              const phoneKey = findPairedKey(field.key, "country", "phone");
+              if (phoneKey) {
+                const { dialCode: newDialCode } = getPhoneMetaForCountry(val);
+                const currentPhone = String(formData[phoneKey] ?? "").trim();
+
+                // Keep user-typed digits, replace only the dial code prefix
+                const digits = currentPhone.replace(/^\+\d{1,4}/, "").trim();
+                handleChange(phoneKey, digits ? `${newDialCode}${digits}` : newDialCode);
               }
             }}
           >
@@ -597,11 +694,14 @@ function Extension() {
 
       case "state": {
         const countryKey = findPairedKey(field.key, "state", "country");
-        const selectedCountry = countryKey ? formData[countryKey] ?? "IN" : "IN";
+        const selectedCountry = countryKey
+          ? (formData[countryKey] ?? "IN")
+          : "IN";
         const stateOptions = field.options?.length
           ? field.options
           : getProvinceOptions(selectedCountry);
-        const selectedState = formData[field.key] ?? stateOptions[0]?.value ?? "";
+        const selectedState =
+          formData[field.key] ?? stateOptions[0]?.value ?? "";
         return (
           <s-select
             label={field.label}
@@ -620,20 +720,34 @@ function Extension() {
                 </s-option>
               ))
             ) : (
-              <s-option value="" defaultSelected>— No states available —</s-option>
+              <s-option value="" defaultSelected>
+                — No states available —
+              </s-option>
             )}
           </s-select>
         );
       }
 
-      case "phone":
+      case "phone": {
+        const countryKey = findPairedKey(field.key, "phone", "country");
+        const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
+        const { dialCode, flagEmoji } = getPhoneMetaForCountry(selectedCountry);
+
+        const currentVal = String(formData[field.key] ?? "").trim();
+
+        // If empty or only has a dial code, show the current one
+        const displayVal = currentVal || dialCode;
+
         return (
-          <s-phone-field
-            label={field.label}
-            value={formData[field.key] ?? ""}
+          <s-text-field
+            key={`phone-${selectedCountry}`}
+            label={`${flagEmoji} ${field.label} (${dialCode})`}
+            value={displayVal}
+            type="tel"
             onChange={(val) => handleChange(field.key, val)}
           />
         );
+      }
 
       default:
         return (
@@ -691,19 +805,21 @@ function Extension() {
       Object.entries(formData).forEach(([key, value]) => {
         form.append(
           key,
-          typeof value === "boolean" ? (value ? "true" : "false") : value
+          typeof value === "boolean" ? (value ? "true" : "false") : value,
         );
       });
       if (customerId) form.append("shopifyCustomerId", customerId);
 
       const res = await fetch(
         `${API_URL}/api/proxy/registration?shop=${shopDomain}`,
-        { method: "POST", body: form, headers: { Accept: "application/json" } }
+        { method: "POST", body: form, headers: { Accept: "application/json" } },
       );
       const text = await res.text();
+      console.log(text, "text from registration API");
       let result;
       try {
         result = JSON.parse(text);
+        console.log(result, "result from registration API");
       } catch {
         throw new Error("Invalid JSON from server");
       }
@@ -754,14 +870,14 @@ function Extension() {
     const bannerTone = statusMessage.toLowerCase().includes("rejected")
       ? "critical"
       : statusMessage.toLowerCase().includes("review")
-      ? "warning"
-      : "info";
+        ? "warning"
+        : "info";
     const bannerTitle =
       bannerTone === "critical"
         ? "Registration Rejected"
         : bannerTone === "warning"
-        ? "Under Review"
-        : "Account Status";
+          ? "Under Review"
+          : "Account Status";
     return (
       <s-box padding="base">
         <s-banner tone={bannerTone}>
@@ -781,8 +897,8 @@ function Extension() {
           <s-stack direction="block" gap="small">
             <s-heading>Registration Submitted</s-heading>
             <s-text tone="subdued">
-              Your request has been received. We'll review your details and be
-              in touch shortly.
+              Your request has been received. We&apos;ll review your details and
+              be in touch shortly.
             </s-text>
           </s-stack>
         </s-banner>
@@ -795,13 +911,12 @@ function Extension() {
   // ═══════════════════════════════════════════════════════════
   return (
     <s-stack direction="block" gap="large">
-
       {/* ── Top-level fields (no section) ── */}
       {topLevelFields.length > 0 && (
         <s-box padding="base">
           <s-stack direction="block" gap="base">
             {buildFieldRows(topLevelFields).map((row, rowIndex) =>
-              renderRow(row, rowIndex)
+              renderRow(row, rowIndex),
             )}
           </s-stack>
         </s-box>
@@ -826,13 +941,15 @@ function Extension() {
 
       {/* ── One s-section per section group ── */}
       {Object.entries(grouped).map(([section, sectionFields]) => {
-        const visibleSectionFields = getVisibleSectionFields(section, sectionFields);
+        const visibleSectionFields = getVisibleSectionFields(
+          section,
+          sectionFields,
+        );
         const sectionMeta = getSectionMeta(section, visibleSectionFields);
 
         return (
           <s-section key={section} padding>
             <s-stack direction="block" gap="base">
-
               {/* Section heading + divider */}
               {shouldShowSectionHeading(section, visibleSectionFields) && (
                 <s-box inlineSize={`${sectionMeta.width}%`}>
@@ -850,10 +967,9 @@ function Extension() {
               {/* Fields — row by row */}
               <s-stack direction="block" gap="base">
                 {buildFieldRows(visibleSectionFields).map((row, rowIndex) =>
-                  renderRow(row, rowIndex)
+                  renderRow(row, rowIndex),
                 )}
               </s-stack>
-
             </s-stack>
           </s-section>
         );
@@ -877,7 +993,6 @@ function Extension() {
           )}
         </s-stack>
       </s-box>
-
     </s-stack>
   );
 }
