@@ -513,7 +513,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     fetchAllCatalogs(admin),
     fetchPriceLists(admin),
   ]);
-  console.log(allCatalogs,"allCatalogs111");
 
   return Response.json({
     submissions: submissions.map((s) => ({
@@ -970,6 +969,20 @@ export async function assignLocationAddresses(
     billing,
   });
 
+  const formatAddressErrors = (
+    addressType: "Shipping" | "Billing",
+    userErrors: Array<{ field?: string[]; message?: string }>,
+  ) =>
+    userErrors
+      .map((error) => {
+        const fieldPath =
+          error.field && error.field.length > 0
+            ? error.field.join(".")
+            : "address";
+        return `${addressType} address ${fieldPath}: ${error.message || "Invalid value"}`;
+      })
+      .join("\n");
+
   // ── Shipping address ──
   if (shipping) {
     const shippingAddress = {
@@ -1024,6 +1037,7 @@ export async function assignLocationAddresses(
         "❌ Input that caused error:",
         JSON.stringify({ shippingAddress, addressTypes }, null, 2),
       );
+      throw new Error(formatAddressErrors("Shipping", shippingUserErrors));
     } else {
       console.log(
         "✅ SHIPPING address assigned successfully:",
@@ -1084,6 +1098,7 @@ export async function assignLocationAddresses(
         "❌ Input that caused error:",
         JSON.stringify(billingAddress, null, 2),
       );
+      throw new Error(formatAddressErrors("Billing", billingUserErrors));
     } else {
       console.log(
         "✅ BILLING address assigned successfully:",
@@ -3728,6 +3743,7 @@ function DynamicField({
 }) {
   const hasValue = value !== undefined && value !== null && value !== "";
   const showFieldLabel = field.type !== "checkbox";
+  const isLocked = field.readOnly || field.type === "email";
 
   // If the field has no value yet, show a subtle "add" placeholder style
   const addStyle: React.CSSProperties = hasValue
@@ -3876,7 +3892,18 @@ function DynamicField({
             value={value || ""}
             type={field.type === "email" ? "email" : "text"}
             onChange={(e) => onChange(e.target.value)}
-            style={{ ...inputStyle, ...addStyle }}
+            disabled={isLocked}
+            style={{
+              ...inputStyle,
+              ...addStyle,
+              ...(isLocked
+                ? {
+                    background: "#f9fafb",
+                    color: "#6b7280",
+                    cursor: "not-allowed",
+                  }
+                : {}),
+            }}
           />
         </div>
       );
@@ -4617,11 +4644,6 @@ function ConfigureCompanyUI({
                 <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#2f2f2f" }}>
                   Catalogs
                 </h3>
-                {!company?.locationId && (
-                  <span style={{ fontSize: 11, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, padding: "3px 8px" }}>
-                    You can select now and assign on approve
-                  </span>
-                )}
               </div>
  
               <button

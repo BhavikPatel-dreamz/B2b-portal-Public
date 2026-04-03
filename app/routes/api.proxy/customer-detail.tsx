@@ -64,6 +64,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 email
                 firstName
                 lastName
+                phone
+                defaultAddress {
+                  firstName
+                  lastName
+                  address1
+                  address2
+                  city
+                  province
+                  provinceCode
+                  zip
+                  country
+                  countryCodeV2
+                  phone
+                }
               }
             }
           `,
@@ -99,6 +113,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         email: customer.email,
         firstName: customer.firstName,
         lastName: customer.lastName,
+        phone: customer.phone,
+        defaultAddress: customer.defaultAddress
+          ? {
+              firstName: customer.defaultAddress.firstName,
+              lastName: customer.defaultAddress.lastName,
+              address1: customer.defaultAddress.address1,
+              address2: customer.defaultAddress.address2,
+              city: customer.defaultAddress.city,
+              province: customer.defaultAddress.province,
+              provinceCode: customer.defaultAddress.provinceCode,
+              zip: customer.defaultAddress.zip,
+              country: customer.defaultAddress.country,
+              countryCode: customer.defaultAddress.countryCodeV2,
+              phone: customer.defaultAddress.phone,
+            }
+          : null,
       },
     });
 

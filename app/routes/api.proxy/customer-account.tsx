@@ -158,7 +158,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const formFieldConfig = await prisma.formFieldConfig.findUnique({
       where: { shopId: store.id },
     });
-    console.log(formFieldConfig,"formFieldConfig11111");
  
     let config;
  

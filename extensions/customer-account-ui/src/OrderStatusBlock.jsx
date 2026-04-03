@@ -104,8 +104,6 @@ function Extension() {
         if (config?.fields) {
           setFields(config.fields);
           const initial = {};
-
-          // ✅ FIX: initialize country/state with defaults
           const processFields = (arr) => {
             arr.forEach((f) => {
               if (f.type === "group") {
@@ -135,12 +133,10 @@ function Extension() {
 
   useEffect(() => {
     if (!shopDomain || !customerId) return;
-
     const customerIdWithoutPrefix = customerId.replace(
       "gid://shopify/Customer/",
       ""
     );
-
     const fetchCustomerDetails = async () => {
       try {
         const res = await fetch(
@@ -148,23 +144,17 @@ function Extension() {
           { method: "GET", headers: { Accept: "application/json" } }
         );
         const result = await res.json();
-
-        if (!res.ok) {
-          throw new Error(result?.error || "Failed to fetch customer details");
-        }
-
+        if (!res.ok) throw new Error(result?.error || "Failed to fetch customer details");
         setCustomerDetails(result?.customer || null);
       } catch (err) {
         console.error("Customer detail API Error:", err);
       }
     };
-
     fetchCustomerDetails();
   }, [shopDomain, customerId]);
 
   useEffect(() => {
     if (!shopDomain) return;
-
     const fetchCountries = async () => {
       try {
         const res = await fetch(
@@ -177,7 +167,6 @@ function Extension() {
         console.error("Countries fetch error:", err);
       }
     };
-
     fetchCountries();
   }, [shopDomain]);
 
@@ -192,7 +181,6 @@ function Extension() {
 
     setFormData((prev) => {
       const updated = { ...prev, [key]: finalValue };
-
       if (key === "billSameAsShip" && finalValue === true) {
         Object.keys(prev).forEach((k) => {
           if (k.startsWith("ship")) {
@@ -203,9 +191,7 @@ function Extension() {
       }
       if (key === "billSameAsShip" && finalValue === false) {
         Object.keys(prev).forEach((k) => {
-          if (k.startsWith("bill") && k !== "billSameAsShip") {
-            updated[k] = "";
-          }
+          if (k.startsWith("bill") && k !== "billSameAsShip") updated[k] = "";
         });
       }
       if (key.startsWith("ship") && prev["billSameAsShip"] === true) {
@@ -216,7 +202,6 @@ function Extension() {
     });
   };
 
-  // ── Helper: find the paired key in formData ──────────────────────────────
   const findPairedKey = (sourceKey, findWord, replaceWord) => {
     const variants = [
       sourceKey.replace(new RegExp(findWord, "i"), replaceWord),
@@ -232,11 +217,11 @@ function Extension() {
     return variants.find((v) => v in formData) ?? null;
   };
 
-  const getCountryOptions = () => countriesData.map(c => ({ value: c.value, label: c.label }));
+  const getCountryOptions = () =>
+    countriesData.map((c) => ({ value: c.value, label: c.label }));
 
-  // Replaces COUNTRY_STATES[code] usage
   const getProvinceOptions = (countryCode) => {
-    const found = countriesData.find(c => c.value === countryCode);
+    const found = countriesData.find((c) => c.value === countryCode);
     return found?.provinces || [];
   };
 
@@ -263,44 +248,55 @@ function Extension() {
 
   const getAutofillValue = (field) => {
     if (!customerDetails) return "";
-
     const key = normalizeFieldText(field?.key);
     const label = normalizeFieldText(field?.label);
     const fieldType = normalizeFieldText(field?.type);
     const combined = `${key}${label}${fieldType}`;
+    const defaultAddress = customerDetails.defaultAddress || {};
 
-    if (fieldType === "email" || combined.includes("email")) {
+    if (fieldType === "email" || combined.includes("email"))
       return customerDetails.email || "";
-    }
-
     if (combined.includes("firstname")) {
+      if (key.startsWith("ship") || label.includes("shipping"))
+        return defaultAddress.firstName || customerDetails.firstName || "";
       return customerDetails.firstName || "";
     }
-
     if (combined.includes("lastname")) {
+      if (key.startsWith("ship") || label.includes("shipping"))
+        return defaultAddress.lastName || customerDetails.lastName || "";
       return customerDetails.lastName || "";
     }
-
+    if (key.startsWith("ship") || label.includes("shipping")) {
+      if (fieldType === "phone" || combined.includes("phone"))
+        return defaultAddress.phone || customerDetails.phone || "";
+      if (combined.includes("addressline1") || combined.includes("addr1"))
+        return defaultAddress.address1 || "";
+      if (combined.includes("addressline2") || combined.includes("addr2"))
+        return defaultAddress.address2 || "";
+      if (combined.includes("city")) return defaultAddress.city || "";
+      if (combined.includes("state") || combined.includes("province"))
+        return defaultAddress.provinceCode || defaultAddress.province || "";
+      if (combined.includes("zip") || combined.includes("postal"))
+        return defaultAddress.zip || "";
+      if (combined.includes("country"))
+        return defaultAddress.countryCode || defaultAddress.country || "";
+    }
     return "";
   };
 
   useEffect(() => {
     if (!fields.length || !customerDetails) return;
-
     setFormData((prev) => {
       const updated = { ...prev };
       let hasChanges = false;
-
       const applyAutofill = (items) => {
         items.forEach((field) => {
           if (field.type === "group") {
             applyAutofill(field.fields || []);
             return;
           }
-
           const autofillValue = getAutofillValue(field);
           if (!autofillValue) return;
-
           const currentValue = updated[field.key];
           if (currentValue === undefined || currentValue === null || currentValue === "") {
             updated[field.key] = autofillValue;
@@ -308,7 +304,6 @@ function Extension() {
           }
         });
       };
-
       applyAutofill(fields);
       return hasChanges ? updated : prev;
     });
@@ -316,37 +311,35 @@ function Extension() {
 
   const getSectionMeta = (section, sectionFields) => {
     const fieldWithSectionLabel = sectionFields.find(
-      (field) =>
-        typeof field.sectionLabel === "string" && field.sectionLabel.trim() !== ""
+      (f) => typeof f.sectionLabel === "string" && f.sectionLabel.trim() !== ""
     );
-    console.log(fieldWithSectionLabel?.sectionLabel,"testttt");
     const fieldWithHeadingWidth = sectionFields.find(
-      (field) => typeof field.sectionHeadingWidth === "number"
+      (f) => typeof f.sectionHeadingWidth === "number"
     );
     const fieldWithHeadingAlignment = sectionFields.find(
-      (field) => field.sectionHeadingAlignment
+      (f) => f.sectionHeadingAlignment
     );
     const fieldWithHeadingHidden = sectionFields.find(
-      (field) => typeof field.sectionHeadingHidden === "boolean"
+      (f) => typeof f.sectionHeadingHidden === "boolean"
     );
-    console.log(sectionFields ,"fieldWithHeadingWidth?.sectionHeadingWidth ");
-
     return {
       title:
         fieldWithSectionLabel?.sectionLabel?.trim() ||
         SECTION_LABELS[section] ||
         section,
-      width: Math.min(
-        100,
-        Math.max(25, fieldWithHeadingWidth?.sectionHeadingWidth ?? 100)
-      ),
+      width: Math.min(100, Math.max(25, fieldWithHeadingWidth?.sectionHeadingWidth ?? 100)),
       alignment: fieldWithHeadingAlignment?.sectionHeadingAlignment || "left",
       hidden: fieldWithHeadingHidden?.sectionHeadingHidden ?? false,
     };
   };
 
-  const shouldShowSectionHeading = (section, sectionFields) => {
-    return !getSectionMeta(section, sectionFields).hidden;
+  const shouldShowSectionHeading = (section, sectionFields) =>
+    !getSectionMeta(section, sectionFields).hidden;
+
+  const getVisibleSectionFields = (section, sectionFields) => {
+    if (section !== "billing" || formData.billSameAsShip !== true)
+      return sectionFields;
+    return sectionFields.filter((f) => f?.key === "billSameAsShip");
   };
 
   const getInlineAlignment = (alignment) => {
@@ -355,24 +348,77 @@ function Extension() {
     return "start";
   };
 
+  // =============================================
+  // ✅ AUTO WIDTH DETECTION
+  // Returns percentage number: 100, 50, or 25
+  // =============================================
   const getFieldWidthPercent = (field) => {
     if (field?.type === "group") return 100;
-    if (typeof field?.width === "number") {
+
+    // Explicit config width always wins
+    if (typeof field?.width === "number")
       return Math.min(100, Math.max(25, field.width));
-    }
-    if (field?.width === "half") return 50;
+    if (field?.width === "half") return 49;
+    if (field?.width === "quarter") return 25;
+    if (field?.width === "third") return 33;
+
+    const key = normalizeFieldText(field?.key || "");
+    const label = normalizeFieldText(field?.label || "");
+    const type = normalizeFieldText(field?.type || "");
+    const combined = `${key}${label}${type}`;
+
+    // Always full width types
+    if (
+      ["heading", "paragraph", "link", "divider", "textarea", "checkbox"].includes(field?.type)
+    ) return 100;
+
+    // Full-width address fields
+    if (
+      type === "country" ||
+      combined.includes("addressline1") ||
+      combined.includes("address1") ||
+      combined.includes("addr1") ||
+      combined.includes("addressline2") ||
+      combined.includes("address2") ||
+      combined.includes("addr2") ||
+      combined.includes("apartment") ||
+      combined.includes("suite") ||
+      combined.includes("company") ||
+      combined.includes("email")
+      
+    ) return 100;
+
+    // Half width — firstName & lastName side by side
+    if (combined.includes("firstname") || combined.includes("lastname"))
+      return 49;
+
+    // Quarter width — city, state, zip, phone in one row
+    if (
+      combined.includes("city") ||
+      type === "state" ||
+      combined.includes("state") ||
+      combined.includes("province") ||
+      combined.includes("zip") ||
+      combined.includes("postal") ||
+      type === "phone" ||
+      combined.includes("phone")
+    ) return 24;
+
     return 100;
   };
 
+  // =============================================
+  // ✅ BUILD ROWS — group fields until row hits 100%
+  // =============================================
   const buildFieldRows = (sectionFields) => {
     const rows = [];
     let currentRow = [];
     let currentWidth = 0;
 
     sectionFields.forEach((field) => {
-      const fieldWidth = getFieldWidthPercent(field);
+      const w = getFieldWidthPercent(field);
 
-      if (fieldWidth >= 100) {
+      if (w >= 100) {
         if (currentRow.length) {
           rows.push([...currentRow]);
           currentRow = [];
@@ -382,59 +428,57 @@ function Extension() {
         return;
       }
 
-      if (currentWidth + fieldWidth > 100) {
-        console.log(currentRow,"currentRow1111");
+      if (currentWidth + w > 100) {
         rows.push([...currentRow]);
         currentRow = [];
         currentWidth = 0;
       }
 
       currentRow.push(field);
-      currentWidth += fieldWidth;
+      currentWidth += w;
     });
 
     if (currentRow.length) rows.push([...currentRow]);
     return rows;
   };
 
-  const getRowColumns = (row) => {
-    if (row.length <= 1) return null;
-    const columns = row
-      .map((field) => `${getFieldWidthPercent(field)}fr`)
-      .join(" ");
+  // =============================================
+  // ✅ RENDER ROW
+  // Single field → plain s-box (full width)
+  // Multi field  → s-stack inline with inlineSize per box
+  //                NO s-grid, NO @container — avoids all syntax issues
+  // =============================================
+  const renderRow = (row, rowIndex) => {
+    const key = `row-${rowIndex}`;
 
-    return `@container (inline-size > 480px) '${columns}', '1fr'`;
-  };
-
-  const getFieldMinHeight = (field) => {
-    switch (field?.type) {
-      case "textarea":
-      case "paragraph":
-        return 120;
-      case "checkbox":
-      case "divider":
-        return "auto";
-      case "heading":
-        return 40;
-      case "link":
-        return 28;
-      default:
-        return 72;
+    if (row.length === 1) {
+      const field = row[0];
+      return (
+        <s-box key={key}>
+          {field?.type === "group" ? renderGroup(field) : renderField(field)}
+        </s-box>
+      );
     }
-  };
 
-  const renderFieldBox = (field, key) => (
-    <s-box key={key}>
-      <s-stack direction="block" gap={getFieldMinHeight(field) >= 120 ? "base" : "none"}>
-        {field?.type === "group" ? renderGroup(field) : renderField(field)}
+    return (
+      <s-stack key={key} direction="inline" gap="base">
+        {row.map((field, fieldIndex) => {
+          const w = getFieldWidthPercent(field);
+          return (
+            <s-box
+              key={field.key || `${rowIndex}-${fieldIndex}`}
+              inlineSize={`${w}%`}
+            >
+              {field?.type === "group" ? renderGroup(field) : renderField(field)}
+            </s-box>
+          );
+        })}
       </s-stack>
-    </s-box>
-  );
+    );
+  };
 
   const renderDisplayField = (field) => {
-    if (field.type === "divider") {
-      return <s-divider />;
-    }
+    if (field.type === "divider") return <s-divider />;
 
     if (field.type === "heading") {
       return (
@@ -448,15 +492,16 @@ function Extension() {
 
     if (field.type === "paragraph") {
       const paragraphText = stripHtml(field.content || field.label);
-      return paragraphText ? (
-        <s-text>{paragraphText}</s-text>
-      ) : null;
+      return paragraphText ? <s-text>{paragraphText}</s-text> : null;
     }
 
     if (field.type === "link") {
       return (
         <s-stack direction="block" gap="none" inlineAlignment={getInlineAlignment(field.linkAlignment)}>
-          <s-link href={field.linkUrl || "#"} target={field.linkOpenInNewTab ? "_blank" : "_self"}>
+          <s-link
+            href={field.linkUrl || "#"}
+            target={field.linkOpenInNewTab ? "_blank" : "_self"}
+          >
             {field.content || field.label}
           </s-link>
         </s-stack>
@@ -475,7 +520,6 @@ function Extension() {
     }
 
     switch (field.type) {
-
       case "select":
         return (
           <s-select
@@ -518,7 +562,6 @@ function Extension() {
           ? field.options
           : getCountryOptions();
         const selectedCountry = formData[field.key] ?? "IN";
-
         return (
           <s-select
             label={field.label}
@@ -550,15 +593,11 @@ function Extension() {
 
       case "state": {
         const countryKey = findPairedKey(field.key, "state", "country");
-        const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
-
+        const selectedCountry = countryKey ? formData[countryKey] ?? "IN" : "IN";
         const stateOptions = field.options?.length
           ? field.options
           : getProvinceOptions(selectedCountry);
-
-        const selectedState =
-          formData[field.key] ?? stateOptions[0]?.value ?? "";
-
+        const selectedState = formData[field.key] ?? stateOptions[0]?.value ?? "";
         return (
           <s-select
             label={field.label}
@@ -577,9 +616,7 @@ function Extension() {
                 </s-option>
               ))
             ) : (
-              <s-option value="" defaultSelected>
-                — No states available —
-              </s-option>
+              <s-option value="" defaultSelected>— No states available —</s-option>
             )}
           </s-select>
         );
@@ -608,7 +645,6 @@ function Extension() {
   const renderGroup = (group) => {
     const colCount = group.fields.length || 2;
     const wideCols = Array(colCount).fill("fill").join(" ");
-
     return (
       <s-query-container>
         <s-grid
@@ -646,7 +682,6 @@ function Extension() {
     }
     setLoading(true);
     setErrorMessage("");
-
     try {
       const form = new FormData();
       Object.entries(formData).forEach(([key, value]) => {
@@ -662,14 +697,12 @@ function Extension() {
         { method: "POST", body: form, headers: { Accept: "application/json" } }
       );
       const text = await res.text();
-
       let result;
       try {
         result = JSON.parse(text);
       } catch {
         throw new Error("Invalid JSON from server");
       }
-
       if (!res.ok) {
         setErrorMessage(result?.error || "Request failed");
         return;
@@ -691,7 +724,6 @@ function Extension() {
   //  UI STATES
   // ═══════════════════════════════════════════════════════════
 
-  // 1. Redirecting
   if (isRedirecting) {
     return (
       <s-box padding="large" inlineAlignment="center" blockAlignment="center">
@@ -703,7 +735,6 @@ function Extension() {
     );
   }
 
-  // 2. Checking status
   if (checkingStatus) {
     return (
       <s-box padding="large" inlineAlignment="center" blockAlignment="center">
@@ -715,21 +746,18 @@ function Extension() {
     );
   }
 
-  // 3. Server status message
   if (statusMessage) {
     const bannerTone = statusMessage.toLowerCase().includes("rejected")
       ? "critical"
       : statusMessage.toLowerCase().includes("review")
-        ? "warning"
-        : "info";
-
+      ? "warning"
+      : "info";
     const bannerTitle =
       bannerTone === "critical"
         ? "Registration Rejected"
         : bannerTone === "warning"
-          ? "Under Review"
-          : "Account Status";
-
+        ? "Under Review"
+        : "Account Status";
     return (
       <s-box padding="base">
         <s-banner tone={bannerTone}>
@@ -742,7 +770,6 @@ function Extension() {
     );
   }
 
-  // 4. Success confirmation
   if (submitted) {
     return (
       <s-box padding="base">
@@ -759,23 +786,18 @@ function Extension() {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════
+  //  MAIN RENDER
+  // ═══════════════════════════════════════════════════════════
   return (
     <s-stack direction="block" gap="large">
+
+      {/* ── Top-level fields (no section) ── */}
       {topLevelFields.length > 0 && (
         <s-box padding="base">
           <s-stack direction="block" gap="base">
             {buildFieldRows(topLevelFields).map((row, rowIndex) =>
-              row.length > 1 ? (
-                <s-query-container key={rowIndex}>
-                  <s-grid columns={getRowColumns(row)} gap="base">
-                    {row.map((field, fieldIndex) =>
-                      renderFieldBox(field, `${rowIndex}-${field.key || fieldIndex}`)
-                    )}
-                  </s-grid>
-                </s-query-container>
-              ) : (
-                renderFieldBox(row[0], `${rowIndex}-${row[0]?.key || rowIndex}`)
-              )
+              renderRow(row, rowIndex)
             )}
           </s-stack>
         </s-box>
@@ -798,44 +820,42 @@ function Extension() {
         </s-banner>
       )}
 
-      {/* ── One s-section card per section group ── */}
+      {/* ── One s-section per section group ── */}
       {Object.entries(grouped).map(([section, sectionFields]) => {
-        const sectionMeta = getSectionMeta(section, sectionFields);
+        const visibleSectionFields = getVisibleSectionFields(section, sectionFields);
+        const sectionMeta = getSectionMeta(section, visibleSectionFields);
 
         return (
-        <s-section key={section} padding>
-          <s-stack direction="block" gap="base">
-            {shouldShowSectionHeading(section, sectionFields) && (
-              <s-box inlineSize={`${sectionMeta.width}%`}>
-                <s-stack direction="block" gap="base" inlineAlignment={getInlineAlignment(sectionMeta.alignment)}>
-                  <s-heading>{sectionMeta.title}</s-heading>
-                  <s-divider />
-                </s-stack>
-              </s-box>
-            )}
-
+          <s-section key={section} padding>
             <s-stack direction="block" gap="base">
-              {buildFieldRows(sectionFields).map((row, rowIndex) =>
-                row.length > 1 ? (
-                  <s-query-container key={rowIndex}>
-                    <s-grid columns={getRowColumns(row)} gap="base">
-                      {row.map((field, fieldIndex) =>
-                        renderFieldBox(field, `${rowIndex}-${field.key || fieldIndex}`)
-                      )}
-                    </s-grid>
-                  </s-query-container>
-                ) : (
-                  renderFieldBox(row[0], `${rowIndex}-${row[0]?.key || rowIndex}`)
-                )
-              )}
-            </s-stack>
 
-          </s-stack>
-        </s-section>
+              {/* Section heading + divider */}
+              {shouldShowSectionHeading(section, visibleSectionFields) && (
+                <s-box inlineSize={`${sectionMeta.width}%`}>
+                  <s-stack
+                    direction="block"
+                    gap="base"
+                    inlineAlignment={getInlineAlignment(sectionMeta.alignment)}
+                  >
+                    <s-heading>{sectionMeta.title}</s-heading>
+                    <s-divider />
+                  </s-stack>
+                </s-box>
+              )}
+
+              {/* Fields — row by row */}
+              <s-stack direction="block" gap="base">
+                {buildFieldRows(visibleSectionFields).map((row, rowIndex) =>
+                  renderRow(row, rowIndex)
+                )}
+              </s-stack>
+
+            </s-stack>
+          </s-section>
         );
       })}
 
-      {/* ── Submit button row ── */}
+      {/* ── Submit button ── */}
       <s-box>
         <s-stack direction="inline" gap="base" blockAlignment="center">
           <s-button
@@ -846,7 +866,6 @@ function Extension() {
           >
             {loading ? "Submitting…" : "Register"}
           </s-button>
-
           {loading && (
             <s-text tone="subdued">
               Please wait while we process your request…
