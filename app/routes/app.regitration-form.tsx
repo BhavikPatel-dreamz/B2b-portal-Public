@@ -445,7 +445,6 @@ export const DEFAULT_CONFIG: FormConfig = {
       label: "Phone",
       key: "shipPhone",
       section: "shipping",
-      required: true,
       width: "full",
       stepIndex: 0,
       order: 15,
@@ -673,6 +672,8 @@ export function serializeConfig(config: FormConfig): StoredConfig {
 
 export function deserializeConfig(stored: StoredConfig): FormConfig {
   const DISPLAY_TYPES: FieldType[] = ["heading", "paragraph", "link", "divider"];
+  const isBuiltInShippingPhoneField = (field: StoredField) =>
+    field.paletteKey === "shipPhone" || field.key === "shipPhone";
 
   const inferCategory = (f: StoredField): FieldCategory => {
     if (DISPLAY_TYPES.includes(f.type)) return "display";
@@ -716,7 +717,7 @@ export function deserializeConfig(stored: StoredConfig): FormConfig {
           order: f.order,
           stepIndex: stepIdx,
           width: f.width ?? "full",
-          required: f.required,
+          required: isBuiltInShippingPhoneField(f) ? false : f.required,
           section: f.section,
           options: f.options,
           placeholder: f.placeholder,

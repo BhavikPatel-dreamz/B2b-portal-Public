@@ -139,42 +139,10 @@ export function buildUserErrorList(payload: any) {
   return errors;
 }
 
-const US_COUNTRY_ALIASES = new Set([
-  "US",
-  "USA",
-  "UNITED STATES",
-  "UNITED STATES OF AMERICA",
-]);
 
-const TEXAS_STATE_ALIASES = new Set(["TX", "TEXAS"]);
 
-function getSubmissionTaxId(submission: any): string {
-  return (
-    submission?.customFields?.taxId ??
-    submission?.customFields?.taxRegistrationId ??
-    ""
-  );
-}
 
-function isTexasAddress(address?: Record<string, any> | null) {
-  if (!address) return false;
 
-  const state = String(address.State ?? address.state ?? "")
-    .trim()
-    .toUpperCase();
-  const country = String(address.Country ?? address.country ?? "")
-    .trim()
-    .toUpperCase();
-
-  return TEXAS_STATE_ALIASES.has(state) && US_COUNTRY_ALIASES.has(country);
-}
-
-function shouldSyncTexasTaxDetails(submission: any) {
-  return (
-    isTexasAddress(submission?.shipping as Record<string, any> | null) ||
-    isTexasAddress(submission?.billing as Record<string, any> | null)
-  );
-}
 
 async function updateCompanyLocationSettings(
   admin: AdminApiContext,
@@ -3345,6 +3313,7 @@ export interface FormField {
   options?: { value: string; label: string }[]; // for "select" type
   countryCode?: string; // for "phone" type — flag + dial code
   flagEmoji?: string; // for "phone" type
+  phoneDefaultCountry?: string;
   // Maps to a dot-path in submission / company / customer
   // e.g. "submission.companyName" | "submission.customFields.taxRegistrationId"
   // e.g. "shipping.Addr1" | "customer.email"
@@ -3424,6 +3393,17 @@ function getProvinceOptionsForCountry(
       ? dynamicProvinceOptions
       : [{ value: "", label: "State / Province" }, ...dynamicProvinceOptions];
   }
+
+  // If no country is selected, show all available provinces from all countries
+  if (!normalized && shippingProvincesByCountry) {
+    const allProvinces = Object.values(shippingProvincesByCountry).flat();
+    const uniqueProvinces = allProvinces.filter(
+      (province, index, self) =>
+        index === self.findIndex((p) => p.value === province.value && p.label === province.label)
+    );
+    return [{ value: "", label: "State / Province" }, ...uniqueProvinces];
+  }
+
   console.log("Using default province options for", normalized);
 
   return [{ value: "", label: "State / Province" }];
@@ -3526,6 +3506,7 @@ function mapConfigFieldToEditField(
     sourcePath: getFieldSourcePath(field),
     countryCode: field.type === "phone" ? "+91" : undefined,
     flagEmoji: field.type === "phone" ? "🇮🇳" : undefined,
+    phoneDefaultCountry: field.type === "phone" ? field.phoneDefaultCountry : undefined,
   };
 }
 
@@ -3677,13 +3658,13 @@ export function buildInitialEditForm(
     shAddr1: shipping?.Addr1 || "",
     shAddr2: shipping?.Addr2 || "",
     shCity: shipping?.City || "",
-    shCountry: shipping?.Country || "India",
+    shCountry: shipping?.Country || "",
     shState: shipping?.State || "",
     shZip: shipping?.Zip || "",
     biAddr1: billing?.Addr1 || "",
     biAddr2: billing?.Addr2 || "",
     biCity: billing?.City || "",
-    biCountry: billing?.Country || "India",
+    biCountry: billing?.Country || "",
     biState: billing?.State || "",
     biZip: billing?.Zip || "",
     email: resolvedEmail,

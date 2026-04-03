@@ -10,7 +10,7 @@ import {
   useSearchParams,
   useNavigation,
 } from "react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -21,8 +21,6 @@ import {
 } from "../utils/company.server";
 import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
-import { calculateAvailableCredit } from "../services/creditService";
-import { getCompanyCustomers } from "app/utils/b2b-customer.server";
 
 type LoaderCompany = {
   id: string;
@@ -116,106 +114,48 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
-  // Calculate credit information for each company
-  const companiesWithCredit = await Promise.all(
-    companies.map(async (company) => {
-      const creditInfo = await calculateAvailableCredit(company.id);
-      const creditLimitNum = parseFloat(company.creditLimit.toString());
-      const usedCreditNum = creditInfo
-        ? parseFloat(creditInfo.usedCredit.toString())
-        : 0;
-      const pendingCreditNum = creditInfo
-        ? parseFloat(creditInfo.pendingCredit.toString())
-        : 0;
-      console.log(pendingCreditNum);
+  const orderCreditByCompany = await prisma.b2BOrder.groupBy({
+    by: ["companyId"],
+    where: {
+      companyId: { in: companies.map((company) => company.id) },
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { notIn: ["cancelled"] },
+    },
+    _sum: {
+      creditUsed: true,
+    },
+  });
+
+  const creditMap = new Map(
+    orderCreditByCompany.map((entry) => [
+      entry.companyId,
+      Number(entry._sum.creditUsed ?? 0),
+    ]),
+  );
+
+  const companiesWithCredit = companies.map((company) => {
+      const creditLimitNum = Number(company.creditLimit ?? 0);
+      const usedCreditNum = creditMap.get(company.id) ?? 0;
+      const pendingCreditNum = 0;
+      const availableCreditNum = creditLimitNum - usedCreditNum;
       const creditUsagePercentage =
         creditLimitNum > 0
           ? Math.round((usedCreditNum / creditLimitNum) * 100)
           : 0;
 
-      // Get DB users for this company
-      const dbUsers = await prisma.user.findMany({
-        where: { companyId: company.id },
-        select: { email: true },
-      });
-
-      let matchedUserCount = 0;
-      let shopifyUserCount = 0;
-
-      if (!session.accessToken) {
-        throw new Response("Session access token not found", { status: 404 });
-      }
-
-      // Only fetch Shopify customers if company has a Shopify ID
-      let dbUserEmails;
-      if (company.shopifyCompanyId) {
-        try {
-          const customersData = await getCompanyCustomers(
-            company.shopifyCompanyId,
-            session.shop,
-            session.accessToken,
-            {},
-          );
-
-          shopifyUserCount = customersData?.customers?.length || 0;
-
-          // Create a map of Shopify customers by email
-          const shopifyCustomerMap = new Map(
-            customersData?.customers?.map(
-              (customer: { customer: { email?: string } }) => [
-                customer.customer?.email?.toLowerCase(),
-                customer,
-              ],
-            ) || [],
-          );
-          dbUserEmails = await prisma.registrationSubmission.findMany({
-            where: {
-              email: {
-                in:
-                  customersData?.customers?.map(
-                    (customer: { customer: { email?: string } }) =>
-                      customer.customer?.email?.toLowerCase(),
-                  ) || [],
-              },
-            },
-            select: { firstName: true, lastName: true, email: true },
-          });
-
-          // Count matched users (users that exist in both DB and Shopify)
-          matchedUserCount = dbUsers.filter((user) =>
-            shopifyCustomerMap.has(user.email.toLowerCase()),
-          ).length;
-        } catch (error) {
-          console.error(
-            `Error fetching Shopify customers for company ${company.id}:`,
-            error,
-          );
-          // Continue without Shopify data if there's an error
-        }
-      }
-
       return {
         ...company,
-        contactName: (() => {
-          if (!dbUserEmails || !company.contactEmail) return "-";
-          const match = dbUserEmails.find(
-            (u) =>
-              u.email?.toLowerCase() === company.contactEmail?.toLowerCase(),
-          );
-          return `${match?.firstName || ""} ${match?.lastName || ""}`.trim() || "-";
-        })(),
+        contactName: company.contactName || "-",
         creditLimit: company.creditLimit.toString(),
-        usedCredit: creditInfo ? creditInfo.usedCredit.toString() : "0",
-        pendingCredit: creditInfo ? creditInfo.pendingCredit.toString() : "0",
-        availableCredit: creditInfo
-          ? creditInfo.availableCredit.toString()
-          : company.creditLimit.toString(),
+        usedCredit: usedCreditNum.toString(),
+        pendingCredit: pendingCreditNum.toString(),
+        availableCredit: availableCreditNum.toString(),
         creditUsagePercentage,
         updatedAt: company.updatedAt.toISOString(),
-        userCount: matchedUserCount || 0, // Total DB users
+        userCount: company._count.users,
         isDisable: company.isDisable || false,
       } satisfies LoaderCompany;
-    }),
+    },
   );
 
   return Response.json({
@@ -351,6 +291,7 @@ export default function CompaniesPage() {
 
   // Controlled search input
   const [query, setQuery] = useState(searchQuery);
+  const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
 
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
@@ -364,6 +305,12 @@ export default function CompaniesPage() {
     navigation.state !== "idle" &&
     (navigation.location?.search?.includes("search=") ||
       Boolean(searchParams.get("search")));
+
+  useEffect(() => {
+    if (navigation.state === "idle") {
+      setPendingCompanyId(null);
+    }
+  }, [navigation.state]);
 
   if (storeMissing) {
     return (
@@ -535,118 +482,151 @@ export default function CompaniesPage() {
               </thead>
               <tbody>
                 {companies.map((company: LoaderCompany) => (
-                  <tr
-                    key={company.id}
-                    style={{
-                      borderTop: "1px solid #e3e3e3",
-                      backgroundColor: company.isDisable
-                        ? "#ffebee"
-                        : "transparent",
-                    }}
-                  >
-                    <td style={{ padding: "8px" }}>
-                      {company.name}
-                      <br />
-                      {company.shopifyCompanyId
-                        ? company.shopifyCompanyId.replace(
-                            "gid://shopify/Company/",
-                            "",
-                          )
-                        : "–"}
-                    </td>
+                  (() => {
+                    const companyPath = `/app/companies/${company.id}`;
+                    const isNavigatingToCompany =
+                      navigation.location?.pathname === companyPath;
+                    const isCompanyLoading =
+                      pendingCompanyId === company.id || isNavigatingToCompany;
 
-                    <td style={{ padding: "8px" }}>
-                      {company.contactName || company.contactEmail ? (
-                        <span>
-                          {company.contactName ? (
-                            <>
-                              {company.contactName}
-                              <br />
-                              {company.contactEmail
-                                ? company.contactEmail
-                                : "-"}
-                            </>
-                          ) : (
-                            <>{company.contactEmail}</>
-                          )}
-                        </span>
-                      ) : (
-                        <span style={{ color: "#5c5f62" }}>Not set</span>
-                      )}
-                    </td>
-                    <td style={{ padding: "8px" }}>{company.userCount}</td>
-                    <td style={{ padding: "8px" }}>
-                      {formatCredit(company.creditLimit)}
-                    </td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        color: "#d72c0d",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {formatCredit(company.usedCredit)}
-                    </td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        color:
-                          parseFloat(company.availableCredit) >= 0
-                            ? "#008060"
-                            : "#d72c0d",
-                        fontWeight:
-                          parseFloat(company.availableCredit) < 0 ? 600 : 500,
-                      }}
-                    >
-                      {formatCredit(company.availableCredit)}
-                    </td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        color:
-                          company.creditUsagePercentage >= 90
-                            ? "#d72c0d"
-                            : company.creditUsagePercentage >= 70
-                              ? "#b98900"
-                              : "#008060",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {company.creditUsagePercentage}%
-                    </td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        minWidth: 200,
-                        display: "flex",
-                        gap: 8,
-                        alignItems: "center",
-                      }}
-                    >
-                      {/* View Button */}
-                      <Link
-                        to={`/app/companies/${company.id}`}
+                    return (
+                      <tr
+                        key={company.id}
                         style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          minWidth: 60,
-                          padding: "6px 12px",
-                          borderRadius: 6,
-                          border: "1px solid #c9ccd0",
-                          textDecoration: "none",
-                          color: "#202223",
-                          fontSize: 13,
-                          fontWeight: 500,
-                          backgroundColor: "white",
-                          cursor: "pointer",
-                          opacity: isUpdating ? 0.6 : 1,
+                          borderTop: "1px solid #e3e3e3",
+                          backgroundColor: company.isDisable
+                            ? "#ffebee"
+                            : "transparent",
                         }}
                       >
-                        View
-                      </Link>
-                    </td>
-                  </tr>
+                        <td style={{ padding: "8px" }}>
+                          {company.name}
+                          <br />
+                          {company.shopifyCompanyId
+                            ? company.shopifyCompanyId.replace(
+                                "gid://shopify/Company/",
+                                "",
+                              )
+                            : "–"}
+                        </td>
+
+                        <td style={{ padding: "8px" }}>
+                          {company.contactName || company.contactEmail ? (
+                            <span>
+                              {company.contactName ? (
+                                <>
+                                  {company.contactName}
+                                  <br />
+                                  {company.contactEmail
+                                    ? company.contactEmail
+                                    : "-"}
+                                </>
+                              ) : (
+                                <>{company.contactEmail}</>
+                              )}
+                            </span>
+                          ) : (
+                            <span style={{ color: "#5c5f62" }}>Not set</span>
+                          )}
+                        </td>
+                        <td style={{ padding: "8px" }}>{company.userCount}</td>
+                        <td style={{ padding: "8px" }}>
+                          {formatCredit(company.creditLimit)}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px",
+                            color: "#d72c0d",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {formatCredit(company.usedCredit)}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px",
+                            color:
+                              parseFloat(company.availableCredit) >= 0
+                                ? "#008060"
+                                : "#d72c0d",
+                            fontWeight:
+                              parseFloat(company.availableCredit) < 0
+                                ? 600
+                                : 500,
+                          }}
+                        >
+                          {formatCredit(company.availableCredit)}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px",
+                            color:
+                              company.creditUsagePercentage >= 90
+                                ? "#d72c0d"
+                                : company.creditUsagePercentage >= 70
+                                  ? "#b98900"
+                                  : "#008060",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {company.creditUsagePercentage}%
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px",
+                            minWidth: 200,
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <Link
+                            to={companyPath}
+                            discover="render"
+                            prefetch="intent"
+                            onClick={() => setPendingCompanyId(company.id)}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 8,
+                              minWidth: 92,
+                              padding: "6px 12px",
+                              borderRadius: 6,
+                              border: "1px solid #c9ccd0",
+                              textDecoration: "none",
+                              color: "#202223",
+                              fontSize: 13,
+                              fontWeight: 500,
+                              backgroundColor: "white",
+                              cursor: isCompanyLoading ? "wait" : "pointer",
+                              opacity:
+                                isUpdating || isCompanyLoading ? 0.75 : 1,
+                              pointerEvents: isCompanyLoading
+                                ? "none"
+                                : "auto",
+                            }}
+                          >
+                            {isCompanyLoading && (
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  display: "inline-block",
+                                  width: 12,
+                                  height: 12,
+                                  border: "2px solid #d9d9d9",
+                                  borderTopColor: "#202223",
+                                  borderRadius: "50%",
+                                  animation: "spin 0.8s linear infinite",
+                                }}
+                              />
+                            )}
+                            {isCompanyLoading ? "Loading..." : "View"}
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })()
                 ))}
               </tbody>
             </table>

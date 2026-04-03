@@ -30,6 +30,7 @@ function Extension() {
   const [shopDomain, setShopDomain] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [accountCheckComplete, setAccountCheckComplete] = useState(false);
   const [countriesData, setCountriesData] = useState([]);
 
   const getCustomerMetafieldQuery = {
@@ -86,6 +87,7 @@ function Extension() {
 
     const fetchAccountStatus = async () => {
       try {
+        setAccountCheckComplete(false);
         const res = await fetch(
           `${API_URL}/api/proxy/customer-account?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
           { method: "GET", headers: { Accept: "application/json" } }
@@ -94,11 +96,12 @@ function Extension() {
         const { config, message, redirectTo } = result;
         if (redirectTo) {
           setIsRedirecting(true);
-          window.location.href = redirectTo;
+          window.location.replace(redirectTo);
           return;
         }
         if (message) {
           setStatusMessage(message);
+          setAccountCheckComplete(true);
           return;
         }
         if (config?.fields) {
@@ -122,6 +125,7 @@ function Extension() {
           processFields(config.fields);
           setFormData(initial);
         }
+        setAccountCheckComplete(true);
       } catch (err) {
         console.error("Account API Error:", err);
       } finally {
@@ -132,7 +136,7 @@ function Extension() {
   }, [shopDomain, customerId]);
 
   useEffect(() => {
-    if (!shopDomain || !customerId) return;
+    if (!shopDomain || !customerId || !accountCheckComplete || isRedirecting) return;
     const customerIdWithoutPrefix = customerId.replace(
       "gid://shopify/Customer/",
       ""
@@ -151,10 +155,10 @@ function Extension() {
       }
     };
     fetchCustomerDetails();
-  }, [shopDomain, customerId]);
+  }, [shopDomain, customerId, accountCheckComplete, isRedirecting]);
 
   useEffect(() => {
-    if (!shopDomain) return;
+    if (!shopDomain || !accountCheckComplete || isRedirecting) return;
     const fetchCountries = async () => {
       try {
         const res = await fetch(
@@ -168,7 +172,7 @@ function Extension() {
       }
     };
     fetchCountries();
-  }, [shopDomain]);
+  }, [shopDomain, accountCheckComplete, isRedirecting]);
 
   // =========================
   // HANDLE CHANGE

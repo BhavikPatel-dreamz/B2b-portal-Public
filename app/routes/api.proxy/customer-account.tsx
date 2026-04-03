@@ -97,6 +97,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const url = new URL(request.url);
     const shop = url.searchParams.get("shop");
     const customerId = url.searchParams.get("customerId");
+    const customerGid = customerId
+      ? `gid://shopify/Customer/${customerId}`
+      : null;
  
     if (!shop) {
       return json({ error: "Missing shop" }, { status: 400 });
@@ -104,6 +107,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
  
     const store = await prisma.store.findUnique({
       where: { shopDomain: shop },
+      select: { id: true, shopDomain: true },
     });
  
     // ❌ Store doesn't exist — return blank response (with CORS)
@@ -115,26 +119,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return json({ error: "Missing customerId" }, { status: 400 });
     }
  
-    const customer = await prisma.registrationSubmission.findFirst({
-      where: {
-        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
-        shopId: store.id,
-      },
-    });
-    const userData=await prisma.user.findFirst({
-      where:{
-        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
-        shopId: store.id,
-      }
-    })
-    console.log(userData,"userDataa");
+    const [customer, userData] = await Promise.all([
+      prisma.registrationSubmission.findFirst({
+        where: {
+          shopifyCustomerId: customerGid,
+          shopId: store.id,
+        },
+        select: { status: true },
+      }),
+      prisma.user.findFirst({
+        where: {
+          shopifyCustomerId: customerGid,
+          shopId: store.id,
+        },
+        select: {
+          role: true,
+          shopifyCustomerId: true,
+        },
+      }),
+    ]);
+
     if (customer?.status === "PENDING") {
       return json({
         message: "Your account has already been submitted and is under review",
       });
     }
 
-       if(userData?.shopifyCustomerId === `gid://shopify/Customer/${customerId}` && userData.role !== "STORE_ADMIN"){
+    if (userData?.shopifyCustomerId === customerGid && userData.role !== "STORE_ADMIN") {
       return json({
         message: "Your account is not a customer. Please contact the support team.",
         redirectTo: `https://${store.shopDomain}/pages/b2b-page/dashboard`
@@ -157,6 +168,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
  
     const formFieldConfig = await prisma.formFieldConfig.findUnique({
       where: { shopId: store.id },
+      select: {
+        fields: true,
+        updatedAt: true,
+      },
     });
  
     let config;

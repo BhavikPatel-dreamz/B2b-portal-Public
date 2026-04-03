@@ -35,6 +35,7 @@ type FormField = {
   flagEmoji?: string;
   phoneCountryOptions?: PhoneCountryOption[];
   phoneCountryValue?: string;
+  phoneDefaultCountry?: string;
 };
 
 type FormSection = {
@@ -124,6 +125,33 @@ function normalizeCountryCode(countryValue?: string | null) {
 function getPhoneMetaForCountry(countryValue?: string | null) {
   const normalized = normalizeCountryCode(countryValue);
   return COUNTRY_PHONE_META[normalized] || { dialCode: "+91", flagEmoji: "🇮🇳" };
+}
+
+function getResolvedSectionCountryValue(
+  field: FormField,
+  editForm: Record<string, any>,
+) {
+  const configuredCountryValue =
+    field.section === "billing"
+      ? editForm.billCountry
+      : field.section === "shipping"
+        ? editForm.shipCountry
+        : undefined;
+  const legacyCountryValue =
+    field.section === "billing"
+      ? editForm.biCountry
+      : field.section === "shipping"
+        ? editForm.shCountry
+        : undefined;
+
+  return (
+    String(
+      configuredCountryValue ??
+        legacyCountryValue ??
+        field.phoneDefaultCountry ??
+        "",
+    ).trim()
+  );
 }
 
 function getFlagEmojiFromCountryCode(countryCode?: string | null) {
@@ -283,39 +311,67 @@ function DynamicField({
           ) : null}
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "140px minmax(0, 1fr)",
-              gap: 8,
+              display: "flex",
               alignItems: "center",
+              gap: 8,
             }}
           >
-            <select
-              value={field.phoneCountryValue || ""}
-              onChange={(e) => onPhoneCountryChange?.(e.target.value)}
-              disabled={isLocked}
-              style={{
-                ...inputStyle,
-                ...disabledStyle,
-                padding: "8px 6px",
-                textAlign: "left",
-              }}
-            >
-              {(field.phoneCountryOptions || []).map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            {field.countryCode ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  background: "white",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "#374151",
+                  minWidth: "60px",
+                  textAlign: "center",
+                }}
+              >
+                {field.countryCode}
+              </div>
+            ) : (
+              <select
+                value={field.phoneCountryValue || ""}
+                onChange={(e) => {
+                  const selected = field.phoneCountryOptions?.find(
+                    (opt) => opt.value === e.target.value,
+                  );
+                  if (selected && onPhoneCountryChange) {
+                    onPhoneCountryChange(selected.value);
+                  }
+                }}
+                style={{
+                  ...inputStyle,
+                  flex: "0 0 120px",
+                  ...addStyle,
+                  ...disabledStyle,
+                }}
+                disabled={disabled}
+              >
+                {field.phoneCountryOptions?.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            )}
             <input
               placeholder={placeholder}
               value={value || ""}
               onChange={(e) => onChange(e.target.value)}
-              disabled={isLocked}
+              disabled={isLocked || disabled}
               style={{
                 ...inputStyle,
                 ...addStyle,
                 ...disabledStyle,
                 ...(isLocked ? {} : { boxShadow: "0 0 0 2px #2563eb inset" }),
+                flex: 1,
               }}
             />
           </div>
@@ -629,12 +685,10 @@ export default function EditDetailsModal({
                   }}
                 >
                   {visibleSectionFields.map((field) => {
-                    const countryValue =
-                      field.section === "billing"
-                        ? (editForm.billCountry ?? editForm.biCountry)
-                        : field.section === "shipping"
-                          ? (editForm.shipCountry ?? editForm.shCountry)
-                          : (editForm.shipCountry ?? editForm.shCountry);
+                    const countryValue = getResolvedSectionCountryValue(
+                      field,
+                      editForm,
+                    );
                     const phoneMeta =
                       field.type === "phone"
                         ? getPhoneMetaForCountry(String(countryValue ?? ""))
