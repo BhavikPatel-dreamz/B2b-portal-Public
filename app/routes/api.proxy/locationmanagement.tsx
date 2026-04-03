@@ -103,7 +103,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           for (const country of zoneNode.zone?.countries || []) {
             const code = country.code?.countryCode;
 
-            // ❌ skip invalid / rest of world
             if (!code || !validCodes.has(code)) continue;
 
             const provinces = (country.provinces || []).map(
@@ -113,7 +112,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               })
             );
 
-            // 🔁 Deduplicate
             const existing = provincesData.find(
               (c) => c.countryCode === code
             );
@@ -175,7 +173,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    // Authenticate and validate B2B access with permissions
     const { companyId, store, shop, userContext } =
       await authenticateApiProxyWithPermissions(request);
 
@@ -196,7 +193,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("🚀 ~ action ~ body:", body);
     const { action: actionType } = body;
 
-    // Handle different actions
     switch (actionType) {
       case "create": {
         const {
@@ -211,6 +207,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           province,
           zip,
           phone,
+          recipient,
           billingSameAsShipping,
         } = body;
 
@@ -218,7 +215,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           { field: "name", value: name, message: "Location name is required" },
           { field: "firstName", value: firstName, message: "First name is required" },
           { field: "lastName", value: lastName, message: "Last name is required" },
-          { field: "address1", value: address1, message: "Address line 1 is required" },
+          { field: "address1", value: address1, message: "Street address is required" },
           { field: "city", value: city, message: "City is required" },
           { field: "province", value: province, message: "Province/State is required" },
           { field: "country", value: country, message: "Country is required" },
@@ -264,6 +261,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             province: province || "GJ",
             zip: zip || "",
             phone: phoneValue,
+            recipient: recipient || "",
             billingSameAsShipping: billingSameAsShipping,
           },
         );
@@ -295,6 +293,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           province,
           zip,
           phone,
+          recipient,
           billingSameAsShipping,
         } = body;
 
@@ -325,6 +324,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
+        let recipientValue: string | null | undefined = undefined;
+
+        if (recipient !== undefined) {
+          if (recipient === "") {
+            recipientValue = null;
+          } else {
+            recipientValue = recipient;
+          }
+        }
+
         const result = await updateCompanyLocation(
           locationId,
           shop,
@@ -341,6 +350,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             province: province || undefined,
             zip: zip || undefined,
             phone: phoneValue,
+            recipient: recipientValue,
             billingSameAsShipping: billingSameAsShipping || undefined,
           },
         );
@@ -368,7 +378,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
-        // Check if location has orders FIRST
         const orderCheck = await checkLocationHasOrders(
           locationId,
           shop,
@@ -382,7 +391,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
-        // Prevent deletion if location has orders
         if (orderCheck.hasOrders) {
           const errorMessage = `Cannot delete location "${orderCheck.locationName}". This location has ${orderCheck.ordersCount} order(s) are existing.`;
 
@@ -396,7 +404,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
-        // Check if location has assigned users
         const userCheck = await checkLocationHasUsers(
           locationId,
           shop,
@@ -410,7 +417,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
-        // Check if current user is assigned to this location
         const isUserAssignedToLocation =
           userContext?.customerEmail &&
           userCheck?.assignedEmails?.includes(userContext.customerEmail);
@@ -431,7 +437,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
-        // Proceed with deletion
         const result = await deleteCompanyLocation(
           locationId,
           shop,

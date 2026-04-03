@@ -2644,6 +2644,14 @@ export async function getCompanyLocations(
               firstName
               lastName
             }
+            metafields(first: 10, namespace: "custom") {
+              edges {
+                node {
+                  key
+                  value
+                }
+              }
+            }
           }
         }
       }
@@ -2669,6 +2677,7 @@ export async function getCompanyLocations(
     }
 
     const company = data.data.company;
+    
     // Get all contacts with their location assignments
     const contacts = company.contacts.edges.map(
       (edge: {
@@ -2732,7 +2741,6 @@ export async function getCompanyLocations(
             };
           }
 
-          // Only count unique customers per location
           if (
             !locationCustomerCount[assignment.locationId].customerIds.includes(
               contact.customer.id,
@@ -2747,7 +2755,7 @@ export async function getCompanyLocations(
       },
     );
 
-    // Get locations with customer count
+    // Get locations with customer count and recipient from metafields
     const locations = company.locations.edges.map(
       (edge: {
         node: {
@@ -2775,6 +2783,14 @@ export async function getCompanyLocations(
             firstName: string;
             lastName: string;
           };
+          metafields: {
+            edges: Array<{
+              node: {
+                key: string;
+                value: string;
+              };
+            }>;
+          };
         };
       }) => {
         const location = edge.node;
@@ -2783,10 +2799,20 @@ export async function getCompanyLocations(
           customerIds: [],
         };
         
-        // Get the root level phone number
         const rootPhone = location.phone || "";
         
-        // Check if billing address matches shipping address
+        // Extract recipient from metafields
+        let recipient = "";
+        if (location.metafields?.edges) {
+          const recipientMetafield = location.metafields.edges.find(
+            (edge: { node: { key: string; value: string } }) => 
+              edge.node.key === "recipient"
+          );
+          if (recipientMetafield) {
+            recipient = recipientMetafield.node.value;
+          }
+        }
+        
         const shippingAddr = location.shippingAddress;
         const billingAddr = location.billingAddress;
         const billingSameAsShipping = billingAddr && shippingAddr ? (
@@ -2813,7 +2839,8 @@ export async function getCompanyLocations(
             country: location.shippingAddress?.country || "",
             firstName: location.shippingAddress?.firstName || "",
             lastName: location.shippingAddress?.lastName || "",
-            phone: rootPhone
+            phone: rootPhone,
+            recipient: recipient
           },
           billingAddress: {
             address1: location.billingAddress?.address1 || "",
@@ -2824,7 +2851,8 @@ export async function getCompanyLocations(
             country: location.billingAddress?.country || "",
             firstName: location.billingAddress?.firstName || "",
             lastName: location.billingAddress?.lastName || "",
-            phone: rootPhone
+            phone: rootPhone,
+            recipient: recipient
           },
           billingSameAsShipping,
           assignedUsers: customerInfo.count,
@@ -3978,6 +4006,7 @@ export async function createCompanyLocation(
     note?: string;
     firstName?: string;
     lastName?: string;
+    recipient?: string;
     billingSameAsShipping?: boolean;
   },
 ) {
@@ -4061,7 +4090,6 @@ export async function createCompanyLocation(
       input.phone = locationData.phone;
     }
 
-    // Add billing and shipping address if provided
     if (locationData.address1 || locationData.city) {
       const addressData: {
         address1: string;
@@ -4081,7 +4109,6 @@ export async function createCompanyLocation(
         countryCode: locationData.country || "IN",
       };
 
-      // Add firstName and lastName to address if provided
       if (locationData.firstName) {
         addressData.firstName = locationData.firstName;
       }
@@ -4108,7 +4135,6 @@ export async function createCompanyLocation(
       },
     );
 
-    // Check if response is ok before parsing
     if (!response.ok) {
       const errorText = await response.text();
       console.error("❌ HTTP Error:", response.status, errorText);
@@ -4118,7 +4144,6 @@ export async function createCompanyLocation(
       };
     }
 
-    // Check content type before parsing JSON
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
       const textResponse = await response.text();
@@ -4133,7 +4158,6 @@ export async function createCompanyLocation(
     const result = await response.json();
     console.log("📦 Full result:", JSON.stringify(result, null, 2));
 
-    // Check for GraphQL errors
     if (result.errors) {
       console.error("❌ GraphQL Errors:", result.errors);
       return {
@@ -4142,7 +4166,6 @@ export async function createCompanyLocation(
       };
     }
 
-    // Check for user errors
     if (result.data?.companyLocationCreate?.userErrors?.length > 0) {
       const userErrors = result.data.companyLocationCreate.userErrors;
       console.error("❌ User Errors:", userErrors);
@@ -4159,14 +4182,66 @@ export async function createCompanyLocation(
       return { error: "Failed to create location - no location returned" };
     }
 
+    const locationId = result.data.companyLocationCreate.companyLocation.id;
+
+    // Save recipient as a metafield if provided
+    if (locationData.recipient && locationData.recipient.trim() !== "") {
+      const metafieldMutation = `
+        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields {
+              key
+              namespace
+              value
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      const metafieldResponse = await fetch(
+        `https://${shopName}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query: metafieldMutation,
+            variables: {
+              metafields: [
+                {
+                  ownerId: locationId,
+                  namespace: "custom",
+                  key: "recipient",
+                  value: locationData.recipient,
+                  type: "single_line_text_field",
+                },
+              ],
+            },
+          }),
+        },
+      );
+
+      const metafieldResult = await metafieldResponse.json();
+      console.log("📦 Metafield creation result:", JSON.stringify(metafieldResult, null, 2));
+
+      if (metafieldResult.errors) {
+        console.warn("⚠️ Failed to create recipient metafield:", metafieldResult.errors);
+      }
+    }
+
     return {
       success: true,
-      locationId: result.data.companyLocationCreate.companyLocation.id,
+      locationId: locationId,
     };
   } catch (error) {
     console.error("💥 Error creating company location:", error);
 
-    // Provide more specific error messages
     if (error instanceof SyntaxError) {
       return {
         error:
@@ -4568,6 +4643,7 @@ export async function createLocationAndAssignToContact(
     zip?: string;
     country?: string;
     phone?: string;
+    recipient?: string;
     billingSameAsShipping?: boolean;
   },
 ) {
@@ -4679,6 +4755,7 @@ export async function updateCompanyLocation(
     zip?: string;
     country?: string;
     phone?: string | null;
+    recipient?: string | null;
     note?: string;
     billingSameAsShipping?: boolean;
   },
@@ -4725,12 +4802,10 @@ export async function updateCompanyLocation(
         input.name = locationData.name;
       }
       
-      // Handle phone field - can be string, null, or undefined
       if (locationData.phone !== undefined) {
         input.phone = locationData.phone === "" ? null : locationData.phone;
       }
       
-      // Handle externalId field - convert empty string to null to clear the field
       if (locationData.externalId !== undefined) {
         input.externalId = locationData.externalId === "" ? null : locationData.externalId;
       }
@@ -4820,7 +4895,7 @@ export async function updateCompanyLocation(
       const existingShipping = existingLocation?.shippingAddress || {};
       console.log("🏠 Existing address:", existingShipping);
 
-      // Build address input object - include firstName and lastName
+      // Build address input object
       const addressInput: {
         address1: string;
         address2?: string;
@@ -4849,21 +4924,18 @@ export async function updateCompanyLocation(
             : existingShipping.country || "US",
       };
 
-      // Add firstName if provided
       if (locationData.firstName !== undefined) {
         addressInput.firstName = locationData.firstName;
       } else if (existingShipping.firstName) {
         addressInput.firstName = existingShipping.firstName;
       }
 
-      // Add lastName if provided
       if (locationData.lastName !== undefined) {
         addressInput.lastName = locationData.lastName;
       } else if (existingShipping.lastName) {
         addressInput.lastName = existingShipping.lastName;
       }
 
-      // Only add address2 if it exists (not empty string)
       const address2Value =
         locationData.address2 !== undefined
           ? locationData.address2
@@ -4872,7 +4944,6 @@ export async function updateCompanyLocation(
         addressInput.address2 = address2Value;
       }
 
-      // Only add zoneCode if it exists and is not empty
       const provinceValue =
         locationData.province !== undefined
           ? locationData.province
@@ -4882,11 +4953,10 @@ export async function updateCompanyLocation(
       }
 
       console.log(
-        "📍 Updating address with firstName/lastName:",
+        "📍 Updating address:",
         JSON.stringify(addressInput, null, 2),
       );
 
-      // Update address using companyLocationAssignAddress mutation
       const addressMutation = `
         mutation companyLocationAssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
           companyLocationAssignAddress(locationId: $locationId, address: $address, addressTypes: $addressTypes) {
@@ -4942,6 +5012,68 @@ export async function updateCompanyLocation(
             (e: { message: string }) => e.message,
           ),
         );
+      }
+    }
+
+    // Step 3: Update recipient metafield if provided
+    if (locationData.recipient !== undefined) {
+      const metafieldMutation = `
+        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields {
+              key
+              namespace
+              value
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      // If recipient is null or empty string, we want to clear it (set to empty string)
+      const recipientValue = locationData.recipient === null ? "" : locationData.recipient;
+
+      const metafieldResponse = await fetch(
+        `https://${shopName}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query: metafieldMutation,
+            variables: {
+              metafields: [
+                {
+                  ownerId: locationId,
+                  namespace: "custom",
+                  key: "recipient",
+                  value: recipientValue,
+                  type: "single_line_text_field",
+                },
+              ],
+            },
+          }),
+        },
+      );
+
+      const metafieldResult = await metafieldResponse.json();
+      console.log("📦 Recipient metafield update result:", JSON.stringify(metafieldResult, null, 2));
+
+      if (metafieldResult.errors) {
+        console.warn("⚠️ Failed to update recipient metafield:", metafieldResult.errors);
+        hasErrors = true;
+        errors.push("Failed to update recipient field");
+      }
+
+      if (metafieldResult.data?.metafieldsSet?.userErrors?.length > 0) {
+        console.warn("⚠️ Recipient metafield user errors:", metafieldResult.data.metafieldsSet.userErrors);
+        hasErrors = true;
+        errors.push(metafieldResult.data.metafieldsSet.userErrors[0].message);
       }
     }
 
