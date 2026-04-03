@@ -216,7 +216,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const validations = [
           { field: "name", value: name, message: "Location name is required" },
-          { field: "externalId", value: externalId, message: "External ID is required" },
           { field: "firstName", value: firstName, message: "First name is required" },
           { field: "lastName", value: lastName, message: "Last name is required" },
           { field: "address1", value: address1, message: "Address line 1 is required" },
@@ -307,12 +306,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         let phoneValue: string | null | undefined = undefined;
-        
+
         if (phone !== undefined) {
           if (phone === "") {
             phoneValue = null;
           } else {
             phoneValue = phone;
+          }
+        }
+
+        let externalIdValue: string | null | undefined = undefined;
+
+        if (externalId !== undefined) {
+          if (externalId === "") {
+            externalIdValue = null;
+          } else {
+            externalIdValue = externalId;
           }
         }
 
@@ -322,7 +331,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           store.accessToken,
           {
             name: name || undefined,
-            externalId: externalId || undefined,
+            externalId: externalIdValue,
             country: country || undefined,
             firstName: firstName?.trim() || undefined,
             lastName: lastName?.trim() || undefined,

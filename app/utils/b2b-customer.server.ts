@@ -4669,7 +4669,7 @@ export async function updateCompanyLocation(
   accessToken: string,
   locationData: {
     name?: string;
-    externalId?: string;
+    externalId?: string | null;
     firstName?: string;
     lastName?: string;
     address1?: string;
@@ -4717,7 +4717,7 @@ export async function updateCompanyLocation(
       const input: {
         name?: string;
         phone?: string | null;
-        externalId?: string;
+        externalId?: string | null;
         note?: string;
       } = {};
 
@@ -4730,9 +4730,11 @@ export async function updateCompanyLocation(
         input.phone = locationData.phone === "" ? null : locationData.phone;
       }
       
+      // Handle externalId field - convert empty string to null to clear the field
       if (locationData.externalId !== undefined) {
-        input.externalId = locationData.externalId;
+        input.externalId = locationData.externalId === "" ? null : locationData.externalId;
       }
+      
       if (locationData.note !== undefined) {
         input.note = locationData.note;
       }
