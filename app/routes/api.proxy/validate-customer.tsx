@@ -22,15 +22,85 @@ import prisma from "app/db.server";
  * - customerId: string - Shopify customer ID
  * - redirectTo: string - where to redirect if no access
  */
-export const loader = async ({ request }: LoaderFunctionArgs) => { 
+
+// ============================================================
+// 🗂️  CACHE SETUP
+
+// ============================================================
+
+declare global {
+  var __validateCustomerCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+}
+
+const cache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__validateCustomerCache ??
+  (globalThis.__validateCustomerCache = new Map());
+
+const CACHE_TTL = 2 * 60 * 1000; // 2 min — shorter because this is an access check
+
+// ============================================================
+// 🧹 CACHE HELPERS
+// ============================================================
+
+// Call this whenever a user's access/status changes (approve, reject, disable, etc.)
+export const clearValidateCustomerCache = (shop: string, customerId: string) => {
+  // Try both raw and prefixed customerId formats
+  const keys = [
+    `validate-${shop}-${customerId}`,
+    `validate-${shop}-gid://shopify/Customer/${customerId}`,
+  ];
+  for (const key of keys) {
+    if (cache.has(key)) {
+      cache.delete(key);
+      console.log("🧹 Validate cache cleared for:", key);
+    }
+  }
+};
+
+// ============================================================
+// 📦 LOADER — GET request
+// ============================================================
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const startTime = Date.now();
+
   try {
-    // Get proxy parameters
+    // shop + loggedInCustomerId are FREE — plain URL params, no auth or DB needed
     const { shop, loggedInCustomerId } = getProxyParams(request);
 
-    console.log("🔍 Validating customer:=", { shop, loggedInCustomerId });
+    console.log("🔍 Validating customer:", { shop, loggedInCustomerId });
 
-    // STEP 1: Check if customer is logged in
+    // ── FAST PATH — check cache before any DB or Shopify calls ──
+    if (shop && loggedInCustomerId) {
+      const cacheKey = `validate-${shop}-${loggedInCustomerId}`;
+      const cached = cache.get(cacheKey);
+
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        console.log(`⚡ Cache HIT (skipped all DB+Shopify calls) → ${cacheKey}`);
+        console.log(`🚀 Total API Time: ${Date.now() - startTime}ms`);
+        return Response.json(cached.data);
+      }
+    }
+
+    console.log("🐢 Cache MISS → running full validation");
+
+    // Helper to cache a result and return it
+    // Only cache positive access grants + stable negative states (APPROVED, REJECTED, DISABLED)
+    // Do NOT cache transient states (PENDING) so status changes reflect quickly
+    const respond = (data: object, shouldCache = false) => {
+      if (shop && loggedInCustomerId && shouldCache) {
+        const cacheKey = `validate-${shop}-${loggedInCustomerId}`;
+        cache.set(cacheKey, { data, timestamp: Date.now() });
+        console.log(`✅ Cache SET → ${cacheKey}`);
+      }
+      return Response.json(data);
+    };
+
+    // ── STEP 1: Check if customer is logged in ──────────────
     if (!loggedInCustomerId) {
+      // Not logged in — always fast, no need to cache
       return Response.json({
         isLoggedIn: false,
         hasB2BAccess: false,
@@ -41,7 +111,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
-    // STEP 2: Check if shop parameter exists
+    // ── STEP 2: Check if shop parameter exists ──────────────
     if (!shop) {
       return Response.json({
         isLoggedIn: true,
@@ -53,7 +123,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
-    // STEP 3: Get store from database
+    // ── STEP 3: Get store from database ─────────────────────
     const store = await getStoreByDomain(shop);
 
     if (!store || !store.accessToken) {
@@ -67,15 +137,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
-    // STEP 4: Check user status in our database
-    // Check both registrationSubmission table and User table
+    // ── STEP 4: Check user status in our database ───────────
     const [registration, user] = await Promise.all([
       prisma.registrationSubmission.findFirst({
         where: {
           OR: [
-            {
-              shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}`,
-            },
+            { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
             { shopifyCustomerId: loggedInCustomerId },
           ],
         },
@@ -83,35 +150,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       prisma.user.findFirst({
         where: {
           OR: [
-            {
-              shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}`,
-            },
+            { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}` },
             { shopifyCustomerId: loggedInCustomerId },
           ],
           shopId: store.id,
         },
-        include: {
-          company: true,
-        },
+        include: { company: true },
       }),
     ]);
 
-    // STEP 5: Check if customer has B2B access in Shopify
-    // 5a. First check via CompanyContact (primary method for B2B customers)
+    // ── STEP 5: Check if customer has B2B access in Shopify ─
     const customerCompanyInfo = await getCustomerCompanyInfo(
       loggedInCustomerId,
       shop,
       store.accessToken,
     );
- 
+
     let hasB2BInShopify = false;
     let accessMethod = "";
-    // If you know what properties might be in additionalInfo
-interface AdditionalInfo {
-  [key: string]: string | number | boolean | null | object | undefined;
-}
 
-let additionalInfo: AdditionalInfo = {};
+    interface AdditionalInfo {
+      [key: string]: string | number | boolean | null | object | undefined;
+    }
+    let additionalInfo: AdditionalInfo = {};
 
     if (customerCompanyInfo.hasCompany) {
       console.log("✅ Customer has B2B access via CompanyContact");
@@ -119,7 +180,7 @@ let additionalInfo: AdditionalInfo = {};
       accessMethod = "company_contact";
       additionalInfo = { companyInfo: customerCompanyInfo };
     } else {
-      // 5b. Fallback: Check via tags or metafields (legacy B2B setups)
+      // Fallback: check via tags or metafields (legacy B2B setups)
       const b2bCheck = await checkCustomerIsB2BInShopifyByREST(
         shop,
         loggedInCustomerId,
@@ -139,65 +200,69 @@ let additionalInfo: AdditionalInfo = {};
       }
     }
 
-    // STEP 6: Check if user is disabled FIRST (before any other checks)
+    // ── STEP 6: Check if user is disabled ───────────────────
     if (registration?.isDisable === true) {
       const customerName =
         `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
         (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
-      return Response.json({
-        isLoggedIn: true,
-        hasB2BAccess: false,
-        customerId: loggedInCustomerId,
-        customerName,
-        isDisable: registration?.isDisable,
-        customerStatus: registration?.status || user?.status || null,
-        redirectTo: "/apps/b2b-portal/registration",
-        message:
-          "Your company account has been deactivated. Please contact the support team.",
-        alreadySubmitted: true,
-      });
+      // ✅ Cache — disabled state is stable, won't flip without admin action
+      return respond(
+        {
+          isLoggedIn: true,
+          hasB2BAccess: false,
+          customerId: loggedInCustomerId,
+          customerName,
+          isDisable: registration?.isDisable,
+          customerStatus: registration?.status || user?.status || null,
+          redirectTo: "/apps/b2b-portal/registration",
+          message: "Your company account has been deactivated. Please contact the support team.",
+          alreadySubmitted: true,
+        },
+        true, // cache it
+      );
     }
 
-    // STEP 7: Determine access based on B2B status, registration, and user records
+    // ── STEP 7: Determine access ─────────────────────────────
     if (hasB2BInShopify) {
-      // User is part of a company in Shopify
-
-      // Check if user has approved access in either registration or user table
       const isApprovedViaRegistration = registration?.status === "APPROVED";
       const isApprovedViaUser = user?.status === "APPROVED" && user.isActive;
 
       if (isApprovedViaRegistration || isApprovedViaUser) {
         const customerName =
-          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim()  ||
+          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
           (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
-        return Response.json({
-          isLoggedIn: true,
-          hasB2BAccess: true,
-          logo: store.logo,
-          email: store.contactEmail,
-          storeName: store.shopName,
-          themeColor: store.themeColor,
-          customerId: loggedInCustomerId,
-          customerName,
-          customerStatus: isApprovedViaRegistration
-            ? registration.status
-            : user?.status,
-          accessMethod,
-          ...additionalInfo,
-          message: "Access granted",
-        });
+        // ✅ Cache — approved access is stable
+        return respond(
+          {
+            isLoggedIn: true,
+            hasB2BAccess: true,
+            logo: store.logo,
+            email: store.contactEmail,
+            storeName: store.shopName,
+            themeColor: store.themeColor,
+            customerId: loggedInCustomerId,
+            customerName,
+            customerStatus: isApprovedViaRegistration
+              ? registration.status
+              : user?.status,
+            accessMethod,
+            ...additionalInfo,
+            message: "Access granted",
+          },
+          true, // cache it
+        );
       }
 
-      // EXISTS BUT NOT APPROVED
+      // Exists but not approved (PENDING) — don't cache, status may change soon
       if (registration || user) {
         const status = registration?.status || user?.status;
         const customerName =
           `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
           (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
-        return Response.json({
+        return respond({
           isLoggedIn: true,
           hasB2BAccess: false,
           customerId: loggedInCustomerId,
@@ -207,13 +272,12 @@ let additionalInfo: AdditionalInfo = {};
           message: "Your account exists but is not approved yet",
           alreadySubmitted: true,
         });
+        // ❌ not cached — PENDING status changes frequently
       }
 
-      // No registration and no user record - redirect to register
-      console.log(
-        "⚠️ Customer has B2B in Shopify but not registered in our database",
-      );
-      return Response.json({
+      // No registration and no user record
+      console.log("⚠️ Customer has B2B in Shopify but not registered in our database");
+      return respond({
         isLoggedIn: true,
         hasB2BAccess: false,
         customerId: loggedInCustomerId,
@@ -221,49 +285,53 @@ let additionalInfo: AdditionalInfo = {};
         redirectTo: "/apps/b2b-portal/registration",
         message: "Please complete registration to access the B2B portal",
       });
+      // ❌ not cached — they might register any second
     } else {
       // No B2B access in Shopify
       console.log("⚠️ Customer does not have B2B access in Shopify");
 
       if (registration || user) {
-        // Has registration or user record but no B2B access in Shopify
         const status = registration?.status || user?.status;
         const customerName =
           `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
           (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
 
-        let message =
-          "Your account has already been submitted and is under review";
+        let message = "Your account has already been submitted and is under review";
 
         if (status === "APPROVED") {
-          message =
-            "Your account is approved, but B2B access is not yet configured in Shopify.";
+          message = "Your account is approved, but B2B access is not yet configured in Shopify.";
         } else if (status === "REJECTED") {
-          message =
-            "Your account has been rejected. Please contact the support team.";
+          message = "Your account has been rejected. Please contact the support team.";
         }
 
-        return Response.json({
-          isLoggedIn: true,
-          hasB2BAccess: false,
-          customerStatus: status,
-          customerId: loggedInCustomerId,
-          customerName,
-          redirectTo: "/apps/b2b-portal/registration",
-          message,
-          alreadySubmitted: true,
-        });
-      } else {
-        // No registration and no B2B access - redirect to register
-        return Response.json({
-          isLoggedIn: true,
-          hasB2BAccess: false,
-          customerStatus: null,
-          customerId: loggedInCustomerId,
-          redirectTo: "/apps/b2b-portal/registration",
-          message: "No B2B access. Please register for B2B account.",
-        });
+        // ✅ Cache REJECTED (stable). Don't cache PENDING/APPROVED (may change soon).
+        const isStableState = status === "REJECTED";
+
+        return respond(
+          {
+            isLoggedIn: true,
+            hasB2BAccess: false,
+            customerStatus: status,
+            customerId: loggedInCustomerId,
+            customerName,
+            redirectTo: "/apps/b2b-portal/registration",
+            message,
+            alreadySubmitted: true,
+          },
+          isStableState,
+        );
       }
+
+      // No registration and no B2B access
+      return respond({
+        isLoggedIn: true,
+        hasB2BAccess: false,
+        customerStatus: null,
+        customerId: loggedInCustomerId,
+        redirectTo: "/apps/b2b-portal/registration",
+        message: "No B2B access. Please register for B2B account.",
+      });
+      // ❌ not cached — they might register any second
     }
   } catch (error) {
     console.error("❌ Error validating customer:", error);
@@ -278,5 +346,7 @@ let additionalInfo: AdditionalInfo = {};
       },
       { status: 500 },
     );
+  } finally {
+    console.log(`🚀 Total API Time: ${Date.now() - startTime}ms`);
   }
 };

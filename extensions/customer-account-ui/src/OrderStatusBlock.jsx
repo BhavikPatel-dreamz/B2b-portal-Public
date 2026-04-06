@@ -309,6 +309,16 @@ function Extension() {
     return phoneDigits === codeDigits;
   };
 
+  const getPhoneDigitsWithoutDialCode = (phoneValue, dialCode) => {
+    const phone = String(phoneValue || "").trim();
+    const code = String(dialCode || "").trim();
+    if (!phone) return "";
+    if (code && phone.startsWith(code)) {
+      return phone.slice(code.length).trimStart();
+    }
+    return phone.replace(/^\+\d{1,4}\s*/, "");
+  };
+
   const getAutofillValue = (field) => {
     if (!customerDetails) return "";
     const key = normalizeFieldText(field?.key);
@@ -732,20 +742,39 @@ function Extension() {
         const countryKey = findPairedKey(field.key, "phone", "country");
         const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
         const { dialCode, flagEmoji } = getPhoneMetaForCountry(selectedCountry);
-
-        const currentVal = String(formData[field.key] ?? "").trim();
-
-        // If empty or only has a dial code, show the current one
-        const displayVal = currentVal || dialCode;
+        const currentDigits = getPhoneDigitsWithoutDialCode(
+          formData[field.key],
+          dialCode,
+        );
 
         return (
-          <s-text-field
-            key={`phone-${selectedCountry}`}
-            label={`${flagEmoji} ${field.label} (${dialCode})`}
-            value={displayVal}
-            type="tel"
-            onChange={(val) => handleChange(field.key, val)}
-          />
+          <s-stack key={`phone-${selectedCountry}`} direction="block" gap="tight">
+            <s-stack direction="inline" gap="small" blockAlignment="end">
+              <s-box inlineSize="27%">
+                <s-text-field
+                  value={`${flagEmoji} ${dialCode}`}
+                  disabled
+                />
+              </s-box>
+              <s-box inlineSize="60%">
+                <s-text-field
+                  label="Phone number"
+                  value={currentDigits}
+                  type="tel"
+                  placeholder="Enter phone number"
+                  onChange={(val) => {
+                    const typedValue =
+                      val?.target?.value ?? val?.value ?? val ?? "";
+                    const digits = String(typedValue).trim();
+                    handleChange(
+                      field.key,
+                      digits ? `${dialCode} ${digits}` : dialCode,
+                    );
+                  }}
+                />
+              </s-box>
+            </s-stack>
+          </s-stack>
         );
       }
 
