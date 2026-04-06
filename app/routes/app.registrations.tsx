@@ -318,11 +318,108 @@ async function syncCompanyTaxDetails(
   }
 }
 
+// ============================================================
+// 🗂️  REGISTRATION CACHE SETUP
+// ============================================================
+
+declare global {
+  var __regSubmissionsCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+  var __regStaticCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+  var __regLocationCache:
+    | Map<string, { data: { locationId: string | null; locationName: string | null }; timestamp: number }>
+    | undefined;
+}
+
+const regSubmissionsCache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__regSubmissionsCache ??
+  (globalThis.__regSubmissionsCache = new Map());
+
+const regStaticCache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__regStaticCache ??
+  (globalThis.__regStaticCache = new Map());
+
+// Company location cache is shared globally — same companies appear in multiple routes
+const regLocationCache: Map<
+  string,
+  { data: { locationId: string | null; locationName: string | null }; timestamp: number }
+> =
+  globalThis.__regLocationCache ??
+  (globalThis.__regLocationCache = new Map());
+
+const REG_SUBMISSIONS_TTL = 2  * 60 * 1000;  // 2 min  — changes on approve/reject
+const REG_STATIC_TTL      = 15 * 60 * 1000;  // 15 min — payment terms, countries, catalogs
+const REG_LOCATION_TTL    = 10 * 60 * 1000;  // 10 min — per-company Shopify GraphQL
+
+// ============================================================
+// 🧹  CACHE HELPERS
+// ============================================================
+
+export const clearRegistrationSubmissionsCache = (shop: string) => {
+  const key = `reg-submissions-${shop}`;
+  regSubmissionsCache.delete(key);
+  console.log("🧹 Registration submissions cache cleared for:", key);
+};
+
+export const clearRegistrationStaticCache = (shop: string) => {
+  const key = `reg-static-${shop}`;
+  regStaticCache.delete(key);
+  console.log("🧹 Registration static cache cleared for:", key);
+};
+
+// Individual company location — call this when a company is updated
+export const clearCompanyLocationCache = (shopifyCompanyId: string) => {
+  regLocationCache.delete(`loc-${shopifyCompanyId}`);
+};
+
+// Cached wrapper for the single per-company GraphQL location fetch
+async function getCachedCompanyLocation(
+  admin: any,
+  shopifyCompanyId: string,
+): Promise<{ locationId: string | null; locationName: string | null }> {
+  const cacheKey = `loc-${shopifyCompanyId}`;
+  const cached = regLocationCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < REG_LOCATION_TTL) {
+    return cached.data;
+  }
+
+  try {
+    const locationResp = await admin.graphql(
+      `#graphql
+      query GetCompanyLocation($companyId: ID!) {
+        company(id: $companyId) {
+          locations(first: 1) { nodes { id name } }
+        }
+      }`,
+      { variables: { companyId: shopifyCompanyId } },
+    );
+    const locationJson = await locationResp.json();
+    const loc = locationJson?.data?.company?.locations?.nodes?.[0] || null;
+    const result = {
+      locationId:   loc?.id   || null,
+      locationName: loc?.name || null,
+    };
+    regLocationCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    return result;
+  } catch (err) {
+    console.warn("Unable to fetch location for company", shopifyCompanyId, err);
+    return { locationId: null, locationName: null };
+  }
+}
+
+
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const startTime = Date.now();
   const { session, admin } = await authenticate.admin(request);
+  const shop = session.shop;
 
   const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
+    where: { shopDomain: shop },
   });
 
   if (!store) {
@@ -332,181 +429,199 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 
-  const formFieldConfig = await prisma.formFieldConfig.findUnique({
-    where: { shopId: store.id },
-  });
+  // ── 1. SUBMISSIONS CACHE (2 min TTL) ────────────────────
+  const submissionsCacheKey = `reg-submissions-${shop}`;
+  const cachedSubmissions = regSubmissionsCache.get(submissionsCacheKey);
 
-  let config = DEFAULT_CONFIG;
-  if (formFieldConfig?.fields) {
-    try {
-      const stored = formFieldConfig.fields as unknown as StoredConfig;
-      if (
-        Array.isArray(stored) &&
-        stored.length > 0 &&
-        stored.every(
-          (g) =>
-            g.step?.id &&
-            g.step?.label &&
-            Array.isArray(g.fields) &&
-            g.fields.every((f) => f.key && f.label && f.type !== undefined),
-        )
-      ) {
-        config = deserializeConfig(stored);
-      }
-    } catch {
-      config = DEFAULT_CONFIG;
-    }
+  let submissions: any[];
+  let companies: any[];
+
+  if (cachedSubmissions && Date.now() - cachedSubmissions.timestamp < REG_SUBMISSIONS_TTL) {
+    console.log(`⚡ Submissions cache HIT → ${submissionsCacheKey}`);
+    submissions = cachedSubmissions.data.submissions;
+    companies   = cachedSubmissions.data.companies;
+  } else {
+    console.log("🐢 Submissions cache MISS → querying DB");
+
+    const [pendingSubmissions, approvedSubmissions, rejectedSubmissions, rawCompanies] =
+      await Promise.all([
+        prisma.registrationSubmission.findMany({
+          where: { shopId: store.id, status: "PENDING",  shopifyCustomerId: { not: null } },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.registrationSubmission.findMany({
+          where: { shopId: store.id, status: "APPROVED", shopifyCustomerId: { not: null } },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.registrationSubmission.findMany({
+          where: { shopId: store.id, status: "REJECTED", shopifyCustomerId: { not: null } },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.companyAccount.findMany({
+          where: { shopId: store.id },
+          orderBy: { name: "asc" },
+        }),
+      ]);
+
+    submissions = [...pendingSubmissions, ...approvedSubmissions, ...rejectedSubmissions];
+    companies   = rawCompanies;
+
+    regSubmissionsCache.set(submissionsCacheKey, {
+      data: { submissions, companies },
+      timestamp: Date.now(),
+    });
+    console.log(`✅ Submissions cache SET → ${submissionsCacheKey}`);
   }
 
-  const [pendingSubmissions, approvedSubmissions, rejectedSubmissions] =
-    await Promise.all([
-      prisma.registrationSubmission.findMany({
-        where: {
-          shopId: store.id,
-          status: "PENDING",
-          shopifyCustomerId: { not: null },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.registrationSubmission.findMany({
-        where: {
-          shopId: store.id,
-          status: "APPROVED",
-          shopifyCustomerId: { not: null },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.registrationSubmission.findMany({
-        where: {
-          shopId: store.id,
-          status: "REJECTED",
-          shopifyCustomerId: { not: null },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
-
-  const submissions = [
-    ...pendingSubmissions,
-    ...approvedSubmissions,
-    ...rejectedSubmissions,
-  ];
-
-  const companies = await prisma.companyAccount.findMany({
-    where: { shopId: store.id },
-    orderBy: { name: "asc" },
-  });
-
+  // ── 2. COMPANY LOCATIONS (per-company 10 min TTL) ───────
+  // This was the main perf killer — N serial GraphQL calls.
+  // Now each company location is cached individually.
   const companiesWithLocations = await Promise.all(
     companies.map(async (c) => {
-      if (!c.shopifyCompanyId)
-        return { ...c, locationId: null, locationName: null };
-      try {
-        const locationResp = await admin.graphql(
-          `#graphql
-          query GetCompanyLocation($companyId: ID!) {
-            company(id: $companyId) {
-              locations(first: 1) { nodes { id name } }
-            }
-          }`,
-          { variables: { companyId: c.shopifyCompanyId } },
-        );
-        const locationJson = await locationResp.json();
-        const loc = locationJson?.data?.company?.locations?.nodes?.[0] || null;
-        return {
-          ...c,
-          locationId: loc?.id || null,
-          locationName: loc?.name || null,
-        };
-      } catch (err) {
-        console.warn("Unable to fetch location for company", c.id, err);
-        return { ...c, locationId: null, locationName: null };
-      }
+      if (!c.shopifyCompanyId) return { ...c, locationId: null, locationName: null };
+      const loc = await getCachedCompanyLocation(admin, c.shopifyCompanyId);
+      return { ...c, locationId: loc.locationId, locationName: loc.locationName };
     }),
   );
 
-  const paymentTermsResponse = await admin.graphql(
-    `#graphql
-    query { paymentTermsTemplates { id name paymentTermsType dueInDays description translatedName } }`,
-  );
-  const paymentTermsData = await paymentTermsResponse.json();
-  const paymentTermsTemplates = paymentTermsData.data.paymentTermsTemplates;
+  // ── 3. STATIC DATA CACHE (15 min TTL) ───────────────────
+  const staticCacheKey = `reg-static-${shop}`;
+  const cachedStatic = regStaticCache.get(staticCacheKey);
 
-  const shippingCountriesResponse = await admin.graphql(
-    `#graphql
-    query GetShippingCountriesWithProvinces {
-      deliveryProfiles(first: 1) {
-        nodes {
-          profileLocationGroups {
-            locationGroupZones(first: 50) {
+  let paymentTermsTemplates: any;
+  let shippingCountryOptions: any;
+  let shippingProvincesByCountry: any;
+  let allCatalogs: any;
+  let priceLists: any;
+  let formConfig: any;
+
+  if (cachedStatic && Date.now() - cachedStatic.timestamp < REG_STATIC_TTL) {
+    console.log(`⚡ Static cache HIT → ${staticCacheKey}`);
+    ({ paymentTermsTemplates, shippingCountryOptions, shippingProvincesByCountry, allCatalogs, priceLists, formConfig } = cachedStatic.data);
+  } else {
+    console.log("🐢 Static cache MISS → fetching from Shopify + DB");
+
+    // Form field config
+    const formFieldConfig = await prisma.formFieldConfig.findUnique({
+      where: { shopId: store.id },
+    });
+
+    let config = DEFAULT_CONFIG;
+    if (formFieldConfig?.fields) {
+      try {
+        const stored = formFieldConfig.fields as unknown as StoredConfig;
+        if (
+          Array.isArray(stored) &&
+          stored.length > 0 &&
+          stored.every(
+            (g) =>
+              g.step?.id &&
+              g.step?.label &&
+              Array.isArray(g.fields) &&
+              g.fields.every((f) => f.key && f.label && f.type !== undefined),
+          )
+        ) {
+          config = deserializeConfig(stored);
+        }
+      } catch {
+        config = DEFAULT_CONFIG;
+      }
+    }
+
+    // All Shopify static calls in parallel
+    const [paymentTermsResponse, shippingCountriesResponse, catalogsResult, priceListsResult] =
+      await Promise.all([
+        admin.graphql(
+          `#graphql
+          query { paymentTermsTemplates { id name paymentTermsType dueInDays description translatedName } }`,
+        ),
+        admin.graphql(
+          `#graphql
+          query GetShippingCountriesWithProvinces {
+            deliveryProfiles(first: 1) {
               nodes {
-                zone {
-                  countries {
-                    code { countryCode }
-                    provinces { code name }
+                profileLocationGroups {
+                  locationGroupZones(first: 50) {
+                    nodes {
+                      zone {
+                        countries {
+                          code { countryCode }
+                          provinces { code name }
+                        }
+                      }
+                    }
                   }
                 }
               }
             }
-          }
-        }
-      }
-      shop {
-        countriesInShippingZones { countryCodes includeRestOfWorld }
-      }
-    }`,
-  );
-  const shippingCountriesPayload = await shippingCountriesResponse.json();
-  const validCountryCodes = new Set<string>(
-    shippingCountriesPayload?.data?.shop?.countriesInShippingZones
-      ?.countryCodes || [],
-  );
-
-  type ProvinceOption = { value: string; label: string };
-  const countryProvincesMap = new Map<string, ProvinceOption[]>();
-  const profiles =
-    shippingCountriesPayload?.data?.deliveryProfiles?.nodes || [];
-  for (const profile of profiles) {
-    for (const group of profile.profileLocationGroups || []) {
-      for (const zoneNode of group.locationGroupZones?.nodes || []) {
-        for (const country of zoneNode.zone?.countries || []) {
-          const countryCode: string = country.code?.countryCode;
-          if (!countryCode || !validCountryCodes.has(countryCode)) continue;
-          const provinces: ProvinceOption[] = (country.provinces || []).map(
-            (p: { code: string; name: string }) => ({
-              value: p.code,
-              label: p.name,
-            }),
-          );
-          if (countryProvincesMap.has(countryCode)) {
-            const existing = countryProvincesMap.get(countryCode)!;
-            const existingCodes = new Set(existing.map((e) => e.value));
-            for (const p of provinces) {
-              if (!existingCodes.has(p.value)) existing.push(p);
+            shop {
+              countriesInShippingZones { countryCodes includeRestOfWorld }
             }
-          } else {
-            countryProvincesMap.set(countryCode, provinces);
+          }`,
+        ),
+        fetchAllCatalogs(admin),
+        fetchPriceLists(admin),
+      ]);
+
+    const paymentTermsData = await paymentTermsResponse.json();
+    paymentTermsTemplates = paymentTermsData.data.paymentTermsTemplates;
+
+    const shippingCountriesPayload = await shippingCountriesResponse.json();
+    const validCountryCodes = new Set<string>(
+      shippingCountriesPayload?.data?.shop?.countriesInShippingZones?.countryCodes || [],
+    );
+
+    type ProvinceOption = { value: string; label: string };
+    const countryProvincesMap = new Map<string, ProvinceOption[]>();
+    const profiles = shippingCountriesPayload?.data?.deliveryProfiles?.nodes || [];
+    for (const profile of profiles) {
+      for (const group of profile.profileLocationGroups || []) {
+        for (const zoneNode of group.locationGroupZones?.nodes || []) {
+          for (const country of zoneNode.zone?.countries || []) {
+            const countryCode: string = country.code?.countryCode;
+            if (!countryCode || !validCountryCodes.has(countryCode)) continue;
+            const provinces: ProvinceOption[] = (country.provinces || []).map(
+              (p: { code: string; name: string }) => ({ value: p.code, label: p.name }),
+            );
+            if (countryProvincesMap.has(countryCode)) {
+              const existing = countryProvincesMap.get(countryCode)!;
+              const existingCodes = new Set(existing.map((e) => e.value));
+              for (const p of provinces) {
+                if (!existingCodes.has(p.value)) existing.push(p);
+              }
+            } else {
+              countryProvincesMap.set(countryCode, provinces);
+            }
           }
         }
       }
     }
+
+    shippingCountryOptions = Array.from(validCountryCodes).map((countryCode: string) => ({
+      value: countryCode,
+      label: new Intl.DisplayNames(["en"], { type: "region" }).of(countryCode) || countryCode,
+    }));
+
+    shippingProvincesByCountry = Object.fromEntries(countryProvincesMap);
+    allCatalogs  = catalogsResult;
+    priceLists   = priceListsResult;
+    formConfig   = config;
+
+    regStaticCache.set(staticCacheKey, {
+      data: {
+        paymentTermsTemplates,
+        shippingCountryOptions,
+        shippingProvincesByCountry,
+        allCatalogs,
+        priceLists,
+        formConfig,
+      },
+      timestamp: Date.now(),
+    });
+    console.log(`✅ Static cache SET → ${staticCacheKey}`);
   }
 
-  const shippingCountryOptions: CountryOption[] = Array.from(
-    validCountryCodes,
-  ).map((countryCode: string) => ({
-    value: countryCode,
-    label:
-      new Intl.DisplayNames(["en"], { type: "region" }).of(countryCode) ||
-      countryCode,
-  }));
-  const shippingProvincesByCountry = Object.fromEntries(countryProvincesMap);
-
-  // ── NEW: fetch catalogs + price lists in parallel ──
-  const [allCatalogs, priceLists] = await Promise.all([
-    fetchAllCatalogs(admin),
-    fetchPriceLists(admin),
-  ]);
+  console.log(`🚀 Registration loader time: ${Date.now() - startTime}ms`);
 
   return Response.json({
     submissions: submissions.map((s) => ({
@@ -516,16 +631,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     companies: companiesWithLocations.map((company) => ({
       ...company,
       creditLimit: company.creditLimit.toString(),
-      updatedAt: company.updatedAt.toISOString(),
+      updatedAt:   company.updatedAt.toISOString(),
     })),
-    formConfig: config,
+    formConfig,
     shippingCountryOptions:
       shippingCountryOptions.length > 0
         ? [{ value: "", label: "Country" }, ...shippingCountryOptions]
         : DEFAULT_COUNTRY_OPTIONS,
     shippingProvincesByCountry,
     paymentTermsTemplates,
-    // ── NEW ──
     allCatalogs,
     priceLists,
     storeMissing: false,
@@ -1766,6 +1880,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             : Promise.resolve(),
         ]);
 
+            clearRegistrationSubmissionsCache(store.id);
+        if (companyId) clearCompanyLocationCache(companyId);
+
         return Response.json({
           intent,
           success: true,
@@ -1971,24 +2088,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         await Promise.all([
-          // customerEmail
-          //   ? prisma.registrationSubmission.upsert({
-          //       where: {
-          //         shopId_email: { shopId: store.id, email: customerEmail },
-          //       },
-          //       update: { companyName },
-          //       create: {
-          //         email: customerEmail,
-          //         companyName,
-          //         firstName: "",
-          //         lastName: "",
-          //         shopifyCustomerId: null,
-          //         status: "PENDING",
-          //         shopId: store.id,
-          //       },
-          //     })
-          //   : Promise.resolve(),
-
           linkedUser
             ? prisma.user.update({
                 where: { id: linkedUser.id },
@@ -1996,6 +2095,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               })
             : Promise.resolve(),
         ]);
+        clearRegistrationSubmissionsCache(store.id);
+        if (companyId) clearCompanyLocationCache(companyId);
 
         return Response.json({
           intent,
@@ -2095,6 +2196,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             status: "APPROVED",
           },
         });
+
+         clearRegistrationSubmissionsCache(store.id);
 
         return Response.json({
           intent,
@@ -2496,6 +2599,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
+          clearRegistrationSubmissionsCache(store.id);
+        // ✅ Bust company location cache for this company (it may have been created/updated)
+        if (companyId) clearCompanyLocationCache(companyId);
+
         return Response.json({
           intent,
           success: true,
@@ -2613,6 +2720,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
+         clearRegistrationSubmissionsCache(store.id);
+
 
         return Response.json({
           intent,
@@ -2648,6 +2757,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             userCreditLimit: null,
           },
         });
+         clearRegistrationSubmissionsCache(store.id);
 
         return Response.json({
           intent,
@@ -3078,6 +3188,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
+
+        clearRegistrationSubmissionsCache(store.id);
+        if (incomingCompanyId) clearCompanyLocationCache(incomingCompanyId);
 
         return Response.json({
           intent,

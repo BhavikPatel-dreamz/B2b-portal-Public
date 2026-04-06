@@ -45,99 +45,180 @@ interface ActionResponse {
   errors?: string[];
 }
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
 
-  const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
-  });
+// ============================================================
+// 🗂️  CACHE SETUP 
+// ============================================================
 
-  if (!store) {
-    return Response.json(
-      {
-        companies: [] as LoaderCompany[],
-        storeMissing: true,
-        totalCount: 0,
-        currentPage: 1,
-        totalPages: 0,
-        searchQuery: "",
-      },
-      { status: 404 },
-    );
+declare global {
+  var __adminCompaniesCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+  var __adminCompaniesStoreCache:
+    | Map<
+        string,
+        {
+          data: { id: string; submissionEmail: string | null };
+          timestamp: number;
+        }
+      >
+    | undefined;
+}
+
+const cache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__adminCompaniesCache ??
+  (globalThis.__adminCompaniesCache = new Map());
+
+const storeCache: Map<
+  string,
+  {
+    data: { id: string; submissionEmail: string | null };
+    timestamp: number;
+  }
+> =
+  globalThis.__adminCompaniesStoreCache ??
+  (globalThis.__adminCompaniesStoreCache = new Map());
+
+const CACHE_TTL = 3 * 60 * 1000; // 3 min
+const STORE_CACHE_TTL = 10 * 60 * 1000; // 10 min
+
+// ============================================================
+// 🧹 CACHE HELPERS
+// ============================================================
+
+export const clearAdminCompaniesCache = (shop: string) => {
+  const prefix = `admin-companies-${shop}`;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key);
+    }
+  }
+  console.log("🧹 Admin companies cache cleared for:", prefix);
+};
+
+async function getStoreForShop(shop: string) {
+  const cachedStore = storeCache.get(shop);
+  if (cachedStore && Date.now() - cachedStore.timestamp < STORE_CACHE_TTL) {
+    return cachedStore.data;
   }
 
-  // Get page from URL search params
-  const url = new URL(request.url);
-  const page = parseInt(url.searchParams.get("page") || "1", 10);
-  const searchQuery = url.searchParams.get("search") || "";
-  const limit = 10;
-  const skip = (page - 1) * limit;
-
-  // Build where clause with search
-  const whereClause = {
-    shopId: store.id,
-    ...(searchQuery && {
-      OR: [
-        { name: { contains: searchQuery, mode: "insensitive" as const } },
-        {
-          shopifyCompanyId: {
-            contains: searchQuery,
-            mode: "insensitive" as const,
-          },
-        },
-        {
-          contactName: { contains: searchQuery, mode: "insensitive" as const },
-        },
-        {
-          contactEmail: { contains: searchQuery, mode: "insensitive" as const },
-        },
-      ],
-    }),
-  };
-
-  // Get total count
-  const totalCount = await prisma.companyAccount.count({
-    where: whereClause,
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: shop },
+    select: { id: true, submissionEmail: true },
   });
 
-  const totalPages = Math.ceil(totalCount / limit);
+  if (store) {
+    storeCache.set(shop, { data: store, timestamp: Date.now() });
+  }
 
-  const companies = await prisma.companyAccount.findMany({
-    where: whereClause,
-    orderBy: { updatedAt: "desc" },
-    skip,
-    take: limit,
-    include: {
-      _count: {
-        select: { users: true },
-      },
-    },
-  });
+  return store;
+}
 
-  const orderCreditByCompany = await prisma.b2BOrder.groupBy({
-    by: ["companyId"],
-    where: {
-      companyId: { in: companies.map((company) => company.id) },
-      paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled"] },
-    },
-    _sum: {
-      creditUsed: true,
-    },
-  });
+// ============================================================
+// 📦 LOADER — GET request
+// ============================================================
 
-  const creditMap = new Map(
-    orderCreditByCompany.map((entry) => [
-      entry.companyId,
-      Number(entry._sum.creditUsed ?? 0),
-    ]),
-  );
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const startTime = Date.now();
 
-  const companiesWithCredit = companies.map((company) => {
-      const creditLimitNum = Number(company.creditLimit ?? 0);
-      const usedCreditNum = creditMap.get(company.id) ?? 0;
-      const pendingCreditNum = 0;
-      const availableCreditNum = creditLimitNum - usedCreditNum;
+  try {
+    const url         = new URL(request.url);
+    const page        = parseInt(url.searchParams.get("page")   || "1", 10);
+    const searchQuery = url.searchParams.get("search") || "";
+    const limit       = 10;
+    const skip        = (page - 1) * limit;
+
+    // shop is FREE from URL — Shopify always appends it to admin routes
+    const shopFromUrl = url.searchParams.get("shop") || "";
+
+    // ── FAST PATH — check cache before auth + all DB calls ──
+    // authenticate.admin() is a fast JWT check, but the 4 DB queries are slow
+    if (shopFromUrl) {
+      const cacheKey = `admin-companies-${shopFromUrl}-${page}-${searchQuery}`;
+      const cached   = cache.get(cacheKey);
+
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        console.log(`⚡ Cache HIT (skipped all DB calls) → ${cacheKey}`);
+        console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+        return Response.json(cached.data);
+      }
+    }
+
+    // ── SLOW PATH — run auth + all DB queries ───────────────
+    console.log("🐢 Cache MISS → running auth + DB");
+
+    const { session } = await authenticate.admin(request);
+    const shop        = session.shop; // authoritative shop from session
+
+    const cacheKey = `admin-companies-${shop}-${page}-${searchQuery}`;
+
+    const store = await getStoreForShop(shop);
+
+    if (!store) {
+      return Response.json(
+        {
+          companies: [] as LoaderCompany[],
+          storeMissing: true,
+          totalCount: 0,
+          currentPage: 1,
+          totalPages: 0,
+          searchQuery: "",
+        },
+        { status: 404 },
+      );
+    }
+
+    // Build where clause with search
+    const whereClause = {
+      shopId: store.id,
+      ...(searchQuery && {
+        OR: [
+          { name:             { contains: searchQuery, mode: "insensitive" as const } },
+          { shopifyCompanyId: { contains: searchQuery, mode: "insensitive" as const } },
+          { contactName:      { contains: searchQuery, mode: "insensitive" as const } },
+          { contactEmail:     { contains: searchQuery, mode: "insensitive" as const } },
+        ],
+      }),
+    };
+
+    // Run count + companies in parallel
+    const [totalCount, companies] = await Promise.all([
+      prisma.companyAccount.count({ where: whereClause }),
+      prisma.companyAccount.findMany({
+        where: whereClause,
+        orderBy: { updatedAt: "desc" },
+        skip,
+        take: limit,
+        include: { _count: { select: { users: true } } },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    const orderCreditByCompany =
+      companies.length === 0
+        ? []
+        : await prisma.b2BOrder.groupBy({
+            by: ["companyId"],
+            where: {
+              companyId: { in: companies.map((c) => c.id) },
+              paymentStatus: { in: ["pending", "partial"] },
+              orderStatus: { notIn: ["cancelled"] },
+            },
+            _sum: { creditUsed: true },
+          });
+
+    const creditMap = new Map(
+      orderCreditByCompany.map((entry) => [
+        entry.companyId,
+        Number(entry._sum.creditUsed ?? 0),
+      ]),
+    );
+
+    const companiesWithCredit = companies.map((company) => {
+      const creditLimitNum      = Number(company.creditLimit ?? 0);
+      const usedCreditNum       = creditMap.get(company.id) ?? 0;
+      const availableCreditNum  = creditLimitNum - usedCreditNum;
       const creditUsagePercentage =
         creditLimitNum > 0
           ? Math.round((usedCreditNum / creditLimitNum) * 100)
@@ -145,33 +226,53 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       return {
         ...company,
-        contactName: company.contactName || "-",
-        creditLimit: company.creditLimit.toString(),
-        usedCredit: usedCreditNum.toString(),
-        pendingCredit: pendingCreditNum.toString(),
-        availableCredit: availableCreditNum.toString(),
+        contactName:          company.contactName || "-",
+        creditLimit:          company.creditLimit.toString(),
+        usedCredit:           usedCreditNum.toString(),
+        pendingCredit:        "0",
+        availableCredit:      availableCreditNum.toString(),
         creditUsagePercentage,
-        updatedAt: company.updatedAt.toISOString(),
-        userCount: company._count.users,
-        isDisable: company.isDisable || false,
+        updatedAt:            company.updatedAt.toISOString(),
+        userCount:            company._count.users,
+        isDisable:            company.isDisable || false,
       } satisfies LoaderCompany;
-    },
-  );
+    });
 
-  return Response.json({
-    companies: companiesWithCredit,
-    storeMissing: false,
-    totalCount,
-    currentPage: page,
-    totalPages,
-    searchQuery,
-  });
+    const result = {
+      companies: companiesWithCredit,
+      storeMissing: false,
+      totalCount,
+      currentPage: page,
+      totalPages,
+      searchQuery,
+    };
+
+    // ✅ Store in cache
+    cache.set(cacheKey, { data: result, timestamp: Date.now() });
+    console.log(`✅ Cache SET → ${cacheKey}`);
+    console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+
+    return Response.json(result);
+  } catch (error) {
+    console.error("❌ Admin companies loader error:", error);
+    return Response.json(
+      { companies: [], storeMissing: false, totalCount: 0, currentPage: 1, totalPages: 0, searchQuery: "" },
+      { status: 500 },
+    );
+  }
 };
+
+// ============================================================
+// ✏️  ACTION — POST requests
+// Auth always runs on mutations — never skip for security.
+// Cache is busted after every successful mutation.
+// ============================================================
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
-  });
+  const shop = session.shop;
+
+  const store = await getStoreForShop(shop);
 
   if (!store) {
     return Response.json(
@@ -180,78 +281,66 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  const form = await parseForm(request);
+  const form   = await parseForm(request);
   const intent = (form.intent as string) || "";
 
   switch (intent) {
+    // ── SYNC COMPANIES ──────────────────────────────────────
     case "syncCompanies": {
-      const result = await syncShopifyCompanies(
-        admin,
-        store,
-        store.submissionEmail,
-      );
+      const result = await syncShopifyCompanies(admin, store, store.submissionEmail);
+
+      // Sync changes data — bust all pages
+      if (result.success) clearAdminCompaniesCache(shop);
+
       return Response.json({
         intent,
-        success: result.success,
-        message: result.message,
+        success:     result.success,
+        message:     result.message,
         syncedCount: result.syncedCount,
-        errors: result.errors,
+        errors:      result.errors,
       });
     }
+
+    // ── UPDATE CREDIT ───────────────────────────────────────
     case "updateCredit": {
       const formData = new FormData();
-      formData.append("id", (form.id as string) || "");
+      formData.append("id",          (form.id as string)          || "");
       formData.append("creditLimit", (form.creditLimit as string) || "0");
 
       const result = await updateCredit(formData, admin);
+
+      // Credit change affects company list display — bust cache
+      clearAdminCompaniesCache(shop);
+
       return Response.json(result);
     }
 
+    // ── CREATE COMPANY ──────────────────────────────────────
     case "createCompany": {
-      const name = (form.name as string)?.trim();
-      const shopifyCompanyId =
-        (form.shopifyCompanyId as string)?.trim() || null;
-      const contactName = (form.contactName as string)?.trim() || null;
-      const contactEmail = (form.contactEmail as string)?.trim() || null;
-      const credit = parseCredit((form.creditLimit as string) || undefined);
+      const name            = (form.name as string)?.trim();
+      const shopifyCompanyId = (form.shopifyCompanyId as string)?.trim() || null;
+      const contactName     = (form.contactName as string)?.trim()  || null;
+      const contactEmail    = (form.contactEmail as string)?.trim() || null;
+      const credit          = parseCredit((form.creditLimit as string) || undefined);
 
       if (!name) {
         return Response.json({
-          intent,
-          success: false,
-          errors: ["Company name is required"],
+          intent, success: false, errors: ["Company name is required"],
         });
       }
       if (!credit) {
         return Response.json({
-          intent,
-          success: false,
-          errors: ["Credit must be a number"],
+          intent, success: false, errors: ["Credit must be a number"],
         });
       }
 
       if (shopifyCompanyId) {
         await prisma.companyAccount.upsert({
           where: {
-            shopId_shopifyCompanyId: {
-              shopId: store.id,
-              shopifyCompanyId,
-            },
+            shopId_shopifyCompanyId: { shopId: store.id, shopifyCompanyId },
           },
-          update: {
-            name,
-            contactName,
-            contactEmail,
-            creditLimit: credit,
-          },
-          create: {
-            shopId: store.id,
-            shopifyCompanyId,
-            name,
-            contactName,
-            contactEmail,
-            creditLimit: credit,
-          },
+          update:  { name, contactName, contactEmail, creditLimit: credit },
+          create:  { shopId: store.id, shopifyCompanyId, name, contactName, contactEmail, creditLimit: credit },
         });
       } else {
         await prisma.companyAccount.create({
@@ -266,18 +355,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
+      // New company added — bust cache so it shows up immediately
+      clearAdminCompaniesCache(shop);
+
       return Response.json({ intent, success: true, message: "Company saved" });
     }
 
     default:
-      return Response.json({
-        intent,
-        success: false,
-        errors: ["Unknown intent"],
-      });
+      return Response.json({ intent, success: false, errors: ["Unknown intent"] });
   }
 };
-
 export default function CompaniesPage() {
   const {
     companies,

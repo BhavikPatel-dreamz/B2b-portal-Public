@@ -751,15 +751,43 @@ function resolveStoredPaletteKey(field: StoredField) {
 
 const STORED_DEFAULT: StoredConfig = serializeConfig(DEFAULT_CONFIG);
 
+// ============================================================
+// 🗂️  FORM CONFIG CACHE SETUP
+// ============================================================
+
+declare global {
+  var __formConfigCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+}
+
+const formConfigCache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__formConfigCache ??
+  (globalThis.__formConfigCache = new Map());
+
+const FORM_CONFIG_TTL = 10 * 60 * 1000; // 10 min
+
+// ============================================================
+// 🧹  CACHE HELPER
+// ============================================================
+
+export const clearFormConfigCache = (shop: string) => {
+  const key = `formconfig-${shop}`;
+  formConfigCache.delete(key);
+  console.log("🧹 Form config cache cleared for:", key);
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // LOADER
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const startTime = Date.now();
   const { session, admin } = await authenticate.admin(request);
+  const shop = session.shop;
 
   const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
+    where: { shopDomain: shop },
   });
 
   if (!store) {
@@ -772,9 +800,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  const formFieldConfig = await prisma.formFieldConfig.findUnique({
-    where: { shopId: store.id },
-  });
+  // ── CACHE CHECK ──────────────────────────────────────────
+  const cacheKey = `formconfig-${shop}`;
+  const cached = formConfigCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < FORM_CONFIG_TTL) {
+    console.log(`⚡ Form config cache HIT → ${cacheKey}`);
+    console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Form config cache MISS → querying DB + Shopify");
+
+  // ── SLOW PATH ─────────────────────────────────────────────
+  // Run DB + Shopify in parallel — they don't depend on each other
+  const [formFieldConfig, metafieldDefinitions] = await Promise.all([
+    prisma.formFieldConfig.findUnique({ where: { shopId: store.id } }),
+    fetchMetafieldDefinitions(admin),
+  ]);
 
   let config = DEFAULT_CONFIG;
 
@@ -798,15 +841,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       config = DEFAULT_CONFIG;
     }
   }
-  const metafieldDefinitions = await fetchMetafieldDefinitions(admin);
 
-  return Response.json({
+  const result = {
     config,
     storeMissing: false,
-    shopName: normalizeShopName(session.shop.split(".")[0]),
+    shopName: normalizeShopName(shop.split(".")[0]),
     savedAt: formFieldConfig?.updatedAt?.toISOString() ?? null,
     metafieldDefinitions,
-  });
+  };
+
+  // ✅ Store in cache
+  formConfigCache.set(cacheKey, { data: result, timestamp: Date.now() })
+  console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+
+  return Response.json(result);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -834,8 +882,9 @@ function mapToRegistrationData(formData: Record<string, any>) {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const shop = session.shop;                          // ← add this line
 
-  const store = await prisma.store.findUnique({ where: { shopDomain: session.shop } });
+  const store = await prisma.store.findUnique({ where: { shopDomain: shop } });
 
   if (!store) {
     return Response.json({ success: false, intent: "unknown", error: "Store not found" }, { status: 404 });
@@ -854,6 +903,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       update: { fields: toStore as any },
       create: { shopId: store.id, fields: toStore as any },
     });
+
+    // ✅ Config changed — bust cache so next load reflects new fields
+    clearFormConfigCache(shop);
+
     return Response.json({
       success: true, intent,
       savedAt: saved.updatedAt.toISOString(),
@@ -868,10 +921,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       update: { fields: STORED_DEFAULT as any },
       create: { shopId: store.id, fields: STORED_DEFAULT as any },
     });
+
+    // ✅ Config reset — bust cache
+    clearFormConfigCache(shop);
+
     return Response.json({ success: true, intent, config: DEFAULT_CONFIG, savedAt: saved.updatedAt.toISOString() });
   }
 
   if (intent === "submitRegistration") {
+    // No DB write to formFieldConfig — no bust needed
     const formData = (body as any).data;
     const mapped = mapToRegistrationData(formData);
     return Response.json({ success: true, intent, mappedData: mapped });

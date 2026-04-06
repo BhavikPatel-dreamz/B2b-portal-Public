@@ -20,95 +20,123 @@ type LoaderData = {
   pendingCreditAmount?: number;
 };
 
+// ============================================================
+// 🗂️  DASHBOARD STATS CACHE SETUP
+// ============================================================
+
+declare global {
+  var __dashboardStatsCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+}
+
+const dashboardStatsCache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__dashboardStatsCache ??
+  (globalThis.__dashboardStatsCache = new Map());
+
+const DASHBOARD_STATS_TTL = 3 * 60 * 1000; // 3 min
+
+// ============================================================
+// 🧹  CACHE HELPER
+// ============================================================
+
+export const clearDashboardStatsCache = (shop: string) => {
+  const key = `dashboard-stats-${shop}`;
+  dashboardStatsCache.delete(key);
+  console.log("🧹 Dashboard stats cache cleared for:", key);
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const startTime = Date.now();
+
   try {
-    // Try to authenticate the session
     const { session } = await authenticate.admin(request);
 
-    // Get the store based on the session
     const store = await prisma.store.findUnique({
       where: { shopDomain: session.shop },
     });
-    console.log(store, "store in dashboard");
-    // If no store found, return unauthenticated state
+
     if (!store?.shopDomain) {
-    return Response.json({
-       message: "Store not found",
-      });
+      return Response.json({ message: "Store not found" });
     }
 
-    // Fetch all the statistics
-    const totalOrders = await prisma.b2BOrder.groupBy({
-      by: ["shopifyOrderId"],
-      where: {
-        orderStatus: {
-          not: "cancelled",
-        },
-        shopId: store.id,
-         shopifyOrderId: { startsWith: "gid://shopify/Order/" }
-      },
-      _count: {
-        shopifyOrderId: true,
-      },
-    });
+    // ── CACHE CHECK ──────────────────────────────────────────
+    const cacheKey = `dashboard-stats-${session.shop}`;
+    const cached = dashboardStatsCache.get(cacheKey);
 
+    if (cached && Date.now() - cached.timestamp < DASHBOARD_STATS_TTL) {
+      console.log(`⚡ Dashboard stats cache HIT → ${cacheKey}`);
+      console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+      return Response.json(cached.data);
+    }
+
+    console.log("🐢 Dashboard stats cache MISS → querying DB");
+
+    // ── SLOW PATH — run all queries in parallel ───────────────
     const [
+      totalOrders,
       totalCompanies,
       pendingRegistrations,
       approvedRegistrations,
       rejectedRegistrations,
       totalUsers,
+      creditStats,
+      usedCreditStats,
     ] = await Promise.all([
+      prisma.b2BOrder.groupBy({
+        by: ["shopifyOrderId"],
+        where: {
+          orderStatus: { not: "cancelled" },
+          shopId: store.id,
+          shopifyOrderId: { startsWith: "gid://shopify/Order/" },
+        },
+        _count: { shopifyOrderId: true },
+      }),
       countCompanies(store.id),
       countRegistrations(store.id, "PENDING"),
       countRegistrations(store.id, "APPROVED"),
       countRegistrations(store.id, "REJECTED"),
       prisma.user.count({ where: { shopId: store.id } }),
+      prisma.companyAccount.aggregate({
+        where: { shopId: store.id },
+        _sum: { creditLimit: true },
+      }),
+      prisma.b2BOrder.aggregate({
+        where: {
+          shopId: store.id,
+          paymentStatus: { in: ["pending", "partial"] },
+          orderStatus: { notIn: ["cancelled"] },
+        },
+        _sum: { remainingBalance: true },
+      }),
     ]);
 
-    // Fetch credit statistics
-    const creditStats = await prisma.companyAccount.aggregate({
-      where: { shopId: store.id },
-      _sum: {
-        creditLimit: true,
-      },
-    });
-
-    // Calculate total used credit from all unpaid orders
-    const usedCreditStats = await prisma.b2BOrder.aggregate({
-      where: {
-        shopId: store.id,
-        paymentStatus: { in: ["pending", "partial"] },
-        orderStatus: { notIn: ["cancelled"] },
-      },
-      _sum: {
-        remainingBalance: true,
-      },
-    });
-
-    const pendingCreditAmount = 0;
     const totalCreditAllowed = Number(creditStats._sum.creditLimit || 0);
-    const totalCreditUsed = Number(usedCreditStats._sum.remainingBalance || 0);
-    const availableCredit = totalCreditAllowed - totalCreditUsed;
+    const totalCreditUsed    = Number(usedCreditStats._sum.remainingBalance || 0);
 
-    return Response.json({
+    const result = {
       totalCompanies,
       pendingRegistrations,
       approvedRegistrations,
       rejectedRegistrations,
       totalUsers,
-      totalOrders: totalOrders.length,
+      totalOrders:       totalOrders.length,
       totalCreditAllowed,
       totalCreditUsed,
-      availableCredit,
-      pendingCreditAmount,
-    });
+      availableCredit:   totalCreditAllowed - totalCreditUsed,
+      pendingCreditAmount: 0,
+    };
+
+    // ✅ Store in cache
+    dashboardStatsCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    console.log(`✅ Dashboard stats cache SET → ${cacheKey}`);
+    console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+
+    return Response.json(result);
+
   } catch (error) {
-    // If authentication fails, return unauthenticated state
     console.error("Authentication error:", error);
-    return Response.json({
-      message: "Authentication failed",
-    });
+    return Response.json({ message: "Authentication failed" });
   }
 };
 
