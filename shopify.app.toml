@@ -2,7 +2,7 @@
 
 client_id = "7b1f6278dc87bae5f334213333c48522"
 name = "b2b-portal-public"
-application_url = "https://b2b-portal-public.vercel.app"
+application_url = "https://smartb2b.dynamicdreamz.com"
 embedded = true
 
 [build]
@@ -64,9 +64,9 @@ api_version = "2026-01"
 scopes = "customer_read_customers,read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,write_companies,write_customers,write_draft_orders,write_locations,write_orders,write_products,write_validations,write_content,write_online_store_navigation,read_shipping"
 
 [auth]
-redirect_urls = [ "https://b2b-portal-public.vercel.app/api/auth" ]
+redirect_urls = [ "https://smartb2b.dynamicdreamz.com/api/auth" ]
 
 [app_proxy]
-url = "https://b2b-portal-public.vercel.app"
+url = "https://smartb2b.dynamicdreamz.com"
 subpath = "b2b-portal-public"
 prefix = "apps"

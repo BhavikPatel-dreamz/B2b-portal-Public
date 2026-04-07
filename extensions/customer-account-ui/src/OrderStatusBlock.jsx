@@ -1,3 +1,4 @@
+// @ts-nocheck
 // use-strict
 import "@shopify/ui-extensions/preact";
 import { render } from "preact";
@@ -6,9 +7,10 @@ import { useEffect, useState } from "preact/hooks";
 export default async () => {
   render(<Extension />, document.body);
 };
-const API_URL = "https://b2b-portal-public.vercel.app";
+const API_URL = "https://smartb2b.dynamicdreamz.com";
 // "https://dd-79.dynamicdreamz.com"
-// "https://b2b-portal-public.vercel.app";
+//"https://b2b-portal-public.vercel.app"
+// "https://smartb2b.dynamicdreamz.com";
 
 const SECTION_LABELS = {
   company: "Company information",
@@ -65,6 +67,7 @@ function Extension() {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [accountCheckComplete, setAccountCheckComplete] = useState(false);
   const [countriesData, setCountriesData] = useState([]);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const getCustomerMetafieldQuery = {
     query: `query {
@@ -240,6 +243,10 @@ function Extension() {
       }
       return updated;
     });
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      return { ...prev, [key]: "" };
+    });
   };
 
   const findPairedKey = (sourceKey, findWord, replaceWord) => {
@@ -292,7 +299,7 @@ function Extension() {
       .toUpperCase();
 
   const getPhoneMetaForCountry = (countryValue) =>
-    
+
     COUNTRY_PHONE_META[normalizeCountryCode(countryValue)] || {
       dialCode: "+91",
       flagEmoji: "🇮🇳",
@@ -427,6 +434,74 @@ function Extension() {
     if (alignment === "right") return "end";
     return "start";
   };
+
+  const shouldSkipFieldValidation = (field) =>
+    field?.key?.startsWith("bill") &&
+    field?.key !== "billSameAsShip" &&
+    formData.billSameAsShip === true;
+
+  const getAllFormFields = (items = []) => {
+    const flattened = [];
+    items.forEach((field) => {
+      if (field?.type === "group") {
+        flattened.push(...getAllFormFields(field.fields || []));
+        return;
+      }
+      flattened.push(field);
+    });
+    return flattened;
+  };
+
+  const isEmptyFieldValue = (value, field) => {
+    if (field?.type === "checkbox") return value !== true;
+    if (field?.type === "phone") {
+      const countryKey = findPairedKey(field.key, "phone", "country");
+      const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
+      const { dialCode } = getPhoneMetaForCountry(selectedCountry);
+      return isOnlyDialCode(value, dialCode);
+    }
+    return String(value ?? "").trim() === "";
+  };
+
+  const validateField = (field, value) => {
+    if (!field || shouldSkipFieldValidation(field)) return "";
+    if (!field.required) return "";
+
+    if (isEmptyFieldValue(value, field)) {
+      return `${field.label || "This field"} is required.`;
+    }
+
+    if (field.type === "email") {
+      const emailValue = String(value || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+        return "Enter a valid email address.";
+      }
+    }
+
+    return "";
+  };
+
+  const validateForm = () => {
+    const nextErrors = {};
+    getAllFormFields(fields).forEach((field) => {
+      const message = validateField(field, formData[field.key]);
+      if (message) nextErrors[field.key] = message;
+    });
+    setFieldErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const getFieldLabel = (field, fallbackLabel = field?.label) =>
+    field?.required ? `${fallbackLabel} *` : fallbackLabel;
+
+  const renderFieldWithMessage = (field, control) => (
+    <s-stack direction="block" gap="tight">
+      {control}
+      {fieldErrors[field.key] && (
+        <s-text tone="critical">{fieldErrors[field.key]}</s-text>
+      )}
+    </s-stack>
+  );
 
   // =============================================
   // ✅ AUTO WIDTH DETECTION
