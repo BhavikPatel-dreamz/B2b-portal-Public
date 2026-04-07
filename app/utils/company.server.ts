@@ -63,6 +63,8 @@ type ShopifyCustomerNode = {
   }> | null;
 };
 
+const EMPTY_ADDRESS_JSON: Prisma.JsonObject = {};
+
 /**
  * Sync Shopify B2B companies to local database
  * Fetches all companies from Shopify, imports contact data, and sends notifications
@@ -199,7 +201,7 @@ export const syncShopifyCompanies = async (
             },
           });
 
-          await prisma.registrationSubmission.upsert({
+          const registrationSubmission = await prisma.registrationSubmission.upsert({
             where: {
               shopId_email: { shopId: store.id, email: mainContact.email },
             },
@@ -211,7 +213,7 @@ export const syncShopifyCompanies = async (
               shopifyCustomerId,
               status: "APPROVED",
               shopId: store.id,
-
+              workflowCompleted: true,
             },
             create: {
               email: mainContact.email,
@@ -222,11 +224,12 @@ export const syncShopifyCompanies = async (
               status: "APPROVED",
               shopId: store.id,
               contactTitle: "",
-              shipping: "",
-              billing: "",
+              shipping: EMPTY_ADDRESS_JSON,
+              billing: EMPTY_ADDRESS_JSON,
               workflowCompleted: true,
             },
           });
+          
 
           await syncShopifyUsers(admin, store, upsertedCompany.id);
           await syncShopifyOrders(admin, store, upsertedCompany.id);
