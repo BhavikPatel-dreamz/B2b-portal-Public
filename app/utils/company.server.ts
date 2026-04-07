@@ -3,19 +3,79 @@ import prisma from "../db.server";
 import { sendCompanyWelcomeEmail } from "../services/notification.server";
 import { Decimal } from "@prisma/client/runtime/library";
 
+type ShopifyAdminClient = {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, unknown> },
+  ) => Promise<{
+    json: () => Promise<any>;
+  }>;
+};
+
+type StoreRef = {
+  id: string;
+};
+
+type ShopifyCompanyNode = {
+  id: string;
+  name: string;
+  externalId?: string | null;
+  mainContact?: {
+    id: string;
+    customer?: {
+      id: string;
+      email?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      phone?: string | null;
+    } | null;
+  } | null;
+  locations?: {
+    nodes: Array<{
+      id: string;
+      name: string;
+    }>;
+  } | null;
+};
+
+type ShopifyCustomerNode = {
+  id: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  companyContactProfiles?: Array<{
+    id: string;
+    title?: string | null;
+    company?: {
+      id: string;
+      name?: string | null;
+      mainContact?: {
+        id: string;
+        customer?: {
+          id: string;
+        } | null;
+      } | null;
+    } | null;
+    roleAssignments?: {
+      edges: ShopifyRoleAssignment[];
+    } | null;
+  }> | null;
+};
+
 /**
  * Sync Shopify B2B companies to local database
  * Fetches all companies from Shopify, imports contact data, and sends notifications
  * SERVER ONLY - Uses Prisma and admin context
  */
 export const syncShopifyCompanies = async (
-  admin: string,
-  store: string,
+  admin: ShopifyAdminClient,
+  store: StoreRef,
   submissionEmail: string | null,
 ) => {
   try {
     // Step 1: Fetch all Shopify B2B companies with pagination
-    let allCompanies: [] = [];
+    let allCompanies: ShopifyCompanyNode[] = [];
     let hasNextPage = true;
     let cursor: string | null = null;
 
@@ -141,33 +201,34 @@ export const syncShopifyCompanies = async (
 
           await prisma.registrationSubmission.upsert({
             where: {
-              shopId_email: { shopId: store.id, email: customer.email },
+              shopId_email: { shopId: store.id, email: mainContact.email },
             },
             update: {
-              email: mainContact.email, 
+              email: mainContact.email,
               companyName: upsertedCompany.name,
-              contactName:
-                `${mainContact.firstName} ${mainContact.lastName || upsertedCompany.contactName}`.trim(),
-              phone: "",
+              firstName: mainContact.firstName || "",
+              lastName: mainContact.lastName || "",
               shopifyCustomerId,
               status: "APPROVED",
-              businessType: "",
               shopId: store.id,
+
             },
             create: {
               email: mainContact.email,
               companyName: upsertedCompany.name,
-              contactName:
-                `${mainContact.firstName} ${mainContact.lastName || upsertedCompany.contactName}`.trim(),
-              phone: "",
+              firstName: mainContact.firstName || "",
+              lastName: mainContact.lastName || "",
               shopifyCustomerId,
               status: "APPROVED",
-              businessType: "",
               shopId: store.id,
+              contactTitle: "",
+              shipping: "",
+              billing: "",
+              workflowCompleted: true,
             },
           });
 
-           await syncShopifyUsers(admin, store, upsertedCompany.id);
+          await syncShopifyUsers(admin, store, upsertedCompany.id);
           await syncShopifyOrders(admin, store, upsertedCompany.id);
           // Send welcome email if email is configured
           if (
@@ -286,13 +347,13 @@ interface ShopifyRoleAssignment {
  * SERVER ONLY - Uses Prisma and admin context
  */
 export const syncShopifyUsers = async (
-  admin: string,
-  store: string,
+  admin: ShopifyAdminClient,
+  store: StoreRef,
   companyId?: string,
 ) => {
   try {
     // Fetch all customers with B2B company contact profiles
-    let allCustomers: [] = [];
+    let allCustomers: ShopifyCustomerNode[] = [];
     let hasNextPage = true;
     let cursor: string | null = null;
 
@@ -443,7 +504,7 @@ export const syncShopifyUsers = async (
                 lastName: customer.lastName || "",
                 shopifyCustomerId: customerGid,
                 companyId: localCompany.id,
-                companyRole:userRole == "STORE_ADMIN" ? "admin" : "member",
+                companyRole: userRole == "STORE_ADMIN" ? "admin" : "member",
                 shopId: store.id,
                 status: "APPROVED",
                 isActive: true,
@@ -459,11 +520,10 @@ export const syncShopifyUsers = async (
                 isActive: true,
                 shopId: store.id,
                 companyId: localCompany.id,
-                companyRole:userRole == "STORE_ADMIN" ? "admin" : "member",
+                companyRole: userRole == "STORE_ADMIN" ? "admin" : "member",
                 shopifyCustomerId: customerGid,
               },
             });
-
 
             syncedCount++;
           } catch (profileError) {
@@ -504,8 +564,8 @@ export const syncShopifyUsers = async (
 };
 
 export const syncShopifyOrders = async (
-  admin: string,
-  store: { id: string },
+  admin: ShopifyAdminClient,
+  store: StoreRef,
   companyId?: string,
 ) => {
   try {
@@ -603,10 +663,12 @@ export const syncShopifyOrders = async (
       try {
         if (!order?.id) continue;
 
-        const totalAmount = order.totalPriceSet?.shopMoney?.amount ?? "0";
+        const totalAmount = new Decimal(
+          order.totalPriceSet?.shopMoney?.amount ?? "0",
+        );
 
         // Resolve the local user from the order's customer email
-        let createdByUserId: string | null = null;
+        let createdByUserId: string | undefined;
         if (order.customer?.email) {
           const localUser = await prisma.user.findUnique({
             where: {
@@ -614,7 +676,25 @@ export const syncShopifyOrders = async (
             },
             select: { id: true },
           });
-          createdByUserId = localUser?.id ?? null;
+          createdByUserId = localUser?.id ?? undefined;
+        }
+
+        if (!createdByUserId) {
+          const fallbackUser = await prisma.user.findFirst({
+            where: {
+              shopId: store.id,
+              companyId: localCompanyId,
+            },
+            select: { id: true },
+          });
+          createdByUserId = fallbackUser?.id;
+        }
+
+        if (!createdByUserId) {
+          errors.push(
+            `Skipped order ${order.name ?? order.id}: no local company user found`,
+          );
+          continue;
         }
 
         // Map Shopify statuses → your local enums
