@@ -7,9 +7,14 @@ import {
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import type { Session } from "@shopify/shopify-api";
+import { Prisma } from "@prisma/client";
 import prisma from "./db.server";
 import { upsertStore } from "./services/store.server";
 import { registerCartValidationFunction, debugListAllShopifyFunctions } from "./services/cartValidationRegistration.server";
+import { syncShopifyCompanies } from "./utils/company.server";
+  const { DEFAULT_CONFIG, serializeConfig } = await import(
+          "./routes/app.regitration-form"
+        );
 
 class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> {
   // Upsert store record whenever Shopify saves a session (install or token refresh)
@@ -47,8 +52,40 @@ const shopify = shopifyApp({
   },
   // Hook to run after app installation/authentication
   hooks: {
-    afterAuth: async ({ admin }) => {
+    afterAuth: async ({ admin, session }) => {
       console.log("🔧 Running post-installation setup...");
+
+      let store;
+
+      try {
+        store = await upsertStore({
+          shopDomain: session.shop,
+          accessToken: session.accessToken ?? "",
+          scope: session.scope,
+        });
+
+      
+        const defaultStoredConfig = serializeConfig(DEFAULT_CONFIG);
+
+        await prisma.formFieldConfig.upsert({
+          where: { shopId: store.id },
+          update: {},
+          create: {
+            shopId: store.id,
+            fields: defaultStoredConfig as unknown as Prisma.JsonArray,
+          },
+        });
+
+        await syncShopifyCompanies(
+          admin,
+          store,
+          store.submissionEmail || "",
+        );
+
+        console.log(`✅ Store bootstrap completed for ${session.shop}`);
+      } catch (error) {
+        console.error("❌ Error during store bootstrap:", error);
+      }
 
       // First, debug what functions are available
       try {
@@ -119,5 +156,3 @@ export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
 export const sessionStorage = shopify.sessionStorage;
-
-

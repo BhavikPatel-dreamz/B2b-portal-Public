@@ -321,6 +321,19 @@ export const DEFAULT_CONFIG: FormConfig = {
       stepIndex: 0,
       order: 4,
     },
+    {
+      id: "f06",
+      paletteKey: "email",
+      category: "general",
+      type: "email",
+      label: "Email",
+      key: "email",
+      section: "contact",
+      required: true,
+      width: "full",
+      stepIndex: 0,
+      order: 5,
+    },
 
     // ───────────── SHIPPING (FIXED ORDER) ─────────────
     {

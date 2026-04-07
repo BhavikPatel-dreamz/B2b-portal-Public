@@ -148,14 +148,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     if (userData?.shopifyCustomerId === customerGid && userData.role !== "STORE_ADMIN") {
       return json({
         message: "Your account is not a customer. Please contact the support team.",
-        redirectTo: `https://${store.shopDomain}/pages/b2b-page/dashboard`
+        redirectTo: `https://${store.shopDomain}/pages/b2b-page-dashboard`
       });
     }
  
     if (customer?.status === "APPROVED") {
       return json({
         message: "Your account is approved, but B2B access is not yet configured in Shopify.",
-        redirectTo: `https://${store.shopDomain}/pages/b2b-page/dashboard`,
+        redirectTo: `https://${store.shopDomain}/pages/b2b-page-dashboard`,
       });
     }
  
