@@ -1,26 +1,18 @@
 import {
   useLoaderData,
+  Link,
+  useFetcher,
+  useNavigate,
+  type ActionFunctionArgs,
   type HeadersFunction
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import  { useState } from "react";
+import  { useEffect, useState } from "react";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
 import { LoaderFunctionArgs } from "react-router";
+import { syncShopifyCompanies } from "app/utils/company.server";
 
-// type LoaderData = {
-//   isAuthenticated: boolean;
-//   totalCompanies?: number;
-//   pendingRegistrations?: number;
-//   approvedRegistrations?: number;
-//   rejectedRegistrations?: number;
-//   totalUsers?: number;
-//   totalOrders?: number;
-//   totalCreditAllowed?: number;
-//   totalCreditUsed?: number;
-//   availableCredit?: number;
-//   pendingCreditAmount?: number;
-// };
 
 type CompletedStepsState = {
   step1: boolean;
@@ -35,6 +27,13 @@ type Tutorial = {
   title: string;
   description: string;
   videoUrl: string;
+};
+
+type ActionResponse = {
+  intent: string;
+  success: boolean;
+  message?: string;
+  errors?: string[];
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -57,11 +56,56 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 };
 
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") || "");
+
+  if (intent !== "syncCompanies") {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Unknown intent"],
+    });
+  }
+
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: session.shop },
+    select: {
+      id: true,
+      shopDomain: true,
+      shopName: true,
+      storeOwnerName: true,
+      submissionEmail: true,
+    },
+  });
+
+  if (!store) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Store not found"],
+    }, { status: 404 });
+  }
+
+  const result = await syncShopifyCompanies(admin, store, store.submissionEmail);
+
+  return Response.json({
+    intent,
+    success: result.success,
+    message: result.message,
+    errors: result.errors,
+  });
+};
+
 export default function Welcome() {
   const { store } = useLoaderData<typeof loader>() as { 
     store: { shopDomain: string } | null 
   };
+  const syncFetcher = useFetcher<ActionResponse>();
+  const navigate = useNavigate();
   const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
+  const [showSetupEssentials, setShowSetupEssentials] = useState(true);
 
   
   const [completedSteps, setCompletedSteps] = useState({
@@ -85,6 +129,29 @@ export default function Welcome() {
 
 
   const [selectedTutorial, setSelectedTutorial] = useState<Tutorial | null>(null);
+  const setupEssentials = [
+    {
+      label: "Customize the application form",
+      actionLabel: "View form editor",
+      href: "/app/regitration-form",
+    },
+    {
+      label: "Review approval preset",
+      actionLabel: "Manage preset",
+      href: "/app/companies?tab=pending",
+    },
+    {
+      label: "Activate app extensions",
+      actionLabel: "Manage installation",
+      href: `https://admin.shopify.com/store/${getStoreName()}/themes`,
+      external: true,
+    },
+    {
+      label: "Configure email notifications",
+      actionLabel: "Manage notifications",
+      href: "/app/settings",
+    },
+  ];
   const tutorials = [
     {
       id: 1,
@@ -119,6 +186,12 @@ export default function Welcome() {
   const closeModal = () => {
     setSelectedTutorial(null);
   };
+
+  useEffect(() => {
+    if (syncFetcher.state === "idle" && syncFetcher.data?.success) {
+      navigate("/app/companies");
+    }
+  }, [navigate, syncFetcher.data, syncFetcher.state]);
 
 
   return (
@@ -237,6 +310,249 @@ export default function Welcome() {
           padding: 20px;
           margin-bottom: 16px;
           border: 1px solid #e4e5e7;
+        }
+
+        .setup-essentials-card {
+          background: white;
+          border-radius: 16px;
+          margin-bottom: 16px;
+          border: 1px solid #d8dadd;
+          overflow: hidden;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .setup-essentials-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 18px 20px;
+          border-bottom: 1px solid #eceef1;
+          background: #ffffff;
+        }
+
+        .setup-essentials-title {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 14px;
+          font-weight: 600;
+          color: #303030;
+        }
+
+        .setup-essentials-icon {
+          width: 18px;
+          height: 18px;
+          border-radius: 6px;
+          border: 1.5px solid #303030;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 11px;
+          line-height: 1;
+        }
+
+        .setup-essentials-close {
+          background: transparent;
+          border: none;
+          color: #6d7175;
+          font-size: 22px;
+          cursor: pointer;
+          line-height: 1;
+          padding: 0;
+        }
+
+        .setup-essential-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 18px 20px;
+          border-bottom: 1px solid #eceef1;
+        }
+
+        .setup-essential-row:last-of-type {
+          border-bottom: none;
+        }
+
+        .setup-essential-label {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          color: #303030;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .setup-essential-check {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          border: 2px solid #008060;
+          color: #008060;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 11px;
+          flex-shrink: 0;
+        }
+
+        .setup-essential-link {
+          color: #0a61c7;
+          font-size: 14px;
+          font-weight: 500;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+
+        .setup-essential-link:hover {
+          text-decoration: underline;
+        }
+
+        .setup-essentials-footer {
+          display: flex;
+          justify-content: flex-end;
+          padding: 18px 20px;
+          background: #ffffff;
+          border-top: 1px solid #eceef1;
+        }
+
+        .setup-essentials-button {
+          background: #ffffff;
+          border: 1px solid #c9cccf;
+          border-radius: 12px;
+          padding: 10px 16px;
+          color: #303030;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+        }
+
+        .setup-essentials-button:hover {
+          background: #f6f6f7;
+        }
+
+        .overview-card {
+          background: white;
+          border-radius: 16px;
+          border: 1px solid #d8dadd;
+          margin-bottom: 16px;
+          overflow: hidden;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .overview-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 14px 18px;
+          border-bottom: 1px solid #eceef1;
+        }
+
+        .overview-title {
+          font-size: 16px;
+          font-weight: 600;
+          color: #303030;
+        }
+
+        .overview-news {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          border: 1px solid #d8dadd;
+          border-radius: 10px;
+          padding: 8px 12px;
+          background: #fff;
+          color: #303030;
+          font-size: 14px;
+          font-weight: 500;
+          position: relative;
+        }
+
+        .overview-news-dot {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #e11d48;
+        }
+
+        .overview-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 16px;
+          padding: 16px;
+        }
+
+        .overview-item {
+          border: 1px solid #e4e5e7;
+          border-radius: 12px;
+          padding: 16px 18px;
+          min-height: 168px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+
+        .overview-item-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 15px;
+          font-weight: 600;
+          color: #303030;
+          margin-bottom: 16px;
+        }
+
+        .overview-icon {
+          width: 18px;
+          height: 18px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          color: #303030;
+          flex-shrink: 0;
+        }
+
+        .overview-count {
+          font-size: 38px;
+          line-height: 1;
+          font-weight: 600;
+          color: #4a4f55;
+          margin-top: 8px;
+        }
+
+        .overview-description {
+          color: #4a4f55;
+          font-size: 14px;
+          line-height: 1.6;
+          max-width: 420px;
+        }
+
+        .overview-button {
+          background: white;
+          border: 1px solid #c9cccf;
+          border-radius: 10px;
+          padding: 10px 14px;
+          color: #303030;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          width: fit-content;
+          text-decoration: none;
+        }
+
+        .overview-button:hover {
+          background: #f6f6f7;
+        }
+
+        .overview-button.disabled {
+          background: #f1f2f4;
+          border-color: #eceef1;
+          color: #a1a5aa;
+          cursor: not-allowed;
+          pointer-events: none;
         }
 
         .setup-guide-header {
@@ -941,6 +1257,10 @@ export default function Welcome() {
         }
 
         @media (max-width: 768px) {
+          .overview-grid {
+            grid-template-columns: 1fr;
+          }
+
           .tutorials-grid {
             grid-template-columns: 1fr;
           }
@@ -975,47 +1295,108 @@ export default function Welcome() {
           <h1>Welcome to B2B portal,</h1>
         </div>
 
-        {/* Setup Guide */}
        
-        <div className="setup-guide-card">
-          <div className="setup-guide-header">
-            <div>
-              <h2 className="setup-guide-title">Setup guide</h2>
-              <p className="setup-guide-description">
-                Use this personalized guide to set up a B2B extension on your store.
-              </p>
+
+        {showSetupEssentials ? (
+          <div className="setup-essentials-card">
+            <div className="setup-essentials-header">
+              <div className="setup-essentials-title">
+                <span className="setup-essentials-icon">✓</span>
+                <span>Setup essentials</span>
+              </div>
+              <button
+                className="setup-essentials-close"
+                onClick={() => setShowSetupEssentials(false)}
+                aria-label="Close setup essentials"
+              >
+                ×
+              </button>
             </div>
-            <button
-              className={`collapse-btn ${isGuideCollapsed ? "collapsed" : ""}`}
-              onClick={() => setIsGuideCollapsed(!isGuideCollapsed)}
-            >
-              ^
-            </button>
+
+            {setupEssentials.map((item) => (
+              <div key={item.label} className="setup-essential-row">
+                <div className="setup-essential-label">
+                  <span className="setup-essential-check">✓</span>
+                  <span>{item.label}</span>
+                </div>
+                {item.external ? (
+                  <a
+                    className="setup-essential-link"
+                    href={item.href}
+                    target="_top"
+                    rel="noreferrer"
+                  >
+                    {item.actionLabel}
+                  </a>
+                ) : (
+                  <Link className="setup-essential-link" to={item.href}>
+                    {item.actionLabel}
+                  </Link>
+                )}
+              </div>
+            ))}
+
+            <div className="setup-essentials-footer">
+              <button
+                className="setup-essentials-button"
+                onClick={() => setShowSetupEssentials(false)}
+              >
+                Finish and close
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+         <div className="overview-card">
+          <div className="overview-header">
+            <div className="overview-title">Welcome, Dynamic!</div>
+            <div className="overview-news">
+              <span style={{ fontSize: "16px", lineHeight: 1 }}>🔔</span>
+              <span>App news and updates</span>
+              <span className="overview-news-dot"></span>
+            </div>
           </div>
 
-          {!isGuideCollapsed && (
-            <>
-              {/* Step 2 */}
-              <div className="setup-step">
-                <div 
-                  className={`step-radio ${completedSteps.step2 ? 'checked' : ''}`}
-                  onClick={() => toggleStep('step2')}
-                >
-                  <div className="radio-circle">
-                    {completedSteps.step2 && <div className="radio-dot"></div>}
-                  </div>
+          <div className="overview-grid">
+            <div className="overview-item">
+              <div>
+                <div className="overview-item-header">
+                  <span className="overview-icon">⌂</span>
+                  <span>Pending applications</span>
                 </div>
-                <div className="step-content">
-                  <button
-                    className="create-form-btn"
-                    onClick={() => window.open(`https://admin.shopify.com/store/${getStoreName()}/themes`, "_top")}
-                  >
-                    Enable theme app extensions
-                  </button>
-                </div>
+                <div className="overview-count">0</div>
               </div>
-            </>
-          )}
+              <a
+                className="overview-button disabled"
+                href="/app/companies?tab=pending"
+              >
+                Review applications
+              </a>
+            </div>
+
+            <div className="overview-item">
+              <div>
+                <div className="overview-item-header">
+                  <span className="overview-icon">⇩</span>
+                  <span>Company import</span>
+                </div>
+                <p className="overview-description">
+                  Use the app to bulk create or update companies, locations, and
+                  contacts.
+                </p>
+              </div>
+              <syncFetcher.Form method="post">
+                <input type="hidden" name="intent" value="syncCompanies" />
+                <button
+                  type="submit"
+                  className="overview-button"
+                  disabled={syncFetcher.state !== "idle"}
+                >
+                  {syncFetcher.state !== "idle" ? "Syncing..." : "View import tool"}
+                </button>
+              </syncFetcher.Form>
+            </div>
+          </div>
         </div>
 
         {/* Tutorials */}

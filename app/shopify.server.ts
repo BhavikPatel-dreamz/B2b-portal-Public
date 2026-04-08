@@ -11,7 +11,6 @@ import { Prisma } from "@prisma/client";
 import prisma from "./db.server";
 import { upsertStore } from "./services/store.server";
 import { registerCartValidationFunction, debugListAllShopifyFunctions } from "./services/cartValidationRegistration.server";
-import { syncShopifyCompanies } from "./utils/company.server";
 import {
   DEFAULT_CONFIG,
   serializeConfig,
@@ -76,12 +75,6 @@ const shopify = shopifyApp({
             fields: defaultStoredConfig as unknown as Prisma.JsonArray,
           },
         });
-
-        await syncShopifyCompanies(
-          admin,
-          store,
-          store.submissionEmail || "",
-        );
 
         console.log(`✅ Store bootstrap completed for ${session.shop}`);
       } catch (error) {
