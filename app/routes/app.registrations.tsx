@@ -22,7 +22,10 @@ import {
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { sendCompanyAssignmentEmail } from "app/utils/email";
+import {
+  sendCompanyAssignmentEmail,
+  sendRegistrationRejectedEmail,
+} from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
 import EditDetailsModal, {
   type CountryOption,
@@ -38,7 +41,7 @@ import {
   type StoredConfig,
 } from "../utils/form-config.shared";
 
-interface RegistrationSubmission {
+export interface RegistrationSubmission {
   paymentTermsTemplateId: string;
   id: string;
   companyName: string;
@@ -62,7 +65,7 @@ interface RegistrationSubmission {
   createdAt: string;
 }
 
-interface ActionJson {
+export interface ActionJson {
   existsInDb: boolean;
   intent: string;
   success: boolean;
@@ -2743,21 +2746,61 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        await prisma.registrationSubmission.update({
+        const registrationUpdateData: any = {
+          status: "REJECTED",
+          reviewedAt: new Date(),
+        };
+
+        if (note !== null) {
+          registrationUpdateData.reviewNotes = note;
+        }
+
+        const registration = await prisma.registrationSubmission.update({
           where: { id: registrationId },
-          data: { status: "REJECTED" },
+          data: registrationUpdateData,
         });
 
-        await prisma.user.update({
-          where: { id: userId || "" },
-          data: {
-            status: "REJECTED",
-            isActive: false,
-            companyId: null,
-            userCreditLimit: null,
-          },
-        });
+        if (userId) {
+          await prisma.user.update({
+            where: { id: userId },
+            data: {
+              status: "REJECTED",
+              isActive: false,
+              companyId: null,
+              userCreditLimit: null,
+            },
+          });
+        } else {
+          await prisma.user.updateMany({
+            where: {
+              shopId: store.id,
+              OR: [
+                { email: registration.email },
+                registration.shopifyCustomerId
+                  ? { shopifyCustomerId: registration.shopifyCustomerId }
+                  : { email: registration.email },
+              ],
+            },
+            data: {
+              status: "REJECTED",
+              isActive: false,
+              companyId: null,
+              userCreditLimit: null,
+            },
+          });
+        }
          clearRegistrationSubmissionsCache(store.id);
+
+        await sendRegistrationRejectedEmail({
+          shopName: store.shopName || "B2B Portal",
+          shopDomain: store.shopDomain || "shop-domain.myshopify.com",
+          storeOwnerName: store.storeOwnerName || "Store Owner",
+          email: registration.email,
+          companyName: registration.companyName,
+          contactName:
+            `${registration.firstName || ""} ${registration.lastName || ""}`.trim(),
+          note,
+        });
 
         return Response.json({
           intent,
@@ -5251,36 +5294,44 @@ function ConfigureCompanyUI({
   );
 }
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function RegistrationApprovals() {
-  const {
-    submissions,
-    storeMissing,
-    formConfig,
-    shippingCountryOptions,
-    shippingProvincesByCountry,
-    paymentTermsTemplates,
-    allCatalogs,
-    priceLists,
-  } = useLoaderData<{
-    submissions: RegistrationSubmission[];
-    companies: any[];
-    formConfig: FormConfig;
-    shippingCountryOptions: CountryOption[];
-    shippingProvincesByCountry: Record<string, CountryOption[]>;
-    storeMissing: boolean;
-    allCatalogs: CatalogNode[];
-    priceLists: PriceListNode[];
-    paymentTermsTemplates: Array<{
-      id: string;
-      name: string;
-      paymentTermsType: string;
-      dueInDays: number | null;
-    }>;
-  }>();
+interface RegistrationApprovalsPanelProps {
+  submissions: RegistrationSubmission[];
+  storeMissing: boolean;
+  formConfig: FormConfig;
+  shippingCountryOptions: CountryOption[];
+  shippingProvincesByCountry: Record<string, CountryOption[]>;
+  allCatalogs: CatalogNode[];
+  priceLists: PriceListNode[];
+  paymentTermsTemplates: Array<{
+    id: string;
+    name: string;
+    paymentTermsType: string;
+    dueInDays: number | null;
+  }>;
+  forcedStatusFilter?: "PENDING" | "APPROVED" | "REJECTED";
+  hideStatusTabs?: boolean;
+  embedded?: boolean;
+  heading?: string;
+}
+
+export function RegistrationApprovalsPanel({
+  submissions,
+  storeMissing,
+  formConfig,
+  shippingCountryOptions,
+  shippingProvincesByCountry,
+  paymentTermsTemplates,
+  allCatalogs,
+  priceLists,
+  forcedStatusFilter,
+  hideStatusTabs = false,
+  embedded = false,
+  heading = "Registration submissions",
+}: RegistrationApprovalsPanelProps) {
 
   // ── List state (UNCHANGED) ────────────────────────────────────────────────
   const [searchParams] = useSearchParams();
-  const statusFromUrl = searchParams.get("status");
+  const statusFromUrl = forcedStatusFilter ?? searchParams.get("status");
   const normalizeStatus = (v: string | null) => {
     switch (v?.toUpperCase()) {
       case "APPROVED":
@@ -5296,7 +5347,7 @@ export default function RegistrationApprovals() {
   >(normalizeStatus(statusFromUrl));
   useEffect(() => {
     setStatusFilter(normalizeStatus(statusFromUrl));
-  }, [statusFromUrl]);
+  }, [statusFromUrl, forcedStatusFilter]);
 
   const filteredSubmissions = useMemo(
     () => submissions.filter((s) => s.status === statusFilter),
@@ -5306,6 +5357,9 @@ export default function RegistrationApprovals() {
   // ── Pipeline state ────────────────────────────────────────────────────────
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
   const [showConfigureUI, setShowConfigureUI] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<RegistrationSubmission | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
   const [pipelineStep, setPipelineStep] = useState<PipelineStep>("idle");
   const [pipelineError, setPipelineError] = useState<string | undefined>();
   const [customer, setCustomer] = useState<ActionJson["customer"]>(null);
@@ -5358,6 +5412,9 @@ export default function RegistrationApprovals() {
     setPipelineError(undefined);
     setCustomer(null);
     setCompany(null);
+    setShowRejectModal(false);
+    setRejectTarget(null);
+    setRejectNote("");
     customerRef.current = null;
     companyRef.current = null;
     configOptsRef.current = null;
@@ -5473,74 +5530,96 @@ export default function RegistrationApprovals() {
 
   // ── Reject (unchanged) ───────────────────────────────────────────────────
   const rejectSubmission = (submission: RegistrationSubmission) => {
-    if (!window.confirm(`Reject registration for ${submission.companyName}?`))
-      return;
+    setRejectTarget(submission);
+    setRejectNote(submission.reviewNotes || "");
+    setShowRejectModal(true);
+  };
+
+  const confirmRejectSubmission = useCallback(() => {
+    if (!rejectTarget) return;
+
     rejectFetcher.submit(
-      { intent: "reject", registrationId: submission.id },
+      {
+        intent: "reject",
+        registrationId: rejectTarget.id,
+        reviewNotes: rejectNote,
+      },
       { method: "post" },
     );
-  };
+  }, [rejectFetcher, rejectNote, rejectTarget]);
 
   useEffect(() => {
     if (rejectFetcher.data?.success) {
+      setShowRejectModal(false);
+      setRejectTarget(null);
+      setRejectNote("");
       revalidator.revalidate();
       shopify.toast.show?.("Registration rejected");
     }
   }, [rejectFetcher.data]);
 
   if (storeMissing) {
+    const missingContent = (
+      <s-section>
+        <s-banner tone="critical">
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            Store not found
+          </div>
+          <s-paragraph>
+            The current shop does not exist in the database. Please reinstall
+            the app.
+          </s-paragraph>
+        </s-banner>
+      </s-section>
+    );
+
+    if (embedded) {
+      return missingContent;
+    }
+
     return (
       <s-page heading="Registrations">
-        <s-section>
-          <s-banner tone="critical">
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              Store not found
-            </div>
-            <s-paragraph>
-              The current shop does not exist in the database. Please reinstall
-              the app.
-            </s-paragraph>
-          </s-banner>
-        </s-section>
+        {missingContent}
       </s-page>
     );
   }
 
-  return (
-    <s-page heading="Registration submissions">
-      {/* ── Status Filter Tabs + Table (COMPLETELY UNCHANGED) ──────────── */}
+  const content = (
+    <>
       <s-section heading="">
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginBottom: 16,
-            borderBottom: "1px solid #e3e3e3",
-          }}
-        >
-          {(["PENDING", "APPROVED", "REJECTED"] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              style={{
-                padding: "8px 16px",
-                background: "none",
-                border: "none",
-                borderBottom:
-                  statusFilter === status
-                    ? "2px solid #2c6ecb"
-                    : "2px solid transparent",
-                color: statusFilter === status ? "#2c6ecb" : "#5c5f62",
-                fontWeight: statusFilter === status ? 600 : 400,
-                cursor: "pointer",
-                transition: "all 0.2s",
-              }}
-            >
-              {status.charAt(0) + status.slice(1).toLowerCase()} (
-              {submissions.filter((s) => s.status === status).length})
-            </button>
-          ))}
-        </div>
+        {!hideStatusTabs ? (
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              marginBottom: 16,
+              borderBottom: "1px solid #e3e3e3",
+            }}
+          >
+            {(["PENDING", "APPROVED", "REJECTED"] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                style={{
+                  padding: "8px 16px",
+                  background: "none",
+                  border: "none",
+                  borderBottom:
+                    statusFilter === status
+                      ? "2px solid #2c6ecb"
+                      : "2px solid transparent",
+                  color: statusFilter === status ? "#2c6ecb" : "#5c5f62",
+                  fontWeight: statusFilter === status ? 600 : 400,
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                {status.charAt(0) + status.slice(1).toLowerCase()} (
+                {submissions.filter((s) => s.status === status).length})
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {filteredSubmissions.length === 0 ? (
           <s-paragraph>
@@ -5664,8 +5743,133 @@ export default function RegistrationApprovals() {
           pipelineError={pipelineError}
         />
       )}
+      {showRejectModal && rejectTarget && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(17, 24, 39, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 45,
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget && rejectFetcher.state === "idle") {
+              setShowRejectModal(false);
+              setRejectTarget(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 92vw)",
+              background: "white",
+              borderRadius: 12,
+              boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+              padding: 20,
+            }}
+          >
+            <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 600 }}>
+              Reject Registration
+            </h3>
+            <p style={{ margin: "0 0 14px", color: "#5c5f62", fontSize: 14 }}>
+              Add a note for {rejectTarget.firstName} {rejectTarget.lastName}. This note will be sent by email to {rejectTarget.email}.
+            </p>
+            <textarea
+              value={rejectNote}
+              onChange={(event) => setRejectNote(event.target.value)}
+              placeholder="Enter rejection reason or next steps for the user"
+              rows={5}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1px solid #c9ccd0",
+                fontSize: 14,
+                resize: "vertical",
+                boxSizing: "border-box",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 16,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRejectModal(false);
+                  setRejectTarget(null);
+                }}
+                disabled={rejectFetcher.state !== "idle"}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  background: "white",
+                  cursor: rejectFetcher.state !== "idle" ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRejectSubmission}
+                disabled={rejectFetcher.state !== "idle"}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#d72c0d",
+                  color: "white",
+                  fontWeight: 600,
+                  cursor: rejectFetcher.state !== "idle" ? "not-allowed" : "pointer",
+                  opacity: rejectFetcher.state !== "idle" ? 0.7 : 1,
+                }}
+              >
+                {rejectFetcher.state !== "idle" ? "Rejecting..." : "Reject"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <s-page heading={heading}>
+      {content}
     </s-page>
   );
+}
+
+export default function RegistrationApprovals() {
+  const data = useLoaderData<{
+    submissions: RegistrationSubmission[];
+    companies: any[];
+    formConfig: FormConfig;
+    shippingCountryOptions: CountryOption[];
+    shippingProvincesByCountry: Record<string, CountryOption[]>;
+    storeMissing: boolean;
+    allCatalogs: CatalogNode[];
+    priceLists: PriceListNode[];
+    paymentTermsTemplates: Array<{
+      id: string;
+      name: string;
+      paymentTermsType: string;
+      dueInDays: number | null;
+    }>;
+  }>();
+
+  return <RegistrationApprovalsPanel {...data} />;
 }
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);

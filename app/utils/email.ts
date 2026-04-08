@@ -1,5 +1,5 @@
 import prisma from "app/db.server";
-import axios, { isAxiosError } from 'axios';
+import axios, { isAxiosError } from "axios";
 
 interface EmailParams {
   to: string;
@@ -72,7 +72,6 @@ export async function sendRegistrationEmail(
     throw new Error("Company welcome email template not found");
   }
 
-
   const templateVariables = {
     companyName: companyName || "Company Name",
     storeOwnerName: storeOwnerName || "Store Owner",
@@ -87,7 +86,10 @@ export async function sendRegistrationEmail(
   );
 
   // FIXED: Pass shopDomain to convertToHtmlEmail
-  const html = convertToHtmlEmail(processedTemplate, StoreData?.shopDomain || "store.com");
+  const html = convertToHtmlEmail(
+    processedTemplate,
+    StoreData?.shopDomain || "store.com",
+  );
 
   const text = stripHtmlTags(processedTemplate);
 
@@ -112,7 +114,6 @@ function replaceTemplateVariables(
 
   return processedTemplate;
 }
-
 
 function convertToHtmlEmail(content: string, shopDomain: string): string {
   const shopDomaindata = shopDomain.split(".")[0];
@@ -221,10 +222,14 @@ function stripHtmlTags(content: string): string {
     .trim();
 }
 
-
-
 export async function sendCompanyAssignmentEmail(
-shopName: string, shopDomain: string, storeOwnerName: string, email: string, companyName: string, contactName: string,  note?: string | null,
+  shopName: string,
+  shopDomain: string,
+  storeOwnerName: string,
+  email: string,
+  companyName: string,
+  contactName: string,
+  note?: string | null,
 ) {
   const { html, text } = generateCompanyAssignmentTemplate(
     shopName || "Shop Name",
@@ -251,7 +256,7 @@ function generateCompanyAssignmentTemplate(
   contactName: string,
   note?: string,
 ) {
-      const safeDomain = shopDomain || "shop-domain.myshopify.com";
+  const safeDomain = shopDomain || "shop-domain.myshopify.com";
 
   // ✅ safer domain handling
   const shopDomaindata = safeDomain.startsWith("http")
@@ -368,7 +373,7 @@ export async function sendEmployeeAssignmentEmail({
     adminName || "Admin",
     role || "Employee", // ✅ added role
     companyName || "Company Name",
-    contactName || "Employee"
+    contactName || "Employee",
   );
   return sendEmail({
     to: email,
@@ -493,4 +498,114 @@ ${shopName}
 `;
 
   return { html, text };
+}
+
+export async function sendRegistrationRejectedEmail({
+  shopName,
+  shopDomain,
+  storeOwnerName,
+  email,
+  companyName,
+  contactName,
+  note,
+}: {
+  shopName: string;
+  shopDomain: string;
+  storeOwnerName: string;
+  email: string;
+  companyName: string;
+  contactName: string;
+  note?: string | null;
+}) {
+  const safeDomain = shopDomain || "shop-domain.myshopify.com";
+  const storefrontUrl = safeDomain.startsWith("http")
+    ? safeDomain
+    : `https://${safeDomain}`;
+
+  const safeContactName = contactName || "there";
+  const safeCompanyName = companyName || "your company";
+  const safeNote = note?.trim() || "";
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registration Request Rejected</title>
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #f4f6f8; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background-color: #dc2626; padding: 20px; text-align: center; color: #fff; border-radius: 8px 8px 0 0; }
+    .content { background-color: #ffffff; padding: 30px; border: 1px solid #dee2e6; }
+    .note { background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 14px; margin: 20px 0; border-radius: 4px; }
+    .btn {
+      display: inline-block;
+      padding: 12px 24px;
+      background-color: #111827;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 4px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Registration Request Rejected</h1>
+    </div>
+    <div class="content">
+      <p>Hello <strong>${safeContactName}</strong>,</p>
+      <p>
+        We reviewed your registration for <strong>${safeCompanyName}</strong>, and
+        we’re unable to approve it at this time.
+      </p>
+      ${
+        safeNote
+          ? `<div class="note"><strong>Note from ${storeOwnerName || "our team"}:</strong><br />${safeNote}</div>`
+          : ""
+      }
+      <p>
+        If you believe this needs a follow-up or want to submit updated details,
+        please contact the store team or try again from the storefront.
+      </p>
+      <p style="text-align: center;">
+        <a href="${storefrontUrl}" class="btn">Visit Store</a>
+      </p>
+      <p>
+        Best regards,<br />
+        <strong>${shopName || "B2B Portal"}</strong>
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  const text = [
+    "Registration Request Rejected",
+    "",
+    `Hello ${safeContactName},`,
+    "",
+    `We reviewed your registration for ${safeCompanyName}, and we’re unable to approve it at this time.`,
+    safeNote ? "" : undefined,
+    safeNote
+      ? `Note from ${storeOwnerName || "our team"}: ${safeNote}`
+      : undefined,
+    "",
+    `Visit store: ${storefrontUrl}`,
+    "",
+    `Best regards,`,
+    shopName || "B2B Portal",
+  ]
+    .filter((line): line is string => typeof line === "string")
+    .join("\n");
+
+  return sendEmail({
+    to: email,
+    subject: "Update on your B2B registration",
+    html,
+    text,
+  });
 }

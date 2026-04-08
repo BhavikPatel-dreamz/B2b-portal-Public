@@ -154,6 +154,8 @@ model UserSession {
     shop            Store     @relation(fields: [shopId], references: [id], onDelete: Cascade)
     // Status tracking
     status          UserStatus @default(PENDING)
+    reviewNotes     String?
+    reviewedAt      DateTime?
 
     // Shopify workflow tracking
     shopifyCustomerId  String?  // Shopify customer GID
