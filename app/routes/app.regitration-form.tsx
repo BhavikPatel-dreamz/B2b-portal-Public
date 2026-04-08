@@ -3011,8 +3011,6 @@ export default function FormEditor() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {[
             { label: "Form", active: true },
-            { label: "Rules", active: false },
-            { label: "Advanced settings", active: false },
           ].map((tab) => (
             <button
               key={tab.label}
