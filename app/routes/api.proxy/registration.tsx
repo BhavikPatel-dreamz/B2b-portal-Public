@@ -127,6 +127,33 @@ function parseFormFields(form: FormFields) {
   return { shipping, billing, customFields };
 }
 
+function normalizeFieldKey(key: string) {
+  return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function getFieldValueByKeyMatch(
+  fields: FormFields,
+  targetKey: string,
+  options: { startsWith?: boolean; endsWith?: boolean; includes?: boolean } = {
+    startsWith: true,
+    endsWith: true,
+  },
+) {
+  const normalizedTarget = normalizeFieldKey(targetKey);
+  const matchingKey = Object.keys(fields).find((key) => {
+    const normalizedKey = normalizeFieldKey(key);
+
+    if (normalizedKey === normalizedTarget) return true;
+    if (options.startsWith && normalizedKey.startsWith(normalizedTarget)) return true;
+    if (options.endsWith && normalizedKey.endsWith(normalizedTarget)) return true;
+    if (options.includes && normalizedKey.includes(normalizedTarget)) return true;
+
+    return false;
+  });
+
+  return matchingKey ? fields[matchingKey] : "";
+}
+
 function buildAddress(
   address: AddressFields | undefined,
   fallbackFirstName: string,
@@ -801,22 +828,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     for (const [key, value] of formData.entries()) {
       allFields[key] = typeof value === "string" ? value : value.name;
     }
-    console.log("🔥 All Form Data:", allFields);
  
     // ✅ Extract main fields
-    const companyName = allFields.companyName || "";
-    const emailKey = Object.keys(allFields).find((key) =>
-      key.toLowerCase().includes("email")
-    );
-    const email = allFields.email || allFields.customerEmail || (emailKey ? allFields[emailKey] : "");
-    const firstName = allFields.firstName || "";
-    const lastName = allFields.lastName || "";
-    const contactTitle = allFields.contactTitle || "";
+    const companyName = getFieldValueByKeyMatch(allFields, "companyName", {
+      startsWith: true,
+      endsWith: true,
+      includes: true,
+    });
+    const email =
+      allFields.email ||
+      allFields.customerEmail ||
+      getFieldValueByKeyMatch(allFields, "email", {
+        startsWith: true,
+        endsWith: true,
+        includes: true,
+      });
+    const firstName = getFieldValueByKeyMatch(allFields, "firstName");
+    const lastName = getFieldValueByKeyMatch(allFields, "lastName");
+    const contactTitle = getFieldValueByKeyMatch(allFields, "contactTitle");
+
 
     // ✅ Basic validation
-    if (!companyName || !email || !firstName) {
+    if (!companyName) {
       return json(
-        { success: false, error: "Company name, first name, and email are required." },
+        { success: false, error: "Company name is required." },
+        { status: 400 }
+      );
+    }
+    if(!email) {
+      return json(
+        { success: false, error: "Email is required." },
         { status: 400 }
       );
     }
