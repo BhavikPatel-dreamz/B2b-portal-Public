@@ -3203,7 +3203,7 @@ export default function FormEditor() {
                       onClick={saveFieldEditor}
                       style={{ border: "1px solid #d1d5db", background: "#fff", borderRadius: 8, padding: "5px 14px", fontSize: 12, cursor: "pointer", color: "#111827", fontWeight: 600 }}
                     >
-                      Done
+                      Done 
                     </button>
                   </div>
                 </div>
