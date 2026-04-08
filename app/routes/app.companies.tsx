@@ -15,12 +15,18 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import {
+  RegistrationApprovalsPanel,
+  type RegistrationSubmission,
+} from "./app.registrations";
+import {
   syncShopifyCompanies,
   parseForm,
   parseCredit,
 } from "../utils/company.server";
 import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
+import type { FormConfig } from "../utils/form-config.shared";
+import type { CountryOption } from "app/components/registrations/EditDetailsModal";
 
 type LoaderCompany = {
   id: string;
@@ -37,6 +43,8 @@ type LoaderCompany = {
   userCount: number;
   isDisable: boolean;
 };
+
+type RegistrationStatusTab = "companies" | "pending" | "approved" | "rejected";
 
 interface ActionResponse {
   intent: string;
@@ -82,6 +90,19 @@ const storeCache: Map<
 const CACHE_TTL = 3 * 60 * 1000; // 3 min
 const STORE_CACHE_TTL = 10 * 60 * 1000; // 10 min
 
+function normalizeTab(value: string | null): RegistrationStatusTab {
+  switch (value?.toLowerCase()) {
+    case "pending":
+      return "pending";
+    case "approved":
+      return "approved";
+    case "rejected":
+      return "rejected";
+    default:
+      return "companies";
+  }
+}
+
 // ============================================================
 // 🧹 CACHE HELPERS
 // ============================================================
@@ -123,6 +144,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   try {
     const url         = new URL(request.url);
+    const activeTab   = normalizeTab(url.searchParams.get("tab"));
     const page        = parseInt(url.searchParams.get("page")   || "1", 10);
     const searchQuery = url.searchParams.get("search") || "";
     const limit       = 10;
@@ -134,7 +156,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // ── FAST PATH — check cache before auth + all DB calls ──
     // authenticate.admin() is a fast JWT check, but the 4 DB queries are slow
     if (shopFromUrl) {
-      const cacheKey = `admin-companies-${shopFromUrl}-${page}-${searchQuery}`;
+      const cacheKey = `admin-companies-${shopFromUrl}-${activeTab}-${page}-${searchQuery}`;
       const cached   = cache.get(cacheKey);
 
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -150,7 +172,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { session } = await authenticate.admin(request);
     const shop        = session.shop; // authoritative shop from session
 
-    const cacheKey = `admin-companies-${shop}-${page}-${searchQuery}`;
+    const cacheKey = `admin-companies-${shop}-${activeTab}-${page}-${searchQuery}`;
 
     const store = await getStoreForShop(shop);
 
@@ -158,6 +180,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return Response.json(
         {
           companies: [] as LoaderCompany[],
+          submissions: [] as RegistrationSubmission[],
+          activeTab,
+          pendingCount: 0,
+          approvedCount: 0,
+          rejectedCount: 0,
+          formConfig: null as FormConfig | null,
+          shippingCountryOptions: [] as CountryOption[],
+          shippingProvincesByCountry: {} as Record<string, CountryOption[]>,
+          paymentTermsTemplates: [] as Array<{
+            id: string;
+            name: string;
+            paymentTermsType: string;
+            dueInDays: number | null;
+          }>,
+          allCatalogs: [] as any[],
+          priceLists: [] as any[],
           storeMissing: true,
           totalCount: 0,
           currentPage: 1,
@@ -181,8 +219,51 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }),
     };
 
-    // Run count + companies in parallel
-    const [totalCount, companies] = await Promise.all([
+    const registrationDataPromise =
+      activeTab === "companies"
+        ? Promise.resolve({
+            submissions: [] as RegistrationSubmission[],
+            formConfig: null as FormConfig | null,
+            shippingCountryOptions: [] as CountryOption[],
+            shippingProvincesByCountry: {} as Record<string, CountryOption[]>,
+            paymentTermsTemplates: [] as Array<{
+              id: string;
+              name: string;
+              paymentTermsType: string;
+              dueInDays: number | null;
+            }>,
+            allCatalogs: [] as any[],
+            priceLists: [] as any[],
+          })
+        : (async () => {
+            const { loader: registrationsLoader } = await import("./app.registrations");
+            const registrationUrl = new URL(request.url);
+            registrationUrl.pathname = "/app/registrations";
+            registrationUrl.searchParams.set("status", activeTab.toUpperCase());
+
+            const registrationResponse = await registrationsLoader({
+              request: new Request(registrationUrl.toString(), request),
+              params: {},
+              context: undefined as never,
+            });
+
+            return (await registrationResponse.json()) as {
+              submissions: RegistrationSubmission[];
+              formConfig: FormConfig;
+              shippingCountryOptions: CountryOption[];
+              shippingProvincesByCountry: Record<string, CountryOption[]>;
+              paymentTermsTemplates: Array<{
+                id: string;
+                name: string;
+                paymentTermsType: string;
+                dueInDays: number | null;
+              }>;
+              allCatalogs: any[];
+              priceLists: any[];
+            };
+          })();
+
+    const [totalCount, companies, pendingCount, approvedCount, rejectedCount, registrationData] = await Promise.all([
       prisma.companyAccount.count({ where: whereClause }),
       prisma.companyAccount.findMany({
         where: whereClause,
@@ -191,9 +272,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         take: limit,
         include: { _count: { select: { users: true } } },
       }),
+      prisma.registrationSubmission.count({
+        where: { shopId: store.id, status: "PENDING", shopifyCustomerId: { not: null } },
+      }),
+      prisma.registrationSubmission.count({
+        where: { shopId: store.id, status: "APPROVED", shopifyCustomerId: { not: null } },
+      }),
+      prisma.registrationSubmission.count({
+        where: { shopId: store.id, status: "REJECTED", shopifyCustomerId: { not: null } },
+      }),
+      registrationDataPromise,
     ]);
-
-    const totalPages = Math.ceil(totalCount / limit);
+    const totalItems =
+      activeTab === "companies"
+        ? totalCount
+        : activeTab === "pending"
+          ? pendingCount
+          : activeTab === "approved"
+            ? approvedCount
+            : rejectedCount;
+    const totalPages = Math.ceil(totalItems / limit);
 
     const orderCreditByCompany =
       companies.length === 0
@@ -240,8 +338,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const result = {
       companies: companiesWithCredit,
+      submissions: registrationData.submissions,
+      activeTab,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+      formConfig: registrationData.formConfig,
+      shippingCountryOptions: registrationData.shippingCountryOptions,
+      shippingProvincesByCountry: registrationData.shippingProvincesByCountry,
+      paymentTermsTemplates: registrationData.paymentTermsTemplates,
+      allCatalogs: registrationData.allCatalogs,
+      priceLists: registrationData.priceLists,
       storeMissing: false,
-      totalCount,
+      totalCount: totalItems,
       currentPage: page,
       totalPages,
       searchQuery,
@@ -256,7 +365,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch (error) {
     console.error("❌ Admin companies loader error:", error);
     return Response.json(
-      { companies: [], storeMissing: false, totalCount: 0, currentPage: 1, totalPages: 0, searchQuery: "" },
+      {
+        companies: [],
+        submissions: [],
+        activeTab: "companies" as const,
+        pendingCount: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+        formConfig: null,
+        shippingCountryOptions: [],
+        shippingProvincesByCountry: {},
+        paymentTermsTemplates: [],
+        allCatalogs: [],
+        priceLists: [],
+        storeMissing: false,
+        totalCount: 0,
+        currentPage: 1,
+        totalPages: 0,
+        searchQuery: "",
+      },
       { status: 500 },
     );
   }
@@ -269,6 +396,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 // ============================================================
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  const form = await parseForm(request.clone());
+  const intent = (form.intent as string) || "";
+
+  if (
+    [
+      "checkCustomer",
+      "approveRegistration",
+      "reject",
+      "updatecustomerCompanyDetails",
+      "assignCatalog",
+      "removeCatalog",
+    ].includes(intent)
+  ) {
+    const { action: registrationsAction } = await import("./app.registrations");
+    return registrationsAction({ request, params: {}, context: undefined as never });
+  }
+
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
@@ -280,9 +424,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { status: 404 },
     );
   }
-
-  const form   = await parseForm(request);
-  const intent = (form.intent as string) || "";
 
   switch (intent) {
     // ── SYNC COMPANIES ──────────────────────────────────────
@@ -368,6 +509,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function CompaniesPage() {
   const {
     companies,
+    submissions,
+    activeTab,
+    pendingCount,
+    approvedCount,
+    rejectedCount,
+    formConfig,
+    shippingCountryOptions,
+    shippingProvincesByCountry,
+    paymentTermsTemplates,
+    allCatalogs,
+    priceLists,
     storeMissing,
     totalCount,
     currentPage,
@@ -421,59 +573,105 @@ export default function CompaniesPage() {
         <div
           style={{
             display: "flex",
+            gap: 8,
+            marginBottom: 16,
+            borderBottom: "1px solid #e3e3e3",
+          }}
+        >
+          {[
+            { key: "companies", label: "Company List", count: null },
+            { key: "pending", label: "Pending", count: pendingCount },
+            { key: "approved", label: "Approved", count: approvedCount },
+            { key: "rejected", label: "Rejected", count: rejectedCount },
+          ].map((tab) => (
+            <Link
+              key={tab.key}
+              to={`?${new URLSearchParams({
+                ...(tab.key !== "companies" ? { tab: tab.key } : {}),
+                page: "1",
+              })}`}
+              style={{
+                padding: "8px 16px",
+                textDecoration: "none",
+                borderBottom:
+                  activeTab === tab.key
+                    ? "2px solid #2c6ecb"
+                    : "2px solid transparent",
+                color: activeTab === tab.key ? "#2c6ecb" : "#5c5f62",
+                fontWeight: activeTab === tab.key ? 600 : 400,
+                marginBottom: -1,
+              }}
+            >
+              {tab.label}
+              {typeof tab.count === "number" ? ` (${tab.count})` : ""}
+            </Link>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             marginBottom: 12,
           }}
         >
-          <h4 style={{ margin: 0 }}>Company list</h4>
+          <h4 style={{ margin: 0 }}>
+            {activeTab === "companies"
+              ? "Company list"
+              : `${activeTab.charAt(0).toUpperCase()}${activeTab.slice(1)} registrations`}
+          </h4>
 
-          <syncFetcher.Form method="post">
-            <input name="intent" value="syncCompanies" hidden readOnly />
-            <s-button type="submit" variant="secondary" loading={isSyncing}>
-              Company Sync
-            </s-button>
-          </syncFetcher.Form>
+          {activeTab === "companies" ? (
+            <syncFetcher.Form method="post">
+              <input name="intent" value="syncCompanies" hidden readOnly />
+              <s-button type="submit" variant="secondary" loading={isSyncing}>
+                Company Sync
+              </s-button>
+            </syncFetcher.Form>
+          ) : null}
         </div>
 
-        {/* Search Input */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="text"
-              placeholder="Search by company name, Shopify ID, or contact..."
-              value={query}
-              onChange={(e) => {
-                const value = e.target.value;
-                setQuery(value);
-                setSearchParams((prev) => {
-                  const newParams = new URLSearchParams(prev);
-                  if (value) {
-                    newParams.set("search", value);
-                    newParams.set("page", "1"); // Reset to page 1 on search
-                  } else {
-                    newParams.delete("search");
-                  }
-                  return newParams;
-                });
-              }}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid #c9ccd0",
-                fontSize: 14,
-                outline: "none",
-              }}
-            />
+        {activeTab === "companies" ? (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="text"
+                placeholder="Search by company name, Shopify ID, or contact..."
+                value={query}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setQuery(value);
+                  setSearchParams((prev) => {
+                    const newParams = new URLSearchParams(prev);
+                    if (value) {
+                      newParams.set("search", value);
+                      newParams.set("page", "1");
+                    } else {
+                      newParams.delete("search");
+                    }
+                    return newParams;
+                  });
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        {companies.length === 0 ? (
-          <s-empty-state
-            heading={searchQuery ? "No companies found" : "No companies yet"}
-          />
-        ) : (
+        {activeTab === "companies" ? (
+          companies.length === 0 ? (
+            <s-empty-state
+              heading={searchQuery ? "No companies found" : "No companies yet"}
+            />
+          ) : (
           <div style={{ position: "relative" }}>
             {isSearching && (
               <div
@@ -718,10 +916,26 @@ export default function CompaniesPage() {
               </tbody>
             </table>
           </div>
+          )
+        ) : (
+          <RegistrationApprovalsPanel
+            submissions={submissions}
+            storeMissing={storeMissing}
+            formConfig={formConfig!}
+            shippingCountryOptions={shippingCountryOptions}
+            shippingProvincesByCountry={shippingProvincesByCountry}
+            paymentTermsTemplates={paymentTermsTemplates}
+            allCatalogs={allCatalogs}
+            priceLists={priceLists}
+            forcedStatusFilter={activeTab.toUpperCase() as "PENDING" | "APPROVED" | "REJECTED"}
+            hideStatusTabs
+            embedded
+            heading="Registrations"
+          />
         )}
 
         {/* Pagination */}
-        {totalPages > 1 && (
+        {activeTab === "companies" && totalPages > 1 && (
           <div
             style={{
               display: "flex",
