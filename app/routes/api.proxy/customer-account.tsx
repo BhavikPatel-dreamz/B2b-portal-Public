@@ -1,69 +1,10 @@
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
 import { LoaderFunctionArgs } from "react-router";
-import { FieldCategory, FieldDef, FieldType, FormConfig, FormStep, StoredConfig, StoredField } from "../app.regitration-form";
-
-
-
-function deserializeConfig(stored: StoredConfig): FormConfig {
-  const DISPLAY_TYPES: FieldType[] = [
-    "heading",
-    "paragraph",
-    "link",
-    "divider",
-  ];
-
-  const inferCategory = (f: StoredField): FieldCategory => {
-    if (DISPLAY_TYPES.includes(f.type)) return "display";
-    if (f.section === "shipping") return "shipping";
-    if (f.section === "billing") return "billing";
-    if (f.section === "company" || f.section === "contact") return "general";
-    return "custom";
-  };
-
-  const steps: FormStep[] = stored.map((g) => g.step);
-
-  const fields: FieldDef[] = stored.flatMap((group, stepIdx) =>
-    group.fields
-      .sort((a, b) => a.order - b.order)
-      .map(
-        (f): FieldDef => ({
-          // Runtime-only props — derived, never stored
-          id: `_${f.key}_${stepIdx}_${f.order}`,
-          paletteKey: f.key,
-          category: inferCategory(f),
-          isDisplay: DISPLAY_TYPES.includes(f.type),
-          // Stored props
-          key: f.key,
-          label: f.label,
-          type: f.type,
-          order: f.order,
-          stepIndex: stepIdx, // ← re-injected from array position
-          width: f.width ?? "full",
-          required: f.required,
-          section: f.section,
-          options: f.options,
-          placeholder: f.placeholder,
-          content: f.content,
-          headingTag: f.headingTag,
-          headingAlignment: f.headingAlignment,
-          headingWidth: f.headingWidth,
-          paragraphFontSize: f.paragraphFontSize,
-          linkUrl: f.linkUrl,
-          linkOpenInNewTab: f.linkOpenInNewTab,
-          linkAlignment: f.linkAlignment,
-          sectionLabel: f.sectionLabel,
-          sectionHeadingLabel: f.sectionHeadingLabel,
-          sectionHeadingTag: f.sectionHeadingTag,
-          sectionHeadingAlignment: f.sectionHeadingAlignment,
-          sectionHeadingWidth: f.sectionHeadingWidth,
-          sectionHeadingHidden: f.sectionHeadingHidden,
-        }),
-      ),
-  );
-
-  return { steps, fields };
-}
+import {
+  deserializeConfig,
+  type StoredConfig,
+} from "../../utils/form-config.shared";
 
 
 const CORS_HEADERS = {
@@ -197,6 +138,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         config = [];
       }
     }
+    console.log(config,"config------");
  
     return json({
       config,

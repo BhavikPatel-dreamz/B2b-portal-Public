@@ -36,7 +36,7 @@ import {
   type FormConfig,
   type FieldWidth,
   type StoredConfig,
-} from "./app.regitration-form";
+} from "../utils/form-config.shared";
 
 interface RegistrationSubmission {
   paymentTermsTemplateId: string;

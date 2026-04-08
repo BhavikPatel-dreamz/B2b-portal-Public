@@ -12,9 +12,10 @@ import prisma from "./db.server";
 import { upsertStore } from "./services/store.server";
 import { registerCartValidationFunction, debugListAllShopifyFunctions } from "./services/cartValidationRegistration.server";
 import { syncShopifyCompanies } from "./utils/company.server";
-  const { DEFAULT_CONFIG, serializeConfig } = await import(
-          "./routes/app.regitration-form"
-        );
+import {
+  DEFAULT_CONFIG,
+  serializeConfig,
+} from "./utils/form-config.shared";
 
 class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> {
   // Upsert store record whenever Shopify saves a session (install or token refresh)
