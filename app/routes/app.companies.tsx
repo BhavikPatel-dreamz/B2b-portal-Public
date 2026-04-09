@@ -10,12 +10,12 @@ import {
   useSearchParams,
   useNavigation,
 } from "react-router";
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import {
+  RegistrationApprovalsPanel,
   type RegistrationSubmission,
 } from "./app.registrations";
 import {
@@ -44,7 +44,7 @@ type LoaderCompany = {
   isDisable: boolean;
 };
 
-type RegistrationStatusTab = "companies" | "pending" | "approved" | "rejected";
+type RegistrationStatusTab = "companies" | "pending"  | "rejected";
 
 interface ActionResponse {
   intent: string;
@@ -67,21 +67,10 @@ function formatDisplayDate(value: string) {
   }).format(new Date(value));
 }
 
-function matchesDateFilter(value: string, filter: string) {
-  if (!filter) return true;
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return false;
-
-  return date.toISOString().slice(0, 10) === filter;
-}
-
 function downloadCsv(filename: string, rows: string[][]) {
   const csv = rows
     .map((row) =>
-      row
-        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
-        .join(","),
+      row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","),
     )
     .join("\n");
 
@@ -95,17 +84,6 @@ function downloadCsv(filename: string, rows: string[][]) {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
-
-const compactControlStyle: CSSProperties = {
-  minHeight: 36,
-  padding: "6px 12px",
-  borderRadius: 10,
-  border: "1px solid #cfd8e3",
-  fontSize: 13,
-  background: "#fff",
-  color: "#111827",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-};
 
 
 // ============================================================
@@ -148,8 +126,6 @@ function normalizeTab(value: string | null): RegistrationStatusTab {
   switch (value?.toLowerCase()) {
     case "pending":
       return "pending";
-    case "approved":
-      return "approved";
     case "rejected":
       return "rejected";
     default:
@@ -343,8 +319,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ? totalCount
         : activeTab === "pending"
           ? pendingCount
-          : activeTab === "approved"
-            ? approvedCount
             : rejectedCount;
     const totalPages = Math.ceil(totalItems / limit);
 
@@ -569,7 +543,14 @@ export default function CompaniesPage() {
     submissions,
     activeTab,
     pendingCount,
+    approvedCount,
     rejectedCount,
+    formConfig,
+    shippingCountryOptions,
+    shippingProvincesByCountry,
+    paymentTermsTemplates,
+    allCatalogs,
+    priceLists,
     storeMissing,
     totalCount,
     currentPage,
@@ -582,7 +563,37 @@ export default function CompaniesPage() {
   // Controlled search input
   const [query, setQuery] = useState(searchQuery);
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
-  const [registrationSearch, setRegistrationSearch] = useState(searchParams.get("registrationSearch") || "");
+
+  const exportCompaniesCsv = () => {
+    downloadCsv("companies.csv", [
+      [
+        "Company",
+        "Shopify Company ID",
+        "Contact Name",
+        "Contact Email",
+        "Users",
+        "Credit Limit",
+        "Used Credit",
+        "Available Credit",
+        "Usage %",
+        "Updated At",
+        "Status",
+      ],
+      ...companies.map((company) => [
+        company.name,
+        company.shopifyCompanyId?.replace("gid://shopify/Company/", "") || "",
+        company.contactName || "",
+        company.contactEmail || "",
+        String(company.userCount),
+        company.creditLimit,
+        company.usedCredit,
+        company.availableCredit,
+        String(company.creditUsagePercentage),
+        formatDisplayDate(company.updatedAt),
+        company.isDisable ? "Inactive" : "Active",
+      ]),
+    ]);
+  };
 
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
@@ -602,98 +613,6 @@ export default function CompaniesPage() {
       setPendingCompanyId(null);
     }
   }, [navigation.state]);
-
-  useEffect(() => {
-    setRegistrationSearch(searchParams.get("registrationSearch") || "");
-  }, [searchParams]);
-
-  const submissionDateFilter = searchParams.get("submittedOn") || "";
-  const registrationStatusFilter =
-    activeTab === "companies" ? "companies" : normalizeTab(searchParams.get("tab"));
-
-  const filteredRegistrationSubmissions = useMemo(() => {
-    const normalizedSearch = registrationSearch.trim().toLowerCase();
-
-    const filtered = submissions.filter((submission) => {
-      const matchesSearch =
-        !normalizedSearch ||
-        submission.companyName.toLowerCase().includes(normalizedSearch) ||
-        submission.email.toLowerCase().includes(normalizedSearch);
-
-      const matchesStatus =
-        registrationStatusFilter === "companies"
-          ? true
-          : submission.status.toLowerCase() === registrationStatusFilter;
-
-      return (
-        matchesSearch &&
-        matchesStatus &&
-        matchesDateFilter(submission.createdAt, submissionDateFilter)
-      );
-    });
-
-    return filtered.sort((a, b) => {
-      const aTime = new Date(a.createdAt).getTime();
-      const bTime = new Date(b.createdAt).getTime();
-      return sortOrder === "oldest" ? aTime - bTime : bTime - aTime;
-    });
-  }, [
-    registrationSearch,
-    registrationStatusFilter,
-    sortOrder,
-    submissionDateFilter,
-    submissions,
-  ]);
-
-  const updateParams = (updater: (params: URLSearchParams) => void) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      updater(next);
-      return next;
-    });
-  };
-
-  const exportCompaniesCsv = () => {
-    downloadCsv("companies.csv", [
-      [
-        "Company",
-        "Shopify Company ID",
-        "Contact Name",
-        "Contact Email",
-        "Users",
-        "Credit Limit",
-        "Used Credit",
-        "Available Credit",
-        "Usage %",
-        "Updated At",
-      ],
-      ...companies.map((company) => [
-        company.name,
-        company.shopifyCompanyId?.replace("gid://shopify/Company/", "") || "",
-        company.contactName || "",
-        company.contactEmail || "",
-        String(company.userCount),
-        company.creditLimit,
-        company.usedCredit,
-        company.availableCredit,
-        String(company.creditUsagePercentage),
-        formatDisplayDate(company.updatedAt),
-      ]),
-    ]);
-  };
-
-  const exportRegistrationsCsv = () => {
-    downloadCsv("registrations.csv", [
-      ["Company", "Customer", "Email", "Status", "Submitted On"],
-      ...filteredRegistrationSubmissions.map((submission) => [
-        submission.companyName,
-        `${submission.firstName} ${submission.lastName}`.trim(),
-        submission.email,
-        submission.status,
-        formatDisplayDate(submission.createdAt),
-      ]),
-    ]);
-  };
 
   if (storeMissing) {
     return (
@@ -751,161 +670,98 @@ export default function CompaniesPage() {
           ))}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 14,
-            flexWrap: "wrap",
-            marginBottom: 16,
-            padding: 14,
-            border: "1px solid #dde3ea",
-            borderRadius: 14,
-            background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
-            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)",
-          }}
-        >
+        {activeTab === "companies" ? (
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 10,
-              flex: 1,
+              justifyContent: "space-between",
+              gap: 12,
               flexWrap: "wrap",
-              minWidth: 320,
+              marginBottom: 16,
+              padding: 14,
+              border: "1px solid #dde3ea",
+              borderRadius: 14,
+              background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
             }}
           >
-            <input
-              type="text"
-              placeholder={
-                activeTab === "companies"
-                  ? "Search by company name, contact, or email"
-                  : "Search by company name or email"
-              }
-              value={activeTab === "companies" ? query : registrationSearch}
-              onChange={(e) => {
-                const value = e.target.value;
-
-                if (activeTab === "companies") {
-                  setQuery(value);
-                  updateParams((params) => {
-                    params.set("page", "1");
-                    if (value) {
-                      params.set("search", value);
-                    } else {
-                      params.delete("search");
-                    }
-                  });
-                  return;
-                }
-
-                setRegistrationSearch(value);
-                updateParams((params) => {
-                  if (value) {
-                    params.set("registrationSearch", value);
-                  } else {
-                    params.delete("registrationSearch");
-                  }
-                });
-              }}
+            <div
               style={{
-                ...compactControlStyle,
-                flex: activeTab === "companies" ? "2.4 1 420px" : "1.8 1 320px",
-                background: "#fff",
-                outline: "none",
-                minHeight: 34,
-                padding: "5px 12px",
-                boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.04)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                flex: 1,
+                minWidth: 320,
               }}
-            />
-
-            {activeTab === "companies" ? null : (
-              <select
-                value={registrationStatusFilter}
-                onChange={(e) => {
-                  updateParams((params) => {
-                    params.set("tab", e.target.value);
-                    params.set("page", "1");
-                  });
-                }}
-                style={compactControlStyle}
-              >
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-              </select>
-            )}
-
-            {activeTab === "companies" ? null : (
+            >
               <input
-                type="date"
-                value={submissionDateFilter}
+                type="text"
+                placeholder="Search by company name, email."
+                value={query}
                 onChange={(e) => {
-                  updateParams((params) => {
-                    if (e.target.value) {
-                      params.set("submittedOn", e.target.value);
+                  const value = e.target.value;
+                  setQuery(value);
+                  setSearchParams((prev) => {
+                    const newParams = new URLSearchParams(prev);
+                    newParams.set("page", "1");
+                    if (value) {
+                      newParams.set("search", value);
                     } else {
-                      params.delete("submittedOn");
+                      newParams.delete("search");
                     }
+                    return newParams;
                   });
                 }}
-                style={compactControlStyle}
+                style={{
+                  flex: "1 1 280px",
+                  minHeight: 36,
+                  padding: "6px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #c9ccd0",
+                  fontSize: 13,
+                  outline: "none",
+                }}
               />
-            )}
 
-            <select
-              value={sortOrder}
-              onChange={(e) => {
-                updateParams((params) => {
-                  params.set("sort", e.target.value);
-                  params.set("page", "1");
-                });
-              }}
-              style={compactControlStyle}
-            >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
-          </div>
+              <select
+                value={sortOrder}
+                onChange={(e) => {
+                  setSearchParams((prev) => {
+                    const newParams = new URLSearchParams(prev);
+                    newParams.set("page", "1");
+                    newParams.set("sort", e.target.value);
+                    return newParams;
+                  });
+                }}
+                style={{
+                  minHeight: 36,
+                  padding: "6px 12px",
+                  borderRadius: 10,
+                  border: "1px solid #c9ccd0",
+                  fontSize: 13,
+                  background: "#fff",
+                }}
+              >
+                <option value="newest">Sort by newest</option>
+                <option value="oldest">Sort by oldest</option>
+              </select>
+            </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <s-button
-              type="button"
-              onClick={activeTab === "companies" ? exportCompaniesCsv : exportRegistrationsCsv}
-              variant="secondary"
-              style={{
-                minHeight: 36,
-                paddingInline: 14,
-                borderRadius: 10,
-                fontSize: 13,
-                whiteSpace: "nowrap",
-              }}
-            >
-              Export CSV
-            </s-button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <s-button type="button" variant="secondary" onClick={exportCompaniesCsv}>
+                Export CSV
+              </s-button>
 
-            {activeTab === "companies" ? (
               <syncFetcher.Form method="post">
                 <input name="intent" value="syncCompanies" hidden readOnly />
-                <s-button
-                  type="submit"
-                  variant="secondary"
-                  loading={isSyncing}
-                  style={{
-                    minHeight: 36,
-                    paddingInline: 12,
-                    borderRadius: 10,
-                    fontSize: 13,
-                    whiteSpace: "nowrap",
-                  }}
-                >
+                <s-button type="submit" variant="secondary" loading={isSyncing}>
                   Company Sync
                 </s-button>
               </syncFetcher.Form>
-            ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {activeTab === "companies" ? (
           companies.length === 0 ? (
@@ -1159,90 +1015,20 @@ export default function CompaniesPage() {
           </div>
           )
         ) : (
-          filteredRegistrationSubmissions.length === 0 ? (
-            <s-empty-state heading="No registrations found" />
-          ) : (
-            <div
-              style={{
-                border: "1px solid #e3e3e3",
-                borderRadius: 10,
-                overflow: "hidden",
-                background: "#fff",
-              }}
-            >
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ background: "#f6f6f7" }}>
-                    <th style={{ textAlign: "left", padding: "10px 12px", fontSize: 13 }}>Company</th>
-                    <th style={{ textAlign: "left", padding: "10px 12px", fontSize: 13 }}>Email</th>
-                    <th style={{ textAlign: "left", padding: "10px 12px", fontSize: 13 }}>Status</th>
-                    <th style={{ textAlign: "left", padding: "10px 12px", fontSize: 13 }}>Submission date</th>
-                    <th style={{ textAlign: "left", padding: "10px 12px", fontSize: 13 }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRegistrationSubmissions.map((submission) => (
-                    <tr key={submission.id} style={{ borderTop: "1px solid #e3e3e3" }}>
-                      <td style={{ padding: "12px" }}>
-                        <div style={{ fontWeight: 600, color: "#202223" }}>{submission.companyName}</div>
-                        <div style={{ color: "#6d7175", fontSize: 13 }}>
-                          {submission.firstName} {submission.lastName}
-                        </div>
-                      </td>
-                      <td style={{ padding: "12px", color: "#202223" }}>{submission.email}</td>
-                      <td style={{ padding: "12px" }}>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            padding: "4px 10px",
-                            borderRadius: 999,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            background:
-                              submission.status === "APPROVED"
-                                ? "#d9f5e5"
-                                : submission.status === "REJECTED"
-                                  ? "#fde2e1"
-                                  : "#fff1d6",
-                            color:
-                              submission.status === "APPROVED"
-                                ? "#0f5132"
-                                : submission.status === "REJECTED"
-                                  ? "#8a1f17"
-                                  : "#8a6116",
-                          }}
-                        >
-                          {submission.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: "12px", color: "#202223" }}>
-                        {formatDisplayDate(submission.createdAt)}
-                      </td>
-                      <td style={{ padding: "12px" }}>
-                        <Link
-                          to={`/app/registrations?status=${submission.status}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "8px 12px",
-                            borderRadius: 8,
-                            border: "1px solid #c9ccd0",
-                            textDecoration: "none",
-                            color: "#202223",
-                            fontSize: 13,
-                            fontWeight: 500,
-                            background: "#fff",
-                          }}
-                        >
-                          Open details
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
+          <RegistrationApprovalsPanel
+            submissions={submissions}
+            storeMissing={storeMissing}
+            formConfig={formConfig!}
+            shippingCountryOptions={shippingCountryOptions}
+            shippingProvincesByCountry={shippingProvincesByCountry}
+            paymentTermsTemplates={paymentTermsTemplates}
+            allCatalogs={allCatalogs}
+            priceLists={priceLists}
+            forcedStatusFilter={activeTab.toUpperCase() as "PENDING" | "APPROVED" | "REJECTED"}
+            hideStatusTabs
+            embedded
+            heading="Registrations"
+          />
         )}
 
         {/* Pagination */}

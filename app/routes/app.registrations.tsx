@@ -5587,140 +5587,208 @@ export function RegistrationApprovalsPanel({
   const content = (
     <>
       <s-section heading="">
-        {!hideStatusTabs ? (
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              marginBottom: 16,
-              borderBottom: "1px solid #e3e3e3",
-            }}
-          >
-            {(["PENDING", "APPROVED", "REJECTED"] as const).map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                style={{
-                  padding: "8px 16px",
-                  background: "none",
-                  border: "none",
-                  borderBottom:
-                    statusFilter === status
-                      ? "2px solid #2c6ecb"
-                      : "2px solid transparent",
-                  color: statusFilter === status ? "#2c6ecb" : "#5c5f62",
-                  fontWeight: statusFilter === status ? 600 : 400,
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-              >
-                {status.charAt(0) + status.slice(1).toLowerCase()} (
-                {submissions.filter((s) => s.status === status).length})
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        {filteredSubmissions.length === 0 ? (
-          <s-paragraph>
-            There are no {statusFilter.toLowerCase()} submissions yet.
-          </s-paragraph>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table
+        <div
+          style={{
+            border: "1px solid #d8dadd",
+            borderRadius: 16,
+            background: "#fff",
+            boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+            padding: 14,
+          }}
+        >
+          {!hideStatusTabs ? (
+            <div
               style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: 900,
+                display: "flex",
+                gap: 8,
+                marginBottom: 14,
+                borderBottom: "1px solid #e3e3e3",
+                overflowX: "auto",
               }}
             >
-              <thead>
-                <tr>
-                  {[
-                    "Company",
-                    "Contact",
-                    "Email",
-                    "Phone",
-                    "Status",
-                    "Created",
-                    "Actions",
-                  ].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: "8px" }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSubmissions.map((submission) => (
-                  <tr
-                    key={submission.id}
-                    style={{ borderTop: "1px solid #e3e3e3" }}
-                  >
-                    <td style={{ padding: "8px" }}>{submission.companyName}</td>
-                    <td style={{ padding: "8px" }}>
-                      {submission.firstName} {submission.lastName}
-                    </td>
-                    <td style={{ padding: "8px" }}>{submission.email}</td>
-                    <td style={{ padding: "8px" }}>
-                      {(submission as any)?.shipping?.Phone}
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      <s-badge
-                        tone={
-                          submission.status === "APPROVED"
-                            ? "success"
-                            : submission.status === "REJECTED"
-                              ? "critical"
-                              : "warning"
-                        }
+              {(["PENDING", "APPROVED", "REJECTED"] as const).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setStatusFilter(status)}
+                  style={{
+                    padding: "10px 14px",
+                    background: "none",
+                    border: "none",
+                    borderBottom:
+                      statusFilter === status
+                        ? "2px solid #2c6ecb"
+                        : "2px solid transparent",
+                    color: statusFilter === status ? "#2c6ecb" : "#5c5f62",
+                    fontWeight: statusFilter === status ? 600 : 400,
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    whiteSpace: "nowrap",
+                    marginBottom: -1,
+                    fontSize: 14,
+                  }}
+                >
+                  {status.charAt(0) + status.slice(1).toLowerCase()} (
+                  {submissions.filter((s) => s.status === status).length})
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {filteredSubmissions.length === 0 ? (
+            <s-paragraph>
+              There are no {statusFilter.toLowerCase()} submissions yet.
+            </s-paragraph>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  minWidth: 960,
+                }}
+              >
+                <thead>
+                  <tr style={{ background: "#fff" }}>
+                    {[
+                      "Company",
+                      "Contact",
+                      "Email",
+                      "Phone",
+                      "Status",
+                      "Created",
+                      "Actions",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: "left",
+                          padding: "14px 12px",
+                          fontSize: 14,
+                          color: "#303030",
+                          borderBottom: "1px solid #e3e3e3",
+                        }}
                       >
-                        {submission.status}
-                      </s-badge>
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      {formatDate(submission.createdAt)}
-                    </td>
-                    <td style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                      {submission.status === "PENDING" ? (
-                        <>
-                          <s-button
-                            onClick={() => startApproval(submission)}
-                            {...(isCheckingCustomer &&
-                            selected?.id === submission.id
-                              ? { loading: true }
-                              : {})}
-                          >
-                            Approve
-                          </s-button>
-                          <span style={{ marginLeft: 8 }}>
-                            <s-button
-                              tone="critical"
-                              variant="tertiary"
-                              onClick={() => rejectSubmission(submission)}
-                              {...(rejectFetcher.state !== "idle" &&
-                              selected?.id === submission.id
-                                ? { loading: true }
-                                : {})}
-                            >
-                              Reject
-                            </s-button>
-                          </span>
-                        </>
-                      ) : (
-                        <span style={{ color: "#5c5f62", fontSize: 14 }}>
-                          {submission.status === "APPROVED"
-                            ? "Approved"
-                            : "Rejected"}
-                        </span>
-                      )}
-                    </td>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {filteredSubmissions.map((submission) => {
+                    const contactName =
+                      `${submission.firstName || ""} ${submission.lastName || ""}`.trim() || "-";
+                    const phone = submission.phone || submission.shipping?.phone || "-";
+                    const isRowChecking =
+                      isCheckingCustomer && selected?.id === submission.id;
+                    const isRowRejecting =
+                      rejectFetcher.state !== "idle" && rejectTarget?.id === submission.id;
+
+                    const statusStyles =
+                      submission.status === "APPROVED"
+                        ? { background: "#d9f5e5", color: "#0f5132" }
+                        : submission.status === "REJECTED"
+                          ? { background: "#fde2e1", color: "#8a1f17" }
+                          : { background: "#fde7c1", color: "#8a6116" };
+
+                    return (
+                      <tr
+                        key={submission.id}
+                        style={{ borderTop: "1px solid #f1f2f4" }}
+                      >
+                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                          {submission.companyName}
+                        </td>
+                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                          {contactName}
+                        </td>
+                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                          {submission.email}
+                        </td>
+                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                          {phone}
+                        </td>
+                        <td style={{ padding: "14px 12px" }}>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              ...statusStyles,
+                            }}
+                          >
+                            {submission.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                          {new Intl.DateTimeFormat("en-IN", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          }).format(new Date(submission.createdAt))}
+                        </td>
+                        <td style={{ padding: "14px 12px", whiteSpace: "nowrap" }}>
+                          {submission.status === "PENDING" ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 12,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <s-button
+                                onClick={() => startApproval(submission)}
+                                variant="secondary"
+                                {...(isRowChecking ? { loading: true } : {})}
+                                style={{
+                                  minHeight: 30,
+                                  paddingInline: 14,
+                                  borderRadius: 10,
+                                  fontSize: 14,
+                                }}
+                              >
+                                Approve
+                              </s-button>
+                              <button
+                                type="button"
+                                onClick={() => rejectSubmission(submission)}
+                                disabled={isRowRejecting}
+                                style={{
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "#b42318",
+                                  fontSize: 14,
+                                  fontWeight: 500,
+                                  cursor: isRowRejecting ? "not-allowed" : "pointer",
+                                  opacity: isRowRejecting ? 0.6 : 1,
+                                  padding: 0,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {isRowRejecting ? "Rejecting..." : "Reject"}
+                              </button>
+                            </div>
+                          ) : (
+                            <span style={{ color: "#5c5f62", fontSize: 14 }}>
+                              {submission.status === "APPROVED"
+                                ? "Approved"
+                                : "Rejected"}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </s-section>
 
       {/* ── Configure Company UI ─────────────────────────────────────────── */}
