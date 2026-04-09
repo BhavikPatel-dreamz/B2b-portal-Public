@@ -76,7 +76,7 @@ model Store {
   companyAccounts        CompanyAccount[]
   b2bOrders              B2BOrder[]    @relation("StoreOrders")
   formFieldConfigs        FormFieldConfig[]
-
+  emailTemplates          EmailTemplates[] @relation("StoreEmailTemplates")
   @@index([shopDomain])
 }
 
@@ -346,4 +346,20 @@ model CreditTransaction {
 
   @@index([companyId])
   @@index([transactionType])
+}
+
+model EmailTemplates {
+  id                                    String   @id @default(cuid())
+  shopId                                String
+  shop                                  Store    @relation("StoreEmailTemplates", fields: [shopId], references: [id], onDelete: Cascade)
+  customerRegistration                  Boolean?  @default(false)
+  customerRegistrationTemplate          String?
+  customerRegistrationApproved          Boolean?  @default(false)
+  customerRegistrationApprovedTemplate  String?
+  customerRegistrationRejectd           Boolean?  @default(false)
+  customerRegistrationRejectedTemplate  String?
+  adminRequest                          Boolean?  @default(false)
+  adminRequestTemplate                  String?
+  createdAt                             DateTime  @default(now())
+  updatedAt                             DateTime @updatedAt
 }

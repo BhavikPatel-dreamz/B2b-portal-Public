@@ -27,6 +27,8 @@ type Tutorial = {
   title: string;
   description: string;
   videoUrl: string;
+  duration: string;
+  thumbnailTitle: string;
 };
 
 type ActionResponse = {
@@ -106,6 +108,8 @@ export default function Welcome() {
   const navigate = useNavigate();
   const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
   const [showSetupEssentials, setShowSetupEssentials] = useState(true);
+  const [isSetupFinished, setIsSetupFinished] = useState(false);
+  const [completedSetupItems, setCompletedSetupItems] = useState<string[]>([]);
 
   
   const [completedSteps, setCompletedSteps] = useState({
@@ -159,7 +163,9 @@ export default function Welcome() {
       tagClass: "tag-storefront",
       title: "Enable B2B Registration on Storefront",
       description: "Learn how to enable the app embed and display the B2B company registration form on your storefront so wholesale customers can apply.",
-      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
+      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs",
+      duration: "4:55",
+      thumbnailTitle: "How To Set Up\nRequest For Quote?"
     },
     {
       id: 2,
@@ -167,7 +173,9 @@ export default function Welcome() {
       tagClass: "tag-customer",
       title: "Create & Publish B2B Portal Page",
       description: "Step-by-step guide to creating a B2B portal page, adding the app block, and linking it to your store menu.",
-      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
+      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs",
+      duration: "2:58",
+      thumbnailTitle: "How To Set Up\nQuick Order?"
     },
     {
       id: 3,
@@ -175,9 +183,46 @@ export default function Welcome() {
       tagClass: "tag-customer",
       title: "Approve Companies & Manage Access",
       description: "See how to review B2B registrations, approve companies, manage users, locations, and assign roles.",
-      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs"
+      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs",
+      duration: "3:42",
+      thumbnailTitle: "How To Manage\nCompany Access?"
     }
   ];
+
+  const setupStorageKey = store?.shopDomain
+    ? `setup-essentials-${store.shopDomain}`
+    : "setup-essentials";
+  const setupDismissedStorageKey = `${setupStorageKey}-dismissed`;
+
+  const isSetupItemComplete = (label: string) =>
+    completedSetupItems.includes(label);
+
+  const markSetupItemComplete = (label: string) => {
+    setCompletedSetupItems((prev) => {
+      if (prev.includes(label)) {
+        return prev;
+      }
+
+      const next = [...prev, label];
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(setupStorageKey, JSON.stringify(next));
+      }
+      return next;
+    });
+  };
+
+  const areAllSetupItemsComplete =
+    setupEssentials.length > 0 &&
+    setupEssentials.every((item) => isSetupItemComplete(item.label));
+
+  const handleFinishAndClose = () => {
+    if (!areAllSetupItemsComplete || typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(setupDismissedStorageKey, "true");
+    setIsSetupFinished(true);
+  };
 
   const openModal = (tutorial: Tutorial) => {
     setSelectedTutorial(tutorial);
@@ -193,9 +238,51 @@ export default function Welcome() {
     }
   }, [navigate, syncFetcher.data, syncFetcher.state]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedSteps = window.localStorage.getItem(setupStorageKey);
+
+    if (!storedSteps) {
+      return;
+    }
+
+    try {
+      const parsedSteps = JSON.parse(storedSteps);
+      if (Array.isArray(parsedSteps)) {
+        setCompletedSetupItems(parsedSteps);
+      }
+    } catch {
+      window.localStorage.removeItem(setupStorageKey);
+    }
+  }, [setupStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const isDismissed = window.localStorage.getItem(setupDismissedStorageKey) === "true";
+
+    if (isDismissed) {
+      setShowSetupEssentials(true);
+      setIsSetupFinished(true);
+    }
+  }, [setupDismissedStorageKey]);
+
 
   return (
-    <div style={{ background: "#f1f2f4", minHeight: "100vh", padding: "24px" }}>
+    <div
+      style={{
+        background: "#f1f2f4",
+        minHeight: "100vh",
+        padding: "24px",
+        fontFamily:
+          'var(--p-font-family-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+      }}
+    >
       <style>{`
         * {
           margin: 0;
@@ -349,6 +436,13 @@ export default function Welcome() {
           justify-content: center;
           font-size: 11px;
           line-height: 1;
+          color: #303030;
+        }
+
+        .setup-essentials-icon.completed {
+          border-color: #008060;
+          background: #008060;
+          color: #ffffff;
         }
 
         .setup-essentials-close {
@@ -387,13 +481,20 @@ export default function Welcome() {
           width: 18px;
           height: 18px;
           border-radius: 50%;
-          border: 2px solid #008060;
-          color: #008060;
+          border: 2px solid #303030;
+          color: #303030;
           display: inline-flex;
           align-items: center;
           justify-content: center;
           font-size: 11px;
           flex-shrink: 0;
+          background: #ffffff;
+        }
+
+        .setup-essential-check.completed {
+          border-color: #008060;
+          background: #008060;
+          color: #ffffff;
         }
 
         .setup-essential-link {
@@ -429,6 +530,13 @@ export default function Welcome() {
 
         .setup-essentials-button:hover {
           background: #f6f6f7;
+        }
+
+        .setup-essentials-button:disabled {
+          background: #f6f6f7;
+          border-color: #e4e5e7;
+          color: #8c9196;
+          cursor: not-allowed;
         }
 
         .overview-card {
@@ -813,45 +921,146 @@ export default function Welcome() {
         /* Tutorials Section */
         .tutorials-section {
           background: white;
-          border-radius: 8px;
-          padding: 20px;
-          border: 1px solid #e4e5e7;
+          border-radius: 16px;
+          padding: 22px;
+          border: 1px solid #d8dadd;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        }
+
+        .tutorials-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 18px;
         }
 
         .tutorials-title {
-          font-size: 18px;
-          font-weight: 600;
+          font-size: 24px;
+          font-weight: 700;
           color: #303030;
-          margin-bottom: 20px;
+          margin-bottom: 4px;
+        }
+
+        .tutorials-subtitle {
+          color: #6d7175;
+          font-size: 14px;
+          line-height: 1.5;
+        }
+
+        .tutorials-menu {
+          border: none;
+          background: transparent;
+          color: #6d7175;
+          font-size: 22px;
+          line-height: 1;
+          cursor: pointer;
+          padding: 0;
         }
 
         .tutorials-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 16px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
         }
 
         .tutorial-card {
-          border: 1px solid #e4e5e7;
-          border-radius: 8px;
-          padding: 16px;
+          border: 1px solid #d8dadd;
+          border-radius: 12px;
           cursor: pointer;
-          transition: all 0.2s;
+          overflow: hidden;
+          background: #ffffff;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+          transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
         }
 
         .tutorial-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+          transform: translateY(-3px);
+          box-shadow: 0 12px 24px rgba(31, 33, 36, 0.1);
           border-color: #c9cccf;
+        }
+
+        .tutorial-card-visual {
+          position: relative;
+          min-height: 150px;
+          padding: 14px 14px 12px;
+          background:
+            radial-gradient(circle at top right, rgba(145, 116, 255, 0.45), transparent 34%),
+            linear-gradient(135deg, #121033 0%, #1c184e 48%, #28206a 100%);
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+
+        .tutorial-card-visual::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.18) 100%);
+          pointer-events: none;
+        }
+
+        .tutorial-card-badge {
+          position: relative;
+          z-index: 1;
+          width: fit-content;
+          margin: 0 auto;
+          padding: 3px 8px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          background: rgba(88, 72, 168, 0.42);
+          color: #d7d2ff;
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .tutorial-thumbnail-title {
+          position: relative;
+          z-index: 1;
+          color: #f4f1ff;
+          font-size: 20px;
+          font-weight: 700;
+          line-height: 1.1;
+          text-align: center;
+          white-space: pre-line;
+          margin-top: 12px;
+          text-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+        }
+
+        .tutorial-duration {
+          position: absolute;
+          left: 12px;
+          bottom: 12px;
+          z-index: 1;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 4px 8px;
+          border-radius: 8px;
+          background: rgba(12, 13, 14, 0.85);
+          color: #ffffff;
+          font-size: 11px;
+          font-weight: 600;
+        }
+
+        .tutorial-duration-icon {
+          font-size: 10px;
+          line-height: 1;
+        }
+
+        .tutorial-card-body {
+          padding: 12px;
         }
 
         .tutorial-tag {
           display: inline-block;
-          padding: 4px 10px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: 500;
-          margin-bottom: 12px;
+          padding: 3px 8px;
+          border-radius: 999px;
+          font-size: 10px;
+          font-weight: 600;
+          margin-bottom: 10px;
         }
 
         .tag-storefront {
@@ -865,7 +1074,7 @@ export default function Welcome() {
         }
 
         .tutorial-card-title {
-          font-size: 15px;
+          font-size: 14px;
           font-weight: 600;
           color: #303030;
           margin-bottom: 8px;
@@ -873,22 +1082,23 @@ export default function Welcome() {
 
         .tutorial-card-description {
           color: #6d7175;
-          font-size: 13px;
-          line-height: 1.5;
-          margin-bottom: 16px;
+          font-size: 12px;
+          line-height: 1.4;
+          margin-bottom: 12px;
+          min-height: 50px;
         }
 
         .watch-tutorial-btn {
           background: white;
           color: #303030;
           border: 1px solid #c9cccf;
-          padding: 8px 16px;
-          border-radius: 6px;
-          font-size: 13px;
+          padding: 7px 12px;
+          border-radius: 9px;
+          font-size: 12px;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.2s;
-          width: 100%;
+          width: fit-content;
         }
 
         .watch-tutorial-btn:hover {
@@ -1262,7 +1472,7 @@ export default function Welcome() {
           }
 
           .tutorials-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
           .onboarding-card {
@@ -1287,6 +1497,12 @@ export default function Welcome() {
             display: none;
           }
         }
+
+        @media (max-width: 560px) {
+          .tutorials-grid {
+            grid-template-columns: 1fr;
+          }
+        }
       `}</style>
 
       <div className="setup-container">
@@ -1301,7 +1517,11 @@ export default function Welcome() {
           <div className="setup-essentials-card">
             <div className="setup-essentials-header">
               <div className="setup-essentials-title">
-                <span className="setup-essentials-icon">✓</span>
+                <span
+                  className={`setup-essentials-icon${areAllSetupItemsComplete ? " completed" : ""}`}
+                >
+                  {areAllSetupItemsComplete ? "✓" : ""}
+                </span>
                 <span>Setup essentials</span>
               </div>
               <button
@@ -1313,35 +1533,47 @@ export default function Welcome() {
               </button>
             </div>
 
-            {setupEssentials.map((item) => (
-              <div key={item.label} className="setup-essential-row">
-                <div className="setup-essential-label">
-                  <span className="setup-essential-check">✓</span>
-                  <span>{item.label}</span>
+            {setupEssentials.map((item) => {
+              const isComplete = isSetupItemComplete(item.label);
+
+              return (
+                <div key={item.label} className="setup-essential-row">
+                  <div className="setup-essential-label">
+                    <span className={`setup-essential-check${isComplete ? " completed" : ""}`}>
+                      {isComplete ? "✓" : ""}
+                    </span>
+                    <span>{item.label}</span>
+                  </div>
+                  {item.external ? (
+                    <a
+                      className="setup-essential-link"
+                      href={item.href}
+                      target="_top"
+                      rel="noreferrer"
+                      onClick={() => markSetupItemComplete(item.label)}
+                    >
+                      {item.actionLabel}
+                    </a>
+                  ) : (
+                    <Link
+                      className="setup-essential-link"
+                      to={item.href}
+                      onClick={() => markSetupItemComplete(item.label)}
+                    >
+                      {item.actionLabel}
+                    </Link>
+                  )}
                 </div>
-                {item.external ? (
-                  <a
-                    className="setup-essential-link"
-                    href={item.href}
-                    target="_top"
-                    rel="noreferrer"
-                  >
-                    {item.actionLabel}
-                  </a>
-                ) : (
-                  <Link className="setup-essential-link" to={item.href}>
-                    {item.actionLabel}
-                  </Link>
-                )}
-              </div>
-            ))}
+              );
+            })}
 
             <div className="setup-essentials-footer">
               <button
                 className="setup-essentials-button"
-                onClick={() => setShowSetupEssentials(false)}
+                onClick={handleFinishAndClose}
+                disabled={!areAllSetupItemsComplete || isSetupFinished}
               >
-                Finish and close
+                {isSetupFinished ? "Finished" : "Finish and close"}
               </button>
             </div>
           </div>
@@ -1401,7 +1633,17 @@ export default function Welcome() {
 
         {/* Tutorials */}
         <div className="tutorials-section">
-          <h2 className="tutorials-title">Tutorials</h2>
+          <div className="tutorials-header">
+            <div>
+              <h2 className="tutorials-title">Guide videos</h2>
+              <p className="tutorials-subtitle">
+                Step-by-step instruction videos, just a few minutes to know the app!
+              </p>
+            </div>
+            <button className="tutorials-menu" type="button" aria-label="Tutorial options">
+              ...
+            </button>
+          </div>
           <div className="tutorials-grid">
             {tutorials.map((tutorial) => (
               <div 
@@ -1409,12 +1651,24 @@ export default function Welcome() {
                 className="tutorial-card"
                 onClick={() => openModal(tutorial)}
               >
-                <span className={`tutorial-tag ${tutorial.tagClass}`}>
-                  {tutorial.tag}
-                </span>
-                <h3 className="tutorial-card-title">{tutorial.title}</h3>
-                <p className="tutorial-card-description">{tutorial.description}</p>
-                <button className="watch-tutorial-btn">Watch tutorial</button>
+                <div className="tutorial-card-visual">
+                  <span className="tutorial-card-badge">B2B Portal Guide</span>
+                  <div className="tutorial-thumbnail-title">{tutorial.thumbnailTitle}</div>
+                  <div className="tutorial-duration">
+                    <span className="tutorial-duration-icon">▶</span>
+                    <span>{tutorial.duration}</span>
+                  </div>
+                </div>
+                <div className="tutorial-card-body">
+                  <span className={`tutorial-tag ${tutorial.tagClass}`}>
+                    {tutorial.tag}
+                  </span>
+                  <h3 className="tutorial-card-title">{tutorial.title}</h3>
+                  <p className="tutorial-card-description">{tutorial.description}</p>
+                  <button className="watch-tutorial-btn" type="button">
+                    Watch video
+                  </button>
+                </div>
               </div>
             ))}
           </div>

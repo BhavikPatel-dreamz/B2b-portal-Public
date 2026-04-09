@@ -1661,16 +1661,7 @@ export default function CompanyDashboard() {
               <span>Unpaid:</span>
               <span>{data.orderStats.unpaid}</span>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                color: "#b98900",
-              }}
-            >
-              <span>Pending:</span>
-              <span>{data.orderStats.pending}</span>
-            </div>
+       
           </div>
         </s-section>
       </div>

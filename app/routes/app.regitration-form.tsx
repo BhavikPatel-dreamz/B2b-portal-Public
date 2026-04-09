@@ -2982,7 +2982,7 @@ export default function FormEditor() {
 
   if (storeMissing) {
     return (
-      <s-page heading="Form editor">
+      <s-page heading="B2B/Wholesale registration form">
         <s-section>
           <s-banner tone="critical">
             <p>Store not found. Please reinstall the app.</p>
@@ -2993,50 +2993,7 @@ export default function FormEditor() {
   }
 
   return (
-    <s-page heading="Form editor">
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 18,
-          gap: 16,
-          padding: "10px 14px",
-          border: "1px solid #d7dde4",
-          borderRadius: 16,
-          background: "#ffffff",
-          boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {[
-            { label: "Form", active: true },
-          ].map((tab) => (
-            <button
-              key={tab.label}
-              type="button"
-              style={{
-                border: "none",
-                background: tab.active ? "#ececec" : "transparent",
-                color: "#4b5563",
-                borderRadius: 12,
-                padding: "9px 14px",
-                fontSize: 14,
-                fontWeight: tab.active ? 600 : 500,
-                cursor: "default",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <s-button variant="primary" onClick={handleSaveAndSubmit} loading={isSaving}>
-            Save & Submit
-          </s-button>
-        </div>
-      </div>
-
+    <s-page heading="B2B/Wholesale registration form">
       <div
         style={{
           display: "flex",
@@ -4417,23 +4374,41 @@ export default function FormEditor() {
             }
           }}
         >
-          <div style={{ display: "flex", gap: 3, marginBottom: 12, flexWrap: "wrap", border: "1px solid #d7dde4", borderRadius: 14, background: "#fff", padding: "12px 14px" }}>
-            {config.steps.map((step, idx) => (
-              <button
-                key={step.id}
-                onClick={(e) => { e.stopPropagation(); setActiveStepIndex(idx); setEditingSteps(false); setActiveSection(null); setActiveFieldId(null); }}
-                style={{
-                  padding: "7px 15px", border: "none",
-                  borderRadius: 10,
-                  background: activeStepIndex === idx ? "#d8d8d8" : "transparent",
-                  color: "#4b5563",
-                  fontWeight: activeStepIndex === idx ? 600 : 500,
-                  fontSize: 13, cursor: "pointer", transition: "background 0.12s, color 0.12s",
-                }}
-              >
-                {step.label}
-              </button>
-            ))}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginBottom: 12,
+              flexWrap: "wrap",
+              border: "1px solid #d7dde4",
+              borderRadius: 14,
+              background: "#fff",
+              padding: "12px 14px",
+            }}
+          >
+            <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+              {config.steps.map((step, idx) => (
+                <button
+                  key={step.id}
+                  onClick={(e) => { e.stopPropagation(); setActiveStepIndex(idx); setEditingSteps(false); setActiveSection(null); setActiveFieldId(null); }}
+                  style={{
+                    padding: "7px 15px", border: "none",
+                    borderRadius: 10,
+                    background: activeStepIndex === idx ? "#d8d8d8" : "transparent",
+                    color: "#4b5563",
+                    fontWeight: activeStepIndex === idx ? 600 : 500,
+                    fontSize: 13, cursor: "pointer", transition: "background 0.12s, color 0.12s",
+                  }}
+                >
+                  {step.label}
+                </button>
+              ))}
+            </div>
+            <s-button variant="primary" onClick={handleSaveAndSubmit} loading={isSaving}>
+              Save & Submit
+            </s-button>
           </div>
 
           <div
@@ -4538,9 +4513,7 @@ export default function FormEditor() {
       </div>
 
       {/* ── Bottom hint ────────────────────────────────────────────────────── */}
-      <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af", textAlign: "center" }}>
-        Fields are saved to <strong>FormFieldConfig</strong> per store · Registration form reads this config dynamically
-      </div>
+     
     </s-page>
   );
 }
