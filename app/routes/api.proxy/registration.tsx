@@ -1,6 +1,9 @@
 import { ActionFunctionArgs, LoaderFunction } from "react-router";
 import { getProxyParams } from "app/utils/proxy.server";
-import { sendRegistrationEmail } from "app/utils/email";
+import {
+  sendRegistrationEmailForAdmin,
+  sendRegistrationEmailForCustomer,
+} from "app/utils/email";
 import { getStoreByDomain } from "app/services/store.server";
 import prisma from "app/db.server";
 
@@ -929,20 +932,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    if (store.submissionEmail) {
-      const emailResult = await sendRegistrationEmail(
+    if (email) {
+      const emailResult = await sendRegistrationEmailForCustomer(
         store.id,
-        store.submissionEmail,
+        email,
         store.storeOwnerName || "",
         email,
         companyName,
         `${registration?.firstName || ""} ${registration?.lastName || ""}`,
       );
 
+      if (store.submissionEmail) {
+        const adminEmailResult = await sendRegistrationEmailForAdmin(
+          store.id,
+          store.submissionEmail,
+          store.storeOwnerName || "",
+          email,
+          companyName,
+          `${registration?.firstName || ""} ${registration?.lastName || ""}`,
+        );
+
+        if (!adminEmailResult.success) {
+          console.warn(
+            "⚠️ Failed to send admin registration email:",
+            "error" in adminEmailResult ? adminEmailResult.error : "Unknown error",
+          );
+        }
+      }
+
       if (emailResult.success) {
-        console.log("✅ Registration email sent successfully");
+        console.log("✅ Customer registration email sent successfully");
       } else {
-        console.warn("⚠️ Failed to send registration email:", emailResult.error);
+        console.warn(
+          "⚠️ Failed to send customer registration email:",
+          "error" in emailResult ? emailResult.error : "Unknown error",
+        );
       }
     }
 

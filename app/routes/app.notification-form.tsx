@@ -25,6 +25,7 @@ type TemplateItem = {
   description: string;
   editorTitle: string;
   helperText: string;
+  initialSubject: string;
   initialHtml: string;
   audience: "customer" | "admin";
 };
@@ -39,6 +40,7 @@ type TemplateStoreValues = Record<
   TemplateId,
   {
     enabled: boolean;
+    subject: string;
     html: string;
   }
 >;
@@ -53,8 +55,18 @@ type ActionData = {
   message?: string;
   errors?: string[];
   templateId?: TemplateId;
+  subject?: string;
   html?: string;
   enabled?: boolean;
+};
+
+const PREVIEW_VARIABLE_VALUES: Record<string, string> = {
+  "{{companyName}}": "Sanjay-New Company",
+  "{{contactName}}": "John Doe",
+  "{{email}}": "john@sanjaynew.com",
+  "{{storeOwnerName}}": "Store Admin",
+  "{{shopName}}": "Sanjay-New",
+  "{{reviewNotes}}": "Please contact our team if you would like more details.",
 };
 
 const ToolbarButton = ({
@@ -98,6 +110,7 @@ const TEMPLATE_ITEMS: TemplateItem[] = [
     editorTitle: "Application received email template",
     helperText:
       "This email is sent to a customer when they submit the company application form.",
+    initialSubject: "We received your B2B registration request",
     initialHtml:
       "Hello {{contactName}},<br /><br />We have received your B2B registration request for {{companyName}} on {{shopName}}.",
     audience: "customer",
@@ -110,6 +123,7 @@ const TEMPLATE_ITEMS: TemplateItem[] = [
     editorTitle: "Application approved email template",
     helperText:
       "This email is sent to a customer when their company account is approved and they can begin placing orders.",
+    initialSubject: "Your B2B registration has been approved",
     initialHtml:
       "Hello {{contactName}},<br /><br />Your company account for {{companyName}} has been approved. You can now begin placing orders on {{shopName}}.",
     audience: "customer",
@@ -122,6 +136,7 @@ const TEMPLATE_ITEMS: TemplateItem[] = [
     editorTitle: "Application rejected email template",
     helperText:
       "This email is sent to a customer when their B2B registration request is rejected.",
+    initialSubject: "Update on your B2B registration",
     initialHtml:
       "Hello {{contactName}},<br /><br />Your B2B application for {{companyName}} has been rejected. Please contact {{storeOwnerName}} for more information.",
     audience: "customer",
@@ -134,6 +149,7 @@ const TEMPLATE_ITEMS: TemplateItem[] = [
     editorTitle: "New Company Registration Email Template",
     helperText:
       "This email is sent to the store owner when a new company submits a B2B registration request.",
+    initialSubject: "New B2B registration request from {{companyName}}",
     initialHtml:
       "Hello {{storeOwnerName}},<br /><br />A new company has submitted a B2B registration request on {{shopName}}.",
     audience: "admin",
@@ -146,27 +162,36 @@ const TEMPLATE_VARIABLES = [
   { variable: "{{email}}", description: "Contact email address" },
   { variable: "{{storeOwnerName}}", description: "Store owner's name" },
   { variable: "{{shopName}}", description: "Shopify store's name" },
+  { variable: "{{reviewNotes}}", description: "Approval or rejection note" },
 ];
 
 function createDefaultTemplateValues(): TemplateStoreValues {
   return {
     "customer-application-received": {
       enabled: true,
+      subject: TEMPLATE_ITEMS.find((item) => item.id === "customer-application-received")!
+        .initialSubject,
       html: TEMPLATE_ITEMS.find((item) => item.id === "customer-application-received")!
         .initialHtml,
     },
     "customer-application-approved": {
       enabled: true,
+      subject: TEMPLATE_ITEMS.find((item) => item.id === "customer-application-approved")!
+        .initialSubject,
       html: TEMPLATE_ITEMS.find((item) => item.id === "customer-application-approved")!
         .initialHtml,
     },
     "customer-application-rejected": {
       enabled: true,
+      subject: TEMPLATE_ITEMS.find((item) => item.id === "customer-application-rejected")!
+        .initialSubject,
       html: TEMPLATE_ITEMS.find((item) => item.id === "customer-application-rejected")!
         .initialHtml,
     },
     "admin-application-received": {
       enabled: true,
+      subject: TEMPLATE_ITEMS.find((item) => item.id === "admin-application-received")!
+        .initialSubject,
       html: TEMPLATE_ITEMS.find((item) => item.id === "admin-application-received")!
         .initialHtml,
     },
@@ -178,24 +203,117 @@ function getTemplateDbMapping(templateId: TemplateId) {
     case "customer-application-received":
       return {
         enabledField: "customerRegistration",
+        subjectField: "customerRegistrationSubject",
         templateField: "customerRegistrationTemplate",
       } as const;
     case "customer-application-approved":
       return {
         enabledField: "customerRegistrationApproved",
+        subjectField: "customerRegistrationApprovedSubject",
         templateField: "customerRegistrationApprovedTemplate",
       } as const;
     case "customer-application-rejected":
       return {
         enabledField: "customerRegistrationRejectd",
+        subjectField: "customerRegistrationRejectedSubject",
         templateField: "customerRegistrationRejectedTemplate",
       } as const;
     case "admin-application-received":
       return {
         enabledField: "adminRequest",
+        subjectField: "adminRequestSubject",
         templateField: "adminRequestTemplate",
       } as const;
   }
+}
+
+function buildPreviewHtml(subject: string, html: string) {
+  const replacePreviewVariables = (value: string) =>
+    Object.entries(PREVIEW_VARIABLE_VALUES).reduce(
+      (content, [variable, replacement]) => content.replaceAll(variable, replacement),
+      value,
+    );
+
+  const resolvedSubject = replacePreviewVariables(subject);
+  const resolvedHtml = replacePreviewVariables(html);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${resolvedSubject}</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px 24px;
+        background: #f3f4f6;
+        font-family: Arial, sans-serif;
+        color: #202223;
+      }
+      .email-shell {
+        max-width: 720px;
+        margin: 0 auto;
+        background: #ffffff;
+        border: 1px solid #d8dadd;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      }
+      .email-header {
+        padding: 28px 32px 12px;
+        border-bottom: 1px solid #eceef0;
+      }
+      .eyebrow {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: #6d7175;
+      }
+      .subject {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.2;
+        font-weight: 700;
+        color: #111827;
+      }
+      .email-content {
+        padding: 32px;
+        font-size: 16px;
+        line-height: 1.7;
+        color: #303030;
+      }
+      .email-content p:first-child {
+        margin-top: 0;
+      }
+      .email-content p:last-child {
+        margin-bottom: 0;
+      }
+      .email-footer {
+        padding: 18px 32px 24px;
+        border-top: 1px solid #eceef0;
+        font-size: 12px;
+        color: #6d7175;
+      }
+      a {
+        color: #0a61c7;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="email-shell">
+      <div class="email-header">
+        <p class="eyebrow">Email Preview</p>
+        <h1 class="subject">${resolvedSubject}</h1>
+      </div>
+      <div class="email-content">
+        ${resolvedHtml}
+      </div>
+      <div class="email-footer">
+        Preview data uses sample values for company, customer, and shop fields.
+      </div>
+    </div>
+  </body>
+</html>`;
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -222,24 +340,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? {
         "customer-application-received": {
           enabled: record.customerRegistration ?? false,
+          subject:
+            record.customerRegistrationSubject ||
+            defaultValues["customer-application-received"].subject,
           html:
             record.customerRegistrationTemplate ||
             defaultValues["customer-application-received"].html,
         },
         "customer-application-approved": {
           enabled: record.customerRegistrationApproved ?? false,
+          subject:
+            record.customerRegistrationApprovedSubject ||
+            defaultValues["customer-application-approved"].subject,
           html:
             record.customerRegistrationApprovedTemplate ||
             defaultValues["customer-application-approved"].html,
         },
         "customer-application-rejected": {
           enabled: record.customerRegistrationRejectd ?? false,
+          subject:
+            record.customerRegistrationRejectedSubject ||
+            defaultValues["customer-application-rejected"].subject,
           html:
             record.customerRegistrationRejectedTemplate ||
             defaultValues["customer-application-rejected"].html,
         },
         "admin-application-received": {
           enabled: record.adminRequest ?? false,
+          subject:
+            record.adminRequestSubject ||
+            defaultValues["admin-application-received"].subject,
           html:
             record.adminRequestTemplate ||
             defaultValues["admin-application-received"].html,
@@ -290,16 +420,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       customerRegistration: enabled,
       customerRegistrationApproved: enabled,
       customerRegistrationRejectd: enabled,
+      customerRegistrationSubject:
+        existing?.customerRegistrationSubject ||
+        defaults["customer-application-received"].subject,
       customerRegistrationTemplate:
         existing?.customerRegistrationTemplate ||
         defaults["customer-application-received"].html,
+      customerRegistrationApprovedSubject:
+        existing?.customerRegistrationApprovedSubject ||
+        defaults["customer-application-approved"].subject,
       customerRegistrationApprovedTemplate:
         existing?.customerRegistrationApprovedTemplate ||
         defaults["customer-application-approved"].html,
+      customerRegistrationRejectedSubject:
+        existing?.customerRegistrationRejectedSubject ||
+        defaults["customer-application-rejected"].subject,
       customerRegistrationRejectedTemplate:
         existing?.customerRegistrationRejectedTemplate ||
         defaults["customer-application-rejected"].html,
       adminRequest: existing?.adminRequest ?? true,
+      adminRequestSubject:
+        existing?.adminRequestSubject ||
+        defaults["admin-application-received"].subject,
       adminRequestTemplate:
         existing?.adminRequestTemplate ||
         defaults["admin-application-received"].html,
@@ -338,16 +480,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       customerRegistration: existing?.customerRegistration ?? true,
       customerRegistrationApproved: existing?.customerRegistrationApproved ?? true,
       customerRegistrationRejectd: existing?.customerRegistrationRejectd ?? true,
+      customerRegistrationSubject:
+        existing?.customerRegistrationSubject ||
+        defaults["customer-application-received"].subject,
       customerRegistrationTemplate:
         existing?.customerRegistrationTemplate ||
         defaults["customer-application-received"].html,
+      customerRegistrationApprovedSubject:
+        existing?.customerRegistrationApprovedSubject ||
+        defaults["customer-application-approved"].subject,
       customerRegistrationApprovedTemplate:
         existing?.customerRegistrationApprovedTemplate ||
         defaults["customer-application-approved"].html,
+      customerRegistrationRejectedSubject:
+        existing?.customerRegistrationRejectedSubject ||
+        defaults["customer-application-rejected"].subject,
       customerRegistrationRejectedTemplate:
         existing?.customerRegistrationRejectedTemplate ||
         defaults["customer-application-rejected"].html,
       adminRequest: enabled,
+      adminRequestSubject:
+        existing?.adminRequestSubject ||
+        defaults["admin-application-received"].subject,
       adminRequestTemplate:
         existing?.adminRequestTemplate ||
         defaults["admin-application-received"].html,
@@ -375,12 +529,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const templateId = String(formData.get("templateId") || "") as TemplateId;
+  const subject = String(formData.get("subject") || "").trim();
   const html = String(formData.get("html") || "").trim();
   const enabled = String(formData.get("enabled") || "true") === "true";
 
   if (!TEMPLATE_ITEMS.some((item) => item.id === templateId)) {
     return Response.json(
       { success: false, errors: ["Invalid template id"] } satisfies ActionData,
+      { status: 400 },
+    );
+  }
+
+  if (!subject) {
+    return Response.json(
+      { success: false, errors: ["Email subject is required"] } satisfies ActionData,
       { status: 400 },
     );
   }
@@ -400,6 +562,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const data = {
     [mapping.enabledField]: enabled,
+    [mapping.subjectField]: subject,
     [mapping.templateField]: html,
   };
 
@@ -421,6 +584,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     success: true,
     message: "Template saved",
     templateId,
+    subject,
     html,
     enabled,
   } satisfies ActionData);
@@ -433,10 +597,10 @@ export default function NotificationForm() {
   const saveFetcher = useFetcher<ActionData>();
   const toggleFetcher = useFetcher<ActionData>();
   const adminToggleFetcher = useFetcher<ActionData>();
-  const [showDropdown, setShowDropdown] = useState(false);
   const [templateValues, setTemplateValues] =
     useState<TemplateStoreValues>(loaderTemplates);
   const [editorHasContent, setEditorHasContent] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const selectedTemplateId = searchParams.get("template") as TemplateId | null;
 
@@ -467,6 +631,7 @@ export default function NotificationForm() {
       ...prev,
       [saveFetcher.data!.templateId!]: {
         enabled: saveFetcher.data!.enabled ?? true,
+        subject: saveFetcher.data!.subject || prev[saveFetcher.data!.templateId!].subject,
         html: saveFetcher.data!.html!,
       },
     }));
@@ -545,7 +710,6 @@ export default function NotificationForm() {
 
     handleEditorInput();
     editorRef.current.focus();
-    setShowDropdown(false);
   };
 
   const saveCurrentTemplate = () => {
@@ -557,8 +721,9 @@ export default function NotificationForm() {
       {
         intent: "saveTemplate",
         templateId: selectedTemplate.id,
+        subject: templateValues[selectedTemplate.id].subject,
         html: editorRef.current.innerHTML,
-        enabled: "true",
+        enabled: String(templateValues[selectedTemplate.id].enabled),
       },
       { method: "post" },
     );
@@ -572,6 +737,14 @@ export default function NotificationForm() {
   const adminNotificationsEnabled = adminTemplates.every(
     (item) => templateValues[item.id].enabled,
   );
+
+  const previewDocument =
+    selectedTemplate && editorRef.current
+      ? buildPreviewHtml(
+          templateValues[selectedTemplate.id].subject,
+          editorRef.current.innerHTML || templateValues[selectedTemplate.id].html,
+        )
+      : "";
 
   if (selectedTemplate) {
     return (
@@ -613,10 +786,10 @@ export default function NotificationForm() {
               <div
                 style={{
                   display: "flex",
-                  alignItems: "flex-start",
+                  alignItems: "center",
                   justifyContent: "space-between",
                   gap: 16,
-                  marginBottom: 14,
+                  marginBottom: 20,
                   flexWrap: "wrap",
                 }}
               >
@@ -632,7 +805,7 @@ export default function NotificationForm() {
                   >
                     {selectedTemplate.editorTitle}
                   </h2>
-                  <div style={{ fontSize: 12, color: "#6d7175" }}>
+                  <div style={{ fontSize: 13, color: "#6d7175" }}>
                     Saving for {storeName}
                   </div>
                 </div>
@@ -646,6 +819,13 @@ export default function NotificationForm() {
                   <s-button
                     type="button"
                     variant="secondary"
+                    onClick={() => setShowPreview(true)}
+                  >
+                    Preview
+                  </s-button>
+                  <s-button
+                    type="button"
+                    variant="secondary"
                     onClick={saveCurrentTemplate}
                     loading={saveFetcher.state !== "idle"}
                   >
@@ -656,194 +836,399 @@ export default function NotificationForm() {
 
               <div
                 style={{
-                  display: "flex",
-                  gap: 8,
-                  flexWrap: "wrap",
-                  padding: 8,
-                  background: "#f6f6f7",
-                  border: "1px solid #c9cccf",
-                  borderRadius: "10px 10px 0 0",
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) 320px",
+                  gap: 16,
+                  alignItems: "start",
                 }}
               >
-                <ToolbarButton onClick={() => format("bold")} title="Bold">
-                  <strong>B</strong>
-                </ToolbarButton>
-                <ToolbarButton onClick={() => format("italic")} title="Italic">
-                  <em>I</em>
-                </ToolbarButton>
-                <ToolbarButton onClick={() => format("underline")} title="Underline">
-                  <u>U</u>
-                </ToolbarButton>
-                <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
-                <ToolbarButton
-                  onClick={() => format("insertUnorderedList")}
-                  title="Bullet list"
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #d8dadd",
+                    borderRadius: 16,
+                    overflow: "hidden",
+                  }}
                 >
-                  ≡
-                </ToolbarButton>
-                <ToolbarButton
-                  onClick={() => format("insertOrderedList")}
-                  title="Numbered list"
-                >
-                  ≣
-                </ToolbarButton>
-                <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
-                <ToolbarButton onClick={() => format("justifyLeft")} title="Align left">
-                  ⫷
-                </ToolbarButton>
-                <ToolbarButton onClick={() => format("justifyCenter")} title="Align center">
-                  ≡
-                </ToolbarButton>
-                <ToolbarButton onClick={() => format("justifyRight")} title="Align right">
-                  ⫸
-                </ToolbarButton>
-                <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
-                <ToolbarButton onClick={() => format("removeFormat")} title="Clear format">
-                  ✕
-                </ToolbarButton>
-              </div>
-
-              <div style={{ position: "relative" }}>
-                {!editorHasContent && (
                   <div
                     style={{
-                      position: "absolute",
-                      top: 14,
-                      left: 12,
-                      right: 12,
-                      color: "#8c9196",
-                      fontSize: 14,
-                      pointerEvents: "none",
-                      lineHeight: 1.65,
-                      whiteSpace: "pre-wrap",
+                      padding: "16px 16px 14px",
+                      borderBottom: "1px solid #e3e5e7",
+                      background: "#fbfbfb",
                     }}
                   >
-                    {templateValues[selectedTemplate.id].html
-                      .replace(/<br\s*\/?>/g, "\n")
-                      .replace(/<[^>]*>/g, "")}
-                  </div>
-                )}
-
-                <div
-                  ref={editorRef}
-                  contentEditable
-                  onInput={handleEditorInput}
-                  style={{
-                    padding: "12px 12px",
-                    border: "1px solid #c9cccf",
-                    borderTop: "none",
-                    borderRadius: "0 0 10px 10px",
-                    fontSize: 14,
-                    outline: "none",
-                    minHeight: 140,
-                    background: "#fff",
-                    lineHeight: 1.65,
-                    color: "#303030",
-                  }}
-                />
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: 12,
-                  marginTop: 12,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#6d7175",
-                    flex: 1,
-                    minWidth: 240,
-                  }}
-                >
-                  {selectedTemplate.helperText}
-                </div>
-
-                <div style={{ position: "relative" }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowDropdown((prev) => !prev)}
-                    style={{
-                      padding: "8px 12px",
-                      background: "#ffffff",
-                      color: "#202223",
-                      border: "1px solid #c9cccf",
-                      borderRadius: 8,
-                      fontSize: 13,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    Available variables
-                    <span style={{ fontSize: 11 }}>⌄</span>
-                  </button>
-
-                  {showDropdown && (
-                    <div
+                    <label
+                      htmlFor="template-subject"
                       style={{
-                        position: "absolute",
-                        right: 0,
-                        top: "calc(100% + 6px)",
-                        width: 320,
-                        background: "#ffffff",
-                        border: "1px solid #c9cccf",
-                        borderRadius: 10,
-                        boxShadow: "0 10px 24px rgba(15, 23, 42, 0.12)",
-                        padding: 8,
-                        zIndex: 20,
+                        display: "block",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "#303030",
+                        marginBottom: 8,
                       }}
                     >
-                      <div style={{ display: "grid", gap: 4 }}>
-                        {TEMPLATE_VARIABLES.map(({ variable, description }) => (
-                          <button
-                            key={variable}
-                            type="button"
-                            onClick={() => insertVariable(variable)}
-                            style={{
-                              padding: "8px 10px",
-                              border: "none",
-                              background: "#ffffff",
-                              borderRadius: 8,
-                              textAlign: "left",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 600,
-                                color: "#303030",
-                                marginBottom: 2,
-                              }}
-                            >
-                              {variable}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 12,
-                                color: "#6d7175",
-                              }}
-                            >
-                              {description}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
+                      Subject
+                    </label>
+                    <input
+                      id="template-subject"
+                      type="text"
+                      value={templateValues[selectedTemplate.id].subject}
+                      onChange={(event) => {
+                        const nextSubject = event.currentTarget.value;
+                        setTemplateValues((prev) => ({
+                          ...prev,
+                          [selectedTemplate.id]: {
+                            ...prev[selectedTemplate.id],
+                            subject: nextSubject,
+                          },
+                        }));
+                      }}
+                      placeholder="Enter email subject"
+                      style={{
+                        width: "100%",
+                        border: "1px solid #c9cccf",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        fontSize: 14,
+                        color: "#303030",
+                        outline: "none",
+                        boxSizing: "border-box",
+                        background: "#ffffff",
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      padding: "16px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: "block",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#303030",
+                        }}
+                      >
+                        Content
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTemplateValues((prev) => ({
+                            ...prev,
+                            [selectedTemplate.id]: createDefaultTemplateValues()[selectedTemplate.id],
+                          }));
+                          if (editorRef.current) {
+                            const defaultTemplate =
+                              createDefaultTemplateValues()[selectedTemplate.id];
+                            editorRef.current.innerHTML = defaultTemplate.html;
+                            setEditorHasContent(
+                              editorRef.current.innerText.trim().length > 0,
+                            );
+                          }
+                        }}
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: "#0a61c7",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        Reset to default
+                      </button>
                     </div>
-                  )}
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        padding: 8,
+                        background: "#f6f6f7",
+                        border: "1px solid #c9cccf",
+                        borderRadius: "10px 10px 0 0",
+                        marginBottom: 0,
+                      }}
+                    >
+                      <ToolbarButton onClick={() => format("bold")} title="Bold">
+                        <strong>B</strong>
+                      </ToolbarButton>
+                      <ToolbarButton onClick={() => format("italic")} title="Italic">
+                        <em>I</em>
+                      </ToolbarButton>
+                      <ToolbarButton onClick={() => format("underline")} title="Underline">
+                        <u>U</u>
+                      </ToolbarButton>
+                      <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
+                      <ToolbarButton
+                        onClick={() => format("insertUnorderedList")}
+                        title="Bullet list"
+                      >
+                        ≡
+                      </ToolbarButton>
+                      <ToolbarButton
+                        onClick={() => format("insertOrderedList")}
+                        title="Numbered list"
+                      >
+                        ≣
+                      </ToolbarButton>
+                      <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
+                      <ToolbarButton onClick={() => format("justifyLeft")} title="Align left">
+                        ⫷
+                      </ToolbarButton>
+                      <ToolbarButton onClick={() => format("justifyCenter")} title="Align center">
+                        ≡
+                      </ToolbarButton>
+                      <ToolbarButton onClick={() => format("justifyRight")} title="Align right">
+                        ⫸
+                      </ToolbarButton>
+                      <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
+                      <ToolbarButton onClick={() => format("removeFormat")} title="Clear format">
+                        ✕
+                      </ToolbarButton>
+                    </div>
+
+                    <div style={{ position: "relative" }}>
+                      {!editorHasContent && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: 14,
+                            left: 12,
+                            right: 12,
+                            color: "#8c9196",
+                            fontSize: 14,
+                            pointerEvents: "none",
+                            lineHeight: 1.65,
+                            whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {templateValues[selectedTemplate.id].html
+                            .replace(/<br\s*\/?>/g, "\n")
+                            .replace(/<[^>]*>/g, "")}
+                        </div>
+                      )}
+
+                      <div
+                        ref={editorRef}
+                        contentEditable
+                        onInput={handleEditorInput}
+                        style={{
+                          padding: "12px 12px",
+                          border: "1px solid #c9cccf",
+                          borderTop: "none",
+                          borderRadius: "0 0 10px 10px",
+                          fontSize: 14,
+                          outline: "none",
+                          minHeight: 280,
+                          background: "#fff",
+                          lineHeight: 1.65,
+                          color: "#303030",
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #d8dadd",
+                    borderRadius: 16,
+                    padding: 16,
+                    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+                    position: "sticky",
+                    top: 16,
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: "0 0 14px",
+                      fontSize: 20,
+                      lineHeight: 1.2,
+                      fontWeight: 700,
+                      color: "#303030",
+                    }}
+                  >
+                    Liquid variables
+                  </h3>
+
+                  <p
+                    style={{
+                      margin: "0 0 14px",
+                      fontSize: 14,
+                      lineHeight: 1.5,
+                      color: "#303030",
+                    }}
+                  >
+                    {selectedTemplate.helperText}
+                  </p>
+
+                  <div
+                    style={{
+                      fontSize: 14,
+                      color: "#303030",
+                      marginBottom: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Available objects include:
+                  </div>
+
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {TEMPLATE_VARIABLES.map(({ variable, description }) => (
+                      <button
+                        key={variable}
+                        type="button"
+                        onClick={() => insertVariable(variable)}
+                        style={{
+                          padding: "10px 12px",
+                          border: "1px solid #e3e5e7",
+                          background: "#ffffff",
+                          borderRadius: 10,
+                          textAlign: "left",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 600,
+                            color: "#303030",
+                            marginBottom: 4,
+                          }}
+                        >
+                          {variable}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#6d7175",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {description}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        {showPreview ? (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(17, 24, 39, 0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 24,
+              zIndex: 2000,
+            }}
+            onClick={() => setShowPreview(false)}
+          >
+            <div
+              style={{
+                width: "min(1040px, 100%)",
+                height: "min(760px, calc(100vh - 48px))",
+                background: "#ffffff",
+                borderRadius: 20,
+                overflow: "hidden",
+                boxShadow: "0 28px 80px rgba(15, 23, 42, 0.28)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "18px 20px",
+                  borderBottom: "1px solid #e3e5e7",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: "#202223",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Preview
+                  </div>
+                  <div style={{ fontSize: 13, color: "#6d7175" }}>
+                    Sample data is used for the template variables.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPreview(false)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#6d7175",
+                    fontSize: 26,
+                    lineHeight: 1,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                  aria-label="Close preview"
+                >
+                  ×
+                </button>
+              </div>
+
+              <iframe
+                title="Email preview"
+                srcDoc={previewDocument}
+                style={{
+                  width: "100%",
+                  flex: 1,
+                  border: "none",
+                  background: "#ffffff",
+                }}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  padding: "16px 20px",
+                  borderTop: "1px solid #e3e5e7",
+                  background: "#ffffff",
+                }}
+              >
+                <s-button type="button" variant="secondary" onClick={() => setShowPreview(false)}>
+                  Close
+                </s-button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </s-page>
     );
   }

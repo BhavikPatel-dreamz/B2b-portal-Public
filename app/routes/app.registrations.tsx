@@ -23,8 +23,8 @@ import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import {
-  sendCompanyAssignmentEmail,
-  sendRegistrationRejectedEmail,
+  sendCustomerRegistrationApprovalEmail,
+  sendCustomerRegistrationRejectdEmail,
 } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
 import EditDetailsModal, {
@@ -2583,15 +2583,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        await sendCompanyAssignmentEmail(
-          store.shopName || "Shop Name",
-          store.shopDomain || "shop-domain.myshopify.com",
-          store.storeOwnerName || "Store Owner",
-          customerEmail,
+        await sendCustomerRegistrationApprovalEmail({
+          storeId: store.id,
+          storeOwnerName: store.storeOwnerName || "Store Owner",
+          email: customerEmail,
           companyName,
-          `${registrationData?.firstName || firstName || ""} ${registrationData?.lastName || lastName || ""}`.trim(),
-          reviewNotes,
-        );
+          contactName:
+            `${registrationData?.firstName || firstName || ""} ${registrationData?.lastName || lastName || ""}`.trim(),
+          note: reviewNotes,
+        });
 
         await prisma.registrationSubmission.update({
           where: { id: registrationId },
@@ -2791,9 +2791,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
          clearRegistrationSubmissionsCache(store.id);
 
-        await sendRegistrationRejectedEmail({
-          shopName: store.shopName || "B2B Portal",
-          shopDomain: store.shopDomain || "shop-domain.myshopify.com",
+        await sendCustomerRegistrationRejectdEmail({
+          storeId: store.id,
           storeOwnerName: store.storeOwnerName || "Store Owner",
           email: registration.email,
           companyName: registration.companyName,

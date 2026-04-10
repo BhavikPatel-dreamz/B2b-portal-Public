@@ -353,12 +353,16 @@ model EmailTemplates {
   shopId                                String
   shop                                  Store    @relation("StoreEmailTemplates", fields: [shopId], references: [id], onDelete: Cascade)
   customerRegistration                  Boolean?  @default(false)
+  customerRegistrationSubject           String?
   customerRegistrationTemplate          String?
   customerRegistrationApproved          Boolean?  @default(false)
+  customerRegistrationApprovedSubject   String?
   customerRegistrationApprovedTemplate  String?
   customerRegistrationRejectd           Boolean?  @default(false)
+  customerRegistrationRejectedSubject   String?
   customerRegistrationRejectedTemplate  String?
   adminRequest                          Boolean?  @default(false)
+  adminRequestSubject                   String?
   adminRequestTemplate                  String?
   createdAt                             DateTime  @default(now())
   updatedAt                             DateTime @updatedAt
