@@ -1,6 +1,7 @@
 import { ActionFunctionArgs, LoaderFunction } from "react-router";
 import { getProxyParams } from "app/utils/proxy.server";
 import {
+  sendCustomerRegistrationApprovalEmail,
   sendRegistrationEmailForAdmin,
   sendRegistrationEmailForCustomer,
 } from "app/utils/email";
@@ -60,6 +61,8 @@ type AdminGraphQLClient = {
     },
   ) => Promise<Response>;
 };
+
+type StoreRecord = NonNullable<Awaited<ReturnType<typeof getStoreByDomain>>>;
 
 function formatPhone(phone?: string, countryCode?: string) {
   if (!phone) return undefined;
@@ -743,6 +746,109 @@ async function assignLocationAddresses(
   }
 }
 
+async function autoApproveRegistrationSubmission({
+  store,
+  registrationId,
+  company,
+  customer,
+  companyName,
+  email,
+  firstName,
+  lastName,
+}: {
+  store: StoreRecord;
+  registrationId: string;
+  company: ShopifyCompany;
+  customer: ShopifyCustomer;
+  companyName: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+}) {
+  const contactName = `${firstName || ""} ${lastName || ""}`.trim() || null;
+  const defaultCreditLimit = store.defaultCompanyCreditLimit ?? 0;
+
+  return prisma.$transaction(async (tx) => {
+    const companyAccount = await tx.companyAccount.upsert({
+      where: {
+        shopId_shopifyCompanyId: {
+          shopId: store.id,
+          shopifyCompanyId: company.id,
+        },
+      },
+      update: {
+        name: companyName,
+        contactName,
+        contactEmail: email || null,
+      },
+      create: {
+        shopId: store.id,
+        shopifyCompanyId: company.id,
+        name: companyName,
+        contactName,
+        contactEmail: email || null,
+        creditLimit: defaultCreditLimit,
+      },
+    });
+
+    const existingUser = await tx.user.findFirst({
+      where: {
+        shopId: store.id,
+        OR: [{ email }, { shopifyCustomerId: customer.id }],
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (existingUser) {
+      await tx.user.update({
+        where: { id: existingUser.id },
+        data: {
+          email,
+          firstName: firstName || null,
+          lastName: lastName || null,
+          shopifyCustomerId: customer.id,
+          companyId: companyAccount.id,
+          companyRole: "admin",
+          role: "STORE_ADMIN",
+          status: "APPROVED",
+          isActive: true,
+        },
+      });
+    } else {
+      await tx.user.create({
+        data: {
+          email,
+          firstName: firstName || null,
+          lastName: lastName || null,
+          password: "",
+          shopifyCustomerId: customer.id,
+          shopId: store.id,
+          companyId: companyAccount.id,
+          companyRole: "admin",
+          role: "STORE_ADMIN",
+          status: "APPROVED",
+          isActive: true,
+        },
+      });
+    }
+
+    const registration = await tx.registrationSubmission.update({
+      where: { id: registrationId },
+      data: {
+        companyName,
+        firstName,
+        lastName,
+        shopifyCustomerId: customer.id,
+        status: "APPROVED",
+        workflowCompleted: true,
+        reviewedAt: new Date(),
+      },
+    });
+
+    return { companyAccount, registration };
+  });
+}
+
 function json(data: unknown, init: ResponseInit = {}) {
   return Response.json(data, {
     ...init,
@@ -932,48 +1038,87 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    if (email) {
-      const emailResult = await sendRegistrationEmailForCustomer(
-        store.id,
-        email,
-        store.storeOwnerName || "",
-        email,
-        companyName,
-        `${registration?.firstName || ""} ${registration?.lastName || ""}`,
-      );
+    let finalRegistration = registration;
+    let autoApproved = false;
 
-      if (store.submissionEmail) {
-        const adminEmailResult = await sendRegistrationEmailForAdmin(
+    if (store.autoApproveB2BOnboarding) {
+      const result = await autoApproveRegistrationSubmission({
+        store,
+        registrationId: registration.id,
+        company,
+        customer,
+        companyName,
+        email,
+        firstName,
+        lastName,
+      });
+
+      finalRegistration = result.registration;
+      autoApproved = true;
+    }
+
+    if (email) {
+      if (autoApproved) {
+        const approvalEmailResult = await sendCustomerRegistrationApprovalEmail({
+          storeId: store.id,
+          email,
+          storeOwnerName: store.storeOwnerName || "Store Owner",
+          companyName,
+          contactName: `${finalRegistration?.firstName || ""} ${finalRegistration?.lastName || ""}`.trim(),
+        });
+
+        if (!approvalEmailResult.success) {
+          console.warn(
+            "⚠️ Failed to send approval email:",
+            "error" in approvalEmailResult ? approvalEmailResult.error : "Unknown error",
+          );
+        }
+      } else {
+        const emailResult = await sendRegistrationEmailForCustomer(
           store.id,
-          store.submissionEmail,
+          email,
           store.storeOwnerName || "",
           email,
           companyName,
           `${registration?.firstName || ""} ${registration?.lastName || ""}`,
         );
 
-        if (!adminEmailResult.success) {
+        if (store.submissionEmail) {
+          const adminEmailResult = await sendRegistrationEmailForAdmin(
+            store.id,
+            store.submissionEmail,
+            store.storeOwnerName || "",
+            email,
+            companyName,
+            `${registration?.firstName || ""} ${registration?.lastName || ""}`,
+          );
+
+          if (!adminEmailResult.success) {
+            console.warn(
+              "⚠️ Failed to send admin registration email:",
+              "error" in adminEmailResult ? adminEmailResult.error : "Unknown error",
+            );
+          }
+        }
+
+        if (emailResult.success) {
+          console.log("✅ Customer registration email sent successfully");
+        } else {
           console.warn(
-            "⚠️ Failed to send admin registration email:",
-            "error" in adminEmailResult ? adminEmailResult.error : "Unknown error",
+            "⚠️ Failed to send customer registration email:",
+            "error" in emailResult ? emailResult.error : "Unknown error",
           );
         }
-      }
-
-      if (emailResult.success) {
-        console.log("✅ Customer registration email sent successfully");
-      } else {
-        console.warn(
-          "⚠️ Failed to send customer registration email:",
-          "error" in emailResult ? emailResult.error : "Unknown error",
-        );
       }
     }
 
     return json({
       success: true,
-      message: "Registration submitted successfully!",
-      registrationdata: registration,
+      message: autoApproved
+        ? "Registration submitted and approved successfully!"
+        : "Registration submitted successfully!",
+      autoApproved,
+      registrationdata: finalRegistration,
       customer,
       company: {
         id: company.id,

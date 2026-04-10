@@ -6,11 +6,17 @@ import { apiVersion } from "../../shopify.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop } = await validateB2BCustomerAccess(request);
   const url = new URL(request.url);
-  const query = url.searchParams.get("q");
+  const query = url.searchParams.get("q")?.trim() || "";
 
   if (!query) {
     return { products: [] };
   }
+
+  const normalizedQuery = query.toLowerCase();
+  const shopifySearchQuery =
+    normalizedQuery === "all"
+      ? "status:active published_status:published"
+      : `status:active published_status:published title:*${query}*`;
 
   const store = await getStoreByDomain(shop);
   if (!store || !store.accessToken) {
@@ -51,8 +57,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         `,
         variables: {
-          // Only active (not draft/archived) and published products
-          query: `status:active published_status:published title:*${query}*`,
+          // When q=all, return all active published products.
+          query: shopifySearchQuery,
         },
       }),
     }

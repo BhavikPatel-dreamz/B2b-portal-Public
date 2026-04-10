@@ -1235,6 +1235,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await parseForm(request);
   const intent = (form.intent as string) || "";
 
+  const resolveCompanyCreditLimit = (value?: string | null) => {
+    const trimmed = value?.trim() || "";
+
+    if (trimmed) {
+      return new Prisma.Decimal(trimmed);
+    }
+
+    if (store.defaultCompanyCreditLimit !== null) {
+      return new Prisma.Decimal(store.defaultCompanyCreditLimit.toString());
+    }
+
+    return undefined;
+  };
+
+  const creditLimitToNumber = (value?: Prisma.Decimal) =>
+    value ? Number(value.toString()) : null;
+
   try {
     switch (intent) {
       case "checkCustomer": {
@@ -1642,7 +1659,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "createCompany": {
         const companyName = (form.companyName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
-        const creditLimit = (form.creditLimit as string)?.trim();
+        const creditLimitInput = (form.creditLimit as string)?.trim() || null;
+        const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
         const customerEmail = (form.customerEmail as string)?.trim();
         const firstName = (form.firstName as string)?.trim();
         const lastName = (form.lastName as string)?.trim();
@@ -1718,11 +1736,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           locationName = existingLocation.name;
 
           await Promise.all([
-            creditLimit
+            companyCreditLimit
               ? updateCompanyMetafield(admin, companyId, {
                   namespace: "custom",
                   key: "company_credit_limit",
-                  value: creditLimit.toString(),
+                  value: companyCreditLimit.toString(),
                   type: "number_decimal",
                 })
               : Promise.resolve(),
@@ -1786,11 +1804,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               )
               .then((res) => res.json()),
 
-            creditLimit
+            companyCreditLimit
               ? updateCompanyMetafield(admin, companyId, {
                   namespace: "custom",
                   key: "company_credit_limit",
-                  value: creditLimit.toString(),
+                  value: companyCreditLimit.toString(),
                   type: "number_decimal",
                 })
               : Promise.resolve(),
@@ -1843,7 +1861,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             update: {
               name: companyName,
               paymentTerm: paymentTermsTemplateId || null,
-              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+              creditLimit: companyCreditLimit,
               contactEmail: customerEmail || "",
               contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
             },
@@ -1852,7 +1870,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName,
               shopifyCompanyId: companyId,
               paymentTerm: paymentTermsTemplateId || null,
-              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+              creditLimit: companyCreditLimit,
               contactEmail: customerEmail || "",
               contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
             },
@@ -1896,7 +1914,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             locationId,
             locationName,
             paymentTermsTemplateId: paymentTermsTemplateId || null,
-            creditLimit: creditLimit ? Number(creditLimit) : null,
+            creditLimit: creditLimitToNumber(companyCreditLimit),
           },
           message: existingShopifyCompany
             ? "Company already existed — details updated"
@@ -1908,7 +1926,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyId = (form.companyId as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
         const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
-        const creditLimit = (form.creditLimit as string)?.trim();
+        const creditLimitInput = (form.creditLimit as string)?.trim() || null;
+        const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
         const customerEmail = (form.customerEmail as string)?.trim();
 
         if (!companyId || !companyName) {
@@ -2002,14 +2021,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             update: {
               name: companyName,
               paymentTerm: paymentTermsTemplateId || null,
-              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+              creditLimit: companyCreditLimit,
             },
             create: {
               shopId: store.id,
               name: companyName,
               shopifyCompanyId: companyId,
               paymentTerm: paymentTermsTemplateId || null,
-              creditLimit: creditLimit ? Number(creditLimit) : undefined,
+              creditLimit: companyCreditLimit,
             },
           }),
 
@@ -2028,11 +2047,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 orderBy: { createdAt: "desc" },
               }),
 
-          creditLimit
+          companyCreditLimit
             ? updateCompanyMetafield(admin, companyId, {
                 namespace: "custom",
                 key: "company_credit_limit",
-                value: creditLimit.toString(),
+                value: companyCreditLimit.toString(),
                 type: "number_decimal",
               })
             : Promise.resolve(),
@@ -2110,7 +2129,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             locationId: location.id,
             locationName: location.name,
             paymentTermsTemplateId: paymentTermsTemplateId || null,
-            creditLimit: creditLimit ? Number(creditLimit) : null,
+            creditLimit: creditLimitToNumber(companyCreditLimit),
           },
           message: "Company updated successfully",
         });
@@ -2169,6 +2188,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             name: "Company",
             contactName: contactName || null,
             contactEmail: customerEmail || null,
+            creditLimit: resolveCompanyCreditLimit() ?? new Prisma.Decimal(0),
           },
         });
 
@@ -2268,7 +2288,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             return [];
           }
         })();
-        const creditLimit = (form.creditLimit as string)?.trim();
+        const creditLimitInput = (form.creditLimit as string)?.trim() || null;
+        const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
         const customerEmail = (form.customerEmail as string)?.trim();
         const firstName = (form.firstName as string)?.trim();
         const lastName = (form.lastName as string)?.trim();
@@ -2342,11 +2363,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           locationName = existingLocation.name;
 
           await Promise.all([
-            creditLimit
+            companyCreditLimit
               ? updateCompanyMetafield(admin, companyId, {
                   namespace: "custom",
                   key: "company_credit_limit",
-                  value: creditLimit.toString(),
+                  value: companyCreditLimit.toString(),
                   type: "number_decimal",
                 })
               : Promise.resolve(),
@@ -2406,11 +2427,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               )
               .then((res) => res.json()),
 
-            creditLimit
+            companyCreditLimit
               ? updateCompanyMetafield(admin, companyId, {
                   namespace: "custom",
                   key: "company_credit_limit",
-                  value: creditLimit.toString(),
+                  value: companyCreditLimit.toString(),
                   type: "number_decimal",
                 })
               : Promise.resolve(),
@@ -2501,7 +2522,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           update: {
             name: companyName,
             paymentTerm: paymentTermsTemplateId || null,
-            creditLimit: creditLimit ? new Prisma.Decimal(creditLimit) : undefined,
+            creditLimit: companyCreditLimit,
             contactEmail: customerEmail,
             contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
           },
@@ -2510,7 +2531,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             name: companyName,
             shopifyCompanyId: companyId,
             paymentTerm: paymentTermsTemplateId || null,
-            creditLimit: creditLimit ? new Prisma.Decimal(creditLimit) : undefined,
+            creditLimit: companyCreditLimit,
             contactEmail: customerEmail,
             contactName: `${firstName || ""} ${lastName || ""}`.trim() || "",
           },
@@ -2561,8 +2582,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             role: "STORE_ADMIN",
             status: "APPROVED",
             isActive: true,
-            userCreditLimit: creditLimit
-              ? new Prisma.Decimal(creditLimit)
+            userCreditLimit: creditLimitInput
+              ? new Prisma.Decimal(creditLimitInput)
               : undefined,
           },
           create: {
@@ -2577,8 +2598,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             role: "STORE_ADMIN",
             status: "APPROVED",
             isActive: true,
-            userCreditLimit: creditLimit
-              ? new Prisma.Decimal(creditLimit)
+            userCreditLimit: creditLimitInput
+              ? new Prisma.Decimal(creditLimitInput)
               : undefined,
           },
         });
@@ -2615,7 +2636,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             locationId,
             locationName,
             paymentTermsTemplateId: paymentTermsTemplateId || null,
-            creditLimit: creditLimit ? Number(creditLimit) : null,
+            creditLimit: creditLimitToNumber(companyCreditLimit),
           },
           message: "Registration approved",
         });
@@ -2632,7 +2653,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const contactEmail = (form.contactEmail as string)?.trim() || null;
         const paymentTermsTemplateId =
           (form.paymentTerm as string)?.trim() || null;
-        const creditLimit = (form.creditLimit as string)?.trim() || null;
+        const creditLimitInput = (form.creditLimit as string)?.trim() || null;
+        const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
 
         if (!registrationId || !customerId) {
           return Response.json({
@@ -2669,9 +2691,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 paymentTermsTemplateId !== null
                   ? paymentTermsTemplateId
                   : undefined,
-              creditLimit: creditLimit
-                ? new Prisma.Decimal(creditLimit)
-                : undefined,
+              creditLimit: companyCreditLimit,
             },
             create: {
               shopId: store.id,
@@ -2679,9 +2699,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName || "Company",
               contactName,
               contactEmail,
-              creditLimit: creditLimit
-                ? new Prisma.Decimal(creditLimit)
-                : undefined,
+              creditLimit: companyCreditLimit,
               paymentTerm: paymentTermsTemplateId,
             },
           });
@@ -2693,9 +2711,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               name: companyName,
               contactName,
               contactEmail,
-              creditLimit: creditLimit
-                ? new Prisma.Decimal(creditLimit)
-                : undefined,
+              creditLimit: companyCreditLimit,
               paymentTerm: paymentTermsTemplateId ?? null,
             },
           });
@@ -2717,8 +2733,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               status: "APPROVED",
               isActive: true,
               companyId: companyData.id,
-              userCreditLimit: creditLimit
-                ? new Prisma.Decimal(creditLimit)
+              userCreditLimit: creditLimitInput
+                ? new Prisma.Decimal(creditLimitInput)
                 : undefined,
             },
           });
@@ -3176,6 +3192,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 contactEmail: email || updatedRegistration.email,
                 contactName:
                   `${firstName || updatedRegistration.firstName} ${lastName || updatedRegistration.lastName}`.trim(),
+                creditLimit: resolveCompanyCreditLimit() ?? new Prisma.Decimal(0),
               },
             });
 

@@ -1672,7 +1672,40 @@ export default function Welcome() {
               </div>
             ))}
           </div>
+          {/* Need Help Section */}
+<div style={{ marginTop: "16px", borderTop: "1px solid #eceef1", paddingTop: "16px" }}>
+  <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#303030", marginBottom: "12px" }}>
+    Need help with your B2B setup?
+  </h3>
+  <div style={{
+    background: "#f0f4ff",
+    borderRadius: "12px",
+    padding: "18px 20px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "16px",
+  }}>
+    <div>
+      <p style={{ fontSize: "14px", fontWeight: 700, color: "#1a2366", marginBottom: "6px" }}>
+        First time setting up and finding it a bit challenging?
+      </p>
+      <p style={{ fontSize: "13px", color: "#4a5580", marginBottom: "14px", lineHeight: 1.5 }}>
+        Don't worry! We're here to walk you through the app, show you a live demo, and clear up any doubts you have.
+      </p>
+      <button style={{
+        background: "white", border: "1px solid #c9cccf", borderRadius: "8px",
+        padding: "8px 16px", fontSize: "13px", fontWeight: 500, color: "#303030", cursor: "pointer"
+      }}>
+        Book a 30-min session
+      </button>
+    </div>
+    <img src="https://cdn.shopify.com/s/files/1/0938/7068/6498/files/Mascot_BSS_2-04_1.png?v=1766374740" alt="mascot" style={{ width: "80px", flexShrink: 0 }} />
+  </div>
+ 
+</div>
         </div>
+
 
         {/* Modal Popup */}
         {selectedTutorial && (
@@ -1713,38 +1746,7 @@ export default function Welcome() {
           </div>
         )}
 
-        {/* Chat Widget */}
-        {/* <div className="chat-widget">
-          {isChatOpen && (
-            <div className="chat-popup">
-              <div className="chat-popup-header">
-                <div className="chat-popup-title">Questions? Chat with us!</div>
-                <button
-                  className="close-btn"
-                  onClick={() => setIsChatOpen(false)}
-                >
-                  ×
-                </button>
-              </div>
-              <div className="chat-popup-status">
-                <div className="online-indicator"></div>
-                <div className="status-text">Support is online</div>
-                <div className="chat-icons">
-                  <div className="chat-icon">😊</div>
-                  <div className="chat-icon">👤</div>
-                  <div className="chat-icon">💬</div>
-                </div>
-              </div>
-              <button className="qikify-btn">💬 Chat with Qikify Plus</button>
-            </div>
-          )}
-          <button
-            className="chat-bubble-btn"
-            onClick={() => setIsChatOpen(!isChatOpen)}
-          >
-            💬
-          </button>
-        </div> */}
+     
       </div>
     </div>
   );

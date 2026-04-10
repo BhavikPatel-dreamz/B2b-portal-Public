@@ -76,6 +76,13 @@ export const syncShopifyCompanies = async (
   submissionEmail: string | null,
 ) => {
   try {
+    const storeSettings = await prisma.store.findUnique({
+      where: { id: store.id },
+      select: { defaultCompanyCreditLimit: true },
+    });
+    const defaultCompanyCreditLimit =
+      storeSettings?.defaultCompanyCreditLimit ?? new Prisma.Decimal(0);
+
     // Step 1: Fetch all Shopify B2B companies with pagination
     let allCompanies: ShopifyCompanyNode[] = [];
     let hasNextPage = true;
@@ -166,7 +173,9 @@ export const syncShopifyCompanies = async (
                 ? `${mainContact.firstName} ${mainContact.lastName || ""}`.trim()
                 : null,
               contactEmail: mainContact.email,
-              creditLimit: new Prisma.Decimal(0),
+              creditLimit: new Prisma.Decimal(
+                defaultCompanyCreditLimit.toString(),
+              ),
             },
           });
 

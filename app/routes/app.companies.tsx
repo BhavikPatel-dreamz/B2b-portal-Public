@@ -493,14 +493,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const shopifyCompanyId = (form.shopifyCompanyId as string)?.trim() || null;
       const contactName     = (form.contactName as string)?.trim()  || null;
       const contactEmail    = (form.contactEmail as string)?.trim() || null;
-      const credit          = parseCredit((form.creditLimit as string) || undefined);
+      const creditRaw       = (form.creditLimit as string | undefined)?.trim() || "";
+      let credit            = creditRaw ? parseCredit(creditRaw) : null;
 
       if (!name) {
         return Response.json({
           intent, success: false, errors: ["Company name is required"],
         });
       }
-      if (!credit) {
+
+      if (!creditRaw) {
+        const storeSettings = await prisma.store.findUnique({
+          where: { id: store.id },
+          select: { defaultCompanyCreditLimit: true },
+        });
+        credit =
+          storeSettings?.defaultCompanyCreditLimit ?? parseCredit("0");
+      }
+
+      if (credit === null) {
         return Response.json({
           intent, success: false, errors: ["Credit must be a number"],
         });

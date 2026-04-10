@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -25,6 +25,10 @@ interface LoaderData {
     submissionEmail: string;
     contactEmail: string;
     themeColor: string;
+    autoApproveB2BOnboarding: boolean;
+    defaultCompanyCreditLimit: string;
+    orderConfirmationToMainAccount: boolean;
+    allowQuickOrderForUser: boolean;
     companyWelcomeEmailTemplate?: string;
     companyWelcomeEmailEnabled?: boolean;
     privacyPolicylink?: string;
@@ -36,6 +40,19 @@ interface ActionResponse {
   success: boolean;
   message?: string;
   errors?: string[];
+}
+
+function clearAdminCompaniesCache(shop: string) {
+  const globalCache = globalThis as typeof globalThis & {
+    __adminCompaniesCache?: Map<string, { data: unknown; timestamp: number }>;
+  };
+  const prefix = `admin-companies-${shop}`;
+
+  for (const key of globalCache.__adminCompaniesCache?.keys() ?? []) {
+    if (key.startsWith(prefix)) {
+      globalCache.__adminCompaniesCache?.delete(key);
+    }
+  }
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -61,6 +78,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         submissionEmail: store.submissionEmail || "",
         contactEmail: store.contactEmail || "",
         themeColor: store.themeColor || "",
+        autoApproveB2BOnboarding: store.autoApproveB2BOnboarding ?? false,
+        defaultCompanyCreditLimit:
+          store.defaultCompanyCreditLimit?.toString() || "",
+        orderConfirmationToMainAccount:
+          store.orderConfirmationToMainAccount ?? false,
+        allowQuickOrderForUser: store.allowQuickOrderForUser ?? false,
         companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
         companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
         privacyPolicylink: store.privacyPolicylink || "",
@@ -261,7 +284,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // Handle settings update
-  const logoRaw = (formData.get("logo") as string | null)?.trim() || "";
   const shopName = (formData.get("shopName") as string | null)?.trim() || "";
   const submissionEmailRaw =
     (formData.get("submissionEmail") as string | null)?.trim() || "";
@@ -269,6 +291,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     (formData.get("contactEmail") as string | null)?.trim() || "";
   const themeColorRaw =
     (formData.get("themeColor") as string | null)?.trim() || "";
+  const autoApproveB2BOnboarding =
+    (formData.get("autoApproveB2BOnboarding") as string | null) === "true";
+  const defaultCompanyCreditLimitRaw =
+    (formData.get("defaultCompanyCreditLimit") as string | null)?.trim() || "";
+  const orderConfirmationToMainAccount =
+    (formData.get("orderConfirmationToMainAccount") as string | null) ===
+    "true";
+  const allowQuickOrderForUser =
+    (formData.get("allowQuickOrderForUser") as string | null) === "true";
   const companyWelcomeEmailTemplate =
     (formData.get("companyWelcomeEmailTemplate") as string | null)?.trim() ||
     "";
@@ -297,6 +328,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     errors.push("Theme color must be a hex value like #0d6efd or #123.");
   }
 
+  if (
+    defaultCompanyCreditLimitRaw &&
+    !/^\d+(\.\d{1,2})?$/.test(defaultCompanyCreditLimitRaw)
+  ) {
+    errors.push("Default credit limit must be a valid positive number.");
+  }
+
+  const defaultCompanyCreditLimit =
+    defaultCompanyCreditLimitRaw === ""
+      ? null
+      : Number(defaultCompanyCreditLimitRaw);
+  if (
+    defaultCompanyCreditLimit !== null &&
+    (Number.isNaN(defaultCompanyCreditLimit) || defaultCompanyCreditLimit < 0)
+  ) {
+    errors.push("Default credit limit must be 0 or greater.");
+  }
+
+  const currentDefaultCompanyCreditLimit =
+    store.defaultCompanyCreditLimit === null
+      ? null
+      : Number(store.defaultCompanyCreditLimit.toString());
+  const shouldSyncCompanyCreditLimit =
+    defaultCompanyCreditLimit !== null &&
+    currentDefaultCompanyCreditLimit !== defaultCompanyCreditLimit;
+
   if (privacyPolicylink && !/^https?:\/\/[^\s]+$/.test(privacyPolicylink)) {
     errors.push("Privacy policy link must be a valid URL.");
   }
@@ -305,22 +362,43 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ success: false, errors }, { status: 400 });
   }
 
-  const logo = logoRaw || null;
-
   await updateStore(store.id, {
-    logo,
     shopName,
     submissionEmail,
     contactEmail,
     themeColor,
+    autoApproveB2BOnboarding,
+    defaultCompanyCreditLimit:
+      defaultCompanyCreditLimitRaw === "" ? null : defaultCompanyCreditLimitRaw,
+    orderConfirmationToMainAccount,
+    allowQuickOrderForUser,
     companyWelcomeEmailTemplate: companyWelcomeEmailTemplate || null,
     companyWelcomeEmailEnabled,
     privacyPolicylink,
     privacyPolicyContent,
   });
 
+  let updatedCompanyCount = 0;
+
+  if (shouldSyncCompanyCreditLimit) {
+    const result = await prisma.companyAccount.updateMany({
+      where: { shopId: store.id },
+      data: { creditLimit: defaultCompanyCreditLimitRaw },
+    });
+    updatedCompanyCount = result.count;
+    clearAdminCompaniesCache(session.shop);
+  }
+
+  const message = shouldSyncCompanyCreditLimit
+    ? `Settings saved. Default credit limit applied to ${updatedCompanyCount} ${
+        updatedCompanyCount === 1 ? "company" : "companies"
+      }.`
+    : defaultCompanyCreditLimit === null
+      ? "Settings saved. Default credit limit cleared."
+    : "Settings saved";
+
   return Response.json(
-    { success: true, message: "Settings saved" } satisfies ActionResponse,
+    { success: true, message } satisfies ActionResponse,
     { status: 200 },
   );
 };
@@ -360,6 +438,94 @@ const ToolbarButton = ({
   </button>
 );
 
+const ToggleRow = ({
+  name,
+  title,
+  description,
+  defaultChecked = false,
+  borderBottom = false,
+}: {
+  name: string;
+  title: string;
+  description: string;
+  defaultChecked?: boolean;
+  borderBottom?: boolean;
+}) => {
+  const [checked, setChecked] = useState(defaultChecked);
+
+  useEffect(() => {
+    setChecked(defaultChecked);
+  }, [defaultChecked]);
+
+  return (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 20,
+        padding: "22px 0",
+        cursor: "pointer",
+        borderBottom: borderBottom ? "1px solid #e3e3e3" : undefined,
+      }}
+    >
+      <div style={{ display: "grid", gap: 6 }}>
+        <span style={{ fontWeight: 600, fontSize: 15, color: "#202223" }}>
+          {title}
+        </span>
+        <span style={{ fontSize: 14, color: "#6d7175", lineHeight: 1.5 }}>
+          {description}
+        </span>
+      </div>
+
+      <span style={{ position: "relative", flexShrink: 0 }}>
+        <input
+          name={name}
+          type="checkbox"
+          value="true"
+          checked={checked}
+          onChange={(event) => setChecked(event.currentTarget.checked)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: 0,
+            cursor: "pointer",
+            margin: 0,
+            width: 46,
+            height: 26,
+          }}
+        />
+        <span
+          aria-hidden="true"
+          style={{
+            display: "block",
+            width: 46,
+            height: 26,
+            background: checked ? "#303030" : "#d8dadd",
+            borderRadius: 999,
+            position: "relative",
+            transition: "background 0.2s ease",
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              top: 2,
+              left: checked ? 22 : 2,
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              background: "#fff",
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.2)",
+              transition: "left 0.2s ease",
+            }}
+          />
+        </span>
+      </span>
+    </label>
+  );
+};
+
 const EMAIL_PLACEHOLDER = `Hello {{storeOwnerName}},
 
 A new company has submitted a B2B registration request on {{shopName}}.`;
@@ -367,6 +533,15 @@ A new company has submitted a B2B registration request on {{shopName}}.`;
 const PRIVACY_PLACEHOLDER = `Privacy Policy
 
 This privacy policy describes how we collect, use, and protect your personal information.`;
+
+type SettingsTabId = "store" | "onboarding" | "company" | "theme";
+
+const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
+  { id: "store", label: "Store Settings" },
+  { id: "onboarding", label: "B2B Onboarding Setting" },
+  { id: "company", label: "Company Setting" },
+  { id: "theme", label: "Theme Setting" },
+];
 
 
 
@@ -383,6 +558,7 @@ export default function SettingsPage() {
 
   const [showDropdown, setShowDropdown] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<SettingsTabId>("store");
 
   const loaderData = useLoaderData<LoaderData>();
   const { storeMissing } = loaderData;
@@ -596,7 +772,7 @@ export default function SettingsPage() {
 
   return (
     <s-page heading="Store settings">
-      <s-section heading="Branding & notifications">
+      <s-section heading="Settings">
         {feeprismaack && (
           <div style={{ marginBottom: 12 }}>
             <s-banner tone={feeprismaack.tone} heading={feeprismaack.title}>
@@ -621,272 +797,336 @@ export default function SettingsPage() {
           }}
         >
           <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
-            {/* Store Name */}
-            <div style={{ display: "grid", gap: 6 }}>
-              <label
-                htmlFor="shopName"
-                style={{ fontWeight: 600, fontSize: 14 }}
-              >
-                Store name
-              </label>
-              <input
-                id="shopName"
-                name="shopName"
-                type="text"
-                defaultValue={store?.shopName}
-                placeholder="Store name"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9cccf",
-                  fontSize: 14,
-                  outline: "none",
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = "#005bd3";
-                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = "#c9cccf";
-                  e.target.style.boxShadow = "none";
-                }}
-              />
-              <s-text tone="neutral">
-                Store name shown across emails or customer views.
-              </s-text>
-            </div>
-            {/* Logo URL */}
-            <div style={{ display: "grid", gap: 6 }}>
-              <label htmlFor="logo" style={{ fontWeight: 600, fontSize: 14 }}>
-                Logo URL
-              </label>
-              <input
-                id="logo"
-                name="logo"
-                type="url"
-                defaultValue={store?.logo}
-                placeholder="https://your-cdn.com/logo.png"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9cccf",
-                  fontSize: 14,
-                  outline: "none",
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = "#005bd3";
-                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = "#c9cccf";
-                  e.target.style.boxShadow = "none";
-                }}
-              />
-              <s-text tone="neutral">
-                Storefront logo URL shown across emails or customer views.
-              </s-text>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                paddingBottom: 8,
+                borderBottom: "1px solid #e3e3e3",
+              }}
+            >
+              {SETTINGS_TABS.map((tab) => {
+                const isActive = activeTab === tab.id;
 
-              {store?.logo && (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    marginTop: 8,
-                  }}
-                >
-                  <div
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
                     style={{
-                      width: 64,
-                      height: 64,
-                      borderRadius: 8,
-                      overflow: "hidden",
-                      border: "1px solid #ebedef",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: "#f6f6f7",
+                      padding: "10px 16px",
+                      borderRadius: 999,
+                      border: isActive ? "1px solid #005bd3" : "1px solid #d8dadd",
+                      background: isActive ? "#e8f2ff" : "#fff",
+                      color: isActive ? "#004299" : "#303030",
+                      fontWeight: 600,
+                      fontSize: 14,
+                      cursor: "pointer",
                     }}
                   >
-                    <img
-                      src={store.logo}
-                      alt="Current logo"
-                      style={{ maxWidth: "100%", maxHeight: "100%" }}
-                    />
-                  </div>
-                  <s-text tone="neutral">Preview of the stored logo.</s-text>
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                display: activeTab === "store" ? "grid" : "none",
+                gap: 16,
+              }}
+            >
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label
+                    htmlFor="shopName"
+                    style={{ fontWeight: 600, fontSize: 14 }}
+                  >
+                    Store name
+                  </label>
+                  <input
+                    id="shopName"
+                    name="shopName"
+                    type="text"
+                    defaultValue={store?.shopName}
+                    placeholder="Store name"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9cccf",
+                      fontSize: 14,
+                      outline: "none",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#005bd3";
+                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#c9cccf";
+                      e.target.style.boxShadow = "none";
+                    }}
+                  />
+                  <s-text tone="neutral">
+                    Store name shown across emails or customer views.
+                  </s-text>
                 </div>
-              )}
+{/* 
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label
+                    htmlFor="submissionEmail"
+                    style={{ fontWeight: 600, fontSize: 14 }}
+                  >
+                    Registration notification email
+                  </label>
+                  <input
+                    id="submissionEmail"
+                    name="submissionEmail"
+                    type="email"
+                    defaultValue={store?.submissionEmail}
+                    placeholder="ops@yourstore.com"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9cccf",
+                      fontSize: 14,
+                      outline: "none",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#005bd3";
+                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#c9cccf";
+                      e.target.style.boxShadow = "none";
+                    }}
+                  />
+                  <s-text tone="neutral">
+                    Email address that receives new B2B registration submissions.
+                  </s-text>
+                </div> */}
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label
+                    htmlFor="contactEmail"
+                    style={{ fontWeight: 600, fontSize: 14 }}
+                  >
+                    Primary contact email
+                  </label>
+                  <input
+                    id="contactEmail"
+                    name="contactEmail"
+                    type="email"
+                    defaultValue={store?.contactEmail}
+                    placeholder="support@yourstore.com"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9cccf",
+                      fontSize: 14,
+                      outline: "none",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#005bd3";
+                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#c9cccf";
+                      e.target.style.boxShadow = "none";
+                    }}
+                  />
+                  <s-text tone="neutral">
+                    Shared contact inbox for customers and notifications.
+                  </s-text>
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label
+                    htmlFor="companyWelcomeEmailEnabled"
+                    style={{ fontWeight: 600, fontSize: 14 }}
+                  >
+                    Company sync notifications
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      id="companyWelcomeEmailEnabled"
+                      name="companyWelcomeEmailEnabled"
+                      type="checkbox"
+                      defaultChecked={store?.companyWelcomeEmailEnabled}
+                      style={{ width: 18, height: 18, cursor: "pointer" }}
+                    />
+                    <label
+                      htmlFor="companyWelcomeEmailEnabled"
+                      style={{ cursor: "pointer" }}
+                    >
+                      Send email notifications when companies are synced
+                    </label>
+                  </div>
+                  <s-text tone="neutral">
+                    Enable to receive email notifications whenever companies are
+                    synced from Shopify B2B.
+                  </s-text>
+                </div>
             </div>
-            {/* Registration Email */}
-            <div style={{ display: "grid", gap: 6 }}>
-              <label
-                htmlFor="submissionEmail"
-                style={{ fontWeight: 600, fontSize: 14 }}
-              >
-                Registration notification email
-              </label>
-              <input
-                id="submissionEmail"
-                name="submissionEmail"
-                type="email"
-                defaultValue={store?.submissionEmail}
-                placeholder="ops@yourstore.com"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9cccf",
-                  fontSize: 14,
-                  outline: "none",
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = "#005bd3";
-                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = "#c9cccf";
-                  e.target.style.boxShadow = "none";
-                }}
-              />
-              <s-text tone="neutral">
-                Email address that receives new B2B registration submissions.
-              </s-text>
-            </div>
-            {/* Contact Email */}
-            <div style={{ display: "grid", gap: 6 }}>
-              <label
-                htmlFor="contactEmail"
-                style={{ fontWeight: 600, fontSize: 14 }}
-              >
-                Primary contact email
-              </label>
-              <input
-                id="contactEmail"
-                name="contactEmail"
-                type="email"
-                defaultValue={store?.contactEmail}
-                placeholder="support@yourstore.com"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9cccf",
-                  fontSize: 14,
-                  outline: "none",
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = "#005bd3";
-                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = "#c9cccf";
-                  e.target.style.boxShadow = "none";
-                }}
-              />
-              <s-text tone="neutral">
-                Shared contact inbox for customers and notifications.
-              </s-text>
-            </div>
-            {/* Company Sync Notifications */}
-            <div style={{ display: "grid", gap: 6 }}>
-              <label
-                htmlFor="companyWelcomeEmailEnabled"
-                style={{ fontWeight: 600, fontSize: 14 }}
-              >
-                Company sync notifications
-              </label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input
-                  id="companyWelcomeEmailEnabled"
-                  name="companyWelcomeEmailEnabled"
-                  type="checkbox"
-                  defaultChecked={store?.companyWelcomeEmailEnabled}
-                  style={{ width: 18, height: 18, cursor: "pointer" }}
+
+            <div
+              style={{
+                display: activeTab === "onboarding" ? "grid" : "none",
+                gap: 16,
+              }}
+            >
+              <div style={{ display: "grid" }}>
+                <ToggleRow
+                  name="autoApproveB2BOnboarding"
+                  title="Auto approve"
+                  description="Automatically approve new B2B onboarding submissions when enabled."
+                  defaultChecked={store?.autoApproveB2BOnboarding}
                 />
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: activeTab === "company" ? "grid" : "none",
+                gap: 16,
+              }}
+            >
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label
+                    htmlFor="defaultCompanyCreditLimit"
+                    style={{ fontWeight: 600, fontSize: 14 }}
+                  >
+                    Default credit limit
+                  </label>
+                  <input
+                    id="defaultCompanyCreditLimit"
+                    name="defaultCompanyCreditLimit"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    defaultValue={store?.defaultCompanyCreditLimit || ""}
+                    placeholder="1000"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9cccf",
+                      fontSize: 14,
+                      outline: "none",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#005bd3";
+                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#c9cccf";
+                      e.target.style.boxShadow = "none";
+                    }}
+                  />
+                  <s-text tone="neutral">
+                    Credit limit prefilled for new companies. Default is 1000.
+                  </s-text>
+                </div>
+
+                <div style={{ display: "grid" }}>
+                  <ToggleRow
+                    name="orderConfirmationToMainAccount"
+                    title="Order confirmation notifications to main account"
+                    description="Main contact will receive order confirmation email when order is placed by other users of the company."
+                    defaultChecked={store?.orderConfirmationToMainAccount}
+                    borderBottom
+                  />
+                  <ToggleRow
+                    name="allowQuickOrderForUser"
+                    title="Allow quick order for user"
+                    description="Control whether quick order is available for B2B users."
+                    defaultChecked={store?.allowQuickOrderForUser}
+                  />
+                </div>
+            </div>
+
+            <div
+              style={{
+                display: activeTab === "theme" ? "grid" : "none",
+                gap: 16,
+              }}
+            >
+              <div style={{ display: "grid", gap: 6 }}>
                 <label
-                  htmlFor="companyWelcomeEmailEnabled"
-                  style={{ cursor: "pointer" }}
+                  htmlFor="themeColor"
+                  style={{ fontWeight: 600, fontSize: 14 }}
                 >
-                  Send email notifications when companies are synced
+                  B2B dashboard color
                 </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <input
+                    id="themeColor"
+                    type="color"
+                    defaultValue={store?.themeColor || "#005bd3"}
+                    style={{
+                      width: 52,
+                      height: 36,
+                      border: "1px solid #c9cccf",
+                      borderRadius: 8,
+                      padding: 0,
+                      cursor: "pointer",
+                      background: "#fff",
+                    }}
+                    onChange={(e) => {
+                      const textInput = document.getElementById(
+                        "themeColorText",
+                      ) as HTMLInputElement | null;
+                      if (textInput) {
+                        textInput.value = e.target.value;
+                      }
+                    }}
+                  />
+                  <input
+                    id="themeColorText"
+                    name="themeColor"
+                    type="text"
+                    defaultValue={store?.themeColor || ""}
+                    placeholder="#005bd3"
+                    style={{
+                      flex: 1,
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9cccf",
+                      fontSize: 14,
+                      outline: "none",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#005bd3";
+                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#c9cccf";
+                      e.target.style.boxShadow = "none";
+                    }}
+                    onChange={(e) => {
+                      const colorInput = document.getElementById(
+                        "themeColor",
+                      ) as HTMLInputElement | null;
+                      if (
+                        colorInput &&
+                        /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(e.target.value)
+                      ) {
+                        colorInput.value = e.target.value;
+                      }
+                    }}
+                  />
+                </div>
+                <s-text tone="neutral">
+                  Primary accent color used across B2B dashboard surfaces.
+                </s-text>
               </div>
-              <s-text tone="neutral">
-                Enable to receive email notifications whenever companies are
-                synced from Shopify B2B.
-              </s-text>
             </div>
-            {/* Theme Color */}
-            <div style={{ display: "grid", gap: 6 }}>
-              <label
-                htmlFor="themeColor"
-                style={{ fontWeight: 600, fontSize: 14 }}
-              >
-                Theme color
-              </label>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <input
-                  id="themeColor"
-                  type="color"
-                  defaultValue={store?.themeColor || "#005bd3"}
-                  style={{
-                    width: 52,
-                    height: 36,
-                    border: "1px solid #c9cccf",
-                    borderRadius: 8,
-                    padding: 0,
-                    cursor: "pointer",
-                    background: "#fff",
-                  }}
-                  onChange={(e) => {
-                    const textInput = document.getElementById(
-                      "themeColorText",
-                    ) as HTMLInputElement | null;
-                    if (textInput) {
-                      textInput.value = e.target.value;
-                    }
-                  }}
-                />
-                <input
-                  id="themeColorText"
-                  name="themeColor"
-                  type="text"
-                  defaultValue={store?.themeColor || ""}
-                  placeholder="#005bd3"
-                  style={{
-                    flex: 1,
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #c9cccf",
-                    fontSize: 14,
-                    outline: "none",
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = "#005bd3";
-                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = "#c9cccf";
-                    e.target.style.boxShadow = "none";
-                  }}
-                  onChange={(e) => {
-                    const colorInput = document.getElementById(
-                      "themeColor",
-                    ) as HTMLInputElement | null;
-                    if (
-                      colorInput &&
-                      /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(e.target.value)
-                    ) {
-                      colorInput.value = e.target.value;
-                    }
-                  }}
-                />
-              </div>
-              <s-text tone="neutral">
-                Primary accent color used across storefront surfaces. Accepts
-                hex values.
-              </s-text>
-            </div>
-            {/* Privacy Policy Section with Placeholder */}
-            <div style={{ display: "grid", gap: 6 }}>
+
+            <div
+              style={{
+                display: activeTab === "store" ? "grid" : "none",
+                gap: 6,
+              }}
+            >
+              <div style={{ display: "grid", gap: 6 }}>
               <label
                 htmlFor="privacyPolicylink"
                 style={{ fontWeight: 600, fontSize: 14 }}
@@ -1060,8 +1300,9 @@ export default function SettingsPage() {
                 name="privacyPolicyContent"
                 id="privacyPolicyContent"
               />
+              </div>
             </div>
-            {/* Save Button */}
+
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <s-button
                 type="submit"

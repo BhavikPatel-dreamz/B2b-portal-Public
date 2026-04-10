@@ -18,6 +18,10 @@ export interface UpdateStoreInput {
   companyWelcomeEmailEnabled?: boolean;
   contactEmail?: string | null;
   themeColor?: string | null;
+  autoApproveB2BOnboarding?: boolean;
+  defaultCompanyCreditLimit?: number | string | null;
+  orderConfirmationToMainAccount?: boolean;
+  allowQuickOrderForUser?: boolean;
   privacyPolicylink?: string | null;
   privacyPolicyContent?: string | null;
 }

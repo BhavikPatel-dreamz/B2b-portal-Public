@@ -55,12 +55,26 @@ export interface ShopifyOrder {
   remainingBalance: Prisma.Decimal;
 }
 
+async function getStoreDefaultCompanyCreditLimit(shopId: string) {
+  const store = await prisma.store.findUnique({
+    where: { id: shopId },
+    select: { defaultCompanyCreditLimit: true },
+  });
+
+  return store?.defaultCompanyCreditLimit ?? new Prisma.Decimal(0);
+}
+
 
 
 /**
  * Create a new company account
  */
 export async function createCompany(data: CreateCompanyInput) {
+  const creditLimit =
+    data.creditLimit !== undefined
+      ? new Prisma.Decimal(data.creditLimit.toString())
+      : await getStoreDefaultCompanyCreditLimit(data.shopId);
+
   return await prisma.companyAccount.create({
     data: {
       shopId: data.shopId,
@@ -68,9 +82,7 @@ export async function createCompany(data: CreateCompanyInput) {
       name: data.name,
       contactName: data.contactName,
       contactEmail: data.contactEmail,
-      creditLimit: data.creditLimit
-        ? new Prisma.Decimal(data.creditLimit.toString())
-        : new Prisma.Decimal(0),
+      creditLimit,
     },
     include: {
       users: true,
@@ -174,6 +186,11 @@ export async function upsertCompany(
   shopifyCompanyId: string,
   data: Omit<CreateCompanyInput, "shopId" | "shopifyCompanyId">,
 ) {
+  const createCreditLimit =
+    data.creditLimit !== undefined
+      ? new Prisma.Decimal(data.creditLimit.toString())
+      : await getStoreDefaultCompanyCreditLimit(shopId);
+
   return await prisma.companyAccount.upsert({
     where: {
       shopId_shopifyCompanyId: {
@@ -196,9 +213,7 @@ export async function upsertCompany(
       name: data.name,
       contactName: data.contactName,
       contactEmail: data.contactEmail,
-      creditLimit: data.creditLimit
-        ? new Prisma.Decimal(data.creditLimit.toString())
-        : new Prisma.Decimal(0),
+      creditLimit: createCreditLimit,
     },
     include: {
       users: true,

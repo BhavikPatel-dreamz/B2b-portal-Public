@@ -55,6 +55,10 @@ model Store {
   storeOwnerName   String?
   contactEmail  String?
   themeColor    String?
+  autoApproveB2BOnboarding Boolean @default(false)
+  defaultCompanyCreditLimit Decimal?  @db.Decimal(14, 2)
+  orderConfirmationToMainAccount Boolean @default(false)
+  allowQuickOrderForUser Boolean @default(false)
   accessToken   String?
   scope         String?
   logo          String?

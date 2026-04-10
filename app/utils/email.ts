@@ -148,6 +148,7 @@ export async function sendRegistrationEmailForAdmin(
     storeData?.shopDomain || "store.com",
     processedSubject,
     {
+      logoUrl: storeData?.logo,
       ctaLabel: "View B2B Page",
       ctaUrl: `https://admin.shopify.com/store/${
         (storeData?.shopDomain || "store.com").split(".")[0]
@@ -203,6 +204,7 @@ export async function sendRegistrationEmailForCustomer(
   const storefrontUrl = shopDomain.startsWith("http") ? shopDomain : `https://${shopDomain}`;
 
   const html = convertToHtmlEmail(processedTemplate, shopDomain, processedSubject, {
+    logoUrl: storeData?.logo,
     ctaLabel: "Visit Store",
     ctaUrl: storefrontUrl,
     footerText: "This email confirms we received your B2B registration request.",
@@ -255,6 +257,7 @@ function convertToHtmlEmail(
   shopDomain: string,
   emailTitle = "Company Inquiry",
   options?: {
+    logoUrl?: string | null;
     ctaLabel?: string;
     ctaUrl?: string;
     footerText?: string;
@@ -268,6 +271,9 @@ function convertToHtmlEmail(
     `https://admin.shopify.com/store/${shopDomaindata}/apps/b2b-portal-public-1/app/registrations`;
   const footerText =
     options?.footerText || "This email was sent to notify you about a B2B registration request.";
+  const logoMarkup = options?.logoUrl
+    ? `<div style="margin-bottom: 16px;"><img src="${options.logoUrl}" alt="Store logo" style="display: block; max-width: 180px; max-height: 72px; width: auto; height: auto; margin: 0 auto;" /></div>`
+    : "";
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -326,6 +332,7 @@ function convertToHtmlEmail(
 <body>
   <div class="container">
     <div class="header">
+      ${logoMarkup}
       <h1>${emailTitle}</h1>
     </div>
 
@@ -419,6 +426,7 @@ export async function sendCustomerRegistrationApprovalEmail(
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
   const storefrontUrl = shopDomain.startsWith("http") ? shopDomain : `https://${shopDomain}`;
   const html = convertToHtmlEmail(processedTemplate, shopDomain, processedSubject, {
+    logoUrl: storeData?.logo,
     ctaLabel: "Visit Store",
     ctaUrl: storefrontUrl,
     footerText: "This email confirms your B2B registration has been approved.",
@@ -627,6 +635,7 @@ export async function sendCustomerRegistrationRejectdEmail({
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
   const storefrontUrl = shopDomain.startsWith("http") ? shopDomain : `https://${shopDomain}`;
   const html = convertToHtmlEmail(processedTemplate, shopDomain, processedSubject, {
+    logoUrl: storeData?.logo,
     ctaLabel: "Visit Store",
     ctaUrl: storefrontUrl,
     footerText: "This email shares an update about your B2B registration request.",

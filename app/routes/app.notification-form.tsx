@@ -45,8 +45,11 @@ type TemplateStoreValues = Record<
   }
 >;
 
+
 type LoaderData = {
   storeName: string;
+  storeLogo: string;
+  submissionEmail: string;
   templates: TemplateStoreValues;
 };
 
@@ -58,6 +61,8 @@ type ActionData = {
   subject?: string;
   html?: string;
   enabled?: boolean;
+  storeLogo?: string;
+  submissionEmail?: string;
 };
 
 const PREVIEW_VARIABLE_VALUES: Record<string, string> = {
@@ -227,7 +232,7 @@ function getTemplateDbMapping(templateId: TemplateId) {
   }
 }
 
-function buildPreviewHtml(subject: string, html: string) {
+function buildPreviewHtml(subject: string, html: string, logoUrl?: string) {
   const replacePreviewVariables = (value: string) =>
     Object.entries(PREVIEW_VARIABLE_VALUES).reduce(
       (content, [variable, replacement]) => content.replaceAll(variable, replacement),
@@ -263,6 +268,16 @@ function buildPreviewHtml(subject: string, html: string) {
       .email-header {
         padding: 28px 32px 12px;
         border-bottom: 1px solid #eceef0;
+      }
+      .logo-wrap {
+        margin-bottom: 16px;
+      }
+      .logo {
+        display: block;
+        max-width: 180px;
+        max-height: 72px;
+        width: auto;
+        height: auto;
       }
       .eyebrow {
         margin: 0 0 8px;
@@ -302,6 +317,7 @@ function buildPreviewHtml(subject: string, html: string) {
   <body>
     <div class="email-shell">
       <div class="email-header">
+        ${logoUrl ? `<div class="logo-wrap"><img class="logo" src="${logoUrl}" alt="Store logo" /></div>` : ""}
         <p class="eyebrow">Email Preview</p>
         <h1 class="subject">${resolvedSubject}</h1>
       </div>
@@ -324,6 +340,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     select: {
       id: true,
       shopName: true,
+      logo: true,
+      submissionEmail: true,
     },
   });
 
@@ -379,6 +397,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return Response.json({
     storeName: store.shopName || session.shop,
+    storeLogo: store.logo || "",
+    submissionEmail: store.submissionEmail || "",
     templates,
   } satisfies LoaderData);
 };
@@ -401,13 +421,78 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "");
 
-  if (!["saveTemplate", "toggleCustomerNotifications", "toggleAdminNotifications"].includes(intent)) {
+  if (
+    ![
+      "saveTemplate",
+      "toggleCustomerNotifications",
+      "toggleAdminNotifications",
+      "saveLogo",
+      "saveCustomEmail",
+    ].includes(intent)
+  ) {
     return Response.json(
       { success: false, errors: ["Unknown intent"] } satisfies ActionData,
       { status: 400 },
     );
   }
 
+  // ── saveCustomEmail ──────────────────────────────────────────────────────────
+  if (intent === "saveCustomEmail") {
+    const submissionEmail = String(formData.get("submissionEmail") || "").trim();
+
+    if (submissionEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submissionEmail)) {
+      return Response.json(
+        {
+          success: false,
+          errors: ["Please enter a valid email address."],
+        } satisfies ActionData,
+        { status: 400 },
+      );
+    }
+
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { submissionEmail: submissionEmail || null },
+    });
+
+    return Response.json({
+      success: true,
+      message: submissionEmail
+        ? "Custom email connected successfully."
+        : "Custom email removed.",
+      submissionEmail,
+    } satisfies ActionData);
+  }
+
+  // ── saveLogo ─────────────────────────────────────────────────────────────────
+  if (intent === "saveLogo") {
+    const storeLogo = String(formData.get("storeLogo") || "").trim();
+
+    if (storeLogo && !/^https?:\/\/[^\s]+$/i.test(storeLogo)) {
+      return Response.json(
+        {
+          success: false,
+          errors: ["Store logo must be a valid URL starting with http:// or https://"],
+        } satisfies ActionData,
+        { status: 400 },
+      );
+    }
+
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { logo: storeLogo || null },
+    });
+
+    return Response.json({
+      success: true,
+      message: storeLogo
+        ? "Logo saved for all email templates"
+        : "Logo removed from all email templates",
+      storeLogo,
+    } satisfies ActionData);
+  }
+
+  // ── toggleCustomerNotifications ──────────────────────────────────────────────
   if (intent === "toggleCustomerNotifications") {
     const enabled = String(formData.get("enabled") || "true") === "true";
     const defaults = createDefaultTemplateValues();
@@ -454,20 +539,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     } else {
       await prisma.emailTemplates.create({
-        data: {
-          shopId: store.id,
-          ...toggleData,
-        },
+        data: { shopId: store.id, ...toggleData },
       });
     }
 
     return Response.json({
       success: true,
-      message: enabled ? "Customer notifications turned on" : "Customer notifications turned off",
+      message: enabled
+        ? "Customer notifications turned on"
+        : "Customer notifications turned off",
       enabled,
     } satisfies ActionData);
   }
 
+  // ── toggleAdminNotifications ─────────────────────────────────────────────────
   if (intent === "toggleAdminNotifications") {
     const enabled = String(formData.get("enabled") || "true") === "true";
     const defaults = createDefaultTemplateValues();
@@ -514,20 +599,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     } else {
       await prisma.emailTemplates.create({
-        data: {
-          shopId: store.id,
-          ...toggleData,
-        },
+        data: { shopId: store.id, ...toggleData },
       });
     }
 
     return Response.json({
       success: true,
-      message: enabled ? "Admin notifications turned on" : "Admin notifications turned off",
+      message: enabled
+        ? "Admin notifications turned on"
+        : "Admin notifications turned off",
       enabled,
     } satisfies ActionData);
   }
 
+  // ── saveTemplate ─────────────────────────────────────────────────────────────
   const templateId = String(formData.get("templateId") || "") as TemplateId;
   const subject = String(formData.get("subject") || "").trim();
   const html = String(formData.get("html") || "").trim();
@@ -567,17 +652,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   };
 
   if (existing) {
-    await prisma.emailTemplates.update({
-      where: { id: existing.id },
-      data,
-    });
+    await prisma.emailTemplates.update({ where: { id: existing.id }, data });
   } else {
-    await prisma.emailTemplates.create({
-      data: {
-        shopId: store.id,
-        ...data,
-      },
-    });
+    await prisma.emailTemplates.create({ data: { shopId: store.id, ...data } });
   }
 
   return Response.json({
@@ -591,16 +668,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function NotificationForm() {
-  const { storeName, templates: loaderTemplates } =
-    useLoaderData<typeof loader>() as LoaderData;
+  const {
+    storeName,
+    storeLogo: loaderStoreLogo,
+    submissionEmail: loaderSubmissionEmail,
+    templates: loaderTemplates,
+  } = useLoaderData<typeof loader>() as LoaderData;
+
   const [searchParams, setSearchParams] = useSearchParams();
   const saveFetcher = useFetcher<ActionData>();
   const toggleFetcher = useFetcher<ActionData>();
   const adminToggleFetcher = useFetcher<ActionData>();
-  const [templateValues, setTemplateValues] =
-    useState<TemplateStoreValues>(loaderTemplates);
+  const logoFetcher = useFetcher<ActionData>();
+  const emailDomainFetcher = useFetcher<ActionData>();
+
+  const [templateValues, setTemplateValues] = useState<TemplateStoreValues>(loaderTemplates);
+  const [storeLogo, setStoreLogo] = useState(loaderStoreLogo);
+  const [submissionEmail, setSubmissionEmail] = useState(loaderSubmissionEmail);
   const [editorHasContent, setEditorHasContent] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailInput, setEmailInput] = useState(loaderSubmissionEmail);
+
   const editorRef = useRef<HTMLDivElement>(null);
   const selectedTemplateId = searchParams.get("template") as TemplateId | null;
 
@@ -609,24 +698,21 @@ export default function NotificationForm() {
     [selectedTemplateId],
   );
 
+  useEffect(() => { setTemplateValues(loaderTemplates); }, [loaderTemplates]);
+  useEffect(() => { setStoreLogo(loaderStoreLogo); }, [loaderStoreLogo]);
   useEffect(() => {
-    setTemplateValues(loaderTemplates);
-  }, [loaderTemplates]);
+    setSubmissionEmail(loaderSubmissionEmail);
+    setEmailInput(loaderSubmissionEmail);
+  }, [loaderSubmissionEmail]);
 
   useEffect(() => {
-    if (!selectedTemplate || !editorRef.current) {
-      return;
-    }
-
+    if (!selectedTemplate || !editorRef.current) return;
     editorRef.current.innerHTML = templateValues[selectedTemplate.id].html;
     setEditorHasContent(editorRef.current.innerText.trim().length > 0);
   }, [selectedTemplate, templateValues]);
 
   useEffect(() => {
-    if (!saveFetcher.data?.success || !saveFetcher.data.templateId || !saveFetcher.data.html) {
-      return;
-    }
-
+    if (!saveFetcher.data?.success || !saveFetcher.data.templateId || !saveFetcher.data.html) return;
     setTemplateValues((prev) => ({
       ...prev,
       [saveFetcher.data!.templateId!]: {
@@ -638,40 +724,36 @@ export default function NotificationForm() {
   }, [saveFetcher.data]);
 
   useEffect(() => {
-    if (!toggleFetcher.data?.success || typeof toggleFetcher.data.enabled !== "boolean") {
-      return;
-    }
-
+    if (!toggleFetcher.data?.success || typeof toggleFetcher.data.enabled !== "boolean") return;
     setTemplateValues((prev) => ({
       ...prev,
-      "customer-application-received": {
-        ...prev["customer-application-received"],
-        enabled: toggleFetcher.data!.enabled!,
-      },
-      "customer-application-approved": {
-        ...prev["customer-application-approved"],
-        enabled: toggleFetcher.data!.enabled!,
-      },
-      "customer-application-rejected": {
-        ...prev["customer-application-rejected"],
-        enabled: toggleFetcher.data!.enabled!,
-      },
+      "customer-application-received": { ...prev["customer-application-received"], enabled: toggleFetcher.data!.enabled! },
+      "customer-application-approved": { ...prev["customer-application-approved"], enabled: toggleFetcher.data!.enabled! },
+      "customer-application-rejected": { ...prev["customer-application-rejected"], enabled: toggleFetcher.data!.enabled! },
     }));
   }, [toggleFetcher.data]);
 
   useEffect(() => {
-    if (!adminToggleFetcher.data?.success || typeof adminToggleFetcher.data.enabled !== "boolean") {
-      return;
-    }
-
+    if (!adminToggleFetcher.data?.success || typeof adminToggleFetcher.data.enabled !== "boolean") return;
     setTemplateValues((prev) => ({
       ...prev,
-      "admin-application-received": {
-        ...prev["admin-application-received"],
-        enabled: adminToggleFetcher.data!.enabled!,
-      },
+      "admin-application-received": { ...prev["admin-application-received"], enabled: adminToggleFetcher.data!.enabled! },
     }));
   }, [adminToggleFetcher.data]);
+
+  useEffect(() => {
+    if (!logoFetcher.data?.success || typeof logoFetcher.data.storeLogo !== "string") return;
+    setStoreLogo(logoFetcher.data.storeLogo);
+  }, [logoFetcher.data]);
+
+  // Close modal and sync state on successful email save
+  useEffect(() => {
+    if (!emailDomainFetcher.data?.success) return;
+    const saved = emailDomainFetcher.data.submissionEmail ?? "";
+    setSubmissionEmail(saved);
+    setEmailInput(saved);
+    setShowEmailModal(false);
+  }, [emailDomainFetcher.data]);
 
   const format = (command: string) => {
     document.execCommand(command, false);
@@ -679,44 +761,28 @@ export default function NotificationForm() {
   };
 
   const handleEditorInput = () => {
-    if (!editorRef.current) {
-      return;
-    }
-
+    if (!editorRef.current) return;
     setEditorHasContent(editorRef.current.innerText.trim().length > 0);
   };
 
   const insertVariable = (variable: string) => {
-    if (!editorRef.current) {
-      return;
-    }
-
+    if (!editorRef.current) return;
     const selection = window.getSelection();
-
-    if (!selection || !selection.rangeCount) {
-      editorRef.current.focus();
-      return;
-    }
-
+    if (!selection || !selection.rangeCount) { editorRef.current.focus(); return; }
     const range = selection.getRangeAt(0);
     range.deleteContents();
-
     const textNode = document.createTextNode(variable);
     range.insertNode(textNode);
     range.setStartAfter(textNode);
     range.setEndAfter(textNode);
     selection.removeAllRanges();
     selection.addRange(range);
-
     handleEditorInput();
     editorRef.current.focus();
   };
 
   const saveCurrentTemplate = () => {
-    if (!selectedTemplate || !editorRef.current) {
-      return;
-    }
-
+    if (!selectedTemplate || !editorRef.current) return;
     saveFetcher.submit(
       {
         intent: "saveTemplate",
@@ -731,31 +797,266 @@ export default function NotificationForm() {
 
   const customerTemplates = TEMPLATE_ITEMS.filter((item) => item.audience === "customer");
   const adminTemplates = TEMPLATE_ITEMS.filter((item) => item.audience === "admin");
-  const customerNotificationsEnabled = customerTemplates.every(
-    (item) => templateValues[item.id].enabled,
-  );
-  const adminNotificationsEnabled = adminTemplates.every(
-    (item) => templateValues[item.id].enabled,
-  );
+  const customerNotificationsEnabled = customerTemplates.every((item) => templateValues[item.id].enabled);
+  const adminNotificationsEnabled = adminTemplates.every((item) => templateValues[item.id].enabled);
 
   const previewDocument =
     selectedTemplate && editorRef.current
       ? buildPreviewHtml(
           templateValues[selectedTemplate.id].subject,
           editorRef.current.innerHTML || templateValues[selectedTemplate.id].html,
+          storeLogo,
         )
       : "";
 
+  // ── Shared modal ─────────────────────────────────────────────────────────────
+  const emailModal = showEmailModal ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(17, 24, 39, 0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        zIndex: 3000,
+      }}
+      onClick={() => setShowEmailModal(false)}
+    >
+      <div
+        style={{
+          width: "min(480px, 100%)",
+          background: "#ffffff",
+          borderRadius: 16,
+          boxShadow: "0 28px 80px rgba(15, 23, 42, 0.28)",
+          padding: "24px 24px 20px",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 20,
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#202223" }}>
+            Connect your custom email domain
+          </h2>
+          <button
+            type="button"
+            onClick={() => setShowEmailModal(false)}
+            aria-label="Close"
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "#6d7175",
+              fontSize: 24,
+              lineHeight: 1,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Modal body */}
+        <div style={{ marginBottom: 20 }}>
+          <label
+            htmlFor="modal-email-input"
+            style={{
+              display: "block",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#303030",
+              marginBottom: 8,
+            }}
+          >
+            Email address
+          </label>
+          <input
+            id="modal-email-input"
+            type="email"
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.currentTarget.value)}
+            placeholder="john@example.com"
+            style={{
+              width: "100%",
+              border: "1px solid #c9cccf",
+              borderRadius: 10,
+              padding: "10px 12px",
+              fontSize: 14,
+              color: "#303030",
+              outline: "none",
+              boxSizing: "border-box",
+              background: "#ffffff",
+            }}
+          />
+          {emailDomainFetcher.data?.errors?.length ? (
+            <div style={{ marginTop: 6, fontSize: 12, color: "#d72c0d", lineHeight: 1.5 }}>
+              {emailDomainFetcher.data.errors.join(" ")}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Modal footer */}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setShowEmailModal(false)}
+            style={{
+              border: "1px solid #c9cccf",
+              background: "#ffffff",
+              color: "#303030",
+              borderRadius: 10,
+              padding: "8px 16px",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={emailDomainFetcher.state !== "idle"}
+            onClick={() => {
+              emailDomainFetcher.submit(
+                { intent: "saveCustomEmail", submissionEmail: emailInput },
+                { method: "post" },
+              );
+            }}
+            style={{
+              border: "1px solid #303030",
+              background: emailDomainFetcher.state !== "idle" ? "#555" : "#2f2f2f",
+              color: "#ffffff",
+              borderRadius: 10,
+              padding: "8px 16px",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: emailDomainFetcher.state !== "idle" ? "not-allowed" : "pointer",
+              opacity: emailDomainFetcher.state !== "idle" ? 0.7 : 1,
+            }}
+          >
+            {emailDomainFetcher.state !== "idle" ? "Saving…" : "Connect email"}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // ── Sender email section (reused in both views) ───────────────────────────────
+  const senderEmailSection = (
+    <section
+      style={{
+        background: "#ffffff",
+        border: "1px solid #d8dadd",
+        borderRadius: 16,
+        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 16,
+          marginBottom: 14,
+        }}
+      >
+        <div>
+          <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 600, color: "#303030" }}>
+            Sender email
+          </h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, color: "#303030", fontWeight: 500 }}>
+              {submissionEmail || "noreply@onboardb2b.com"}
+            </span>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: 24,
+                padding: "0 10px",
+                borderRadius: 999,
+                background: submissionEmail ? "#d9f5e5" : "#f1f2f4",
+                color: submissionEmail ? "#0f5132" : "#6d7175",
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+            >
+              {submissionEmail ? "Custom" : "App default"}
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setEmailInput(submissionEmail);
+            setShowEmailModal(true);
+          }}
+          style={{
+            border: "1px solid #303030",
+            background: "#2f2f2f",
+            color: "#ffffff",
+            borderRadius: 10,
+            padding: "8px 14px",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {submissionEmail ? "Change email" : "Connect custom email domain"}
+        </button>
+      </div>
+
+      <p style={{ margin: 0, color: "#303030", fontSize: 14, lineHeight: 1.5, fontWeight: 600 }}>
+        {submissionEmail
+          ? "Notification emails will be sent from your custom email address."
+          : "The app is using its default sender email to send email notifications to your customers."}
+      </p>
+
+      {/* Disconnect link */}
+      {submissionEmail ? (
+        <div style={{ marginTop: 10 }}>
+          <button
+            type="button"
+            onClick={() => {
+              emailDomainFetcher.submit(
+                { intent: "saveCustomEmail", submissionEmail: "" },
+                { method: "post" },
+              );
+            }}
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "#d72c0d",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            Disconnect custom email
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+
+  // ── Template editor view ──────────────────────────────────────────────────────
   if (selectedTemplate) {
     return (
       <s-page>
-        <div
-          style={{
-            background: "#f6f6f7",
-            minHeight: "100vh",
-            padding: "8px 28px 40px",
-          }}
-        >
+        <div style={{ background: "#f6f6f7", minHeight: "100vh", padding: "8px 28px 40px" }}>
           <div style={{ maxWidth: 1080, margin: "0 auto" }}>
             <button
               type="button"
@@ -794,20 +1095,10 @@ export default function NotificationForm() {
                 }}
               >
                 <div>
-                  <h2
-                    style={{
-                      margin: "0 0 6px",
-                      fontSize: 16,
-                      lineHeight: 1.2,
-                      fontWeight: 700,
-                      color: "#303030",
-                    }}
-                  >
+                  <h2 style={{ margin: "0 0 6px", fontSize: 16, lineHeight: 1.2, fontWeight: 700, color: "#303030" }}>
                     {selectedTemplate.editorTitle}
                   </h2>
-                  <div style={{ fontSize: 13, color: "#6d7175" }}>
-                    Saving for {storeName}
-                  </div>
+                  <div style={{ fontSize: 13, color: "#6d7175" }}>Saving for {storeName}</div>
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -816,11 +1107,7 @@ export default function NotificationForm() {
                       {saveFetcher.data.message}
                     </span>
                   ) : null}
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setShowPreview(true)}
-                  >
+                  <s-button type="button" variant="secondary" onClick={() => setShowPreview(true)}>
                     Preview
                   </s-button>
                   <s-button
@@ -877,10 +1164,7 @@ export default function NotificationForm() {
                         const nextSubject = event.currentTarget.value;
                         setTemplateValues((prev) => ({
                           ...prev,
-                          [selectedTemplate.id]: {
-                            ...prev[selectedTemplate.id],
-                            subject: nextSubject,
-                          },
+                          [selectedTemplate.id]: { ...prev[selectedTemplate.id], subject: nextSubject },
                         }));
                       }}
                       placeholder="Enter email subject"
@@ -898,11 +1182,7 @@ export default function NotificationForm() {
                     />
                   </div>
 
-                  <div
-                    style={{
-                      padding: "16px",
-                    }}
-                  >
+                  <div style={{ padding: "16px" }}>
                     <div
                       style={{
                         display: "flex",
@@ -912,16 +1192,9 @@ export default function NotificationForm() {
                         marginBottom: 8,
                       }}
                     >
-                      <label
-                        style={{
-                          display: "block",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: "#303030",
-                        }}
-                      >
+                      <div style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#303030" }}>
                         Content
-                      </label>
+                      </div>
                       <button
                         type="button"
                         onClick={() => {
@@ -930,12 +1203,9 @@ export default function NotificationForm() {
                             [selectedTemplate.id]: createDefaultTemplateValues()[selectedTemplate.id],
                           }));
                           if (editorRef.current) {
-                            const defaultTemplate =
-                              createDefaultTemplateValues()[selectedTemplate.id];
+                            const defaultTemplate = createDefaultTemplateValues()[selectedTemplate.id];
                             editorRef.current.innerHTML = defaultTemplate.html;
-                            setEditorHasContent(
-                              editorRef.current.innerText.trim().length > 0,
-                            );
+                            setEditorHasContent(editorRef.current.innerText.trim().length > 0);
                           }
                         }}
                         style={{
@@ -950,56 +1220,6 @@ export default function NotificationForm() {
                       >
                         Reset to default
                       </button>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                        padding: 8,
-                        background: "#f6f6f7",
-                        border: "1px solid #c9cccf",
-                        borderRadius: "10px 10px 0 0",
-                        marginBottom: 0,
-                      }}
-                    >
-                      <ToolbarButton onClick={() => format("bold")} title="Bold">
-                        <strong>B</strong>
-                      </ToolbarButton>
-                      <ToolbarButton onClick={() => format("italic")} title="Italic">
-                        <em>I</em>
-                      </ToolbarButton>
-                      <ToolbarButton onClick={() => format("underline")} title="Underline">
-                        <u>U</u>
-                      </ToolbarButton>
-                      <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
-                      <ToolbarButton
-                        onClick={() => format("insertUnorderedList")}
-                        title="Bullet list"
-                      >
-                        ≡
-                      </ToolbarButton>
-                      <ToolbarButton
-                        onClick={() => format("insertOrderedList")}
-                        title="Numbered list"
-                      >
-                        ≣
-                      </ToolbarButton>
-                      <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
-                      <ToolbarButton onClick={() => format("justifyLeft")} title="Align left">
-                        ⫷
-                      </ToolbarButton>
-                      <ToolbarButton onClick={() => format("justifyCenter")} title="Align center">
-                        ≡
-                      </ToolbarButton>
-                      <ToolbarButton onClick={() => format("justifyRight")} title="Align right">
-                        ⫸
-                      </ToolbarButton>
-                      <div style={{ width: 1, background: "#c9cccf", margin: "0 2px" }} />
-                      <ToolbarButton onClick={() => format("removeFormat")} title="Clear format">
-                        ✕
-                      </ToolbarButton>
                     </div>
 
                     <div style={{ position: "relative" }}>
@@ -1022,7 +1242,6 @@ export default function NotificationForm() {
                             .replace(/<[^>]*>/g, "")}
                         </div>
                       )}
-
                       <div
                         ref={editorRef}
                         contentEditable
@@ -1055,41 +1274,92 @@ export default function NotificationForm() {
                     top: 16,
                   }}
                 >
-                  <h3
-                    style={{
-                      margin: "0 0 14px",
-                      fontSize: 20,
-                      lineHeight: 1.2,
-                      fontWeight: 700,
-                      color: "#303030",
-                    }}
-                  >
+                  <h3 style={{ margin: "0 0 14px", fontSize: 20, lineHeight: 1.2, fontWeight: 700, color: "#303030" }}>
                     Liquid variables
                   </h3>
-
-                  <p
-                    style={{
-                      margin: "0 0 14px",
-                      fontSize: 14,
-                      lineHeight: 1.5,
-                      color: "#303030",
-                    }}
-                  >
+                  <p style={{ margin: "0 0 14px", fontSize: 14, lineHeight: 1.5, color: "#303030" }}>
                     {selectedTemplate.helperText}
                   </p>
-
-                  <div
-                    style={{
-                      fontSize: 14,
-                      color: "#303030",
-                      marginBottom: 12,
-                      fontWeight: 600,
-                    }}
-                  >
+                  <div style={{ fontSize: 14, color: "#303030", marginBottom: 12, fontWeight: 600 }}>
                     Available objects include:
                   </div>
 
                   <div style={{ display: "grid", gap: 10 }}>
+                    <logoFetcher.Form method="post" style={{ display: "grid", gap: 10 }}>
+                      <input type="hidden" name="intent" value="saveLogo" />
+                      <div>
+                        <label
+                          htmlFor="store-logo"
+                          style={{
+                            display: "block",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: "#303030",
+                            marginBottom: 8,
+                          }}
+                        >
+                          Store logo URL
+                        </label>
+                        <input
+                          id="store-logo"
+                          name="storeLogo"
+                          type="url"
+                          value={storeLogo}
+                          onChange={(event) => setStoreLogo(event.currentTarget.value)}
+                          placeholder="https://your-cdn.com/logo.png"
+                          style={{
+                            width: "100%",
+                            border: "1px solid #c9cccf",
+                            borderRadius: 10,
+                            padding: "10px 12px",
+                            fontSize: 14,
+                            color: "#303030",
+                            outline: "none",
+                            boxSizing: "border-box",
+                            background: "#ffffff",
+                          }}
+                        />
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6d7175", lineHeight: 1.5 }}>
+                        This shared logo is shown at the top of every email template and preview.
+                      </div>
+                      {storeLogo ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            minHeight: 92,
+                            padding: 12,
+                            border: "1px solid #e3e5e7",
+                            borderRadius: 10,
+                            background: "#fafbfb",
+                          }}
+                        >
+                          <img
+                            src={storeLogo}
+                            alt="Store logo preview"
+                            style={{ maxWidth: "100%", maxHeight: 56, objectFit: "contain" }}
+                          />
+                        </div>
+                      ) : null}
+                      {logoFetcher.data?.errors?.length ? (
+                        <div style={{ fontSize: 12, color: "#d72c0d", lineHeight: 1.5 }}>
+                          {logoFetcher.data.errors.join(" ")}
+                        </div>
+                      ) : null}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <s-button type="submit" variant="secondary" loading={logoFetcher.state !== "idle"}>
+                          Save logo
+                        </s-button>
+                        {logoFetcher.data?.message ? (
+                          <span style={{ fontSize: 12, color: "#008060", fontWeight: 600 }}>
+                            {logoFetcher.data.message}
+                          </span>
+                        ) : null}
+                      </div>
+                    </logoFetcher.Form>
+
                     {TEMPLATE_VARIABLES.map(({ variable, description }) => (
                       <button
                         key={variable}
@@ -1104,23 +1374,10 @@ export default function NotificationForm() {
                           cursor: "pointer",
                         }}
                       >
-                        <div
-                          style={{
-                            fontSize: 14,
-                            fontWeight: 600,
-                            color: "#303030",
-                            marginBottom: 4,
-                          }}
-                        >
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "#303030", marginBottom: 4 }}>
                           {variable}
                         </div>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "#6d7175",
-                            lineHeight: 1.4,
-                          }}
-                        >
+                        <div style={{ fontSize: 12, color: "#6d7175", lineHeight: 1.4 }}>
                           {description}
                         </div>
                       </button>
@@ -1169,21 +1426,13 @@ export default function NotificationForm() {
                 }}
               >
                 <div>
-                  <div
-                    style={{
-                      fontSize: 18,
-                      fontWeight: 700,
-                      color: "#202223",
-                      marginBottom: 4,
-                    }}
-                  >
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#202223", marginBottom: 4 }}>
                     Preview
                   </div>
                   <div style={{ fontSize: 13, color: "#6d7175" }}>
                     Sample data is used for the template variables.
                   </div>
                 </div>
-
                 <button
                   type="button"
                   onClick={() => setShowPreview(false)}
@@ -1201,18 +1450,11 @@ export default function NotificationForm() {
                   ×
                 </button>
               </div>
-
               <iframe
                 title="Email preview"
                 srcDoc={previewDocument}
-                style={{
-                  width: "100%",
-                  flex: 1,
-                  border: "none",
-                  background: "#ffffff",
-                }}
+                style={{ width: "100%", flex: 1, border: "none", background: "#ffffff" }}
               />
-
               <div
                 style={{
                   display: "flex",
@@ -1229,32 +1471,22 @@ export default function NotificationForm() {
             </div>
           </div>
         ) : null}
+
+        {emailModal}
       </s-page>
     );
   }
 
+  // ── Main notifications list view ─────────────────────────────────────────────
   return (
     <s-page>
-      <div
-        style={{
-          background: "#f6f6f7",
-          minHeight: "100vh",
-          padding: "8px 28px 40px",
-        }}
-      >
+      <div style={{ background: "#f6f6f7", minHeight: "100vh", padding: "8px 28px 40px" }}>
         <div style={{ maxWidth: 1080, margin: "0 auto" }}>
-          <h1
-            style={{
-              margin: "0 0 24px",
-              fontSize: 22,
-              lineHeight: 1.2,
-              fontWeight: 700,
-              color: "#303030",
-            }}
-          >
+          <h1 style={{ margin: "0 0 24px", fontSize: 22, lineHeight: 1.2, fontWeight: 700, color: "#303030" }}>
             Email notifications
           </h1>
 
+          {/* ── Customer notifications ── */}
           <div
             style={{
               display: "grid",
@@ -1264,31 +1496,16 @@ export default function NotificationForm() {
             }}
           >
             <div style={{ paddingTop: 18 }}>
-              <h2
-                style={{
-                  margin: "0 0 8px",
-                  fontSize: 16,
-                  lineHeight: 1.2,
-                  fontWeight: 700,
-                  color: "#303030",
-                }}
-              >
+              <h2 style={{ margin: "0 0 8px", fontSize: 16, lineHeight: 1.2, fontWeight: 700, color: "#303030" }}>
                 Customer notifications
               </h2>
-              <p
-                style={{
-                  margin: 0,
-                  color: "#6d7175",
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                  fontWeight: 600,
-                }}
-              >
+              <p style={{ margin: 0, color: "#6d7175", fontSize: 14, lineHeight: 1.5, fontWeight: 600 }}>
                 Manage the customer email templates for registration events.
               </p>
             </div>
 
             <div style={{ display: "grid", gap: 18 }}>
+              {/* Admin toggle card */}
               <section
                 style={{
                   background: "#ffffff",
@@ -1308,14 +1525,7 @@ export default function NotificationForm() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <h3
-                      style={{
-                        margin: 0,
-                        fontSize: 15,
-                        fontWeight: 600,
-                        color: "#303030",
-                      }}
-                    >
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#303030" }}>
                       Admin email notifications
                     </h3>
                     <span
@@ -1336,42 +1546,23 @@ export default function NotificationForm() {
                       {adminNotificationsEnabled ? "On" : "Off"}
                     </span>
                     {adminToggleFetcher.data?.message ? (
-                      <span style={{ fontSize: 12, color: "#008060", fontWeight: 600 }}>
-                        Success
-                      </span>
+                      <span style={{ fontSize: 12, color: "#008060", fontWeight: 600 }}>Success</span>
                     ) : null}
                   </div>
-
                   <adminToggleFetcher.Form method="post">
                     <input type="hidden" name="intent" value="toggleAdminNotifications" />
-                    <input
-                      type="hidden"
-                      name="enabled"
-                      value={adminNotificationsEnabled ? "false" : "true"}
-                    />
-                    <s-button
-                      type="submit"
-                      variant="secondary"
-                      loading={adminToggleFetcher.state !== "idle"}
-                    >
+                    <input type="hidden" name="enabled" value={adminNotificationsEnabled ? "false" : "true"} />
+                    <s-button type="submit" variant="secondary" loading={adminToggleFetcher.state !== "idle"}>
                       {adminNotificationsEnabled ? "Turn off" : "Turn on"}
                     </s-button>
                   </adminToggleFetcher.Form>
                 </div>
-
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 14,
-                    color: "#303030",
-                    lineHeight: 1.6,
-                    fontWeight: 600,
-                  }}
-                >
+                <p style={{ margin: 0, fontSize: 14, color: "#303030", lineHeight: 1.6, fontWeight: 600 }}>
                   Admins can receive notifications when a new company registration is submitted.
                 </p>
               </section>
 
+              {/* Customer toggle card */}
               <section
                 style={{
                   background: "#ffffff",
@@ -1391,14 +1582,7 @@ export default function NotificationForm() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <h3
-                      style={{
-                        margin: 0,
-                        fontSize: 15,
-                        fontWeight: 600,
-                        color: "#303030",
-                      }}
-                    >
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#303030" }}>
                       Customer email notifications
                     </h3>
                     <span
@@ -1419,55 +1603,31 @@ export default function NotificationForm() {
                       {customerNotificationsEnabled ? "On" : "Off"}
                     </span>
                     {toggleFetcher.data?.message ? (
-                      <span style={{ fontSize: 12, color: "#008060", fontWeight: 600 }}>
-                        Success
-                      </span>
+                      <span style={{ fontSize: 12, color: "#008060", fontWeight: 600 }}>Success</span>
                     ) : null}
                   </div>
-
                   <toggleFetcher.Form method="post">
                     <input type="hidden" name="intent" value="toggleCustomerNotifications" />
-                    <input
-                      type="hidden"
-                      name="enabled"
-                      value={customerNotificationsEnabled ? "false" : "true"}
-                    />
-                    <s-button
-                      type="submit"
-                      variant="secondary"
-                      loading={toggleFetcher.state !== "idle"}
-                    >
+                    <input type="hidden" name="enabled" value={customerNotificationsEnabled ? "false" : "true"} />
+                    <s-button type="submit" variant="secondary" loading={toggleFetcher.state !== "idle"}>
                       {customerNotificationsEnabled ? "Turn off" : "Turn on"}
                     </s-button>
                   </toggleFetcher.Form>
                 </div>
-
-                <p
-                  style={{
-                    margin: "0 0 10px",
-                    fontSize: 14,
-                    color: "#303030",
-                    lineHeight: 1.45,
-                  }}
-                >
+                <p style={{ margin: "0 0 10px", fontSize: 14, color: "#303030", lineHeight: 1.45 }}>
                   Customers can receive notifications when:
                 </p>
-                <ul
-                  style={{
-                    margin: 0,
-                    paddingLeft: 20,
-                    color: "#303030",
-                    fontSize: 14,
-                    lineHeight: 1.75,
-                    fontWeight: 600,
-                  }}
-                >
+                <ul style={{ margin: 0, paddingLeft: 20, color: "#303030", fontSize: 14, lineHeight: 1.75, fontWeight: 600 }}>
                   <li>Their application is pending review</li>
                   <li>Their application is approved</li>
                   <li>Their application is rejected</li>
                 </ul>
               </section>
 
+              {/* Sender email section */}
+              {senderEmailSection}
+
+              {/* Customer templates list */}
               <section
                 style={{
                   background: "#ffffff",
@@ -1477,121 +1637,10 @@ export default function NotificationForm() {
                   padding: 14,
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    justifyContent: "space-between",
-                    gap: 16,
-                    marginBottom: 14,
-                  }}
-                >
-                  <div>
-                    <h3
-                      style={{
-                        margin: "0 0 8px",
-                        fontSize: 15,
-                        fontWeight: 600,
-                        color: "#303030",
-                      }}
-                    >
-                      Sender email
-                    </h3>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 14,
-                          color: "#303030",
-                          fontWeight: 500,
-                        }}
-                      >
-                        noreply@onboardb2b.com
-                      </span>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          height: 24,
-                          padding: "0 10px",
-                          borderRadius: 999,
-                          background: "#f1f2f4",
-                          color: "#6d7175",
-                          fontSize: 12,
-                          fontWeight: 500,
-                        }}
-                      >
-                        App default
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    style={{
-                      border: "1px solid #303030",
-                      background: "#2f2f2f",
-                      color: "#ffffff",
-                      borderRadius: 10,
-                      padding: "8px 14px",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    Connect custom email domain
-                  </button>
-                </div>
-
-                <p
-                  style={{
-                    margin: 0,
-                    color: "#303030",
-                    fontSize: 14,
-                    lineHeight: 1.5,
-                    fontWeight: 600,
-                  }}
-                >
-                  The app is using its default sender email to send email notifications to your customers.
-                </p>
-              </section>
-
-              <section
-                style={{
-                  background: "#ffffff",
-                  border: "1px solid #d8dadd",
-                  borderRadius: 16,
-                  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-                  padding: 14,
-                }}
-              >
-                <h3
-                  style={{
-                    margin: "0 0 14px",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    color: "#303030",
-                  }}
-                >
+                <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 600, color: "#303030" }}>
                   Customer email templates
                 </h3>
-
-                <div
-                  style={{
-                    border: "1px solid #eceef1",
-                    borderRadius: 12,
-                    overflow: "hidden",
-                    background: "#ffffff",
-                  }}
-                >
+                <div style={{ border: "1px solid #eceef1", borderRadius: 12, overflow: "hidden", background: "#ffffff" }}>
                   {customerTemplates.map((item, index) => (
                     <button
                       key={item.id}
@@ -1612,35 +1661,14 @@ export default function NotificationForm() {
                       }}
                     >
                       <div>
-                        <div
-                          style={{
-                            marginBottom: 4,
-                            fontSize: 14,
-                            fontWeight: 600,
-                            color: "#303030",
-                          }}
-                        >
+                        <div style={{ marginBottom: 4, fontSize: 14, fontWeight: 600, color: "#303030" }}>
                           {item.title}
                         </div>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: 14,
-                            lineHeight: 1.45,
-                            color: "#6d7175",
-                            fontWeight: 500,
-                          }}
-                        >
+                        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.45, color: "#6d7175", fontWeight: 500 }}>
                           {item.description}
                         </p>
                       </div>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 10,
-                        }}
-                      >
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                         <span
                           style={{
                             display: "inline-flex",
@@ -1658,16 +1686,7 @@ export default function NotificationForm() {
                         >
                           {templateValues[item.id].enabled ? "On" : "Off"}
                         </span>
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            color: "#4a4f55",
-                            fontSize: 28,
-                            lineHeight: 1,
-                          }}
-                        >
-                          ›
-                        </span>
+                        <span aria-hidden="true" style={{ color: "#4a4f55", fontSize: 28, lineHeight: 1 }}>›</span>
                       </span>
                     </button>
                   ))}
@@ -1676,7 +1695,7 @@ export default function NotificationForm() {
             </div>
           </div>
 
-
+          {/* ── Admin notifications ── */}
           <div
             style={{
               display: "grid",
@@ -1687,26 +1706,10 @@ export default function NotificationForm() {
             }}
           >
             <div style={{ paddingTop: 18 }}>
-              <h2
-                style={{
-                  margin: "0 0 8px",
-                  fontSize: 16,
-                  lineHeight: 1.2,
-                  fontWeight: 700,
-                  color: "#303030",
-                }}
-              >
+              <h2 style={{ margin: "0 0 8px", fontSize: 16, lineHeight: 1.2, fontWeight: 700, color: "#303030" }}>
                 Admin email notifications
               </h2>
-              <p
-                style={{
-                  margin: 0,
-                  color: "#6d7175",
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                  fontWeight: 600,
-                }}
-              >
+              <p style={{ margin: 0, color: "#6d7175", fontSize: 14, lineHeight: 1.5, fontWeight: 600 }}>
                 Manage admin email notification content and activity for new company registration alerts.
               </p>
             </div>
@@ -1721,27 +1724,10 @@ export default function NotificationForm() {
                   padding: 14,
                 }}
               >
-                
-                <h3
-                  style={{
-                    margin: "0 0 14px",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    color: "#303030",
-                  }}
-                >
+                <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 600, color: "#303030" }}>
                   Admin email templates
                 </h3>
-
-                <div
-                  style={{
-                    border: "1px solid #eceef1",
-                    borderRadius: 12,
-                    overflow: "hidden",
-                    background: "#ffffff",
-                  }}
-                >
-                  
+                <div style={{ border: "1px solid #eceef1", borderRadius: 12, overflow: "hidden", background: "#ffffff" }}>
                   {adminTemplates.map((item, index) => (
                     <button
                       key={item.id}
@@ -1762,35 +1748,14 @@ export default function NotificationForm() {
                       }}
                     >
                       <div>
-                        <div
-                          style={{
-                            marginBottom: 4,
-                            fontSize: 14,
-                            fontWeight: 600,
-                            color: "#303030",
-                          }}
-                        >
+                        <div style={{ marginBottom: 4, fontSize: 14, fontWeight: 600, color: "#303030" }}>
                           {item.title}
                         </div>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: 14,
-                            lineHeight: 1.45,
-                            color: "#6d7175",
-                            fontWeight: 500,
-                          }}
-                        >
+                        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.45, color: "#6d7175", fontWeight: 500 }}>
                           {item.description}
                         </p>
                       </div>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 10,
-                        }}
-                      >
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                         <span
                           style={{
                             display: "inline-flex",
@@ -1808,16 +1773,7 @@ export default function NotificationForm() {
                         >
                           {templateValues[item.id].enabled ? "On" : "Off"}
                         </span>
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            color: "#4a4f55",
-                            fontSize: 28,
-                            lineHeight: 1,
-                          }}
-                        >
-                          ›
-                        </span>
+                        <span aria-hidden="true" style={{ color: "#4a4f55", fontSize: 28, lineHeight: 1 }}>›</span>
                       </span>
                     </button>
                   ))}
@@ -1827,6 +1783,8 @@ export default function NotificationForm() {
           </div>
         </div>
       </div>
+
+      {emailModal}
     </s-page>
   );
 }
