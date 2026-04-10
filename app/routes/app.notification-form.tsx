@@ -232,6 +232,12 @@ function getTemplateDbMapping(templateId: TemplateId) {
   }
 }
 
+  const decodeHtml = (html: string) => {
+  const txt = document.createElement("textarea");
+  txt.innerHTML = html;
+  return txt.value;
+};
+
 function buildPreviewHtml(subject: string, html: string, logoUrl?: string) {
   const replacePreviewVariables = (value: string) =>
     Object.entries(PREVIEW_VARIABLE_VALUES).reduce(
@@ -240,97 +246,160 @@ function buildPreviewHtml(subject: string, html: string, logoUrl?: string) {
     );
 
   const resolvedSubject = replacePreviewVariables(subject);
-  const resolvedHtml = replacePreviewVariables(html);
+ const resolvedHtml = decodeHtml(replacePreviewVariables(html));
 
   return `<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${resolvedSubject}</title>
-    <style>
-      body {
-        margin: 0;
-        padding: 32px 24px;
-        background: #f3f4f6;
-        font-family: Arial, sans-serif;
-        color: #202223;
-      }
-      .email-shell {
-        max-width: 720px;
-        margin: 0 auto;
-        background: #ffffff;
-        border: 1px solid #d8dadd;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
-      }
-      .email-header {
-        padding: 28px 32px 12px;
-        border-bottom: 1px solid #eceef0;
-      }
-      .logo-wrap {
-        margin-bottom: 16px;
-      }
-      .logo {
-        display: block;
-        max-width: 180px;
-        max-height: 72px;
-        width: auto;
-        height: auto;
-      }
-      .eyebrow {
-        margin: 0 0 8px;
-        font-size: 13px;
-        color: #6d7175;
-      }
-      .subject {
-        margin: 0;
-        font-size: 30px;
-        line-height: 1.2;
-        font-weight: 700;
-        color: #111827;
-      }
-      .email-content {
-        padding: 32px;
-        font-size: 16px;
-        line-height: 1.7;
-        color: #303030;
-      }
-      .email-content p:first-child {
-        margin-top: 0;
-      }
-      .email-content p:last-child {
-        margin-bottom: 0;
-      }
-      .email-footer {
-        padding: 18px 32px 24px;
-        border-top: 1px solid #eceef0;
-        font-size: 12px;
-        color: #6d7175;
-      }
-      a {
-        color: #0a61c7;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="email-shell">
-      <div class="email-header">
-        ${logoUrl ? `<div class="logo-wrap"><img class="logo" src="${logoUrl}" alt="Store logo" /></div>` : ""}
-        <p class="eyebrow">Email Preview</p>
-        <h1 class="subject">${resolvedSubject}</h1>
-      </div>
-      <div class="email-content">
-        ${resolvedHtml}
-      </div>
-      <div class="email-footer">
-        Preview data uses sample values for company, customer, and shop fields.
-      </div>
-    </div>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${resolvedSubject}</title>
+
+<style>
+  body {
+    margin: 0;
+    padding: 24px;
+    background: #f3f4f6;
+    font-family: Arial, sans-serif;
+  }
+
+  /* Email wrapper */
+  .email-wrapper {
+    width: 100%;
+    table-layout: fixed;
+    background: #f3f4f6;
+    padding: 24px 0;
+  }
+
+  .email-container {
+    max-width: 720px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+  }
+
+  .email-header {
+    padding: 24px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .email-content {
+    padding: 24px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #303030;
+    word-break: break-word;
+  }
+
+  .email-footer {
+    padding: 16px 24px;
+    font-size: 12px;
+    color: #6b7280;
+    border-top: 1px solid #e5e7eb;
+  }
+
+  /* 🔥 IMPORTANT FIXES */
+  .email-content table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .email-content img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .email-content a {
+    color: #0a61c7;
+    text-decoration: none;
+  }
+
+  .btn {
+    display: inline-block;
+    padding: 12px 20px;
+    background: #0a61c7;
+    color: #ffffff !important;
+    text-decoration: none;
+    border-radius: 6px;
+    font-weight: 600;
+  }
+</style>
+</head>
+
+<body>
+  <table class="email-wrapper" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center">
+
+        <table class="email-container" cellpadding="0" cellspacing="0">
+          
+          <!-- HEADER -->
+          <tr>
+            <td class="email-header">
+              ${
+                logoUrl
+                  ? `<img src="${logoUrl}" style="max-height:60px; margin-bottom:12px;" />`
+                  : ""
+              }
+              <h2 style="margin:0; font-size:20px;">${resolvedSubject}</h2>
+            </td>
+          </tr>
+
+          <!-- CONTENT -->
+          <tr>
+            <td class="email-content">
+              ${resolvedHtml}
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td class="email-footer">
+              Preview using sample data
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</body>
 </html>`;
 }
+
+const cleanHtml = (html: string) => {
+  return html
+    .replace(/<div>/g, "<p>")
+    .replace(/<\/div>/g, "</p>")
+    .replace(/<br>/g, "<br/>")
+    .trim();
+};
+
+const saveCurrentTemplate = () => {
+  if (!selectedTemplate || !editorRef.current) return;
+
+  let rawHtml = editorRef.current.innerHTML;
+
+  // 🔥 decode before saving
+  const txt = document.createElement("textarea");
+  txt.innerHTML = rawHtml;
+  const decodedHtml = txt.value;
+
+  saveFetcher.submit(
+    {
+      intent: "saveTemplate",
+      templateId: selectedTemplate.id,
+      subject: templateValues[selectedTemplate.id].subject,
+      html: decodedHtml,
+      enabled: String(templateValues[selectedTemplate.id].enabled),
+    },
+    { method: "post" },
+  );
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -781,19 +850,21 @@ export default function NotificationForm() {
     editorRef.current.focus();
   };
 
-  const saveCurrentTemplate = () => {
-    if (!selectedTemplate || !editorRef.current) return;
-    saveFetcher.submit(
-      {
-        intent: "saveTemplate",
-        templateId: selectedTemplate.id,
-        subject: templateValues[selectedTemplate.id].subject,
-        html: editorRef.current.innerHTML,
-        enabled: String(templateValues[selectedTemplate.id].enabled),
-      },
-      { method: "post" },
-    );
-  };
+
+
+  // const saveCurrentTemplate = () => {
+  //   if (!selectedTemplate || !editorRef.current) return;
+  //   saveFetcher.submit(
+  //     {
+  //       intent: "saveTemplate",
+  //       templateId: selectedTemplate.id,
+  //       subject: templateValues[selectedTemplate.id].subject,
+  //       html: editorRef.current.innerHTML,
+  //       enabled: String(templateValues[selectedTemplate.id].enabled),
+  //     },
+  //     { method: "post" },
+  //   );
+  // };
 
   const customerTemplates = TEMPLATE_ITEMS.filter((item) => item.audience === "customer");
   const adminTemplates = TEMPLATE_ITEMS.filter((item) => item.audience === "admin");
