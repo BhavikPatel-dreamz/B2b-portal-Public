@@ -362,7 +362,7 @@ model EmailTemplates {
   customerRegistrationApproved          Boolean?  @default(false)
   customerRegistrationApprovedSubject   String?
   customerRegistrationApprovedTemplate  String?
-  customerRegistrationRejectd           Boolean?  @default(false)
+  customerRegistrationRejected          Boolean?  @default(false)
   customerRegistrationRejectedSubject   String?
   customerRegistrationRejectedTemplate  String?
   adminRequest                          Boolean?  @default(false)

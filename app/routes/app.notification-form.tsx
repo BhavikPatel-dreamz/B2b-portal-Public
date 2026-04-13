@@ -467,7 +467,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "");
-  console.log(intent,"intent111111");
   if (
     ![
       "saveTemplate",
