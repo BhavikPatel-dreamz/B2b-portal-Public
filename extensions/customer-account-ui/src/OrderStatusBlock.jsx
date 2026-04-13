@@ -217,10 +217,7 @@ function Extension() {
   // HANDLE CHANGE
   // =========================
   const handleChange = (key, value) => {
-    const finalValue =
-      value?.target?.checked !== undefined
-        ? value.target.checked
-        : (value?.target?.value ?? value?.value ?? value ?? "");
+    const finalValue = getInputValue(value);
 
     setFormData((prev) => {
       const updated = { ...prev, [key]: finalValue };
@@ -249,6 +246,11 @@ function Extension() {
     });
   };
 
+  const getInputValue = (value) =>
+    value?.target?.checked !== undefined
+      ? value.target.checked
+      : (value?.target?.value ?? value?.value ?? value ?? "");
+
   const findPairedKey = (sourceKey, findWord, replaceWord) => {
     const variants = [
       sourceKey.replace(new RegExp(findWord, "i"), replaceWord),
@@ -264,12 +266,44 @@ function Extension() {
     return variants.find((v) => v in formData) ?? null;
   };
 
+  const clearPairedZipField = (sourceKey) => {
+    const zipKey =
+      findPairedKey(sourceKey, "country", "zip") ||
+      findPairedKey(sourceKey, "state", "zip") ||
+      findPairedKey(sourceKey, "province", "zip") ||
+      findPairedKey(sourceKey, "country", "postal") ||
+      findPairedKey(sourceKey, "state", "postal") ||
+      findPairedKey(sourceKey, "province", "postal");
+
+    if (zipKey) {
+      handleChange(zipKey, "");
+    }
+  };
+
   const getCountryOptions = () =>
     countriesData.map((c) => ({ value: c.value, label: c.label }));
 
   const getProvinceOptions = (countryCode) => {
-    const found = countriesData.find((c) => c.value === countryCode);
+    const normalizedCountry = normalizeCountryCode(countryCode);
+    const found = countriesData.find(
+      (c) =>
+        normalizeCountryCode(c.value) === normalizedCountry ||
+        normalizeCountryCode(c.label) === normalizedCountry,
+    );
     return found?.provinces || [];
+  };
+
+  const resolveOptionValue = (options, rawValue) => {
+    const normalizedValue = normalizeCountryCode(rawValue);
+    if (!normalizedValue) return "";
+
+    const matchedOption = (options || []).find(
+      (option) =>
+        normalizeCountryCode(option?.value) === normalizedValue ||
+        normalizeCountryCode(option?.label) === normalizedValue,
+    );
+
+    return matchedOption?.value ?? String(rawValue ?? "");
   };
 
   const stripHtml = (value) =>
@@ -705,11 +739,7 @@ function Extension() {
             onChange={(val) => handleChange(field.key, val)}
           >
             {(field.options || []).map((opt) => (
-              <s-option
-                key={opt.value}
-                value={opt.value}
-                defaultSelected={formData[field.key] === opt.value}
-              >
+              <s-option key={opt.value} value={opt.value}>
                 {opt.label}
               </s-option>
             ))}
@@ -738,24 +768,33 @@ function Extension() {
         const countryOptions = field.options?.length
           ? field.options
           : getCountryOptions();
-        const selectedCountry = formData[field.key] ?? "IN";
+        const selectedCountry =
+          resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
+          "IN";
         return (
           <s-select
             label={field.label}
             value={selectedCountry}
             onChange={(val) => {
-              const previousCountry = formData[field.key] ?? "IN";
-              handleChange(field.key, val);
+              const nextCountry =
+                resolveOptionValue(countryOptions, getInputValue(val)) ||
+                String(getInputValue(val) ?? "");
+              const previousCountry =
+                resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
+                "IN";
+
+              handleChange(field.key, nextCountry);
               const stateKey = findPairedKey(field.key, "country", "state");
               if (stateKey) {
-                const firstState = val
-                  ? (getProvinceOptions(val)?.[0]?.value ?? "")
+                const firstState = nextCountry
+                  ? (getProvinceOptions(nextCountry)?.[0]?.value ?? "")
                   : "";
                 handleChange(stateKey, firstState);
               }
               const phoneKey = findPairedKey(field.key, "country", "phone");
               if (phoneKey) {
-                const { dialCode: newDialCode } = getPhoneMetaForCountry(val);
+                const { dialCode: newDialCode } =
+                  getPhoneMetaForCountry(nextCountry);
                 const currentPhone = String(formData[phoneKey] ?? "").trim();
 
                 // Keep user-typed digits, replace only the dial code prefix
@@ -765,15 +804,14 @@ function Extension() {
                   digits ? `${newDialCode}${digits}` : newDialCode,
                 );
               }
+              if (previousCountry !== nextCountry) {
+                clearPairedZipField(field.key);
+              }
             }}
           >
             <s-option value="">Select a country</s-option>
             {countryOptions.map((opt) => (
-              <s-option
-                key={opt.value}
-                value={opt.value}
-                defaultSelected={selectedCountry === opt.value}
-              >
+              <s-option key={opt.value} value={opt.value}>
                 {opt.label}
               </s-option>
             ))}
@@ -783,33 +821,43 @@ function Extension() {
 
       case "state": {
         const countryKey = findPairedKey(field.key, "state", "country");
+        const countryOptions = getCountryOptions();
         const selectedCountry = countryKey
-          ? (formData[countryKey] ?? "IN")
+          ? (resolveOptionValue(countryOptions, formData[countryKey] ?? "IN") ||
+            "IN")
           : "IN";
         const stateOptions = field.options?.length
           ? field.options
           : getProvinceOptions(selectedCountry);
+        const currentState = String(formData[field.key] ?? "");
         const selectedState =
-          formData[field.key] ?? stateOptions[0]?.value ?? "";
+          resolveOptionValue(stateOptions, currentState) ||
+          (!currentState ? (stateOptions[0]?.value ?? "") : "");
         return (
           <s-select
             label={field.label}
             value={selectedState}
-            onChange={(val) => handleChange(field.key, val)}
+            onChange={(val) => {
+              const nextState =
+                resolveOptionValue(stateOptions, getInputValue(val)) ||
+                String(getInputValue(val) ?? "");
+              const previousState = selectedState;
+
+              handleChange(field.key, nextState);
+              if (previousState !== nextState) {
+                clearPairedZipField(field.key);
+              }
+            }}
           >
             <s-option value="">Select a state</s-option>
             {stateOptions.length > 0 ? (
               stateOptions.map((opt) => (
-                <s-option
-                  key={opt.value}
-                  value={opt.value}
-                  defaultSelected={selectedState === opt.value}
-                >
+                <s-option key={opt.value} value={opt.value}>
                   {opt.label}
                 </s-option>
               ))
             ) : (
-              <s-option value="" defaultSelected>
+              <s-option value="">
                 — No states available —
               </s-option>
             )}
@@ -1088,7 +1136,15 @@ function Extension() {
 
       {/* ── Submit button ── */}
 
-      {fields.length > 0 ? (
+      {/* ── Submit button (only shown when fields exist) ── */}
+      {accountCheckComplete && fields.length === 0 ? (
+        <s-banner tone="warning">
+          <s-text>
+            Registration is currently unavailable. No form fields have been
+            configured. Please contact the store administrator.
+          </s-text>
+        </s-banner>
+      ) : fields.length > 0 ? (
         <s-box>
           <s-stack direction="inline" gap="base" blockAlignment="center">
             <s-button
@@ -1106,14 +1162,7 @@ function Extension() {
             )}
           </s-stack>
         </s-box>
-      ) : (
-        <s-banner tone="warning">
-          <s-text>
-            Registration is currently unavailable. No form fields have been
-            configured. Please contact the store administrator.
-          </s-text>
-        </s-banner>
-      )}
+      ) : null}
     </s-stack>
   );
 }

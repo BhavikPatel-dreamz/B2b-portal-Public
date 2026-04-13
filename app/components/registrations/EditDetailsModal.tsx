@@ -208,6 +208,37 @@ function getFieldGridSpan(field: FormField) {
   return undefined;
 }
 
+function isCountrySelectField(field: FormField) {
+  return field.type === "select" && /country/i.test(field.key);
+}
+
+function isStateSelectField(field: FormField) {
+  return field.type === "select" && /(state|province)/i.test(field.key);
+}
+
+function getZipKeysForSection(
+  section: string,
+  useSameAddress: boolean,
+) {
+  const zipKeys = new Set<string>();
+
+  if (section === "shipping") {
+    zipKeys.add("shipZip");
+    zipKeys.add("shZip");
+    if (useSameAddress) {
+      zipKeys.add("billZip");
+      zipKeys.add("biZip");
+    }
+  }
+
+  if (section === "billing") {
+    zipKeys.add("billZip");
+    zipKeys.add("biZip");
+  }
+
+  return Array.from(zipKeys);
+}
+
 function sortSectionFields(section: string, fields: FormField[]) {
   const preferredOrder =
     section === "shipping" || section === "billing"
@@ -744,7 +775,23 @@ export default function EditDetailsModal({
                             }));
                           }}
                           onChange={(val) =>
-                            setEditForm((f) => ({ ...f, [field.key]: val }))
+                            setEditForm((f) => {
+                              const updated = { ...f, [field.key]: val };
+
+                              if (
+                                isCountrySelectField(field) ||
+                                isStateSelectField(field)
+                              ) {
+                                for (const zipKey of getZipKeysForSection(
+                                  field.section,
+                                  Boolean(f.useSameAddress),
+                                )) {
+                                  updated[zipKey] = "";
+                                }
+                              }
+
+                              return updated;
+                            })
                           }
                         />
                       </div>

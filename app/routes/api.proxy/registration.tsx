@@ -199,16 +199,36 @@ function getNestedValue(payload: unknown, path: string[]) {
   }, payload);
 }
 
+function toArray<T>(value: T | T[] | null | undefined): T[] {
+  if (Array.isArray(value)) return value;
+  if (value == null) return [];
+  return [value];
+}
+
 function collectUserErrors(payload: unknown, path: string[]) {
   const target = getNestedValue(payload, path) as
-    | { userErrors?: GraphQLUserError[] }
+    | { userErrors?: GraphQLUserError | GraphQLUserError[] | string | null }
     | undefined;
-  const userErrors = target?.userErrors || [];
-  return userErrors.map((error) => {
-    const fieldPath =
-      error.field && error.field.length > 0 ? error.field.join(".") : "general";
-    return `${fieldPath}: ${error.message || "Unknown error"}`;
-  });
+  const userErrors = toArray(target?.userErrors);
+
+  return userErrors
+    .map((error) => {
+      if (typeof error === "string") {
+        return error.trim();
+      }
+
+      if (!error || typeof error !== "object") {
+        return "";
+      }
+
+      const fieldPath =
+        Array.isArray(error.field) && error.field.length > 0
+          ? error.field.join(".")
+          : "general";
+
+      return `${fieldPath}: ${error.message || "Unknown error"}`;
+    })
+    .filter((message): message is string => Boolean(message));
 }
 
 function collectTopLevelGraphQLErrors(payload: unknown) {
@@ -216,9 +236,16 @@ function collectTopLevelGraphQLErrors(payload: unknown) {
     return [];
   }
 
-  const errors = (payload as { errors?: GraphQLError[] }).errors || [];
+  const errors = toArray(
+    (payload as { errors?: GraphQLError | GraphQLError[] | string | null }).errors,
+  );
+
   return errors
-    .map((error) => error?.message?.trim())
+    .map((error) => {
+      if (typeof error === "string") return error.trim();
+      if (!error || typeof error !== "object") return "";
+      return error?.message?.trim() || "";
+    })
     .filter((message): message is string => Boolean(message));
 }
 
