@@ -50,9 +50,10 @@ export interface RegistrationSubmission {
   creditLimit: string;
   email: string;
   phone: string;
-  shipping: {
-    phone: string;
-  };
+  shipping?: {
+    phone?: string | null;
+    Phone?: string | null;
+  } | null;
   businessType: string;
   website: string | null;
   additionalInfo: string | null;
@@ -5685,7 +5686,15 @@ export function RegistrationApprovalsPanel({
                   {filteredSubmissions.map((submission) => {
                     const contactName =
                       `${submission.firstName || ""} ${submission.lastName || ""}`.trim() || "-";
-                    const phone = submission.phone || submission.shipping?.phone || "-";
+                    const phone =
+                      [
+                        submission.phone,
+                        submission.shipping?.Phone,
+                        submission.shipping?.phone,
+                      ].find(
+                        (value): value is string =>
+                          typeof value === "string" && value.trim().length > 0,
+                      ) || "-";
                     const isRowChecking =
                       isCheckingCustomer && selected?.id === submission.id;
                     const isRowRejecting =

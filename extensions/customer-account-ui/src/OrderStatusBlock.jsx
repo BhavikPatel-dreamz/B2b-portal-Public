@@ -359,6 +359,9 @@ function Extension() {
     return phone.replace(/^\+\d{1,4}\s*/, "");
   };
 
+  const sanitizePhoneDigits = (value) =>
+    String(value || "").replace(/\D/g, "");
+
   const getAutofillValue = (field) => {
     if (!customerDetails) return "";
     const key = normalizeFieldText(field?.key);
@@ -764,13 +767,67 @@ function Extension() {
           />
         );
 
+      // case "country": {
+      //   const countryOptions = field.options?.length
+      //     ? field.options
+      //     : getCountryOptions();
+      //   const selectedCountry =
+      //     resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
+      //     "IN";
+      //   return (
+      //     <s-select
+      //       label={field.label}
+      //       value={selectedCountry}
+      //       onChange={(val) => {
+      //         const nextCountry =
+      //           resolveOptionValue(countryOptions, getInputValue(val)) ||
+      //           String(getInputValue(val) ?? "");
+      //         const previousCountry =
+      //           resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
+      //           "IN";
+
+      //         handleChange(field.key, nextCountry);
+      //         const stateKey = findPairedKey(field.key, "country", "state");
+      //         if (stateKey) {
+      //           const firstState = nextCountry
+      //             ? (getProvinceOptions(nextCountry)?.[0]?.value ?? "")
+      //             : "";
+      //           handleChange(stateKey, firstState);
+      //         }
+      //         const phoneKey = findPairedKey(field.key, "country", "phone");
+      //         if (phoneKey) {
+      //           const { dialCode: newDialCode } =
+      //             getPhoneMetaForCountry(nextCountry);
+      //           const currentPhone = String(formData[phoneKey] ?? "").trim();
+
+      //           // Keep user-typed digits, replace only the dial code prefix
+      //           const digits = currentPhone.replace(/^\+\d{1,4}/, "").trim();
+      //           handleChange(
+      //             phoneKey,
+      //             digits ? `${newDialCode}${digits}` : newDialCode,
+      //           );
+      //         }
+      //         if (previousCountry !== nextCountry) {
+      //           clearPairedZipField(field.key);
+      //         }
+      //       }}
+      //     >
+      //       <s-option value="">Select a country</s-option>
+      //       {countryOptions.map((opt) => (
+      //         <s-option key={opt.value} value={opt.value}>
+      //           {opt.label}
+      //         </s-option>
+      //       ))}
+      //     </s-select>
+      //   );
+      // }
       case "country": {
         const countryOptions = field.options?.length
           ? field.options
           : getCountryOptions();
         const selectedCountry =
-          resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
-          "IN";
+          resolveOptionValue(countryOptions, formData[field.key] ?? "IN") || "IN";
+
         return (
           <s-select
             label={field.label}
@@ -783,30 +840,72 @@ function Extension() {
                 resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
                 "IN";
 
-              handleChange(field.key, nextCountry);
-              const stateKey = findPairedKey(field.key, "country", "state");
-              if (stateKey) {
-                const firstState = nextCountry
-                  ? (getProvinceOptions(nextCountry)?.[0]?.value ?? "")
-                  : "";
-                handleChange(stateKey, firstState);
-              }
-              const phoneKey = findPairedKey(field.key, "country", "phone");
-              if (phoneKey) {
-                const { dialCode: newDialCode } =
-                  getPhoneMetaForCountry(nextCountry);
-                const currentPhone = String(formData[phoneKey] ?? "").trim();
+              // ✅ Single batched state update — prevents race condition / glitch
+              setFormData((prev) => {
+                const updated = { ...prev, [field.key]: nextCountry };
 
-                // Keep user-typed digits, replace only the dial code prefix
-                const digits = currentPhone.replace(/^\+\d{1,4}/, "").trim();
-                handleChange(
-                  phoneKey,
-                  digits ? `${newDialCode}${digits}` : newDialCode,
-                );
-              }
-              if (previousCountry !== nextCountry) {
-                clearPairedZipField(field.key);
-              }
+                // Reset paired state/province field
+                const stateKey =
+                  findPairedKey(field.key, "country", "state") ||
+                  findPairedKey(field.key, "country", "province");
+                if (stateKey) {
+                  const provinces = getProvinceOptions(nextCountry);
+                  updated[stateKey] = provinces?.[0]?.value ?? "";
+                }
+
+                // Reset paired phone dial code, preserving user-typed digits
+                const phoneKey = findPairedKey(field.key, "country", "phone");
+                if (phoneKey) {
+                  const { dialCode: newDialCode } =
+                    getPhoneMetaForCountry(nextCountry);
+                  const currentPhone = String(prev[phoneKey] ?? "").trim();
+                  const digits = currentPhone.replace(/^\+\d{1,4}/, "").trim();
+                  updated[phoneKey] = digits
+                    ? `${newDialCode} ${digits}`
+                    : newDialCode;
+                }
+
+                // Clear zip/postal if country actually changed
+                if (previousCountry !== nextCountry) {
+                  const zipKey =
+                    findPairedKey(field.key, "country", "zip") ||
+                    findPairedKey(field.key, "country", "postal");
+                  if (zipKey) updated[zipKey] = "";
+                }
+
+                // If billing same as shipping — mirror all bill* fields from ship*
+                if (prev["billSameAsShip"] === true) {
+                  Object.keys(updated).forEach((k) => {
+                    if (k.startsWith("ship")) {
+                      const billKey = "bill" + k.slice(4);
+                      if (billKey in updated) updated[billKey] = updated[k];
+                    }
+                  });
+                }
+
+                return updated;
+              });
+
+              // ✅ Clear field errors for country + its dependent fields in one go
+              setFieldErrors((prev) => {
+                const next = { ...prev };
+                delete next[field.key];
+
+                const stateKey =
+                  findPairedKey(field.key, "country", "state") ||
+                  findPairedKey(field.key, "country", "province");
+                if (stateKey) delete next[stateKey];
+
+                const zipKey =
+                  findPairedKey(field.key, "country", "zip") ||
+                  findPairedKey(field.key, "country", "postal");
+                if (zipKey) delete next[zipKey];
+
+                const phoneKey = findPairedKey(field.key, "country", "phone");
+                if (phoneKey) delete next[phoneKey];
+
+                return next;
+              });
             }}
           >
             <s-option value="">Select a country</s-option>
@@ -830,9 +929,8 @@ function Extension() {
           ? field.options
           : getProvinceOptions(selectedCountry);
         const currentState = String(formData[field.key] ?? "");
-        const selectedState =
-          resolveOptionValue(stateOptions, currentState) ||
-          (!currentState ? (stateOptions[0]?.value ?? "") : "");
+        const resolvedState = resolveOptionValue(stateOptions, currentState);
+        const selectedState = resolvedState || (currentState === "" ? (stateOptions[0]?.value ?? "") : "");
         return (
           <s-select
             label={field.label}
@@ -891,11 +989,12 @@ function Extension() {
                   label="Phone number"
                   value={currentDigits}
                   type="tel"
+                  inputMode="numeric"
                   placeholder="Enter phone number"
                   onChange={(val) => {
                     const typedValue =
                       val?.target?.value ?? val?.value ?? val ?? "";
-                    const digits = String(typedValue).trim();
+                    const digits = sanitizePhoneDigits(typedValue);
                     handleChange(
                       field.key,
                       digits ? `${dialCode} ${digits}` : dialCode,

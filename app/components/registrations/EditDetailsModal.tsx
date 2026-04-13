@@ -208,6 +208,10 @@ function getFieldGridSpan(field: FormField) {
   return undefined;
 }
 
+function sanitizePhoneInput(value: string) {
+  return String(value || "").replace(/\D/g, "");
+}
+
 function isCountrySelectField(field: FormField) {
   return field.type === "select" && /country/i.test(field.key);
 }
@@ -395,7 +399,10 @@ function DynamicField({
             <input
               placeholder={placeholder}
               value={value || ""}
-              onChange={(e) => onChange(e.target.value)}
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              onChange={(e) => onChange(sanitizePhoneInput(e.target.value))}
               disabled={isLocked || disabled}
               style={{
                 ...inputStyle,

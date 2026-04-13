@@ -133,6 +133,58 @@ function parseFormFields(form: FormFields) {
   return { shipping, billing, customFields };
 }
 
+function normalizePhoneForComparison(
+  phone?: string | null,
+  countryCode?: string | null,
+) {
+  if (!phone) return "";
+
+  const formatted = formatPhone(phone, countryCode || undefined) || String(phone);
+  return formatted.replace(/\D/g, "");
+}
+
+function getAddressFieldValue(
+  address: unknown,
+  ...keys: string[]
+) {
+  if (!address || typeof address !== "object") return "";
+
+  for (const key of keys) {
+    const value = (address as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function getSubmissionPhoneCandidates(submission: {
+  shipping?: unknown;
+  billing?: unknown;
+  customFields?: unknown;
+}) {
+  const shippingPhone = getAddressFieldValue(submission.shipping, "Phone", "phone");
+  const shippingCountry = getAddressFieldValue(
+    submission.shipping,
+    "Country",
+    "country",
+  );
+  const billingPhone = getAddressFieldValue(submission.billing, "Phone", "phone");
+  const billingCountry = getAddressFieldValue(
+    submission.billing,
+    "Country",
+    "country",
+  );
+  const customPhone = getAddressFieldValue(submission.customFields, "phone");
+
+  return [
+    normalizePhoneForComparison(customPhone, shippingCountry || billingCountry),
+    normalizePhoneForComparison(shippingPhone, shippingCountry),
+    normalizePhoneForComparison(billingPhone, billingCountry),
+  ].filter(Boolean);
+}
+
 function normalizeFieldKey(key: string) {
   return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
@@ -1018,6 +1070,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       allFields.phone || shipping.Phone || billing.Phone,
       shipping.Country || billing.Country,
     );
+    const normalizedPhone = normalizePhoneForComparison(
+      phone,
+      shipping.Country || billing.Country,
+    );
+
+    if (phone) {
+      customFields.phone = phone;
+    }
+
+    if (normalizedPhone) {
+      const existingPhoneRegistrations = await prisma.registrationSubmission.findMany({
+        where: { shopId: store.id },
+        select: {
+          id: true,
+          shipping: true,
+          billing: true,
+          customFields: true,
+        },
+      });
+
+      const hasDuplicatePhone = existingPhoneRegistrations.some((submission) =>
+        getSubmissionPhoneCandidates(submission).includes(normalizedPhone),
+      );
+
+      if (hasDuplicatePhone) {
+        return json(
+          { success: false, error: "Phone number already registered." },
+          { status: 409 },
+        );
+      }
+    }
+
     const regitrationData = await prisma.registrationSubmission.findFirst({
       where: { shopId: store.id, email },
     });
