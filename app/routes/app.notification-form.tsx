@@ -219,7 +219,7 @@ function getTemplateDbMapping(templateId: TemplateId) {
       } as const;
     case "customer-application-rejected":
       return {
-        enabledField: "customerRegistrationRejectd",
+        enabledField: "customerRegistrationRejected",
         subjectField: "customerRegistrationRejectedSubject",
         templateField: "customerRegistrationRejectedTemplate",
       } as const;
@@ -379,28 +379,6 @@ const cleanHtml = (html: string) => {
     .trim();
 };
 
-const saveCurrentTemplate = () => {
-  if (!selectedTemplate || !editorRef.current) return;
-
-  let rawHtml = editorRef.current.innerHTML;
-
-  // 🔥 decode before saving
-  const txt = document.createElement("textarea");
-  txt.innerHTML = rawHtml;
-  const decodedHtml = txt.value;
-
-  saveFetcher.submit(
-    {
-      intent: "saveTemplate",
-      templateId: selectedTemplate.id,
-      subject: templateValues[selectedTemplate.id].subject,
-      html: decodedHtml,
-      enabled: String(templateValues[selectedTemplate.id].enabled),
-    },
-    { method: "post" },
-  );
-};
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
@@ -444,7 +422,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             defaultValues["customer-application-approved"].html,
         },
         "customer-application-rejected": {
-          enabled: record.customerRegistrationRejectd ?? false,
+          enabled: record.customerRegistrationRejected ?? false,
           subject:
             record.customerRegistrationRejectedSubject ||
             defaultValues["customer-application-rejected"].subject,
@@ -489,7 +467,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "");
-
+  console.log(intent,"intent111111");
   if (
     ![
       "saveTemplate",
@@ -573,7 +551,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const toggleData = {
       customerRegistration: enabled,
       customerRegistrationApproved: enabled,
-      customerRegistrationRejectd: enabled,
+      customerRegistrationRejected: enabled,
       customerRegistrationSubject:
         existing?.customerRegistrationSubject ||
         defaults["customer-application-received"].subject,
@@ -633,7 +611,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const toggleData = {
       customerRegistration: existing?.customerRegistration ?? true,
       customerRegistrationApproved: existing?.customerRegistrationApproved ?? true,
-      customerRegistrationRejectd: existing?.customerRegistrationRejectd ?? true,
+      customerRegistrationRejected: existing?.customerRegistrationRejected ?? true,
       customerRegistrationSubject:
         existing?.customerRegistrationSubject ||
         defaults["customer-application-received"].subject,
@@ -713,6 +691,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     where: { shopId: store.id },
     orderBy: { updatedAt: "desc" },
   });
+
 
   const data = {
     [mapping.enabledField]: enabled,
@@ -852,19 +831,26 @@ export default function NotificationForm() {
 
 
 
-  // const saveCurrentTemplate = () => {
-  //   if (!selectedTemplate || !editorRef.current) return;
-  //   saveFetcher.submit(
-  //     {
-  //       intent: "saveTemplate",
-  //       templateId: selectedTemplate.id,
-  //       subject: templateValues[selectedTemplate.id].subject,
-  //       html: editorRef.current.innerHTML,
-  //       enabled: String(templateValues[selectedTemplate.id].enabled),
-  //     },
-  //     { method: "post" },
-  //   );
-  // };
+const saveCurrentTemplate = () => {
+  if (!selectedTemplate || !editorRef.current) return;
+
+  console.log("saving template...", {
+    templateId: selectedTemplate.id,
+    subject: templateValues[selectedTemplate.id].subject,
+    html: editorRef.current.innerHTML,
+  }); // ← temporary debug log
+
+  saveFetcher.submit(
+    {
+      intent: "saveTemplate",
+      templateId: selectedTemplate.id,
+      subject: templateValues[selectedTemplate.id].subject,
+      html: editorRef.current.innerHTML,
+      enabled: String(templateValues[selectedTemplate.id].enabled),
+    },
+    { method: "post" },
+  );
+};
 
   const customerTemplates = TEMPLATE_ITEMS.filter((item) => item.audience === "customer");
   const adminTemplates = TEMPLATE_ITEMS.filter((item) => item.audience === "admin");
