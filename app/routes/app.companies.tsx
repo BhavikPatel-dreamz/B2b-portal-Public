@@ -9,8 +9,9 @@ import {
   Link,
   useSearchParams,
   useNavigation,
+  useRevalidator,
 } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -570,10 +571,28 @@ export default function CompaniesPage() {
     sortOrder,
   } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const revalidator = useRevalidator();
+  const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
 
   // Controlled search input
   const [query, setQuery] = useState(searchQuery);
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
+
+  // Auto-refresh effect (30 seconds interval)
+  useEffect(() => {
+    const AUTO_REFRESH_INTERVAL = 30 * 1000; // 30 seconds
+
+    intervalIdRef.current = setInterval(() => {
+      console.log("🔄 Auto-refreshing companies list");
+      revalidator.revalidate();
+    }, AUTO_REFRESH_INTERVAL);
+
+    return () => {
+      if (intervalIdRef.current) {
+        clearInterval(intervalIdRef.current);
+      }
+    };
+  }, [revalidator]);
 
   const exportCompaniesCsv = () => {
     downloadCsv("companies.csv", [

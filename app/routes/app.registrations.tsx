@@ -3355,11 +3355,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  return date.toLocaleString();
-};
+
 // Pipeline steps in order
 type PipelineStep =
   | "idle"
@@ -5400,6 +5396,23 @@ export function RegistrationApprovalsPanel({
   const rejectFetcher = useFetcher<ActionJson>();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
+  const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Auto-refresh effect (30 seconds interval) for pending and rejected tabs
+  useEffect(() => {
+    const AUTO_REFRESH_INTERVAL = 30 * 1000; // 30 seconds
+
+    intervalIdRef.current = setInterval(() => {
+      console.log("🔄 Auto-refreshing registrations list");
+      revalidator.revalidate();
+    }, AUTO_REFRESH_INTERVAL);
+
+    return () => {
+      if (intervalIdRef.current) {
+        clearInterval(intervalIdRef.current);
+      }
+    };
+  }, [revalidator]);
 
   const isFlowLoading = flowFetcher.state !== "idle";
   const isCheckingCustomer =

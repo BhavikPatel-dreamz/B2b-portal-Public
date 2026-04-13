@@ -1259,6 +1259,16 @@ function hasParagraphContent(value: string) {
   return getPlainTextFromRichText(value).length > 0;
 }
 
+function generateKeyFromLabel(label: string): string {
+  return label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s_]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function isValidLinkUrl(value: string) {
   if (!value) return false;
   if (value.startsWith("/") || value.startsWith("#")) return true;
@@ -2165,6 +2175,10 @@ export default function FormEditor() {
             ? normalizeParagraphHtml(fieldEditorDraft.content)
             : fieldEditorDraft.content.trim();
         const nextLinkUrl = fieldEditorDraft.linkUrl.trim();
+        
+        // Auto-generate key from label for custom fields
+        const isCustomField = editingField.paletteKey.startsWith("c_") || editingField.category === "custom";
+        const nextKey = isCustomField ? generateKeyFromLabel(nextLabel) : editingField.key;
 
         nextConfig = {
           ...nextConfig,
@@ -2173,6 +2187,7 @@ export default function FormEditor() {
               ? {
                   ...field,
                   label: nextLabel,
+                  key: nextKey,
                   description: fieldEditorDraft.description.trim() || undefined,
                   defaultValue: fieldEditorDraft.defaultValue,
                   validationMessage: fieldEditorDraft.validationMessage.trim() || undefined,
@@ -2314,6 +2329,9 @@ export default function FormEditor() {
           ? {
               ...field,
               label: fieldEditorDraft.label,
+              key: (field.paletteKey.startsWith("c_") || field.category === "custom") 
+                ? generateKeyFromLabel(fieldEditorDraft.label)
+                : field.key,
               description: fieldEditorDraft.description,
               defaultValue: fieldEditorDraft.defaultValue,
               validationMessage: fieldEditorDraft.validationMessage,
@@ -2460,7 +2478,9 @@ export default function FormEditor() {
           category: activeCategory,
           type: paletteItem.type,
           label: paletteItem.label,
-          key: `${paletteItem.key}_${uid()}`,
+          key: activeCategory === "custom"
+  ? `${generateKeyFromLabel(paletteItem.label)}_${uid()}`
+  : `${paletteItem.key}_${uid()}`,
           section: inheritedSection,
           required: paletteItem.required,
           validationMessage: paletteItem.type === "phone" ? "Please provide a valid phone number" : undefined,
@@ -2603,6 +2623,9 @@ export default function FormEditor() {
           ? {
               ...field,
               label: nextLabel,
+              key: (activeField.paletteKey.startsWith("c_") || activeField.category === "custom")
+            ? generateKeyFromLabel(nextLabel)  // ← derive key from label
+            : field.key,        
               description: fieldEditorDraft.description.trim() || undefined,
               defaultValue: fieldEditorDraft.defaultValue,
               validationMessage: fieldEditorDraft.validationMessage.trim() || undefined,
