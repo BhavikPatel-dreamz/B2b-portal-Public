@@ -1735,12 +1735,12 @@ function CanvasField({
         </div>
 
         {/* Delete button area shows on hover for all fields */}
-        {showDeleteIcon ? (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
+    {showDeleteIcon && canDelete ? (
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      onRemove();
+    }}
             style={{
               border: "none", background: "none", cursor: "pointer",
               color: "#c91d2e", padding: "8px 2px", flexShrink: 0,
@@ -1808,7 +1808,7 @@ function FieldRows({
                 onDragOver={onDragOver}
                 onDrop={onDrop}
                 isDragOver={dragOverId === field.id}
-                canDelete={true}
+                canDelete={!field.required}
                 isActive={activeFieldId === field.id}
                 onActivate={() => onActivateField(field.id)}
               />
@@ -1820,7 +1820,7 @@ function FieldRows({
                   onDragOver={onDragOver}
                   onDrop={onDrop}
                   isDragOver={dragOverId === nextField.id}
-                  canDelete={true}
+                  canDelete={!nextField.required}
                   isActive={activeFieldId === nextField.id}
                   onActivate={() => onActivateField(nextField.id)}
                 />
@@ -1840,7 +1840,7 @@ function FieldRows({
             onDragOver={onDragOver}
             onDrop={onDrop}
             isDragOver={dragOverId === field.id}
-            canDelete={true}
+            canDelete={!field.required}
             isActive={activeFieldId === field.id}
             onActivate={() => onActivateField(field.id)}
           />
@@ -2045,6 +2045,8 @@ function SectionBlock({
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
+
 export default function FormEditor() {
   const {
     config: initialConfig,
@@ -2058,6 +2060,8 @@ export default function FormEditor() {
     if (!normalizedShopName) return "";
     return new URL(`/store/${normalizedShopName}/settings/custom_data`, "https://admin.shopify.com").toString();
   }, [shopName]);
+
+  
 
   const fetcher = useFetcher<{
     success: boolean;
@@ -2147,6 +2151,8 @@ export default function FormEditor() {
     | { kind: "section"; section: string }
     | null
   >(null);
+
+  
 
   const isSaving = fetcher.state !== "idle";
   const pendingSubmitRef = useRef(false);
@@ -2998,6 +3004,12 @@ export default function FormEditor() {
     selectedSectionSettings?.alignment,
     selectedSectionSettings?.width,
   ]);
+
+  const removeFieldIfAllowed = useCallback((id: string) => {
+  const field = config.fields.find((f) => f.id === id);
+  if (field?.required) return; // Block deletion of required fields
+  removeField(id);
+}, [config.fields, removeField]);
 
   // ═════════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -4459,7 +4471,7 @@ export default function FormEditor() {
                   <div style={{ background: "#fff", borderRadius: 10, padding: 0, marginBottom: 12, border: "2px solid transparent" }}>
                     <FieldRows
                       fields={noSection}
-                      onRemove={removeField}
+                      onRemove={removeFieldIfAllowed}
                       onDragStart={handleFieldDragStart}
                       onDragOver={handleFieldDragOver}
                       onDrop={handleFieldDrop}
@@ -4502,7 +4514,7 @@ export default function FormEditor() {
                     fields={sectionMap[section] || []}
                     isActive={activeSection === section}
                     onActivate={() => { setActiveSection(section); setActiveFieldId(null); }}
-                    onRemoveField={removeField}
+                    onRemoveField={removeFieldIfAllowed}
                     onRemoveSection={removeSection}
                     onDuplicateSection={duplicateSection}
                     onSectionDragStart={handleSectionDragStart}

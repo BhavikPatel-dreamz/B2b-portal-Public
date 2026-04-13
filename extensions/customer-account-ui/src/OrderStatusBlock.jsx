@@ -299,7 +299,6 @@ function Extension() {
       .toUpperCase();
 
   const getPhoneMetaForCountry = (countryValue) =>
-
     COUNTRY_PHONE_META[normalizeCountryCode(countryValue)] || {
       dialCode: "+91",
       flagEmoji: "🇮🇳",
@@ -456,7 +455,9 @@ function Extension() {
     if (field?.type === "checkbox") return value !== true;
     if (field?.type === "phone") {
       const countryKey = findPairedKey(field.key, "phone", "country");
-      const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
+      const selectedCountry = countryKey
+        ? (formData[countryKey] ?? "IN")
+        : "IN";
       const { dialCode } = getPhoneMetaForCountry(selectedCountry);
       return isOnlyDialCode(value, dialCode);
     }
@@ -759,7 +760,10 @@ function Extension() {
 
                 // Keep user-typed digits, replace only the dial code prefix
                 const digits = currentPhone.replace(/^\+\d{1,4}/, "").trim();
-                handleChange(phoneKey, digits ? `${newDialCode}${digits}` : newDialCode);
+                handleChange(
+                  phoneKey,
+                  digits ? `${newDialCode}${digits}` : newDialCode,
+                );
               }
             }}
           >
@@ -815,7 +819,9 @@ function Extension() {
 
       case "phone": {
         const countryKey = findPairedKey(field.key, "phone", "country");
-        const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
+        const selectedCountry = countryKey
+          ? (formData[countryKey] ?? "IN")
+          : "IN";
         const { dialCode, flagEmoji } = getPhoneMetaForCountry(selectedCountry);
         const currentDigits = getPhoneDigitsWithoutDialCode(
           formData[field.key],
@@ -823,13 +829,14 @@ function Extension() {
         );
 
         return (
-          <s-stack key={`phone-${selectedCountry}`} direction="block" gap="tight">
+          <s-stack
+            key={`phone-${selectedCountry}`}
+            direction="block"
+            gap="tight"
+          >
             <s-stack direction="inline" gap="small" blockAlignment="end">
               <s-box inlineSize="27%">
-                <s-text-field
-                  value={`${flagEmoji} ${dialCode}`}
-                  disabled
-                />
+                <s-text-field value={`${flagEmoji} ${dialCode}`} disabled />
               </s-box>
               <s-box inlineSize="60%">
                 <s-text-field
@@ -1080,23 +1087,33 @@ function Extension() {
       })}
 
       {/* ── Submit button ── */}
-      <s-box>
-        <s-stack direction="inline" gap="base" blockAlignment="center">
-          <s-button
-            variant="primary"
-            onClick={handleSubmit}
-            disabled={loading}
-            loading={loading}
-          >
-            {loading ? "Submitting…" : "Register"}
-          </s-button>
-          {loading && (
-            <s-text tone="subdued">
-              Please wait while we process your request…
-            </s-text>
-          )}
-        </s-stack>
-      </s-box>
+
+      {fields.length > 0 ? (
+        <s-box>
+          <s-stack direction="inline" gap="base" blockAlignment="center">
+            <s-button
+              variant="primary"
+              onClick={handleSubmit}
+              disabled={loading}
+              loading={loading}
+            >
+              {loading ? "Submitting…" : "Register"}
+            </s-button>
+            {loading && (
+              <s-text tone="subdued">
+                Please wait while we process your request…
+              </s-text>
+            )}
+          </s-stack>
+        </s-box>
+      ) : (
+        <s-banner tone="warning">
+          <s-text>
+            Registration is currently unavailable. No form fields have been
+            configured. Please contact the store administrator.
+          </s-text>
+        </s-banner>
+      )}
     </s-stack>
   );
 }
