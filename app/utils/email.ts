@@ -99,6 +99,16 @@ async function getRegistrationEmailContext(storeId: string) {
 
   return { storeData, emailTemplateConfig };
 }
+// Add this helper at the top of the file or in your utils
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
 
 export async function sendRegistrationEmailForAdmin(
   storeId: string,
@@ -107,8 +117,9 @@ export async function sendRegistrationEmailForAdmin(
   email: string,
   companyName: string,
   contactName: string,
-) : Promise<RegistrationEmailResult> {
-  const { storeData, emailTemplateConfig } = await getRegistrationEmailContext(storeId);
+): Promise<RegistrationEmailResult> {
+  const { storeData, emailTemplateConfig } =
+    await getRegistrationEmailContext(storeId);
 
   if (emailTemplateConfig && emailTemplateConfig.adminRequest === false) {
     return { success: true, skipped: true };
@@ -128,20 +139,21 @@ export async function sendRegistrationEmailForAdmin(
     "Hello {{storeOwnerName}},<br /><br />A new company has submitted a B2B registration request on {{shopName}}.";
   const rawSubject =
     emailTemplateConfig?.adminRequestSubject || fallbackSubject;
-  const rawTemplate =
-    emailTemplateConfig?.adminRequestTemplate ||
-    storeData?.companyWelcomeEmailTemplate ||
-    fallbackTemplate;
+   const rawTemplate =
+      emailTemplateConfig?.adminRequestTemplate || fallbackTemplate;
 
   if (!rawTemplate) {
     throw new Error("Registration email template not found");
   }
 
-  const processedTemplate = replaceTemplateVariables(
-    rawTemplate,
+
+const decodedTemplate = decodeHtmlEntities(rawTemplate); // ✅ add this
+const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVariables);
+
+  const processedSubject = replaceTemplateVariables(
+    rawSubject,
     templateVariables,
   );
-  const processedSubject = replaceTemplateVariables(rawSubject, templateVariables);
 
   const html = convertToHtmlEmail(
     processedTemplate,
@@ -153,7 +165,8 @@ export async function sendRegistrationEmailForAdmin(
       ctaUrl: `https://admin.shopify.com/store/${
         (storeData?.shopDomain || "store.com").split(".")[0]
       }/apps/b2b-portal-public-1/app/registrations`,
-      footerText: "This email was sent to notify you about a B2B registration request.",
+      footerText:
+        "This email was sent to notify you about a B2B registration request.",
     },
   );
 
@@ -175,9 +188,13 @@ export async function sendRegistrationEmailForCustomer(
   companyName: string,
   contactName: string,
 ): Promise<RegistrationEmailResult> {
-  const { storeData, emailTemplateConfig } = await getRegistrationEmailContext(storeId);
+  const { storeData, emailTemplateConfig } =
+    await getRegistrationEmailContext(storeId);
 
-  if (emailTemplateConfig && emailTemplateConfig.customerRegistration === false) {
+  if (
+    emailTemplateConfig &&
+    emailTemplateConfig.customerRegistration === false
+  ) {
     return { success: true, skipped: true };
   }
 
@@ -198,17 +215,34 @@ export async function sendRegistrationEmailForCustomer(
   const rawTemplate =
     emailTemplateConfig?.customerRegistrationTemplate || fallbackTemplate;
 
-  const processedTemplate = replaceTemplateVariables(rawTemplate, templateVariables);
-  const processedSubject = replaceTemplateVariables(rawSubject, templateVariables);
-  const shopDomain = storeData?.shopDomain || "store.com";
-  const storefrontUrl = shopDomain.startsWith("http") ? shopDomain : `https://${shopDomain}`;
+  // ✅ ADD THIS — decode escaped HTML entities saved by contentEditable
+  const decodedTemplate = decodeHtmlEntities(rawTemplate);
 
-  const html = convertToHtmlEmail(processedTemplate, shopDomain, processedSubject, {
-    logoUrl: storeData?.logo,
-    ctaLabel: "Visit Store",
-    ctaUrl: storefrontUrl,
-    footerText: "This email confirms we received your B2B registration request.",
-  });
+  const processedTemplate = replaceTemplateVariables(
+    decodedTemplate,
+    templateVariables,
+  );
+  const processedSubject = replaceTemplateVariables(
+    rawSubject,
+    templateVariables,
+  );
+  const shopDomain = storeData?.shopDomain || "store.com";
+  const storefrontUrl = shopDomain.startsWith("http")
+    ? shopDomain
+    : `https://${shopDomain}`;
+
+  const html = convertToHtmlEmail(
+    processedTemplate,
+    shopDomain,
+    processedSubject,
+    {
+      logoUrl: storeData?.logo,
+      ctaLabel: "Visit Store",
+      ctaUrl: storefrontUrl,
+      footerText:
+        "This email confirms we received your B2B registration request.",
+    },
+  );
 
   const text = stripHtmlTags(processedTemplate);
 
@@ -270,7 +304,8 @@ function convertToHtmlEmail(
     options?.ctaUrl ||
     `https://admin.shopify.com/store/${shopDomaindata}/apps/b2b-portal-public-1/app/registrations`;
   const footerText =
-    options?.footerText || "This email was sent to notify you about a B2B registration request.";
+    options?.footerText ||
+    "This email was sent to notify you about a B2B registration request.";
   const logoMarkup = options?.logoUrl
     ? `<div style="margin-bottom: 16px;"><img src="${options.logoUrl}" alt="Store logo" style="display: block; max-width: 180px; max-height: 72px; width: auto; height: auto; margin: 0 auto;" /></div>`
     : "";
@@ -380,26 +415,28 @@ function stripHtmlTags(content: string): string {
     .trim();
 }
 
-export async function sendCustomerRegistrationApprovalEmail(
-  {
-    storeId,
-    email,
-    storeOwnerName,
-    companyName,
-    contactName,
-    note,
-  }: {
-    storeId: string;
-    email: string;
-    storeOwnerName: string;
-    companyName: string;
-    contactName: string;
-    note?: string | null;
-  },
-) {
-  const { storeData, emailTemplateConfig } = await getRegistrationEmailContext(storeId);
+export async function sendCustomerRegistrationApprovalEmail({
+  storeId,
+  email,
+  storeOwnerName,
+  companyName,
+  contactName,
+  note,
+}: {
+  storeId: string;
+  email: string;
+  storeOwnerName: string;
+  companyName: string;
+  contactName: string;
+  note?: string | null;
+}) {
+  const { storeData, emailTemplateConfig } =
+    await getRegistrationEmailContext(storeId);
 
-  if (emailTemplateConfig && emailTemplateConfig.customerRegistrationApproved === false) {
+  if (
+    emailTemplateConfig &&
+    emailTemplateConfig.customerRegistrationApproved === false
+  ) {
     return { success: true, skipped: true } as RegistrationEmailResult;
   }
 
@@ -418,19 +455,30 @@ export async function sendCustomerRegistrationApprovalEmail(
     "Hello {{contactName}},<br /><br />Your company account for {{companyName}} has been approved. You can now begin placing orders on {{shopName}}.";
   const rawSubject =
     emailTemplateConfig?.customerRegistrationApprovedSubject || fallbackSubject;
-  const rawTemplate =
-    emailTemplateConfig?.customerRegistrationApprovedTemplate || fallbackTemplate;
-
-  const processedSubject = replaceTemplateVariables(rawSubject, templateVariables);
-  const processedTemplate = replaceTemplateVariables(rawTemplate, templateVariables);
+const rawTemplate =
+  emailTemplateConfig?.customerRegistrationApprovedTemplate || fallbackTemplate;
+const decodedTemplate = decodeHtmlEntities(rawTemplate); // ✅ add this
+const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVariables);
+  const processedSubject = replaceTemplateVariables(
+    rawSubject,
+    templateVariables,
+  );
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
-  const storefrontUrl = shopDomain.startsWith("http") ? shopDomain : `https://${shopDomain}`;
-  const html = convertToHtmlEmail(processedTemplate, shopDomain, processedSubject, {
-    logoUrl: storeData?.logo,
-    ctaLabel: "Visit Store",
-    ctaUrl: storefrontUrl,
-    footerText: "This email confirms your B2B registration has been approved.",
-  });
+  const storefrontUrl = shopDomain.startsWith("http")
+    ? shopDomain
+    : `https://${shopDomain}`;
+  const html = convertToHtmlEmail(
+    processedTemplate,
+    shopDomain,
+    processedSubject,
+    {
+      logoUrl: storeData?.logo,
+      ctaLabel: "Visit Store",
+      ctaUrl: storefrontUrl,
+      footerText:
+        "This email confirms your B2B registration has been approved.",
+    },
+  );
   const text = stripHtmlTags(processedTemplate);
 
   return sendEmail({
@@ -440,7 +488,6 @@ export async function sendCustomerRegistrationApprovalEmail(
     text,
   });
 }
-
 
 export async function sendEmployeeAssignmentEmail({
   shopName,
@@ -607,9 +654,13 @@ export async function sendCustomerRegistrationRejectdEmail({
   contactName: string;
   note?: string | null;
 }) {
-  const { storeData, emailTemplateConfig } = await getRegistrationEmailContext(storeId);
+  const { storeData, emailTemplateConfig } =
+    await getRegistrationEmailContext(storeId);
 
-  if (emailTemplateConfig && emailTemplateConfig.customerRegistrationRejectd === false) {
+  if (
+    emailTemplateConfig &&
+    emailTemplateConfig.customerRegistrationRejectd === false
+  ) {
     return { success: true, skipped: true } as RegistrationEmailResult;
   }
 
@@ -628,18 +679,29 @@ export async function sendCustomerRegistrationRejectdEmail({
   const rawSubject =
     emailTemplateConfig?.customerRegistrationRejectedSubject || fallbackSubject;
   const rawTemplate =
-    emailTemplateConfig?.customerRegistrationRejectedTemplate || fallbackTemplate;
-
-  const processedSubject = replaceTemplateVariables(rawSubject, templateVariables);
-  const processedTemplate = replaceTemplateVariables(rawTemplate, templateVariables);
+  emailTemplateConfig?.customerRegistrationRejectedTemplate || fallbackTemplate;
+const decodedTemplate = decodeHtmlEntities(rawTemplate); // ✅ add this
+const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVariables);
+  const processedSubject = replaceTemplateVariables(
+    rawSubject,
+    templateVariables,
+  );
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
-  const storefrontUrl = shopDomain.startsWith("http") ? shopDomain : `https://${shopDomain}`;
-  const html = convertToHtmlEmail(processedTemplate, shopDomain, processedSubject, {
-    logoUrl: storeData?.logo,
-    ctaLabel: "Visit Store",
-    ctaUrl: storefrontUrl,
-    footerText: "This email shares an update about your B2B registration request.",
-  });
+  const storefrontUrl = shopDomain.startsWith("http")
+    ? shopDomain
+    : `https://${shopDomain}`;
+  const html = convertToHtmlEmail(
+    processedTemplate,
+    shopDomain,
+    processedSubject,
+    {
+      logoUrl: storeData?.logo,
+      ctaLabel: "Visit Store",
+      ctaUrl: storefrontUrl,
+      footerText:
+        "This email shares an update about your B2B registration request.",
+    },
+  );
   const text = stripHtmlTags(processedTemplate);
 
   return sendEmail({
