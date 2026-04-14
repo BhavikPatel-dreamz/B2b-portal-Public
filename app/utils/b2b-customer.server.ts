@@ -90,23 +90,23 @@ export async function checkCustomerExists(
 
 type CheckCompanyResult =
   | {
-    success: true;
-    exists: true;
-    company: {
-      id: string;
-      name: string;
-      externalId?: string | null;
+      success: true;
+      exists: true;
+      company: {
+        id: string;
+        name: string;
+        externalId?: string | null;
+      };
+    }
+  | {
+      success: true;
+      exists: false;
+      company: null;
+    }
+  | {
+      success: false;
+      error: string;
     };
-  }
-  | {
-    success: true;
-    exists: false;
-    company: null;
-  }
-  | {
-    success: false;
-    error: string;
-  };
 
 export async function checkCompanyExists(
   admin: AdminApiContext,
@@ -1028,14 +1028,265 @@ export async function checkCustomerIsB2BInShopifyByREST(
   }
 }
 
+// export async function getCustomerCompanyInfo(
+//   customerId: string,
+//   shopName: string,
+//   accessToken: string,
+// ) {
+//   try {
+//     // GraphQL query to fetch customer company contacts with their roles
+//     const query = `
+//       query {
+//         customer(id: "gid://shopify/Customer/${customerId}") {
+//           id
+//           email
+//           firstName
+//           lastName
+//           companyContactProfiles {
+//             id
+//             title
+//             company {
+//               id
+//               name
+//               externalId
+//               mainContact {
+//                 customer {
+//                   id
+//                   firstName
+//                   lastName
+//                   email
+//                 }
+//               }
+//               locationsCount {
+//                 count
+//               }
+//               totalSpent {
+//                 amount
+//                 currencyCode
+//               }
+//               updatedAt
+//             }
+//             roleAssignments(first: 10) {
+//               edges {
+//                 node {
+//                   role {
+//                     name
+//                   }
+//                   companyLocation {
+//                     id
+//                     name
+//                   }
+//                 }
+//               }
+//             }
+//           }
+//         }
+//       }
+//     `;
+
+//     const response = await fetch(
+//       `https://${shopName}/admin/api/2025-01/graphql.json`,
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-Shopify-Access-Token": accessToken,
+//         },
+//         body: JSON.stringify({ query }),
+//       },
+//     );
+
+//     const data = await response.json();
+
+//     if (data.errors) {
+//       console.error("GraphQL Errors:", data.errors);
+//       return { hasCompany: false, error: data.errors };
+//     }
+
+//     const customer = data.data.customer;
+//     // companyContactProfiles is a list, not a connection
+//     const companyProfiles = customer.companyContactProfiles || [];
+
+//     if (companyProfiles.length === 0) {
+//       return {
+//         hasCompany: false,
+//         customerId,
+//         customerEmail: customer.email,
+//         message: "Customer has no company association",
+//       };
+//     }
+//     const RegistrationData = await prisma.registrationSubmission.findFirst({
+//       where: {
+//         email: customer.email,
+//       },
+//     });
+
+//     const companyData = await prisma.companyAccount.findFirst({
+//       where: {
+//         contactEmail: customer.email,
+//       },
+//     });
+//     // Process company information
+//     const companies = companyProfiles.map(
+//       (profile: {
+//         company: {
+//           id: string | number;
+//           name: string;
+//           mainContact: { customer: { id: string | number } };
+//         };
+//         roleAssignments: {
+//           edges: Array<{
+//             node: {
+//               role: { name: string };
+//               companyLocation: { id: string | number; name: string };
+//             };
+//           }>;
+//         };
+//       }) => {
+//         const company = profile.company;
+
+//         const roleAssignments =
+//           profile.roleAssignments?.edges?.map(
+//             (edge: {
+//               node: {
+//                 role: { name: string };
+//                 companyLocation: { id: string | number; name: string };
+//               };
+//             }) => ({
+//               role: edge.node.role.name,
+//               locationId: edge.node.companyLocation?.id,
+//               locationName: edge.node.companyLocation?.name,
+//             }),
+//           ) || [];
+
+//         const roles = roleAssignments.map((r: { role: string }) => r.role);
+
+//         // Check if this customer is the main contact (company owner)
+//         const isMainContact =
+//           company.mainContact?.customer?.id ===
+//           `gid://shopify/Customer/${customerId}`;
+
+//         // Check if user has "Company Admin" role (NOT "Location Admin")
+//         // Only "Company Admin" (without "Location" prefix) should be considered admin
+//         const hasCompanyAdminRole = roles.some((r: string) => {
+//           const roleLower = r.toLowerCase();
+//           // Match "company admin" or "admin" but NOT "location admin"
+//           return (
+//             (roleLower === "admin" || roleLower === "company admin") &&
+//             !roleLower.includes("location")
+//           );
+//         });
+
+//         // User is admin if they are main contact OR have Company Admin role
+//         const isAdmin = isMainContact || hasCompanyAdminRole;
+
+//         // Extract unique location IDs that this user has access to
+//         const assignedLocationIds = roleAssignments
+//           .filter((ra: { locationId: string | number }) => ra.locationId)
+//           .map((ra: { locationId: string }) => ra.locationId as string);
+
+//         // Remove duplicates
+//         const uniqueLocationIds = [...new Set(assignedLocationIds)];
+
+//         // Group role assignments by location for easier validation
+//         const locationRoles = roleAssignments.reduce(
+//           (
+//             acc: Record<
+//               string,
+//               { locationId: string; locationName: string; roles: string[] }
+//             >,
+//             ra: {
+//               locationId: string | number;
+//               locationName: string;
+//               role: string;
+//             },
+//           ) => {
+//             if (ra.locationId) {
+//               if (!acc[ra.locationId]) {
+//                 acc[ra.locationId] = {
+//                   locationId: ra.locationId,
+//                   locationName: ra.locationName,
+//                   roles: [],
+//                 };
+//               }
+//               acc[ra.locationId].roles.push(ra.role);
+//             }
+//             return acc;
+//           },
+//           {},
+//         );
+
+//         return {
+//           companyId: company.id,
+//           companyName: company.name,
+//           externalId: company.externalId,
+//           mainContact: company.mainContact?.customer,
+//           totalSpent: company.totalSpent,
+//           locationsCount: company.locationsCount?.count || 0,
+//           updatedAt: company.updatedAt,
+//           roles: roles,
+//           roleAssignments: roleAssignments,
+//           // NEW: Enhanced location-based access control fields
+//           assignedLocationIds: uniqueLocationIds,
+//           locationRoles: Object.values(locationRoles),
+//           // Helper flag: user has access to all locations if they're admin/main contact
+//           hasAllLocationAccess: isAdmin || isMainContact,
+//           title: profile.title,
+//           // isAdmin,
+//           // isMainContact,
+//         };
+//       },
+//     );
+//     const creditInfo = await calculateAvailableCredit(companyData?.id || "");
+//     const creditLimitNum = parseFloat(
+//       companyData?.creditLimit.toString() || "0",
+//     );
+//     const usedCreditNum = creditInfo
+//       ? parseFloat(creditInfo.usedCredit.toString())
+//       : 0;
+//     const pendingCreditNum = creditInfo
+//       ? parseFloat(creditInfo.pendingCredit.toString())
+//       : 0;
+//     const creditUsagePercentage =
+//       creditLimitNum > 0
+//         ? Math.round((usedCreditNum / creditLimitNum) * 100)
+//         : 0;
+
+//     return {
+//       hasCompany: true,
+//       customerId,
+//       customerName:
+//         `${RegistrationData?.firstName || ""} ${RegistrationData?.lastName || ""}`.trim() ||
+//         (customer.firstName
+//           ? `${customer.firstName} ${customer.lastName || ""}`.trim()
+//           : customer.firstName || ""),
+//       customerEmail: customer.email,
+//       CreditLimit: creditLimitNum,
+//       usedCredit: usedCreditNum,
+//       pendingCredit: pendingCreditNum,
+//       creditUsagePercentage: creditUsagePercentage,
+//       companies: companies,
+//       isAdmin: companies[0]?.hasAllLocationAccess,
+//       isMainContact:
+//         companies[0]?.mainContact?.id ===
+//         `gid://shopify/Customer/${customerId}`,
+//     };
+//   } catch (error: { message: string }) {
+//     console.error("Error fetching company info:", error);
+//     return { hasCompany: false, error: error.message };
+//   }
+// }
+
+// Function to get company customers with pagination and filtering
+
 export async function getCustomerCompanyInfo(
   customerId: string,
   shopName: string,
   accessToken: string,
 ) {
   try {
-    // GraphQL query to fetch customer company contacts with their roles
-    const query = `
+    // ─── 1. Main customer + company query ───────────────────────────────────
+    const customerQuery = `
       query {
         customer(id: "gid://shopify/Customer/${customerId}") {
           id
@@ -1058,6 +1309,9 @@ export async function getCustomerCompanyInfo(
                 }
               }
               locationsCount {
+                count
+              }
+              contactsCount {
                 count
               }
               totalSpent {
@@ -1084,7 +1338,7 @@ export async function getCustomerCompanyInfo(
       }
     `;
 
-    const response = await fetch(
+    const customerResponse = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
       {
         method: "POST",
@@ -1092,19 +1346,18 @@ export async function getCustomerCompanyInfo(
           "Content-Type": "application/json",
           "X-Shopify-Access-Token": accessToken,
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query: customerQuery }),
       },
     );
 
-    const data = await response.json();
+    const customerData = await customerResponse.json();
 
-    if (data.errors) {
-      console.error("GraphQL Errors:", data.errors);
-      return { hasCompany: false, error: data.errors };
+    if (customerData.errors) {
+      console.error("GraphQL Errors:", customerData.errors);
+      return { hasCompany: false, error: customerData.errors };
     }
 
-    const customer = data.data.customer;
-    // companyContactProfiles is a list, not a connection
+    const customer = customerData.data.customer;
     const companyProfiles = customer.companyContactProfiles || [];
 
     if (companyProfiles.length === 0) {
@@ -1115,89 +1368,234 @@ export async function getCustomerCompanyInfo(
         message: "Customer has no company association",
       };
     }
-    const RegistrationData = await prisma.registrationSubmission.findFirst({
-      where: {
-        email: customer.email,
-      },
-    });
 
-    const companyData = await prisma.companyAccount.findFirst({
-      where: {
-        contactEmail: customer.email,
-      },
-    });
-    // Process company information
+    // ─── 2. Extract primary company numeric ID ───────────────────────────────
+    const primaryCompanyGid = companyProfiles[0]?.company?.id as string;
+    // "gid://shopify/Company/123456" → "123456"
+    const primaryCompanyNumericId = primaryCompanyGid.split("/").pop();
+
+    // ─── 3. Current month date range ─────────────────────────────────────────
+    const now = new Date();
+    const startOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+    ).toISOString();
+    const endOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+    ).toISOString();
+
+    // ─── 4. Parallel: DB lookups + Shopify order/draft queries ───────────────
+    const shopifyHeaders = {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": accessToken,
+    };
+    const shopifyUrl = `https://${shopName}/admin/api/2025-01/graphql.json`;
+
+    const [
+      registrationData,
+      companyData,
+      currentMonthOrdersRes,
+      pendingDraftOrdersRes,
+      currentMonthCompletedOrdersRes,
+    ] = await Promise.all([
+      // DB: registration info
+      prisma.registrationSubmission.findFirst({
+        where: { email: customer.email },
+      }),
+
+      // DB: company account for credit info
+      prisma.companyAccount.findFirst({
+        where: { contactEmail: customer.email },
+      }),
+
+      // Shopify: current month orders for this company
+      fetch(shopifyUrl, {
+        method: "POST",
+        headers: shopifyHeaders,
+        body: JSON.stringify({
+          query: `
+            query {
+              orders(
+                first: 250
+                query: "company_id:${primaryCompanyNumericId} created_at:>=${startOfMonth} created_at:<=${endOfMonth}"
+              ) {
+                edges {
+                  node {
+                    id
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                }
+              }
+            }
+          `,
+        }),
+      }),
+
+      // Shopify: pending (open) draft orders for this company
+      fetch(shopifyUrl, {
+        method: "POST",
+        headers: shopifyHeaders,
+        body: JSON.stringify({
+          query: `
+            query {
+              draftOrders(
+                first: 250
+                query: "company_id:${primaryCompanyNumericId} status:open"
+              ) {
+                edges {
+                  node {
+                    id
+                    status
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                }
+              }
+            }
+          `,
+        }),
+      }),
+
+      // Shopify: current month COMPLETED orders to sum used credit this month
+fetch(shopifyUrl, {
+  method: "POST",
+  headers: shopifyHeaders,
+  body: JSON.stringify({
+    query: `
+      query {
+        orders(
+          first: 250
+          query: "company_id:${primaryCompanyNumericId} created_at:>=${startOfMonth} created_at:<=${endOfMonth} financial_status:paid"
+        ) {
+          edges {
+            node {
+              id
+              totalPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+  }),
+}),
+    ]);
+
+    
+
+    // ─── 5. Parse order / draft responses ────────────────────────────────────
+    const [currentMonthOrdersData, pendingDraftOrdersData, currentMonthCompletedOrdersData] = await Promise.all([
+      currentMonthOrdersRes.json(),
+      pendingDraftOrdersRes.json(),
+      currentMonthCompletedOrdersRes.json(),
+    ]);
+
+    const currentMonthOrderCount: number =
+      currentMonthOrdersData?.data?.orders?.edges?.length ?? 0;
+
+    const pendingDraftOrderCount: number =
+      pendingDraftOrdersData?.data?.draftOrders?.edges?.length ?? 0;
+
+      const currentMonthUsedCredit: number =
+  currentMonthCompletedOrdersData?.data?.orders?.edges?.reduce(
+    (sum: number, edge: { node: { totalPriceSet: { shopMoney: { amount: string } } } }) => {
+      return sum + parseFloat(edge.node.totalPriceSet?.shopMoney?.amount ?? "0");
+    },
+    0,
+  ) ?? 0;
+
+    // ─── 6. Process company profiles ─────────────────────────────────────────
     const companies = companyProfiles.map(
       (profile: {
+        title: string;
         company: {
-          id: string | number;
+          id: string;
           name: string;
-          mainContact: { customer: { id: string | number } };
+          externalId: string;
+          mainContact: {
+            customer: {
+              id: string;
+              firstName: string;
+              lastName: string;
+              email: string;
+            };
+          };
+          locationsCount: { count: number };
+          contactsCount: { count: number };
+          totalSpent: { amount: string; currencyCode: string };
+          updatedAt: string;
         };
         roleAssignments: {
           edges: Array<{
             node: {
               role: { name: string };
-              companyLocation: { id: string | number; name: string };
+              companyLocation: { id: string; name: string };
             };
           }>;
         };
       }) => {
         const company = profile.company;
 
+        // Flatten role assignments
         const roleAssignments =
-          profile.roleAssignments?.edges?.map(
-            (edge: {
-              node: {
-                role: { name: string };
-                companyLocation: { id: string | number; name: string };
-              };
-            }) => ({
-              role: edge.node.role.name,
-              locationId: edge.node.companyLocation?.id,
-              locationName: edge.node.companyLocation?.name,
-            }),
-          ) || [];
+          profile.roleAssignments?.edges?.map((edge) => ({
+            role: edge.node.role.name,
+            locationId: edge.node.companyLocation?.id ?? null,
+            locationName: edge.node.companyLocation?.name ?? null,
+          })) ?? [];
 
-        const roles = roleAssignments.map((r: { role: string }) => r.role);
+        const roles = roleAssignments.map((r) => r.role);
 
-        // Check if this customer is the main contact (company owner)
+        // Is this customer the main/primary contact?
         const isMainContact =
           company.mainContact?.customer?.id ===
           `gid://shopify/Customer/${customerId}`;
 
-        // Check if user has "Company Admin" role (NOT "Location Admin")
-        // Only "Company Admin" (without "Location" prefix) should be considered admin
-        const hasCompanyAdminRole = roles.some((r: string) => {
-          const roleLower = r.toLowerCase();
-          // Match "company admin" or "admin" but NOT "location admin"
+        // Has "Company Admin" role (not "Location Admin")
+        const hasCompanyAdminRole = roles.some((r) => {
+          const lower = r.toLowerCase();
           return (
-            (roleLower === "admin" || roleLower === "company admin") &&
-            !roleLower.includes("location")
+            (lower === "admin" || lower === "company admin") &&
+            !lower.includes("location")
           );
         });
 
-        // User is admin if they are main contact OR have Company Admin role
         const isAdmin = isMainContact || hasCompanyAdminRole;
 
-        // Extract unique location IDs that this user has access to
-        const assignedLocationIds = roleAssignments
-          .filter((ra: { locationId: string | number }) => ra.locationId)
-          .map((ra: { locationId: string }) => ra.locationId as string);
+        // Unique location IDs this user is assigned to
+        const uniqueLocationIds = [
+          ...new Set(
+            roleAssignments
+              .filter((ra) => ra.locationId)
+              .map((ra) => ra.locationId as string),
+          ),
+        ];
 
-        // Remove duplicates
-        const uniqueLocationIds = [...new Set(assignedLocationIds)];
-
-        // Group role assignments by location for easier validation
+        // Group roles by location
+        type LocationRole = {
+          locationId: string;
+          locationName: string;
+          roles: string[];
+        };
         const locationRoles = roleAssignments.reduce(
           (
-            acc: Record<
-              string,
-              { locationId: string; locationName: string; roles: string[] }
-            >,
+            acc: Record<string, LocationRole>,
             ra: {
-              locationId: string | number;
-              locationName: string;
+              locationId: string | null;
+              locationName: string | null;
               role: string;
             },
           ) => {
@@ -1205,7 +1603,7 @@ export async function getCustomerCompanyInfo(
               if (!acc[ra.locationId]) {
                 acc[ra.locationId] = {
                   locationId: ra.locationId,
-                  locationName: ra.locationName,
+                  locationName: ra.locationName ?? "",
                   roles: [],
                 };
               }
@@ -1213,33 +1611,32 @@ export async function getCustomerCompanyInfo(
             }
             return acc;
           },
-          {},
+          {} as Record<string, LocationRole>,
         );
 
         return {
           companyId: company.id,
           companyName: company.name,
           externalId: company.externalId,
-          mainContact: company.mainContact?.customer,
+          mainContact: company.mainContact?.customer ?? null,
           totalSpent: company.totalSpent,
-          locationsCount: company.locationsCount?.count || 0,
+          locationsCount: company.locationsCount?.count ?? 0,
+          userCount: company.contactsCount?.count ?? 0,
           updatedAt: company.updatedAt,
-          roles: roles,
-          roleAssignments: roleAssignments,
-          // NEW: Enhanced location-based access control fields
+          roles,
+          roleAssignments,
           assignedLocationIds: uniqueLocationIds,
           locationRoles: Object.values(locationRoles),
-          // Helper flag: user has access to all locations if they're admin/main contact
-          hasAllLocationAccess: isAdmin || isMainContact,
+          hasAllLocationAccess: isAdmin,
           title: profile.title,
-          // isAdmin,
-          // isMainContact,
         };
       },
     );
-    const creditInfo = await calculateAvailableCredit(companyData?.id || "");
+
+    // ─── 7. Credit calculations ───────────────────────────────────────────────
+    const creditInfo = await calculateAvailableCredit(companyData?.id ?? "");
     const creditLimitNum = parseFloat(
-      companyData?.creditLimit.toString() || "0",
+      companyData?.creditLimit?.toString() ?? "0",
     );
     const usedCreditNum = creditInfo
       ? parseFloat(creditInfo.usedCredit.toString())
@@ -1252,32 +1649,44 @@ export async function getCustomerCompanyInfo(
         ? Math.round((usedCreditNum / creditLimitNum) * 100)
         : 0;
 
+    // ─── 8. Build final response ──────────────────────────────────────────────
     return {
       hasCompany: true,
       customerId,
       customerName:
-        `${RegistrationData?.firstName || ""} ${RegistrationData?.lastName || ""}`.trim() ||
-        (customer.firstName
-          ? `${customer.firstName} ${customer.lastName || ""}`.trim()
-          : customer.firstName || ""),
+        `${registrationData?.firstName ?? ""} ${registrationData?.lastName ?? ""}`.trim() ||
+        `${customer.firstName ?? ""} ${customer.lastName ?? ""}`.trim() ||
+        "",
       customerEmail: customer.email,
+
+      // Credit
       CreditLimit: creditLimitNum,
       usedCredit: usedCreditNum,
       pendingCredit: pendingCreditNum,
-      creditUsagePercentage: creditUsagePercentage,
-      companies: companies,
-      isAdmin: companies[0]?.hasAllLocationAccess,
+      creditUsagePercentage,
+
+      // ✅ New stats
+      currentMonthOrderCount,
+      pendingDraftOrderCount,
+      currentMonthUsedCredit,
+      totalLocationCount: companies[0]?.locationsCount ?? 0,
+      userCount: companies[0]?.userCount ?? 0,
+
+      // Company + access flags
+      companies,
+      isAdmin: companies[0]?.hasAllLocationAccess ?? false,
       isMainContact:
         companies[0]?.mainContact?.id ===
         `gid://shopify/Customer/${customerId}`,
     };
-  } catch (error: { message: string }) {
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown error occurred";
     console.error("Error fetching company info:", error);
-    return { hasCompany: false, error: error.message };
+    return { hasCompany: false, error: message };
   }
 }
 
-// Function to get company customers with pagination and filtering
 export async function getCompanyCustomers(
   companyId: string,
   shopName: string,
@@ -2677,7 +3086,7 @@ export async function getCompanyLocations(
     }
 
     const company = data.data.company;
-    
+
     // Get all contacts with their location assignments
     const contacts = company.contacts.edges.map(
       (edge: {
@@ -2798,34 +3207,35 @@ export async function getCompanyLocations(
           count: 0,
           customerIds: [],
         };
-        
+
         const rootPhone = location.phone || "";
-        
+
         // Extract recipient from metafields
         let recipient = "";
         if (location.metafields?.edges) {
           const recipientMetafield = location.metafields.edges.find(
-            (edge: { node: { key: string; value: string } }) => 
-              edge.node.key === "recipient"
+            (edge: { node: { key: string; value: string } }) =>
+              edge.node.key === "recipient",
           );
           if (recipientMetafield) {
             recipient = recipientMetafield.node.value;
           }
         }
-        
+
         const shippingAddr = location.shippingAddress;
         const billingAddr = location.billingAddress;
-        const billingSameAsShipping = billingAddr && shippingAddr ? (
-          billingAddr.address1 === shippingAddr.address1 &&
-          billingAddr.address2 === shippingAddr.address2 &&
-          billingAddr.city === shippingAddr.city &&
-          billingAddr.province === shippingAddr.province &&
-          billingAddr.zip === shippingAddr.zip &&
-          billingAddr.country === shippingAddr.country &&
-          billingAddr.firstName === shippingAddr.firstName &&
-          billingAddr.lastName === shippingAddr.lastName
-        ) : false;
-        
+        const billingSameAsShipping =
+          billingAddr && shippingAddr
+            ? billingAddr.address1 === shippingAddr.address1 &&
+              billingAddr.address2 === shippingAddr.address2 &&
+              billingAddr.city === shippingAddr.city &&
+              billingAddr.province === shippingAddr.province &&
+              billingAddr.zip === shippingAddr.zip &&
+              billingAddr.country === shippingAddr.country &&
+              billingAddr.firstName === shippingAddr.firstName &&
+              billingAddr.lastName === shippingAddr.lastName
+            : false;
+
         return {
           id: location.id,
           name: location.name,
@@ -2840,7 +3250,7 @@ export async function getCompanyLocations(
             firstName: location.shippingAddress?.firstName || "",
             lastName: location.shippingAddress?.lastName || "",
             phone: rootPhone,
-            recipient: recipient
+            recipient: recipient,
           },
           billingAddress: {
             address1: location.billingAddress?.address1 || "",
@@ -2852,11 +3262,11 @@ export async function getCompanyLocations(
             firstName: location.billingAddress?.firstName || "",
             lastName: location.billingAddress?.lastName || "",
             phone: rootPhone,
-            recipient: recipient
+            recipient: recipient,
           },
           billingSameAsShipping,
           assignedUsers: customerInfo.count,
-          address: location.shippingAddress 
+          address: location.shippingAddress
             ? `${location.shippingAddress.address1}, ${location.shippingAddress.city}, ${location.shippingAddress.province} ${location.shippingAddress.zip}`
             : "No address provided",
         };
@@ -2985,6 +3395,198 @@ export async function getCompanyLocationById(
   }
 }
 
+// export async function updateCompanyCustomer(
+//   contactId: string,
+//   companyId: string,
+//   shopName: string,
+//   accessToken: string,
+//   customerData: {
+//     firstName?: string;
+//     lastName?: string;
+//     email?: string;
+//     locationRoles?: Array<{
+//       roleId?: string;
+//       roleName?: string;
+//       locationId?: string;
+//       locationName?: string;
+//     }>;
+//     credit?: number;
+//   },
+// ) {
+//   try {
+//     const results: Record<string, unknown> = {
+//       success: true,
+//       updates: {},
+//       warnings: [],
+//     };
+
+//     const makeGraphQLRequest = async (
+//       query: string,
+//       variables: Record<string, unknown>,
+//     ) => {
+//       const response = await fetch(
+//         `https://${shopName}/admin/api/2025-01/graphql.json`,
+//         {
+//           method: "POST",
+//           headers: {
+//             "Content-Type": "application/json",
+//             "X-Shopify-Access-Token": accessToken,
+//           },
+//           body: JSON.stringify({ query, variables }),
+//         },
+//       );
+//       return await response.json();
+//     };
+
+//     // ---- Get Customer ID From Contact ----
+//     const contactGid = contactId.startsWith("gid://")
+//       ? contactId
+//       : `gid://shopify/CompanyContact/${contactId}`;
+
+//     console.log("📝 Contact ID:", contactId);
+//     console.log("📝 Generated contactGid:", contactGid);
+
+//     const getCustomerResult = await makeGraphQLRequest(
+//       `query getCompanyContact($id: ID!) {
+//         companyContact(id: $id) {
+//           customer {
+//             id
+//           }
+//           roleAssignments(first: 50) {
+//             edges {
+//               node {
+//                 id
+//                 role {
+//                   id
+//                   name
+//                 }
+//                 company {
+//                   id
+//                 }
+//                 companyLocation {
+//                   id
+//                   name
+//                 }
+//               }
+//             }
+//           }
+//         }
+//       }`,
+//       { id: contactGid },
+//     );
+
+//     console.log("📝 Customer query result:", getCustomerResult);
+
+//     if (getCustomerResult.errors?.length) {
+//       return { success: false, error: getCustomerResult.errors[0].message };
+//     }
+
+//     const customerId = getCustomerResult.data?.companyContact?.customer?.id;
+//     if (!customerId) {
+//       return { success: false, error: "Customer ID not found for contact" };
+//     }
+
+//     // Get existing role assignments with full details
+//     const existingRoleAssignments =
+//       getCustomerResult.data?.companyContact?.roleAssignments?.edges?.map(
+//         (edge: {
+//           node: {
+//             id: string;
+//             role: { id: string; name: string };
+//             companyLocation: { id: string; name: string };
+//           };
+//         }) => ({
+//           id: edge.node.id,
+//           roleId: edge.node.role?.id,
+//           roleName: edge.node.role?.name,
+//           locationId: edge.node.companyLocation?.id,
+//           locationName: edge.node.companyLocation?.name,
+//         }),
+//       ) || [];
+
+//     // ---- Update Customer Info ----
+//     if (
+//       customerData.email ||
+//       customerData.firstName ||
+//       customerData.lastName ||
+//       customerData.credit !== undefined
+//     ) {
+//       const payload: Record<string, unknown> = { id: customerId };
+
+//       if (customerData.email) payload.email = customerData.email;
+//       if (customerData.firstName) payload.firstName = customerData.firstName;
+//       if (customerData.lastName) payload.lastName = customerData.lastName;
+
+//       if (customerData.credit !== undefined) {
+//         payload.metafields = [
+//           {
+//             namespace: "custom",
+//             key: "credit",
+//             value: customerData.credit.toString(),
+//             type: "number_integer",
+//           },
+//         ];
+//       }
+
+//       console.log("📝 Customer update payload:", payload);
+
+//       const updateResponse = await makeGraphQLRequest(
+//         `mutation customerUpdate($input: CustomerInput!) {
+//           customerUpdate(input: $input) {
+//             userErrors {
+//               field
+//               message
+//             }
+//             customer {
+//               id
+//             }
+//           }
+//         }`,
+//         { input: payload },
+//       );
+
+//       console.log("📝 Customer update response:", updateResponse);
+
+//       if (updateResponse.data?.customerUpdate?.userErrors?.length) {
+//         return {
+//           success: false,
+//           error: updateResponse.data.customerUpdate.userErrors[0].message,
+//         };
+//       }
+
+//       results.updates.customerInfo = "updated";
+//     }
+
+//     // ---- Update Role Assignments ----
+//     if (customerData.locationRoles !== undefined) {
+//       console.log("🎯 New locationRoles:", customerData.locationRoles);
+
+//       const roleUpdateResult = await smartRoleUpdate(
+//         contactGid,
+//         companyId,
+//         existingRoleAssignments,
+//         customerData.locationRoles,
+//         shopName,
+//         accessToken,
+//       );
+
+//       if (!roleUpdateResult.success) {
+//         results.warnings.push(roleUpdateResult.error || "Role update failed");
+//       }
+
+//       results.updates.roleAndLocation = roleUpdateResult.message || "updated";
+//     }
+//     console.log(results, "445454");
+//     return results;
+//   } catch (error) {
+//     console.error("❌ Error updating customer:", error);
+//     return {
+//       success: false,
+//       error: error instanceof Error ? error.message : "Unknown error",
+//     };
+//   }
+// }
+
 export async function updateCompanyCustomer(
   contactId: string,
   companyId: string,
@@ -3028,14 +3630,85 @@ export async function updateCompanyCustomer(
       return await response.json();
     };
 
+    // ---- Resolve contactGid ----
+    // contactId might be a Customer GID (gid://shopify/Customer/123)
+    // or a CompanyContact numeric ID or GID.
+    // We need a CompanyContact GID for companyContact() query.
+
+    let contactGid: string;
+
+    if (contactId.startsWith("gid://shopify/CompanyContact/")) {
+      // Already a CompanyContact GID — use as-is
+      contactGid = contactId;
+    } else if (
+      contactId.startsWith("gid://shopify/Customer/") ||
+      contactId.startsWith("gid://shopify/")
+    ) {
+      // It's some other GID (likely Customer) — resolve to CompanyContact via Customer
+      console.log("📝 Resolving Customer GID to CompanyContact GID...");
+
+      const customerId = contactId.startsWith("gid://shopify/Customer/")
+        ? contactId
+        : null;
+
+      if (!customerId) {
+        return {
+          success: false,
+          error: `Unsupported GID type passed as contactId: ${contactId}`,
+        };
+      }
+
+      const resolveResult = await makeGraphQLRequest(
+        `query resolveCompanyContact($customerId: ID!) {
+          customer(id: $customerId) {
+            companyContactProfiles {
+              id
+              company {
+                id
+              }
+            }
+          }
+        }`,
+        { customerId },
+      );
+
+      console.log("📝 Resolve result:", JSON.stringify(resolveResult, null, 2));
+
+      if (resolveResult.errors?.length) {
+        return {
+          success: false,
+          error: `Failed to resolve contact: ${resolveResult.errors[0].message}`,
+        };
+      }
+
+      const profiles: Array<{ id: string; company: { id: string } }> =
+        resolveResult.data?.customer?.companyContactProfiles ?? [];
+
+      const companyGid = companyId.startsWith("gid://")
+        ? companyId
+        : `gid://shopify/Company/${companyId}`;
+
+      const matchedProfile = profiles.find(
+        (p) => p.company?.id === companyGid,
+      );
+
+      if (!matchedProfile) {
+        return {
+          success: false,
+          error: `No CompanyContact found for customer ${customerId} in company ${companyGid}`,
+        };
+      }
+
+      contactGid = matchedProfile.id;
+      console.log("✅ Resolved contactGid:", contactGid);
+    } else {
+      // Plain numeric ID — treat as CompanyContact numeric ID
+      contactGid = `gid://shopify/CompanyContact/${contactId}`;
+    }
+
+    console.log("📝 Final contactGid:", contactGid);
+
     // ---- Get Customer ID From Contact ----
-    const contactGid = contactId.startsWith("gid://")
-      ? contactId
-      : `gid://shopify/CompanyContact/${contactId}`;
-
-    console.log("📝 Contact ID:", contactId);
-    console.log("📝 Generated contactGid:", contactGid);
-
     const getCustomerResult = await makeGraphQLRequest(
       `query getCompanyContact($id: ID!) {
         companyContact(id: $id) {
@@ -3065,7 +3738,7 @@ export async function updateCompanyCustomer(
       { id: contactGid },
     );
 
-    console.log("📝 Customer query result:", getCustomerResult);
+    console.log("📝 Customer query result:", JSON.stringify(getCustomerResult, null, 2));
 
     if (getCustomerResult.errors?.length) {
       return { success: false, error: getCustomerResult.errors[0].message };
@@ -3076,7 +3749,7 @@ export async function updateCompanyCustomer(
       return { success: false, error: "Customer ID not found for contact" };
     }
 
-    // Get existing role assignments with full details
+    // Get existing role assignments
     const existingRoleAssignments =
       getCustomerResult.data?.companyContact?.roleAssignments?.edges?.map(
         (edge: {
@@ -3092,7 +3765,7 @@ export async function updateCompanyCustomer(
           locationId: edge.node.companyLocation?.id,
           locationName: edge.node.companyLocation?.name,
         }),
-      ) || [];
+      ) ?? [];
 
     // ---- Update Customer Info ----
     if (
@@ -3135,7 +3808,7 @@ export async function updateCompanyCustomer(
         { input: payload },
       );
 
-      console.log("📝 Customer update response:", updateResponse);
+      console.log("📝 Customer update response:", JSON.stringify(updateResponse, null, 2));
 
       if (updateResponse.data?.customerUpdate?.userErrors?.length) {
         return {
@@ -3144,7 +3817,7 @@ export async function updateCompanyCustomer(
         };
       }
 
-      results.updates.customerInfo = "updated";
+      (results.updates as Record<string, unknown>).customerInfo = "updated";
     }
 
     // ---- Update Role Assignments ----
@@ -3161,12 +3834,16 @@ export async function updateCompanyCustomer(
       );
 
       if (!roleUpdateResult.success) {
-        results.warnings.push(roleUpdateResult.error || "Role update failed");
+        (results.warnings as string[]).push(
+          roleUpdateResult.error || "Role update failed",
+        );
       }
 
-      results.updates.roleAndLocation = roleUpdateResult.message || "updated";
+      (results.updates as Record<string, unknown>).roleAndLocation =
+        roleUpdateResult.message || "updated";
     }
-    console.log(results, "445454");
+
+    console.log("✅ Final results:", results);
     return results;
   } catch (error) {
     console.error("❌ Error updating customer:", error);
@@ -3273,11 +3950,11 @@ async function smartRoleUpdate(
         };
       })
       .filter(Boolean) as Array<{
-        roleId: string;
-        roleName: string;
-        locationId: string | null;
-        locationName: string | null;
-      }>;
+      roleId: string;
+      roleName: string;
+      locationId: string | null;
+      locationName: string | null;
+    }>;
 
     console.log("🔍 Normalized new roles:", normalizedNewRoles);
     console.log("🔍 Existing assignments:", existingAssignments);
@@ -3763,25 +4440,192 @@ type ServiceResult<T> =
   | { ok: true; data: T; message?: string }
   | { ok: false; status: number; message: string };
 
-export async function deleteCompanyCustomer(
-  contactId: string,
+// export async function deleteCompanyCustomer(
+//   contactId: string,
+//   shopName: string,
+//   accessToken: string,
+// ): Promise<ServiceResult<{ deletedId: string; deletedCustomerId?: string }>> {
+//   try {
+//     // Step 1: Get customer ID before deleting the contact
+//     const getCustomerQuery = `
+//       query getCompanyContact($id: ID!) {
+//         companyContact(id: $id) {
+//           id
+//           customer {
+//             id
+//           }
+//         }
+//       }
+//     `;
+
+//     const customerResponse = await fetch(
+//       `https://${shopName}/admin/api/2025-01/graphql.json`,
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-Shopify-Access-Token": accessToken,
+//         },
+//         body: JSON.stringify({
+//           query: getCustomerQuery,
+//           variables: { id: contactId },
+//         }),
+//       },
+//     );
+
+//     const customerData = await customerResponse.json();
+//     const customerId = customerData.data?.companyContact?.customer?.id;
+
+//     if (!customerId) {
+//       return {
+//         ok: false,
+//         status: 404,
+//         message: "Customer not found for this contact",
+//       };
+//     }
+
+//     console.log("Found customer:", customerId, "for contact:", contactId);
+
+//     // Step 2: Delete the company contact first
+//     const deleteContactMutation = `
+//       mutation companyContactDelete($id: ID!) {
+//         companyContactDelete(companyContactId: $id) {
+//           deletedCompanyContactId
+//           userErrors {
+//             message
+//           }
+//         }
+//       }
+//     `;
+
+//     const contactRes = await fetch(
+//       `https://${shopName}/admin/api/2025-01/graphql.json`,
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-Shopify-Access-Token": accessToken,
+//         },
+//         body: JSON.stringify({
+//           query: deleteContactMutation,
+//           variables: { id: contactId },
+//         }),
+//       },
+//     );
+
+//     const contactJson = await contactRes.json();
+
+//     if (contactJson.errors?.length) {
+//       return {
+//         ok: false,
+//         status: 400,
+//         message: contactJson.errors[0].message,
+//       };
+//     }
+
+//     const contactPayload = contactJson.data?.companyContactDelete;
+
+//     if (contactPayload?.userErrors?.length) {
+//       return {
+//         ok: false,
+//         status: 400,
+//         message: contactPayload.userErrors[0].message,
+//       };
+//     }
+
+//     console.log("✅ Deleted company contact:", contactId);
+
+//     // Step 3: Delete the underlying Shopify customer
+//     const deleteCustomerMutation = `
+//       mutation customerDelete($input: CustomerDeleteInput!) {
+//         customerDelete(input: $input) {
+//           deletedCustomerId
+//           userErrors {
+//             field
+//             message
+//           }
+//         }
+//       }
+//     `;
+
+//     const customerDeleteRes = await fetch(
+//       `https://${shopName}/admin/api/2025-01/graphql.json`,
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           "X-Shopify-Access-Token": accessToken,
+//         },
+//         body: JSON.stringify({
+//           query: deleteCustomerMutation,
+//           variables: {
+//             input: { id: customerId },
+//           },
+//         }),
+//       },
+//     );
+
+//     const customerDeleteJson = await customerDeleteRes.json();
+
+//     if (customerDeleteJson.errors?.length) {
+//       console.warn(
+//         "⚠️ Customer delete error:",
+//         customerDeleteJson.errors[0].message,
+//       );
+//       return {
+//         ok: true,
+//         data: {
+//           deletedId: contactPayload.deletedCompanyContactId,
+//           deletedCustomerId: undefined,
+//         },
+//         message: "Contact deleted but customer deletion failed",
+//       };
+//     }
+
+//     const customerDeletePayload = customerDeleteJson.data?.customerDelete;
+
+//     if (customerDeletePayload?.userErrors?.length) {
+//       console.warn(
+//         "⚠️ Customer delete error:",
+//         customerDeletePayload.userErrors[0].message,
+//       );
+//       return {
+//         ok: true,
+//         data: {
+//           deletedId: contactPayload.deletedCompanyContactId,
+//           deletedCustomerId: undefined,
+//         },
+//         message: "Contact deleted but customer deletion failed",
+//       };
+//     }
+
+//     console.log("✅ Deleted Shopify customer:", customerId);
+
+//     return {
+//       ok: true,
+//       data: {
+//         deletedId: contactPayload.deletedCompanyContactId,
+//         deletedCustomerId: customerDeletePayload.deletedCustomerId,
+//       },
+//     };
+//   } catch (err) {
+//     console.error("Error in deleteCompanyCustomer:", err);
+//     return {
+//       ok: false,
+//       status: 500,
+//       message: err instanceof Error ? err.message : "Internal server error",
+//     };
+//   }
+// }
+
+export async function resolveCompanyContactGid(
+  userId: string,
+  companyId: string,
   shopName: string,
   accessToken: string,
-): Promise<ServiceResult<{ deletedId: string; deletedCustomerId?: string }>> {
-  try {
-    // Step 1: Get customer ID before deleting the contact
-    const getCustomerQuery = `
-      query getCompanyContact($id: ID!) {
-        companyContact(id: $id) {
-          id
-          customer {
-            id
-          }
-        }
-      }
-    `;
-
-    const customerResponse = await fetch(
+): Promise<string> {
+  const gql = async (query: string, variables: Record<string, unknown>) => {
+    const res = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
       {
         method: "POST",
@@ -3789,16 +4633,125 @@ export async function deleteCompanyCustomer(
           "Content-Type": "application/json",
           "X-Shopify-Access-Token": accessToken,
         },
-        body: JSON.stringify({
-          query: getCustomerQuery,
-          variables: { id: contactId },
-        }),
+        body: JSON.stringify({ query, variables }),
       },
     );
+    return res.json();
+  };
+ 
+  // Already a CompanyContact GID
+  if (userId.startsWith("gid://shopify/CompanyContact/")) {
+    return userId;
+  }
+ 
+  // Plain numeric ID — assume CompanyContact
+  if (!userId.startsWith("gid://")) {
+    return `gid://shopify/CompanyContact/${userId}`;
+  }
+ 
+  // Customer GID — resolve to CompanyContact via companyContactProfiles
+  if (userId.startsWith("gid://shopify/Customer/")) {
+    const result = await gql(
+      `query resolveCompanyContact($customerId: ID!) {
+        customer(id: $customerId) {
+          companyContactProfiles {
+            id
+            company { id }
+          }
+        }
+      }`,
+      { customerId: userId },
+    );
+ 
+    if (result.errors?.length) {
+      throw new Error(
+        `Failed to resolve CompanyContact: ${result.errors[0].message}`,
+      );
+    }
+ 
+    const companyGid = companyId.startsWith("gid://")
+      ? companyId
+      : `gid://shopify/Company/${companyId}`;
+ 
+    const profiles: Array<{ id: string; company: { id: string } }> =
+      result.data?.customer?.companyContactProfiles ?? [];
+ 
+    const match = profiles.find((p) => p.company?.id === companyGid);
+ 
+    if (!match) {
+      throw new Error(
+        `No CompanyContact found for customer ${userId} in company ${companyGid}`,
+      );
+    }
+ 
+    console.log(`✅ Resolved ${userId} → ${match.id}`);
+    return match.id;
+  }
+ 
+  throw new Error(`Unsupported GID type for contactId: ${userId}`);
+}
 
-    const customerData = await customerResponse.json();
+export async function deleteCompanyCustomer(
+  userId: string,
+  companyId: string,        // ← added so we can resolve Customer → CompanyContact
+  shopName: string,
+  accessToken: string,
+): Promise<ServiceResult<{ deletedId: string; deletedCustomerId?: string }>> {
+  try {
+    const gql = async (query: string, variables: Record<string, unknown>) => {
+      const res = await fetch(
+        `https://${shopName}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({ query, variables }),
+        },
+      );
+      return res.json();
+    };
+ 
+    // ---- Resolve to CompanyContact GID ----
+    let contactGid: string;
+    try {
+      contactGid = await resolveCompanyContactGid(
+        userId,
+        companyId,
+        shopName,
+        accessToken,
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        status: 400,
+        message: err instanceof Error ? err.message : "Could not resolve contact ID",
+      };
+    }
+ 
+    console.log("📝 Resolved contactGid for delete:", contactGid);
+ 
+    // ---- Step 1: Get customer ID from contact ----
+    const customerData = await gql(
+      `query getCompanyContact($id: ID!) {
+        companyContact(id: $id) {
+          id
+          customer { id }
+        }
+      }`,
+      { id: contactGid },
+    );
+ 
+    if (customerData.errors?.length) {
+      return {
+        ok: false,
+        status: 400,
+        message: customerData.errors[0].message,
+      };
+    }
+ 
     const customerId = customerData.data?.companyContact?.customer?.id;
-
     if (!customerId) {
       return {
         ok: false,
@@ -3806,48 +4759,29 @@ export async function deleteCompanyCustomer(
         message: "Customer not found for this contact",
       };
     }
-
-    console.log("Found customer:", customerId, "for contact:", contactId);
-
-    // Step 2: Delete the company contact first
-    const deleteContactMutation = `
-      mutation companyContactDelete($id: ID!) {
+ 
+    console.log("📝 Found customer:", customerId, "for contact:", contactGid);
+ 
+    // ---- Step 2: Delete the company contact ----
+    const contactDeleteData = await gql(
+      `mutation companyContactDelete($id: ID!) {
         companyContactDelete(companyContactId: $id) {
           deletedCompanyContactId
-          userErrors {
-            message
-          }
+          userErrors { message }
         }
-      }
-    `;
-
-    const contactRes = await fetch(
-      `https://${shopName}/admin/api/2025-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          query: deleteContactMutation,
-          variables: { id: contactId },
-        }),
-      },
+      }`,
+      { id: contactGid },
     );
-
-    const contactJson = await contactRes.json();
-
-    if (contactJson.errors?.length) {
+ 
+    if (contactDeleteData.errors?.length) {
       return {
         ok: false,
         status: 400,
-        message: contactJson.errors[0].message,
+        message: contactDeleteData.errors[0].message,
       };
     }
-
-    const contactPayload = contactJson.data?.companyContactDelete;
-
+ 
+    const contactPayload = contactDeleteData.data?.companyContactDelete;
     if (contactPayload?.userErrors?.length) {
       return {
         ok: false,
@@ -3855,46 +4789,22 @@ export async function deleteCompanyCustomer(
         message: contactPayload.userErrors[0].message,
       };
     }
-
-    console.log("✅ Deleted company contact:", contactId);
-
-    // Step 3: Delete the underlying Shopify customer
-    const deleteCustomerMutation = `
-      mutation customerDelete($input: CustomerDeleteInput!) {
+ 
+    console.log("✅ Deleted company contact:", contactGid);
+ 
+    // ---- Step 3: Delete the underlying Shopify customer ----
+    const customerDeleteData = await gql(
+      `mutation customerDelete($input: CustomerDeleteInput!) {
         customerDelete(input: $input) {
           deletedCustomerId
-          userErrors {
-            field
-            message
-          }
+          userErrors { field message }
         }
-      }
-    `;
-
-    const customerDeleteRes = await fetch(
-      `https://${shopName}/admin/api/2025-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          query: deleteCustomerMutation,
-          variables: {
-            input: { id: customerId },
-          },
-        }),
-      },
+      }`,
+      { input: { id: customerId } },
     );
-
-    const customerDeleteJson = await customerDeleteRes.json();
-
-    if (customerDeleteJson.errors?.length) {
-      console.warn(
-        "⚠️ Customer delete error:",
-        customerDeleteJson.errors[0].message,
-      );
+ 
+    if (customerDeleteData.errors?.length) {
+      console.warn("⚠️ Customer delete error:", customerDeleteData.errors[0].message);
       return {
         ok: true,
         data: {
@@ -3904,14 +4814,10 @@ export async function deleteCompanyCustomer(
         message: "Contact deleted but customer deletion failed",
       };
     }
-
-    const customerDeletePayload = customerDeleteJson.data?.customerDelete;
-
+ 
+    const customerDeletePayload = customerDeleteData.data?.customerDelete;
     if (customerDeletePayload?.userErrors?.length) {
-      console.warn(
-        "⚠️ Customer delete error:",
-        customerDeletePayload.userErrors[0].message,
-      );
+      console.warn("⚠️ Customer delete userError:", customerDeletePayload.userErrors[0].message);
       return {
         ok: true,
         data: {
@@ -3921,9 +4827,9 @@ export async function deleteCompanyCustomer(
         message: "Contact deleted but customer deletion failed",
       };
     }
-
+ 
     console.log("✅ Deleted Shopify customer:", customerId);
-
+ 
     return {
       ok: true,
       data: {
@@ -3940,41 +4846,54 @@ export async function deleteCompanyCustomer(
     };
   }
 }
+ 
 
 export async function getCompanyContactEmail(
-  contactId: string,
+  userId: string,
+  companyId: string,
   shopName: string,
   accessToken: string,
-) {
-  const query = `
-    query getCompanyContact($id: ID!) {
-      companyContact(id: $id) {
-        customer {
-          email
-        }
-      }
-    }
-  `;
-
-  const response = await fetch(
-    `https://${shopName}/admin/api/2025-01/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
+): Promise<string | null> {
+  try {
+    const contactGid = await resolveCompanyContactGid(
+      userId,
+      companyId,
+      shopName,
+      accessToken,
+    );
+ 
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query: `query getCompanyContact($id: ID!) {
+            companyContact(id: $id) {
+              customer { email }
+            }
+          }`,
+          variables: { id: contactGid },
+        }),
       },
-      body: JSON.stringify({
-        query,
-        variables: { id: contactId },
-      }),
-    },
-  );
-
-  const result = await response.json();
-  console.log(result, "CompanyContact email response");
-
-  return result.data?.companyContact?.customer?.email ?? null;
+    );
+ 
+    const result = await response.json();
+    console.log(result, "CompanyContact email response");
+ 
+    if (result.errors?.length) {
+      console.error("❌ getCompanyContactEmail error:", result.errors[0].message);
+      return null;
+    }
+ 
+    return result.data?.companyContact?.customer?.email ?? null;
+  } catch (err) {
+    console.error("❌ getCompanyContactEmail exception:", err);
+    return null;
+  }
 }
 
 function normalizePhone(phone: string): string {
@@ -4228,10 +5147,16 @@ export async function createCompanyLocation(
       );
 
       const metafieldResult = await metafieldResponse.json();
-      console.log("📦 Metafield creation result:", JSON.stringify(metafieldResult, null, 2));
+      console.log(
+        "📦 Metafield creation result:",
+        JSON.stringify(metafieldResult, null, 2),
+      );
 
       if (metafieldResult.errors) {
-        console.warn("⚠️ Failed to create recipient metafield:", metafieldResult.errors);
+        console.warn(
+          "⚠️ Failed to create recipient metafield:",
+          metafieldResult.errors,
+        );
       }
     }
 
@@ -4655,7 +5580,10 @@ export async function createLocationAndAssignToContact(
     accessToken,
     locationData,
   );
-  console.log("🚀 ~ createLocationAndAssignToContact ~ locationResult:", locationResult)
+  console.log(
+    "🚀 ~ createLocationAndAssignToContact ~ locationResult:",
+    locationResult,
+  );
 
   if (!locationResult.success || !locationResult.locationId) {
     return {
@@ -4801,15 +5729,16 @@ export async function updateCompanyLocation(
       if (locationData.name !== undefined) {
         input.name = locationData.name;
       }
-      
+
       if (locationData.phone !== undefined) {
         input.phone = locationData.phone === "" ? null : locationData.phone;
       }
-      
+
       if (locationData.externalId !== undefined) {
-        input.externalId = locationData.externalId === "" ? null : locationData.externalId;
+        input.externalId =
+          locationData.externalId === "" ? null : locationData.externalId;
       }
-      
+
       if (locationData.note !== undefined) {
         input.note = locationData.note;
       }
@@ -5034,7 +5963,8 @@ export async function updateCompanyLocation(
       `;
 
       // If recipient is null or empty string, we want to clear it (set to empty string)
-      const recipientValue = locationData.recipient === null ? "" : locationData.recipient;
+      const recipientValue =
+        locationData.recipient === null ? "" : locationData.recipient;
 
       const metafieldResponse = await fetch(
         `https://${shopName}/admin/api/2025-01/graphql.json`,
@@ -5062,16 +5992,25 @@ export async function updateCompanyLocation(
       );
 
       const metafieldResult = await metafieldResponse.json();
-      console.log("📦 Recipient metafield update result:", JSON.stringify(metafieldResult, null, 2));
+      console.log(
+        "📦 Recipient metafield update result:",
+        JSON.stringify(metafieldResult, null, 2),
+      );
 
       if (metafieldResult.errors) {
-        console.warn("⚠️ Failed to update recipient metafield:", metafieldResult.errors);
+        console.warn(
+          "⚠️ Failed to update recipient metafield:",
+          metafieldResult.errors,
+        );
         hasErrors = true;
         errors.push("Failed to update recipient field");
       }
 
       if (metafieldResult.data?.metafieldsSet?.userErrors?.length > 0) {
-        console.warn("⚠️ Recipient metafield user errors:", metafieldResult.data.metafieldsSet.userErrors);
+        console.warn(
+          "⚠️ Recipient metafield user errors:",
+          metafieldResult.data.metafieldsSet.userErrors,
+        );
         hasErrors = true;
         errors.push(metafieldResult.data.metafieldsSet.userErrors[0].message);
       }
@@ -5347,12 +6286,12 @@ export async function getAdvancedCompanyOrders(
       customerId?: string | string[];
       dateRange?: {
         preset?:
-        | "last_week"
-        | "current_month"
-        | "last_month"
-        | "last_3_months"
-        | "custom"
-        | "all";
+          | "last_week"
+          | "current_month"
+          | "last_month"
+          | "last_3_months"
+          | "custom"
+          | "all";
         start?: string;
         end?: string;
       };
@@ -5858,7 +6797,7 @@ export async function createCatalog(
   opts: {
     title: string;
     priceListId: string;
-    locationIds?: string[];   // optional: assign to locations right after creation
+    locationIds?: string[]; // optional: assign to locations right after creation
   },
 ): Promise<{ catalog: CatalogNode | null; errors: string[] }> {
   const response = await admin.graphql(
@@ -5917,8 +6856,8 @@ export async function assignCatalogToLocation(
 ): Promise<{ success: boolean; errors: string[] }> {
   console.log("🔗 Assigning catalog to location:", { catalogId, locationId });
 
-const response = await admin.graphql(
-  `#graphql
+  const response = await admin.graphql(
+    `#graphql
   mutation CatalogContextUpdate($catalogId: ID!, $contextsToAdd: CatalogContextInput) {
     catalogContextUpdate(catalogId: $catalogId, contextsToAdd: $contextsToAdd) {
       catalog {
@@ -5933,19 +6872,19 @@ const response = await admin.graphql(
       userErrors { field message code }
     }
   }`,
-  {
-    variables: {
-      catalogId: catalogId,
-      contextsToAdd: { companyLocationIds: [locationId] },
+    {
+      variables: {
+        catalogId: catalogId,
+        contextsToAdd: { companyLocationIds: [locationId] },
+      },
     },
-  },
-);
+  );
 
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =
     payload?.data?.catalogContextUpdate?.userErrors || [];
 
-    console.log(userErrors,"userErrors");
+  console.log(userErrors, "userErrors");
   if (userErrors.length > 0) {
     console.error("❌ catalogContextUpdate (assign) userErrors:", userErrors);
     return { success: false, errors: userErrors.map((e) => e.message) };
@@ -5965,8 +6904,8 @@ export async function removeCatalogFromLocation(
 ): Promise<{ success: boolean; errors: string[] }> {
   console.log("🔗 Removing catalog from location:", { catalogId, locationId });
 
-const response = await admin.graphql(
-  `#graphql
+  const response = await admin.graphql(
+    `#graphql
   mutation CatalogContextUpdate($catalogId: ID!, $contextsToAdd: [ID!]!) {
     catalogContextUpdate(catalogId: $catalogId, contextsToAdd: $contextsToAdd) {
       catalog {
@@ -5980,13 +6919,13 @@ const response = await admin.graphql(
       }
     }
   }`,
-  {
-    variables: {
-      catalogId: catalogId,
-      contextsToAdd: [locationId],
+    {
+      variables: {
+        catalogId: catalogId,
+        contextsToAdd: [locationId],
+      },
     },
-  }
-);
+  );
 
   const payload = await response.json();
   const userErrors: Array<{ message: string }> =

@@ -347,107 +347,125 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       // ── EDIT ────────────────────────────────────────────────
-      case "edit": {
-        const { userId, name, email, locationRoles, credit } = body;
+   case "edit": {
+  const { userId, name, email, locationRoles, credit } = body;
 
-        if (!userId) {
-          return Response.json(
-            { error: "User ID is required for editing" },
-            { status: 400 },
-          );
-        }
+  if (!userId) {
+    return Response.json(
+      { error: "User ID is required for editing" },
+      { status: 400 },
+    );
+  }
 
-        const [firstName, ...lastNameParts] = (name || "").trim().split(" ");
-        const lastName = lastNameParts.join(" ");
+  const [firstName, ...lastNameParts] = (name || "").trim().split(" ");
+  const lastName = lastNameParts.join(" ");
 
-        const result = await updateCompanyCustomer(
-          userId, companyId, shop, store.accessToken,
-          {
-            firstName: firstName || undefined,
-            lastName: lastName || undefined,
-            email,
-            locationRoles: locationRoles || undefined,
-            credit: parseFloat(credit) || 0,
-          },
-        );
+  // userId may be a Customer GID, CompanyContact GID, or plain numeric CompanyContact ID.
+  // updateCompanyCustomer now handles all three cases automatically.
+  const result = await updateCompanyCustomer(
+    userId,       // passed as-is — function resolves the correct GID internally
+    companyId,
+    shop,
+    store.accessToken,
+    {
+      firstName: firstName || undefined,
+      lastName: lastName || undefined,
+      email,
+      locationRoles: locationRoles || undefined,
+      credit: credit !== undefined ? parseFloat(credit) : undefined,
+    },
+  );
 
-        if (result.error) {
-          return Response.json({ error: result.error }, { status: 500 });
-        }
+  if (result.error) {
+    return Response.json({ error: result.error }, { status: 500 });
+  }
 
-        clearCompanyUsersCache(shop, companyId);
-        return Response.json({ success: true, result });
-      }
+  clearCompanyUsersCache(shop, companyId);
+  return Response.json({ success: true, result });
+}
 
       // ── DELETE ──────────────────────────────────────────────
-      case "delete": {
-        const { userId } = body;
+     case "delete": {
+  const { userId } = body;
 
-        if (!userId) {
-          return Response.json(
-            { error: "User ID is required" },
-            { status: 400 },
-          );
-        }
+  if (!userId) {
+    return Response.json(
+      { error: "User ID is required" },
+      { status: 400 },
+    );
+  }
 
-        const contactEmail = await getCompanyContactEmail(userId, shop, store.accessToken);
+  // getCompanyContactEmail also needs the same fix — pass companyId so it
+  // can resolve a Customer GID to a CompanyContact GID internally.
+  const contactEmail = await getCompanyContactEmail(
+    userId,
+    companyId,          // ← pass companyId for GID resolution
+    shop,
+    store.accessToken,
+  );
 
-        if (!contactEmail) {
-          return Response.json(
-            { error: "Company contact not found" },
-            { status: 404 },
-          );
-        }
+  if (!contactEmail) {
+    return Response.json(
+      { error: "Company contact not found" },
+      { status: 404 },
+    );
+  }
 
-        if (
-          userContext.customerEmail &&
-          contactEmail.toLowerCase() === userContext.customerEmail.toLowerCase()
-        ) {
-          return Response.json(
-            { error: "You cannot delete your own account" },
-            { status: 403 },
-          );
-        }
+  if (
+    userContext.customerEmail &&
+    contactEmail.toLowerCase() === userContext.customerEmail.toLowerCase()
+  ) {
+    return Response.json(
+      { error: "You cannot delete your own account" },
+      { status: 403 },
+    );
+  }
 
-        const result = await deleteCompanyCustomer(userId, shop, store.accessToken);
+  // Pass companyId so deleteCompanyCustomer can resolve Customer GID → CompanyContact GID
+  const result = await deleteCompanyCustomer(
+    userId,
+    companyId,          // ← added
+    shop,
+    store.accessToken,
+  );
 
-        if (!result.ok) {
-          return Response.json(
-            { error: result.message },
-            { status: result.status },
-          );
-        }
+  if (!result.ok) {
+    return Response.json(
+      { error: result.message },
+      { status: result.status },
+    );
+  }
 
-        const userData = await prisma.user.findFirst({
-          where: { email: contactEmail },
-        });
+  const userData = await prisma.user.findFirst({
+    where: { email: contactEmail },
+  });
 
-        const registration = await prisma.registrationSubmission.findFirst({
-          where: { email: contactEmail },
-        });
+  const registration = await prisma.registrationSubmission.findFirst({
+    where: { email: contactEmail },
+  });
 
-        if (registration) {
-          await prisma.registrationSubmission.delete({
-            where: { id: registration.id },
-          });
-        }
+  if (registration) {
+    await prisma.registrationSubmission.delete({
+      where: { id: registration.id },
+    });
+  }
 
-        if (!userData) {
-          return Response.json(
-            { error: "User not found in local database" },
-            { status: 404 },
-          );
-        }
+  if (!userData) {
+    return Response.json(
+      { error: "User not found in local database" },
+      { status: 404 },
+    );
+  }
 
-        await prisma.user.delete({ where: { id: userData.id } });
-        clearCompanyUsersCache(shop, companyId);
+  await prisma.user.delete({ where: { id: userData.id } });
+  clearCompanyUsersCache(shop, companyId);
 
-        return Response.json({
-          success: true,
-          deletedId: result.data.deletedId,
-          message: "User deleted successfully",
-        });
-      }
+  return Response.json({
+    success: true,
+    deletedId: result.data.deletedId,
+    message: "User deleted successfully",
+  });
+}
 
       default:
         return Response.json({ error: "Invalid action type" }, { status: 400 });
