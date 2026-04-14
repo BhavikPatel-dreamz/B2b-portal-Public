@@ -1,5 +1,4 @@
 import prisma from "app/db.server";
-import { authenticate } from "app/shopify.server";
 import { LoaderFunctionArgs } from "react-router";
 import {
   deserializeConfig,
@@ -89,14 +88,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     if (userData?.shopifyCustomerId === customerGid && userData.role !== "STORE_ADMIN") {
       return json({
         message: "Your account is not a customer. Please contact the support team.",
-        redirectTo: `https://${store.shopDomain}/pages/b2b-page-dashboard`
+        redirectTo: `https://${store.shopDomain}/pages/b2b-page`
       });
     }
  
     if (customer?.status === "APPROVED") {
       return json({
         message: "Your account is approved, but B2B access is not yet configured in Shopify.",
-        redirectTo: `https://${store.shopDomain}/pages/b2b-page-dashboard`,
+        redirectTo: `https://${store.shopDomain}/pages/b2b-page`,
       });
     }
  
@@ -138,7 +137,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         config = [];
       }
     }
-    console.log(config,"config------");
+  
  
     return json({
       config,
@@ -147,7 +146,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
  
   } catch (error) {
-    console.error("❌ Error validating customer:11111", error);
+    console.error("❌ Error validating customer", error);
  
     return json(
       { error: error instanceof Error ? error.message : "Unknown error" },
