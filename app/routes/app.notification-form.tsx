@@ -116,8 +116,43 @@ const TEMPLATE_ITEMS: TemplateItem[] = [
     helperText:
       "This email is sent to a customer when they submit the company application form.",
     initialSubject: "We received your B2B registration request",
-    initialHtml:
-      "Hello {{contactName}},<br /><br />We have received your B2B registration request for {{companyName}} on {{shopName}}.",
+    initialHtml: `Hello {{contactName}},<br /><br />
+
+Thank you for submitting a B2B registration request for <strong>{{companyName}}</strong> on <strong>{{shopName}}</strong>.<br /><br />
+
+We have received your application and our team is currently reviewing it. Here is a summary of your submission:<br /><br />
+
+<table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;width:45%;">Company</td>
+    <td style="padding:10px 0;color:#111827;font-weight:600;">{{companyName}}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;">Contact Person</td>
+    <td style="padding:10px 0;color:#111827;">{{contactName}}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;">Email</td>
+    <td style="padding:10px 0;color:#111827;">{{email}}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 0;color:#6b7280;">Store</td>
+    <td style="padding:10px 0;color:#111827;">{{shopName}}</td>
+  </tr>
+</table>
+
+<div style="background:#fefce8;border-left:4px solid #ca8a04;padding:12px 16px;margin-bottom:16px;border-radius:4px;">
+  <strong style="color:#854d0e;">Status: Under Review</strong><br />
+  <span style="color:#713f12;font-size:13px;">Our team typically responds within 1–3 business days.</span>
+</div>
+
+Once a decision has been made, you will receive a follow-up email at <strong>{{email}}</strong>.<br /><br />
+
+If you have any questions in the meantime, feel free to reach out to us.<br /><br />
+
+Warm regards,<br />
+<strong>{{storeOwnerName}}</strong><br />
+{{shopName}}`,
     audience: "customer",
   },
   {
@@ -129,8 +164,43 @@ const TEMPLATE_ITEMS: TemplateItem[] = [
     helperText:
       "This email is sent to a customer when their company account is approved and they can begin placing orders.",
     initialSubject: "Your B2B registration has been approved",
-    initialHtml:
-      "Hello {{contactName}},<br /><br />Your company account for {{companyName}} has been approved. You can now begin placing orders on {{shopName}}.",
+    initialHtml:`Hello {{contactName}},<br /><br />
+
+Great news! Your B2B registration request for <strong>{{companyName}}</strong> on <strong>{{shopName}}</strong> has been <strong style="color:#15803d;">approved</strong>.<br /><br />
+
+Here is a summary of your approved account:<br /><br />
+
+<table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;width:45%;">Company</td>
+    <td style="padding:10px 0;color:#111827;font-weight:600;">{{companyName}}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;">Contact Person</td>
+    <td style="padding:10px 0;color:#111827;">{{contactName}}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;">Email</td>
+    <td style="padding:10px 0;color:#111827;">{{email}}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 0;color:#6b7280;">Store</td>
+    <td style="padding:10px 0;color:#111827;">{{shopName}}</td>
+  </tr>
+</table>
+
+<div style="background:#f0fdf4;border-left:4px solid #16a34a;padding:12px 16px;margin-bottom:16px;border-radius:4px;">
+  <strong style="color:#15803d;">Status: Approved</strong><br />
+  <span style="color:#166534;font-size:13px;">{{reviewNotes}}</span>
+</div>
+
+You can now log in to <strong>{{shopName}}</strong> and enjoy full B2B access including wholesale pricing, bulk ordering, and your dedicated account dashboard.<br /><br />
+
+Welcome aboard, and thank you for partnering with us!<br /><br />
+
+Warm regards,<br />
+<strong>{{storeOwnerName}}</strong><br />
+{{shopName}}`,
     audience: "customer",
   },
   {
@@ -141,9 +211,43 @@ const TEMPLATE_ITEMS: TemplateItem[] = [
     editorTitle: "Application rejected email template",
     helperText:
       "This email is sent to a customer when their B2B registration request is rejected.",
-    initialSubject: "Update on your B2B registration",
+    initialSubject: "Your B2B registration has been rejected",
     initialHtml:
-      "Hello {{contactName}},<br /><br />Your B2B application for {{companyName}} has been rejected. Please contact {{storeOwnerName}} for more information.",
+      `Hello {{contactName}},<br /><br />
+
+Thank you for your interest in partnering with <strong>{{shopName}}</strong>. After carefully reviewing your B2B registration request for <strong>{{companyName}}</strong>, we are unable to approve your application at this time.<br /><br />
+
+<table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;width:45%;">Company</td>
+    <td style="padding:10px 0;color:#111827;font-weight:600;">{{companyName}}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;">Contact Person</td>
+    <td style="padding:10px 0;color:#111827;">{{contactName}}</td>
+  </tr>
+  <tr style="border-bottom:1px solid #e5e7eb;">
+    <td style="padding:10px 0;color:#6b7280;">Email</td>
+    <td style="padding:10px 0;color:#111827;">{{email}}</td>
+  </tr>
+  <tr>
+    <td style="padding:10px 0;color:#111827;">Store</td>
+    <td style="padding:10px 0;color:#111827;">{{shopName}}</td>
+  </tr>
+</table>
+
+<div style="background:#fef2f2;border-left:4px solid #dc2626;padding:12px 16px;margin-bottom:16px;border-radius:4px;">
+  <strong style="color:#b91c1c;">Status: Not Approved</strong><br />
+  <span style="color:#991b1b;font-size:13px;">{{reviewNotes}}</span>
+</div>
+
+If you believe this decision was made in error or your circumstances have changed, you are welcome to submit a new request or contact us directly for further clarification.<br /><br />
+
+We appreciate your understanding and wish you the best.<br /><br />
+
+Warm regards,<br />
+<strong>{{storeOwnerName}}</strong><br />
+{{shopName}}`,
     audience: "customer",
   },
   {
