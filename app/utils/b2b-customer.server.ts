@@ -1466,11 +1466,11 @@ export async function getCustomerCompanyInfo(
       }),
 
       // Shopify: current month COMPLETED orders to sum used credit this month
-fetch(shopifyUrl, {
-  method: "POST",
-  headers: shopifyHeaders,
-  body: JSON.stringify({
-    query: `
+      fetch(shopifyUrl, {
+        method: "POST",
+        headers: shopifyHeaders,
+        body: JSON.stringify({
+          query: `
       query {
         orders(
           first: 250
@@ -1490,14 +1490,16 @@ fetch(shopifyUrl, {
         }
       }
     `,
-  }),
-}),
+        }),
+      }),
     ]);
 
-    
-
     // ─── 5. Parse order / draft responses ────────────────────────────────────
-    const [currentMonthOrdersData, pendingDraftOrdersData, currentMonthCompletedOrdersData] = await Promise.all([
+    const [
+      currentMonthOrdersData,
+      pendingDraftOrdersData,
+      currentMonthCompletedOrdersData,
+    ] = await Promise.all([
       currentMonthOrdersRes.json(),
       pendingDraftOrdersRes.json(),
       currentMonthCompletedOrdersRes.json(),
@@ -1509,13 +1511,18 @@ fetch(shopifyUrl, {
     const pendingDraftOrderCount: number =
       pendingDraftOrdersData?.data?.draftOrders?.edges?.length ?? 0;
 
-      const currentMonthUsedCredit: number =
-  currentMonthCompletedOrdersData?.data?.orders?.edges?.reduce(
-    (sum: number, edge: { node: { totalPriceSet: { shopMoney: { amount: string } } } }) => {
-      return sum + parseFloat(edge.node.totalPriceSet?.shopMoney?.amount ?? "0");
-    },
-    0,
-  ) ?? 0;
+    const currentMonthUsedCredit: number =
+      currentMonthCompletedOrdersData?.data?.orders?.edges?.reduce(
+        (
+          sum: number,
+          edge: { node: { totalPriceSet: { shopMoney: { amount: string } } } },
+        ) => {
+          return (
+            sum + parseFloat(edge.node.totalPriceSet?.shopMoney?.amount ?? "0")
+          );
+        },
+        0,
+      ) ?? 0;
 
     // ─── 6. Process company profiles ─────────────────────────────────────────
     const companies = companyProfiles.map(
@@ -1662,7 +1669,7 @@ fetch(shopifyUrl, {
       // Credit
       CreditLimit: creditLimitNum,
       usedCredit: usedCreditNum,
-      pendingCredit: pendingCreditNum,
+      pendingCredit: creditInfo?.availableCredit ?? new Decimal(0).toNumber(),
       creditUsagePercentage,
 
       // ✅ New stats
@@ -3688,9 +3695,7 @@ export async function updateCompanyCustomer(
         ? companyId
         : `gid://shopify/Company/${companyId}`;
 
-      const matchedProfile = profiles.find(
-        (p) => p.company?.id === companyGid,
-      );
+      const matchedProfile = profiles.find((p) => p.company?.id === companyGid);
 
       if (!matchedProfile) {
         return {
@@ -3738,7 +3743,10 @@ export async function updateCompanyCustomer(
       { id: contactGid },
     );
 
-    console.log("📝 Customer query result:", JSON.stringify(getCustomerResult, null, 2));
+    console.log(
+      "📝 Customer query result:",
+      JSON.stringify(getCustomerResult, null, 2),
+    );
 
     if (getCustomerResult.errors?.length) {
       return { success: false, error: getCustomerResult.errors[0].message };
@@ -3808,7 +3816,10 @@ export async function updateCompanyCustomer(
         { input: payload },
       );
 
-      console.log("📝 Customer update response:", JSON.stringify(updateResponse, null, 2));
+      console.log(
+        "📝 Customer update response:",
+        JSON.stringify(updateResponse, null, 2),
+      );
 
       if (updateResponse.data?.customerUpdate?.userErrors?.length) {
         return {
@@ -4638,17 +4649,17 @@ export async function resolveCompanyContactGid(
     );
     return res.json();
   };
- 
+
   // Already a CompanyContact GID
   if (userId.startsWith("gid://shopify/CompanyContact/")) {
     return userId;
   }
- 
+
   // Plain numeric ID — assume CompanyContact
   if (!userId.startsWith("gid://")) {
     return `gid://shopify/CompanyContact/${userId}`;
   }
- 
+
   // Customer GID — resolve to CompanyContact via companyContactProfiles
   if (userId.startsWith("gid://shopify/Customer/")) {
     const result = await gql(
@@ -4662,38 +4673,38 @@ export async function resolveCompanyContactGid(
       }`,
       { customerId: userId },
     );
- 
+
     if (result.errors?.length) {
       throw new Error(
         `Failed to resolve CompanyContact: ${result.errors[0].message}`,
       );
     }
- 
+
     const companyGid = companyId.startsWith("gid://")
       ? companyId
       : `gid://shopify/Company/${companyId}`;
- 
+
     const profiles: Array<{ id: string; company: { id: string } }> =
       result.data?.customer?.companyContactProfiles ?? [];
- 
+
     const match = profiles.find((p) => p.company?.id === companyGid);
- 
+
     if (!match) {
       throw new Error(
         `No CompanyContact found for customer ${userId} in company ${companyGid}`,
       );
     }
- 
+
     console.log(`✅ Resolved ${userId} → ${match.id}`);
     return match.id;
   }
- 
+
   throw new Error(`Unsupported GID type for contactId: ${userId}`);
 }
 
 export async function deleteCompanyCustomer(
   userId: string,
-  companyId: string,        // ← added so we can resolve Customer → CompanyContact
+  companyId: string, // ← added so we can resolve Customer → CompanyContact
   shopName: string,
   accessToken: string,
 ): Promise<ServiceResult<{ deletedId: string; deletedCustomerId?: string }>> {
@@ -4712,7 +4723,7 @@ export async function deleteCompanyCustomer(
       );
       return res.json();
     };
- 
+
     // ---- Resolve to CompanyContact GID ----
     let contactGid: string;
     try {
@@ -4726,12 +4737,13 @@ export async function deleteCompanyCustomer(
       return {
         ok: false,
         status: 400,
-        message: err instanceof Error ? err.message : "Could not resolve contact ID",
+        message:
+          err instanceof Error ? err.message : "Could not resolve contact ID",
       };
     }
- 
+
     console.log("📝 Resolved contactGid for delete:", contactGid);
- 
+
     // ---- Step 1: Get customer ID from contact ----
     const customerData = await gql(
       `query getCompanyContact($id: ID!) {
@@ -4742,7 +4754,7 @@ export async function deleteCompanyCustomer(
       }`,
       { id: contactGid },
     );
- 
+
     if (customerData.errors?.length) {
       return {
         ok: false,
@@ -4750,7 +4762,7 @@ export async function deleteCompanyCustomer(
         message: customerData.errors[0].message,
       };
     }
- 
+
     const customerId = customerData.data?.companyContact?.customer?.id;
     if (!customerId) {
       return {
@@ -4759,9 +4771,9 @@ export async function deleteCompanyCustomer(
         message: "Customer not found for this contact",
       };
     }
- 
+
     console.log("📝 Found customer:", customerId, "for contact:", contactGid);
- 
+
     // ---- Step 2: Delete the company contact ----
     const contactDeleteData = await gql(
       `mutation companyContactDelete($id: ID!) {
@@ -4772,7 +4784,7 @@ export async function deleteCompanyCustomer(
       }`,
       { id: contactGid },
     );
- 
+
     if (contactDeleteData.errors?.length) {
       return {
         ok: false,
@@ -4780,7 +4792,7 @@ export async function deleteCompanyCustomer(
         message: contactDeleteData.errors[0].message,
       };
     }
- 
+
     const contactPayload = contactDeleteData.data?.companyContactDelete;
     if (contactPayload?.userErrors?.length) {
       return {
@@ -4789,9 +4801,9 @@ export async function deleteCompanyCustomer(
         message: contactPayload.userErrors[0].message,
       };
     }
- 
+
     console.log("✅ Deleted company contact:", contactGid);
- 
+
     // ---- Step 3: Delete the underlying Shopify customer ----
     const customerDeleteData = await gql(
       `mutation customerDelete($input: CustomerDeleteInput!) {
@@ -4802,9 +4814,12 @@ export async function deleteCompanyCustomer(
       }`,
       { input: { id: customerId } },
     );
- 
+
     if (customerDeleteData.errors?.length) {
-      console.warn("⚠️ Customer delete error:", customerDeleteData.errors[0].message);
+      console.warn(
+        "⚠️ Customer delete error:",
+        customerDeleteData.errors[0].message,
+      );
       return {
         ok: true,
         data: {
@@ -4814,10 +4829,13 @@ export async function deleteCompanyCustomer(
         message: "Contact deleted but customer deletion failed",
       };
     }
- 
+
     const customerDeletePayload = customerDeleteData.data?.customerDelete;
     if (customerDeletePayload?.userErrors?.length) {
-      console.warn("⚠️ Customer delete userError:", customerDeletePayload.userErrors[0].message);
+      console.warn(
+        "⚠️ Customer delete userError:",
+        customerDeletePayload.userErrors[0].message,
+      );
       return {
         ok: true,
         data: {
@@ -4827,9 +4845,9 @@ export async function deleteCompanyCustomer(
         message: "Contact deleted but customer deletion failed",
       };
     }
- 
+
     console.log("✅ Deleted Shopify customer:", customerId);
- 
+
     return {
       ok: true,
       data: {
@@ -4846,7 +4864,6 @@ export async function deleteCompanyCustomer(
     };
   }
 }
- 
 
 export async function getCompanyContactEmail(
   userId: string,
@@ -4861,7 +4878,7 @@ export async function getCompanyContactEmail(
       shopName,
       accessToken,
     );
- 
+
     const response = await fetch(
       `https://${shopName}/admin/api/2025-01/graphql.json`,
       {
@@ -4880,15 +4897,18 @@ export async function getCompanyContactEmail(
         }),
       },
     );
- 
+
     const result = await response.json();
     console.log(result, "CompanyContact email response");
- 
+
     if (result.errors?.length) {
-      console.error("❌ getCompanyContactEmail error:", result.errors[0].message);
+      console.error(
+        "❌ getCompanyContactEmail error:",
+        result.errors[0].message,
+      );
       return null;
     }
- 
+
     return result.data?.companyContact?.customer?.email ?? null;
   } catch (err) {
     console.error("❌ getCompanyContactEmail exception:", err);
