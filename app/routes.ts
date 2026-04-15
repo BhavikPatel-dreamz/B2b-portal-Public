@@ -1,4 +1,9 @@
-import { type RouteConfig, route, index, prefix } from "@react-router/dev/routes";
+import {
+  type RouteConfig,
+  route,
+  index,
+  prefix,
+} from "@react-router/dev/routes";
 
 export default [
   // Auth routes
@@ -15,9 +20,18 @@ export default [
   route("webhooks/orders/cancelled", "routes/webhooks.orders_cancelled.tsx"),
   route("webhooks/orders/edited", "routes/webhooks.orders_edited.tsx"),
   route("webhooks/orders/updated", "routes/webhooks.orders_updated.tsx"),
-  route("webhooks/draft_orders/create", "routes/webhooks.draft_orders_create.tsx"),
-  route("webhooks/draft_orders/update", "routes/webhooks.draft_orders_update.tsx"),
-  route("webhooks/draft_orders/delete", "routes/webhooks.draft_orders_delete.tsx"),
+  route(
+    "webhooks/draft_orders/create",
+    "routes/webhooks.draft_orders_create.tsx",
+  ),
+  route(
+    "webhooks/draft_orders/update",
+    "routes/webhooks.draft_orders_update.tsx",
+  ),
+  route(
+    "webhooks/draft_orders/delete",
+    "routes/webhooks.draft_orders_delete.tsx",
+  ),
 
   // API Proxy routes (using prefix for folder organization)
   ...prefix("api/proxy", [
@@ -46,12 +60,21 @@ export default [
     route("companies", "routes/app.companies.tsx"),
     route("registrations", "routes/app.registrations.tsx"),
     route("settings", "routes/app.settings.tsx"),
-    route("regitration-form","routes/app.regitration-form.tsx"),
-    route("notifications","routes/app.notification-form.tsx"),
+    route("regitration-form", "routes/app.regitration-form.tsx"),
+    route("notifications", "routes/app.notification-form.tsx"),
     route("companies/:companyId", "routes/app.company-dashboard.tsx"),
-    route("companies/:companyId/orders", "routes/app.companies.$companyId.orders.tsx"),
-    route("companies/:companyId/users", "routes/app.companies.$companyId.users.tsx"),
+    route(
+      "companies/:companyId/orders",
+      "routes/app.companies.$companyId.orders.tsx",
+    ),
+    route(
+      "companies/:companyId/users",
+      "routes/app.companies.$companyId.users.tsx",
+    ),
   ]),
+
+  // App Proxy routes (public, no auth required)
+  route("smartb2b", "routes/smartb2b.tsx"),
 
   // Index route
   index("routes/_index/route.tsx"),
