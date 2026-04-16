@@ -475,13 +475,7 @@ function buildPreviewHtml(subject: string, html: string, logoUrl?: string) {
 </html>`;
 }
 
-const cleanHtml = (html: string) => {
-  return html
-    .replace(/<div>/g, "<p>")
-    .replace(/<\/div>/g, "</p>")
-    .replace(/<br>/g, "<br/>")
-    .trim();
-};
+
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -1215,7 +1209,8 @@ const saveCurrentTemplate = () => {
   // ── Template editor view ──────────────────────────────────────────────────────
   if (selectedTemplate) {
     return (
-      <s-page>
+      
+      <s-page heading="Notification templates">
         <div style={{ background: "#f6f6f7", minHeight: "100vh", padding: "8px 28px 40px" }}>
           <div style={{ maxWidth: 1080, margin: "0 auto" }}>
             <button
@@ -1639,7 +1634,7 @@ const saveCurrentTemplate = () => {
 
   // ── Main notifications list view ─────────────────────────────────────────────
   return (
-    <s-page>
+    <s-page heading="Notification">
       <div style={{ background: "#f6f6f7", minHeight: "100vh", padding: "8px 28px 40px" }}>
         <div style={{ maxWidth: 1080, margin: "0 auto" }}>
           <h1 style={{ margin: "0 0 24px", fontSize: 22, lineHeight: 1.2, fontWeight: 700, color: "#303030" }}>

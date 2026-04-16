@@ -173,7 +173,16 @@ export default function Home() {
       : 0;
 
   return (
-    <div style={{ background: "#f1f2f4", minHeight: "100vh", padding: "12px" }}>
+     <s-page heading="Dashboard Report">
+    <div
+      style={{
+        background: "#f1f2f4",
+        minHeight: "100vh",
+        padding: "12px",
+        fontFamily:
+          'var(--p-font-family-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+      }}
+    >
       <style>{`
         * {
           box-sizing: border-box;
@@ -1206,6 +1215,7 @@ export default function Home() {
         </div>
       </div>
     </div>
+    </s-page>
   );
 }
 

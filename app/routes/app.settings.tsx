@@ -381,12 +381,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let updatedCompanyCount = 0;
 
   if (shouldSyncCompanyCreditLimit) {
+    // ── Step 1: Update company credit limits ────────────────────
     const result = await prisma.companyAccount.updateMany({
       where: { shopId: store.id },
       data: { creditLimit: defaultCompanyCreditLimitRaw },
     });
     updatedCompanyCount = result.count;
-    clearAdminCompaniesCache(session.shop);
+
+    // ── Step 2: Fetch company IDs ────────────────────────────────
+    const companies = await prisma.companyAccount.findMany({
+      where: { shopId: store.id },
+      select: { id: true },
+    });
+
+    const companyIds = companies.map((c) => c.id);
+
+    // ── Step 3: Upsert credit transactions per company ───────────
+    await Promise.all(
+      companyIds.map(async (companyId) => {
+        const existing = await prisma.creditTransaction.findFirst({
+          where: { companyId },
+        });
+
+        if (existing) {
+          return prisma.creditTransaction.update({
+            where: { id: existing.id },
+            data: {
+              creditAmount: defaultCompanyCreditLimitRaw,
+              transactionType: "Credit Added",
+              createdBy: "Admin",
+              previousBalance: existing.newBalance, // ← old "new" becomes "previous"
+              newBalance: defaultCompanyCreditLimitRaw, // ← updated balance
+            },
+          });
+        } else {
+          return prisma.creditTransaction.create({
+            data: {
+              companyId,
+              creditAmount: defaultCompanyCreditLimitRaw,
+              transactionType: "Credit Added",
+              createdBy: "Admin",
+              previousBalance: "0", // ← no previous, so 0
+              newBalance: defaultCompanyCreditLimitRaw, // ← new balance = credit limit
+            },
+          });
+        }
+      }),
+    );
   }
 
   const message = shouldSyncCompanyCreditLimit
@@ -395,12 +436,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }.`
     : defaultCompanyCreditLimit === null
       ? "Settings saved. Default credit limit cleared."
-    : "Settings saved";
+      : "Settings saved";
 
-  return Response.json(
-    { success: true, message } satisfies ActionResponse,
-    { status: 200 },
-  );
+  return Response.json({ success: true, message } satisfies ActionResponse, {
+    status: 200,
+  });
 };
 const ToolbarButton = ({
   onClick,
@@ -543,8 +583,6 @@ const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
   { id: "theme", label: "Theme Setting" },
 ];
 
-
-
 export default function SettingsPage() {
   // Refs
   const editorRef = useRef<HTMLDivElement>(null);
@@ -577,19 +615,19 @@ export default function SettingsPage() {
       }, 2000);
     }
   }, [deleteFetcher.data]);
-  
-  useEffect(() => {
-  const handleEscape = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && showDeleteModal) {
-      setShowDeleteModal(false);
-    }
-  };
 
-  if (showDeleteModal) {
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }
-}, [showDeleteModal]);
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && showDeleteModal) {
+        setShowDeleteModal(false);
+      }
+    };
+
+    if (showDeleteModal) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [showDeleteModal]);
 
   // Update handleInput function
   const handleInput = () => {
@@ -771,7 +809,7 @@ export default function SettingsPage() {
   const { store } = loaderData;
 
   return (
-    <s-page heading="Store settings">
+    <s-page heading="Store setting">
       <s-section heading="Settings">
         {feeprismaack && (
           <div style={{ marginBottom: 12 }}>
@@ -817,7 +855,9 @@ export default function SettingsPage() {
                     style={{
                       padding: "10px 16px",
                       borderRadius: 999,
-                      border: isActive ? "1px solid #005bd3" : "1px solid #d8dadd",
+                      border: isActive
+                        ? "1px solid #005bd3"
+                        : "1px solid #d8dadd",
                       background: isActive ? "#e8f2ff" : "#fff",
                       color: isActive ? "#004299" : "#303030",
                       fontWeight: 600,
@@ -837,40 +877,40 @@ export default function SettingsPage() {
                 gap: 16,
               }}
             >
-                <div style={{ display: "grid", gap: 6 }}>
-                  <label
-                    htmlFor="shopName"
-                    style={{ fontWeight: 600, fontSize: 14 }}
-                  >
-                    Store name
-                  </label>
-                  <input
-                    id="shopName"
-                    name="shopName"
-                    type="text"
-                    defaultValue={store?.shopName}
-                    placeholder="Store name"
-                    style={{
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #c9cccf",
-                      fontSize: 14,
-                      outline: "none",
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = "#005bd3";
-                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = "#c9cccf";
-                      e.target.style.boxShadow = "none";
-                    }}
-                  />
-                  <s-text tone="neutral">
-                    Store name shown across emails or customer views.
-                  </s-text>
-                </div>
-{/* 
+              <div style={{ display: "grid", gap: 6 }}>
+                <label
+                  htmlFor="shopName"
+                  style={{ fontWeight: 600, fontSize: 14 }}
+                >
+                  Store name
+                </label>
+                <input
+                  id="shopName"
+                  name="shopName"
+                  type="text"
+                  defaultValue={store?.shopName}
+                  placeholder="Store name"
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #c9cccf",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "#005bd3";
+                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "#c9cccf";
+                    e.target.style.boxShadow = "none";
+                  }}
+                />
+                <s-text tone="neutral">
+                  Store name shown across emails or customer views.
+                </s-text>
+              </div>
+              {/* 
                 <div style={{ display: "grid", gap: 6 }}>
                   <label
                     htmlFor="submissionEmail"
@@ -905,67 +945,67 @@ export default function SettingsPage() {
                   </s-text>
                 </div> */}
 
-                <div style={{ display: "grid", gap: 6 }}>
-                  <label
-                    htmlFor="contactEmail"
-                    style={{ fontWeight: 600, fontSize: 14 }}
-                  >
-                    Primary contact email
-                  </label>
-                  <input
-                    id="contactEmail"
-                    name="contactEmail"
-                    type="email"
-                    defaultValue={store?.contactEmail}
-                    placeholder="support@yourstore.com"
-                    style={{
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #c9cccf",
-                      fontSize: 14,
-                      outline: "none",
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = "#005bd3";
-                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = "#c9cccf";
-                      e.target.style.boxShadow = "none";
-                    }}
-                  />
-                  <s-text tone="neutral">
-                    Shared contact inbox for customers and notifications.
-                  </s-text>
-                </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                <label
+                  htmlFor="contactEmail"
+                  style={{ fontWeight: 600, fontSize: 14 }}
+                >
+                  Primary contact email
+                </label>
+                <input
+                  id="contactEmail"
+                  name="contactEmail"
+                  type="email"
+                  defaultValue={store?.contactEmail}
+                  placeholder="support@yourstore.com"
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #c9cccf",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "#005bd3";
+                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "#c9cccf";
+                    e.target.style.boxShadow = "none";
+                  }}
+                />
+                <s-text tone="neutral">
+                  Shared contact inbox for customers and notifications.
+                </s-text>
+              </div>
 
-                <div style={{ display: "grid", gap: 6 }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <label
+                  htmlFor="companyWelcomeEmailEnabled"
+                  style={{ fontWeight: 600, fontSize: 14 }}
+                >
+                  Company sync notifications
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    id="companyWelcomeEmailEnabled"
+                    name="companyWelcomeEmailEnabled"
+                    type="checkbox"
+                    defaultChecked={store?.companyWelcomeEmailEnabled}
+                    style={{ width: 18, height: 18, cursor: "pointer" }}
+                  />
                   <label
                     htmlFor="companyWelcomeEmailEnabled"
-                    style={{ fontWeight: 600, fontSize: 14 }}
+                    style={{ cursor: "pointer" }}
                   >
-                    Company sync notifications
+                    Send email notifications when companies are synced
                   </label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input
-                      id="companyWelcomeEmailEnabled"
-                      name="companyWelcomeEmailEnabled"
-                      type="checkbox"
-                      defaultChecked={store?.companyWelcomeEmailEnabled}
-                      style={{ width: 18, height: 18, cursor: "pointer" }}
-                    />
-                    <label
-                      htmlFor="companyWelcomeEmailEnabled"
-                      style={{ cursor: "pointer" }}
-                    >
-                      Send email notifications when companies are synced
-                    </label>
-                  </div>
-                  <s-text tone="neutral">
-                    Enable to receive email notifications whenever companies are
-                    synced from Shopify B2B.
-                  </s-text>
                 </div>
+                <s-text tone="neutral">
+                  Enable to receive email notifications whenever companies are
+                  synced from Shopify B2B.
+                </s-text>
+              </div>
             </div>
 
             <div
@@ -990,57 +1030,57 @@ export default function SettingsPage() {
                 gap: 16,
               }}
             >
-                <div style={{ display: "grid", gap: 6 }}>
-                  <label
-                    htmlFor="defaultCompanyCreditLimit"
-                    style={{ fontWeight: 600, fontSize: 14 }}
-                  >
-                    Default credit limit
-                  </label>
-                  <input
-                    id="defaultCompanyCreditLimit"
-                    name="defaultCompanyCreditLimit"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    defaultValue={store?.defaultCompanyCreditLimit || ""}
-                    placeholder="1000"
-                    style={{
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #c9cccf",
-                      fontSize: 14,
-                      outline: "none",
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = "#005bd3";
-                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = "#c9cccf";
-                      e.target.style.boxShadow = "none";
-                    }}
-                  />
-                  <s-text tone="neutral">
-                    Credit limit prefilled for new companies. Default is 1000.
-                  </s-text>
-                </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                <label
+                  htmlFor="defaultCompanyCreditLimit"
+                  style={{ fontWeight: 600, fontSize: 14 }}
+                >
+                  Default credit limit
+                </label>
+                <input
+                  id="defaultCompanyCreditLimit"
+                  name="defaultCompanyCreditLimit"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={store?.defaultCompanyCreditLimit || ""}
+                  placeholder="1000"
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #c9cccf",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "#005bd3";
+                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "#c9cccf";
+                    e.target.style.boxShadow = "none";
+                  }}
+                />
+                <s-text tone="neutral">
+                  Credit limit prefilled for new companies. Default is 1000.
+                </s-text>
+              </div>
 
-                <div style={{ display: "grid" }}>
-                  <ToggleRow
-                    name="orderConfirmationToMainAccount"
-                    title="Order confirmation notifications to main account"
-                    description="Main contact will receive order confirmation email when order is placed by other users of the company."
-                    defaultChecked={store?.orderConfirmationToMainAccount}
-                    borderBottom
-                  />
-                  <ToggleRow
-                    name="allowQuickOrderForUser"
-                    title="Allow quick order for user"
-                    description="Control whether quick order is available for B2B users."
-                    defaultChecked={store?.allowQuickOrderForUser}
-                  />
-                </div>
+              <div style={{ display: "grid" }}>
+                <ToggleRow
+                  name="orderConfirmationToMainAccount"
+                  title="Order confirmation notifications to main account"
+                  description="Main contact will receive order confirmation email when order is placed by other users of the company."
+                  defaultChecked={store?.orderConfirmationToMainAccount}
+                  borderBottom
+                />
+                <ToggleRow
+                  name="allowQuickOrderForUser"
+                  title="Allow quick order for user"
+                  description="Control whether quick order is available for B2B users."
+                  defaultChecked={store?.allowQuickOrderForUser}
+                />
+              </div>
             </div>
 
             <div
@@ -1107,7 +1147,9 @@ export default function SettingsPage() {
                       ) as HTMLInputElement | null;
                       if (
                         colorInput &&
-                        /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(e.target.value)
+                        /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(
+                          e.target.value,
+                        )
                       ) {
                         colorInput.value = e.target.value;
                       }
@@ -1127,179 +1169,179 @@ export default function SettingsPage() {
               }}
             >
               <div style={{ display: "grid", gap: 6 }}>
-              <label
-                htmlFor="privacyPolicylink"
-                style={{ fontWeight: 600, fontSize: 14 }}
-              >
-                Privacy Policy
-              </label>
-
-              <input
-                id="privacyPolicylink"
-                name="privacyPolicylink"
-                type="url"
-                defaultValue={store?.privacyPolicylink}
-                placeholder="https://www.example.com/privacy"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #c9cccf",
-                  fontSize: 14,
-                  outline: "none",
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = "#005bd3";
-                  e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = "#c9cccf";
-                  e.target.style.boxShadow = "none";
-                }}
-              />
-
-              <s-text tone="neutral">
-                or use custom privacy policy text instead
-              </s-text>
-
-              {/* Privacy Policy Rich Text Editor Toolbar */}
-              <div
-                style={{
-                  display: "flex",
-                  gap: 4,
-                  padding: 8,
-                  background: "#f6f6f7",
-                  border: "1px solid #c9cccf",
-                  borderRadius: "8px 8px 0 0",
-                  flexWrap: "wrap",
-                }}
-              >
-                <ToolbarButton
-                  onClick={() => formatPrivacy("bold")}
-                  title="Bold"
+                <label
+                  htmlFor="privacyPolicylink"
+                  style={{ fontWeight: 600, fontSize: 14 }}
                 >
-                  <strong>B</strong>
-                </ToolbarButton>
-                <ToolbarButton
-                  onClick={() => formatPrivacy("italic")}
-                  title="Italic"
-                >
-                  <em>I</em>
-                </ToolbarButton>
-                <ToolbarButton
-                  onClick={() => formatPrivacy("underline")}
-                  title="Underline"
-                >
-                  <u>U</u>
-                </ToolbarButton>
+                  Privacy Policy
+                </label>
 
-                <div
-                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
-                />
-
-                <ToolbarButton
-                  onClick={() => formatPrivacy("insertUnorderedList")}
-                  title="Bullet List"
-                >
-                  ≡
-                </ToolbarButton>
-                <ToolbarButton
-                  onClick={() => formatPrivacy("insertOrderedList")}
-                  title="Numbered List"
-                >
-                  ≣
-                </ToolbarButton>
-
-                <div
-                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
-                />
-
-                <ToolbarButton
-                  onClick={() => formatPrivacy("justifyLeft")}
-                  title="Align Left"
-                >
-                  ⫴
-                </ToolbarButton>
-                <ToolbarButton
-                  onClick={() => formatPrivacy("justifyCenter")}
-                  title="Align Center"
-                >
-                  ≡
-                </ToolbarButton>
-                <ToolbarButton
-                  onClick={() => formatPrivacy("justifyRight")}
-                  title="Align Right"
-                >
-                  ⫵
-                </ToolbarButton>
-
-                <div
-                  style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
-                />
-
-                <ToolbarButton
-                  onClick={() => formatPrivacy("removeFormat")}
-                  title="Clear Formatting"
-                >
-                  ✕
-                </ToolbarButton>
-              </div>
-
-              {/* Privacy Policy Editor with Placeholder */}
-              <div style={{ position: "relative" }}>
-                {/* Placeholder Text - Only visible when empty */}
-                {!privacyHasContent && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 10,
-                      left: 12,
-                      right: 12,
-                      color: "#8c9196",
-                      fontSize: 14,
-                      pointerEvents: "none",
-                      lineHeight: 1.6,
-                      whiteSpace: "pre-wrap",
-                      userSelect: "none",
-                    }}
-                  >
-                    {PRIVACY_PLACEHOLDER}
-                  </div>
-                )}
-
-                <div
-                  ref={privacyEditorRef}
-                  contentEditable
-                  onInput={handlePrivacyInput}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = "#005bd3";
-                    e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = "#c9cccf";
-                    e.currentTarget.style.boxShadow = "none";
-                  }}
+                <input
+                  id="privacyPolicylink"
+                  name="privacyPolicylink"
+                  type="url"
+                  defaultValue={store?.privacyPolicylink}
+                  placeholder="https://www.example.com/privacy"
                   style={{
                     padding: "10px 12px",
+                    borderRadius: 8,
                     border: "1px solid #c9cccf",
-                    borderTop: "none",
-                    borderRadius: "0 0 8px 8px",
                     fontSize: 14,
                     outline: "none",
-                    minHeight: 120,
-                    maxHeight: 400,
-                    overflowY: "auto",
-                    background: "#fff",
-                    lineHeight: 1.6,
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "#005bd3";
+                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "#c9cccf";
+                    e.target.style.boxShadow = "none";
                   }}
                 />
-              </div>
 
-              <input
-                ref={privacyHiddenInputRef}
-                type="hidden"
-                name="privacyPolicyContent"
-                id="privacyPolicyContent"
-              />
+                <s-text tone="neutral">
+                  or use custom privacy policy text instead
+                </s-text>
+
+                {/* Privacy Policy Rich Text Editor Toolbar */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 4,
+                    padding: 8,
+                    background: "#f6f6f7",
+                    border: "1px solid #c9cccf",
+                    borderRadius: "8px 8px 0 0",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("bold")}
+                    title="Bold"
+                  >
+                    <strong>B</strong>
+                  </ToolbarButton>
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("italic")}
+                    title="Italic"
+                  >
+                    <em>I</em>
+                  </ToolbarButton>
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("underline")}
+                    title="Underline"
+                  >
+                    <u>U</u>
+                  </ToolbarButton>
+
+                  <div
+                    style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                  />
+
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("insertUnorderedList")}
+                    title="Bullet List"
+                  >
+                    ≡
+                  </ToolbarButton>
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("insertOrderedList")}
+                    title="Numbered List"
+                  >
+                    ≣
+                  </ToolbarButton>
+
+                  <div
+                    style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                  />
+
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("justifyLeft")}
+                    title="Align Left"
+                  >
+                    ⫴
+                  </ToolbarButton>
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("justifyCenter")}
+                    title="Align Center"
+                  >
+                    ≡
+                  </ToolbarButton>
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("justifyRight")}
+                    title="Align Right"
+                  >
+                    ⫵
+                  </ToolbarButton>
+
+                  <div
+                    style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
+                  />
+
+                  <ToolbarButton
+                    onClick={() => formatPrivacy("removeFormat")}
+                    title="Clear Formatting"
+                  >
+                    ✕
+                  </ToolbarButton>
+                </div>
+
+                {/* Privacy Policy Editor with Placeholder */}
+                <div style={{ position: "relative" }}>
+                  {/* Placeholder Text - Only visible when empty */}
+                  {!privacyHasContent && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 10,
+                        left: 12,
+                        right: 12,
+                        color: "#8c9196",
+                        fontSize: 14,
+                        pointerEvents: "none",
+                        lineHeight: 1.6,
+                        whiteSpace: "pre-wrap",
+                        userSelect: "none",
+                      }}
+                    >
+                      {PRIVACY_PLACEHOLDER}
+                    </div>
+                  )}
+
+                  <div
+                    ref={privacyEditorRef}
+                    contentEditable
+                    onInput={handlePrivacyInput}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = "#005bd3";
+                      e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = "#c9cccf";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                    style={{
+                      padding: "10px 12px",
+                      border: "1px solid #c9cccf",
+                      borderTop: "none",
+                      borderRadius: "0 0 8px 8px",
+                      fontSize: 14,
+                      outline: "none",
+                      minHeight: 120,
+                      maxHeight: 400,
+                      overflowY: "auto",
+                      background: "#fff",
+                      lineHeight: 1.6,
+                    }}
+                  />
+                </div>
+
+                <input
+                  ref={privacyHiddenInputRef}
+                  type="hidden"
+                  name="privacyPolicyContent"
+                  id="privacyPolicyContent"
+                />
               </div>
             </div>
 

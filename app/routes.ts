@@ -45,6 +45,10 @@ export default [
     route("product-search", "routes/api.proxy/product-search.tsx"),
     route("registration", "routes/api.proxy/registration.tsx"),
     route("usermanagement", "routes/api.proxy/usermanagement.tsx"),
+    route(
+      "credit-transaction-list",
+      "routes/api.proxy/credit-transaction-list.tsx",
+    ),
     route("validate-customer", "routes/api.proxy/validate-customer.tsx"),
     route("wishlist", "routes/api.proxy/wishlist.tsx"),
     route("privacy-policy", "routes/api.proxy/privacy-policy.tsx"),

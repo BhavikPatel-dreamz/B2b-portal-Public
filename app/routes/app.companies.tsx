@@ -10,6 +10,7 @@ import {
   useSearchParams,
   useNavigation,
   useRevalidator,
+  useNavigate,
 } from "react-router";
 import { useEffect, useState, useRef } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -572,11 +573,13 @@ export default function CompaniesPage() {
   } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const revalidator = useRevalidator();
+  const navigate = useNavigate();
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
 
   // Controlled search input
   const [query, setQuery] = useState(searchQuery);
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
+  const actionButtonWidth = 124;
 
   // Auto-refresh effect (30 seconds interval)
   useEffect(() => {
@@ -785,7 +788,12 @@ export default function CompaniesPage() {
 
               <syncFetcher.Form method="post">
                 <input name="intent" value="syncCompanies" hidden readOnly />
-                <s-button type="submit" variant="secondary" loading={isSyncing}>
+                <s-button
+                  type="submit"
+                  variant="secondary"
+                  loading={isSyncing}
+                  style={{ width: actionButtonWidth, display: "inline-block" }}
+                >
                   Company Sync
                 </s-button>
               </syncFetcher.Form>
@@ -986,55 +994,25 @@ export default function CompaniesPage() {
                         <td
                           style={{
                             padding: "8px",
-                            minWidth: 200,
-                            display: "flex",
-                            gap: 8,
-                            alignItems: "center",
+                            width: 148,
+                            verticalAlign: "middle",
                           }}
                         >
-                          <Link
-                            to={companyPath}
-                            discover="render"
-                            prefetch="intent"
-                            onClick={() => setPendingCompanyId(company.id)}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              gap: 8,
-                              minWidth: 92,
-                              padding: "6px 12px",
-                              borderRadius: 6,
-                              border: "1px solid #c9ccd0",
-                              textDecoration: "none",
-                              color: "#202223",
-                              fontSize: 13,
-                              fontWeight: 500,
-                              backgroundColor: "white",
-                              cursor: isCompanyLoading ? "wait" : "pointer",
-                              opacity:
-                                isUpdating || isCompanyLoading ? 0.75 : 1,
-                              pointerEvents: isCompanyLoading
-                                ? "none"
-                                : "auto",
-                            }}
-                          >
-                            {isCompanyLoading && (
-                              <span
-                                aria-hidden="true"
-                                style={{
-                                  display: "inline-block",
-                                  width: 12,
-                                  height: 12,
-                                  border: "2px solid #d9d9d9",
-                                  borderTopColor: "#202223",
-                                  borderRadius: "50%",
-                                  animation: "spin 0.8s linear infinite",
-                                }}
-                              />
-                            )}
-                            {isCompanyLoading ? "Loading..." : "View"}
-                          </Link>
+                          <div style={{ width: actionButtonWidth }}>
+                            <s-button
+                              type="button"
+                              variant="secondary"
+                              loading={isCompanyLoading}
+                              disabled={isCompanyLoading || isUpdating}
+                              onClick={() => {
+                                setPendingCompanyId(company.id);
+                                navigate(companyPath);
+                              }}
+                              style={{ width: "100%", display: "block" }}
+                            >
+                              View
+                            </s-button>
+                          </div>
                         </td>
                       </tr>
                     );

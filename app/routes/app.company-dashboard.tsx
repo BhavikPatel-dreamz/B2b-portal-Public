@@ -824,7 +824,8 @@ interface ActionResponse {
 
 export default function CompanyDashboard() {
   const data = useLoaderData<LoaderData>();
-  const fetcher = useFetcher();
+  const creditFetcher = useFetcher<ActionResponse>();
+  const paymentTermsFetcher = useFetcher<ActionResponse>();
   const syncUsersFetcher = useFetcher<ActionResponse>();
   const syncOrdersFetcher = useFetcher<ActionResponse>();
   const [isEditingCredit, setIsEditingCredit] = useState(false);
@@ -859,6 +860,8 @@ export default function CompanyDashboard() {
   const recalculateFetcher = useFetcher<ActionResponse>();
   // const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
+  const isSavingCredit = creditFetcher.state !== "idle";
+  const isSavingPaymentTerms = paymentTermsFetcher.state !== "idle";
 
   // Update the useEffect to handle fetcher data
   useEffect(() => {
@@ -891,11 +894,13 @@ export default function CompanyDashboard() {
     formData.append("id", data.company.id);
     formData.append("creditLimit", creditLimitValue);
 
-    fetcher.submit(formData, { method: "POST" });
-    setIsEditingCredit(false);
+    creditFetcher.submit(formData, { method: "POST" });
   };
 
   const handleCancelEdit = () => {
+    if (isSavingCredit) {
+      return;
+    }
     setCreditLimitValue(data.creditLimit.toString());
     setIsEditingCredit(false);
   };
@@ -910,11 +915,13 @@ export default function CompanyDashboard() {
     // ✅ FIXED KEY
     formData.append("paymentTerm", selectedPaymentTerms);
 
-    fetcher.submit(formData, { method: "POST" });
-    setIsEditingPaymentTerms(false);
+    paymentTermsFetcher.submit(formData, { method: "POST" });
   };
 
   const handleCancelPaymentTermsEdit = () => {
+    if (isSavingPaymentTerms) {
+      return;
+    }
     setSelectedPaymentTerms(data.company.paymentTermsTemplateId || "");
     setIsEditingPaymentTerms(false);
   };
@@ -1000,10 +1007,26 @@ export default function CompanyDashboard() {
   }, [updateFetcher.state]);
 
   useEffect(() => {
-    if (fetcher.data?.intent === "updatepaymentTerm" && fetcher.data?.success) {
+    if (
+      creditFetcher.state === "idle" &&
+      creditFetcher.data?.intent === "updateCredit" &&
+      creditFetcher.data.success
+    ) {
+      setIsEditingCredit(false);
       window.location.reload();
     }
-  }, [fetcher.data]);
+  }, [creditFetcher.state, creditFetcher.data]);
+
+  useEffect(() => {
+    if (
+      paymentTermsFetcher.state === "idle" &&
+      paymentTermsFetcher.data?.intent === "updatepaymentTerm" &&
+      paymentTermsFetcher.data.success
+    ) {
+      setIsEditingPaymentTerms(false);
+      window.location.reload();
+    }
+  }, [paymentTermsFetcher.state, paymentTermsFetcher.data]);
 
   useEffect(() => {
     if (recalculateFetcher.state === "idle" && recalculateFetcher.data) {
@@ -1067,7 +1090,11 @@ export default function CompanyDashboard() {
             justifyContent: "center",
             zIndex: 1000,
           }}
-          onClick={handleCancelPaymentTermsEdit} // click outside closes
+          onClick={() => {
+            if (!isSavingPaymentTerms) {
+              handleCancelPaymentTermsEdit();
+            }
+          }}
         >
           <section
             onClick={(e) => e.stopPropagation()} // ✅ VERY IMPORTANT
@@ -1094,11 +1121,13 @@ export default function CompanyDashboard() {
               </h2>
               <button
                 onClick={handleCancelPaymentTermsEdit}
+                disabled={isSavingPaymentTerms}
                 style={{
                   background: "none",
                   border: "none",
                   fontSize: 20,
-                  cursor: "pointer",
+                  cursor: isSavingPaymentTerms ? "not-allowed" : "pointer",
+                  opacity: isSavingPaymentTerms ? 0.6 : 1,
                 }}
               >
                 ×
@@ -1116,6 +1145,7 @@ export default function CompanyDashboard() {
                 id="payment-terms-select"
                 value={selectedPaymentTerms}
                 onChange={(e) => setSelectedPaymentTerms(e.target.value)}
+                disabled={isSavingPaymentTerms}
                 style={{
                   width: "100%",
                   padding: "8px 12px",
@@ -1134,21 +1164,44 @@ export default function CompanyDashboard() {
               <div
                 style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
               >
-                <button onClick={handleCancelPaymentTermsEdit}>Cancel</button>
                 <button
-                  onClick={handlePaymentTermsUpdate}
-                  disabled={fetcher.state === "submitting"}
+                  onClick={handleCancelPaymentTermsEdit}
+                  disabled={isSavingPaymentTerms}
                   style={{
-                    backgroundColor: "#008060",
-                    color: "white",
-                    padding: "8px 16px",
-                    borderRadius: 6,
+                    cursor: isSavingPaymentTerms ? "not-allowed" : "pointer",
+                    opacity: isSavingPaymentTerms ? 0.6 : 1,
                   }}
                 >
-                  {fetcher.state === "submitting" ? "Saving..." : "Save"}
+                  Cancel
                 </button>
+                <s-button
+                  type="button"
+                  variant="primary"
+                  onClick={handlePaymentTermsUpdate}
+                  loading={isSavingPaymentTerms}
+                  disabled={isSavingPaymentTerms}
+                  style={{
+                    minWidth: 92,
+                  }}
+                >
+                  Save
+                </s-button>
               </div>
             )}
+
+            {paymentTermsFetcher.data?.intent === "updatepaymentTerm" &&
+              !paymentTermsFetcher.data.success && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    fontSize: 12,
+                    color: "#d72c0d",
+                  }}
+                >
+                  {paymentTermsFetcher.data.errors?.[0] ||
+                    "Failed to update payment terms"}
+                </div>
+              )}
           </section>
         </div>
       )}
@@ -1315,7 +1368,11 @@ export default function CompanyDashboard() {
                       type="number"
                       value={creditLimitValue}
                       onChange={(e) => setCreditLimitValue(e.target.value)}
+                      disabled={isSavingCredit}
                       onKeyDown={(e) => {
+                        if (isSavingCredit) {
+                          return;
+                        }
                         if (e.key === "Enter") {
                           handleCreditUpdate();
                         } else if (e.key === "Escape") {
@@ -1333,41 +1390,21 @@ export default function CompanyDashboard() {
                       step="0.01"
                       min="0"
                     />
-                    <button
+                    <s-button
+                      type="button"
+                      variant="primary"
                       onClick={handleCreditUpdate}
-                      disabled={fetcher.state === "submitting"}
+                      loading={isSavingCredit}
+                      disabled={isSavingCredit}
                       style={{
-                        padding: "4px 8px",
-                        fontSize: 11,
-                        fontWeight: 500,
-                        backgroundColor: "#008060",
-                        color: "white",
-                        border: "none",
-                        borderRadius: 4,
-                        cursor:
-                          fetcher.state === "submitting"
-                            ? "not-allowed"
-                            : "pointer",
-                        opacity: fetcher.state === "submitting" ? 0.6 : 1,
+                        minWidth: 78,
                       }}
                     >
-                      {fetcher.state === "submitting" ? "..." : "✓"}
-                    </button>
+                      Save
+                    </s-button>
                   </div>
-                  {fetcher.data?.intent === "updateCredit" &&
-                    fetcher.data?.success && (
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#008060",
-                          marginTop: 4,
-                        }}
-                      >
-                        ✓ Updated successfully
-                      </div>
-                    )}
-                  {fetcher.data?.intent === "updateCredit" &&
-                    !fetcher.data?.success && (
+                  {creditFetcher.data?.intent === "updateCredit" &&
+                    !creditFetcher.data?.success && (
                       <div
                         style={{
                           fontSize: 11,
@@ -1375,7 +1412,8 @@ export default function CompanyDashboard() {
                           marginTop: 4,
                         }}
                       >
-                        {fetcher.data?.errors?.[0] || "Failed to update"}
+                        {creditFetcher.data?.errors?.[0] ||
+                          "Failed to update"}
                       </div>
                     )}
                 </div>

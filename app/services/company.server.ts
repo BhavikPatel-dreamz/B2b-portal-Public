@@ -2,9 +2,7 @@ import prisma from "../db.server";
 import { Prisma } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { parseCredit } from "../utils/company.server";
-import {
-  getCompanyCustomers,
-} from "app/utils/b2b-customer.server";
+import { getCompanyCustomers } from "app/utils/b2b-customer.server";
 import { syncCompanyCreditMetafields } from "./metafieldSync.server";
 
 export interface CreateCompanyInput {
@@ -63,8 +61,6 @@ async function getStoreDefaultCompanyCreditLimit(shopId: string) {
 
   return store?.defaultCompanyCreditLimit ?? new Prisma.Decimal(0);
 }
-
-
 
 /**
  * Create a new company account
@@ -271,9 +267,7 @@ export async function getCreditTransactionsByCompany(
     skip?: number;
   },
 ) {
-  const where: Prisma.CreditTransactionWhereInput = {
-    companyId,
-  };
+  const where: Prisma.CreditTransactionWhereInput = { companyId };
 
   if (options?.transactionType) {
     where.transactionType = Array.isArray(options.transactionType)
@@ -281,12 +275,41 @@ export async function getCreditTransactionsByCompany(
       : options.transactionType;
   }
 
-  return await prisma.creditTransaction.findMany({
+  const creditTransactions = await prisma.creditTransaction.findMany({
     where,
     orderBy: options?.orderBy || { createdAt: "desc" },
     take: options?.take,
     skip: options?.skip,
   });
+
+  // ── Batch fetch users ────────────────────────────────────────
+  const createdByIds = [
+    ...new Set(creditTransactions.map((tx) => tx.createdBy).filter(Boolean)),
+  ];
+
+  const users = createdByIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: createdByIds as string[] } },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      })
+    : [];
+
+  // ── Map userId → display name ────────────────────────────────
+  const userMap = new Map(
+    users.map((u) => [
+      u.id,
+      // firstName + lastName if available, else fallback to email
+      u.firstName || u.lastName
+        ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim()
+        : u.email,
+    ]),
+  );
+
+  // ── Attach createdByName to each transaction ─────────────────
+  return creditTransactions.map((tx) => ({
+    ...tx,
+    createdByName: tx.createdBy ? (userMap.get(tx.createdBy) ?? null) : null,
+  }));
 }
 
 /**
@@ -391,7 +414,11 @@ export async function getCompanyDashboardData(
     await Promise.all([
       await prisma.b2BOrder.groupBy({
         by: ["shopifyOrderId"],
-        where: { companyId, orderStatus: { notIn: ["cancelled"] } , shopifyOrderId: { startsWith: "gid://shopify/Order/" },},
+        where: {
+          companyId,
+          orderStatus: { notIn: ["cancelled"] },
+          shopifyOrderId: { startsWith: "gid://shopify/Order/" },
+        },
       }),
       await prisma.b2BOrder.groupBy({
         by: ["shopifyOrderId"],
@@ -407,7 +434,7 @@ export async function getCompanyDashboardData(
           companyId,
           paymentStatus: { in: ["pending", "partial"] },
           orderStatus: { notIn: ["cancelled"] },
-          shopifyOrderId: { startsWith: "gid://shopify/Order/" }
+          shopifyOrderId: { startsWith: "gid://shopify/Order/" },
         },
       }),
       await prisma.b2BOrder.groupBy({
@@ -570,7 +597,6 @@ export async function getCompanyOrders(
     where: {
       companyId,
       orderStatus: { not: "cancelled" },
-  
     },
     _max: {
       createdAt: true,
@@ -588,7 +614,7 @@ export async function getCompanyOrders(
     where: {
       companyId,
       orderStatus: { notIn: ["cancelled"] },
-      shopifyOrderId: { startsWith: "gid://shopify/Order/" }
+      shopifyOrderId: { startsWith: "gid://shopify/Order/" },
     },
     distinct: ["shopifyOrderId"],
     orderBy: {
@@ -612,7 +638,8 @@ export async function getCompanyOrders(
 
   const newOrders =
     ordersData?.companyOrders.filter(
-      (shopifyOrder: ShopifyOrder) => !existingShopifyOrderIds.has(shopifyOrder.id),
+      (shopifyOrder: ShopifyOrder) =>
+        !existingShopifyOrderIds.has(shopifyOrder.id),
     ) || [];
 
   const userData = await prisma.user.findMany({
@@ -718,9 +745,49 @@ export async function updateCredit(
       try {
         // Use the comprehensive metafield sync function instead of individual metafield updates
         await syncCompanyCreditMetafields(admin, updatedCompany.id);
-        console.log(`✅ Successfully synced all credit metafields for company ${updatedCompany.id}`);
+        console.log(
+          `✅ Successfully synced all credit metafields for company ${updatedCompany.id}`,
+        );
+        const creditTransactions = await prisma.creditTransaction.findFirst({
+          where: {
+            companyId: updatedCompany.id,
+            transactionType: "Credit Added",
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (creditTransactions) {
+          await prisma.creditTransaction.update({
+            where: { id: creditTransactions.id },
+            data: {
+              previousBalance: creditTransactions.newBalance,
+              newBalance: credit,
+              creditAmount: credit.minus(creditTransactions.newBalance),
+              transactionType: "Credit Added",
+              createdBy: "Admin",
+              companyId: updatedCompany.id,
+              notes: `Credit limit updated to ${credit.toString()} and synced to Shopify`,
+              orderId: null,
+            },
+          });
+        } else {
+          await prisma.creditTransaction.create({
+            data: {
+              previousBalance: new Prisma.Decimal(0),
+              newBalance: credit,
+              creditAmount: credit,
+              transactionType: "Credit Added",
+              createdBy: "Admin",
+              companyId: updatedCompany.id,
+              notes: `Credit limit updated to ${credit.toString()} and synced to Shopify`,
+              orderId: null,
+            },
+          });
+        }
       } catch (shopifyError) {
-        console.error("Failed to sync credit metafields to Shopify:", shopifyError);
+        console.error(
+          "Failed to sync credit metafields to Shopify:",
+          shopifyError,
+        );
         // Continue execution - local update succeeded
       }
     }
