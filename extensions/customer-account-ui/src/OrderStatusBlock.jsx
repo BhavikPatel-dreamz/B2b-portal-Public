@@ -542,8 +542,7 @@ function Extension() {
   );
 
   // =============================================
-  // ✅ AUTO WIDTH DETECTION
-  // Returns percentage number: 100, 50, or 25
+  // AUTO WIDTH DETECTION
   // =============================================
   const getFieldWidthPercent = (field) => {
     if (field?.type === "group") return 100;
@@ -645,10 +644,7 @@ function Extension() {
   };
 
   // =============================================
-  // ✅ RENDER ROW
-  // Single field → plain s-box (full width)
-  // Multi field  → s-stack inline with inlineSize per box
-  //                NO s-grid, NO @container — avoids all syntax issues
+  // RENDER ROW
   // =============================================
   const renderRow = (row, rowIndex) => {
     const key = `row-${rowIndex}`;
@@ -735,9 +731,10 @@ function Extension() {
 
     switch (field.type) {
       case "select":
-        return (
+        return renderFieldWithMessage(
+          field,
           <s-select
-            label={field.label}
+            label={getFieldLabel(field)}
             value={formData[field.key] ?? ""}
             onChange={(val) => handleChange(field.key, val)}
           >
@@ -746,89 +743,39 @@ function Extension() {
                 {opt.label}
               </s-option>
             ))}
-          </s-select>
+          </s-select>,
         );
 
       case "checkbox":
-        return (
+        return renderFieldWithMessage(
+          field,
           <s-checkbox
             label={field.label}
             checked={formData[field.key] ?? false}
             onChange={(val) => handleChange(field.key, val)}
-          />
+          />,
         );
 
       case "textarea":
-        return (
+        return renderFieldWithMessage(
+          field,
           <s-text-area
             label={field.label}
             value={formData[field.key] ?? ""}
             onChange={(val) => handleChange(field.key, val)}
-          />
+          />,
         );
 
-      // case "country": {
-      //   const countryOptions = field.options?.length
-      //     ? field.options
-      //     : getCountryOptions();
-      //   const selectedCountry =
-      //     resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
-      //     "IN";
-      //   return (
-      //     <s-select
-      //       label={field.label}
-      //       value={selectedCountry}
-      //       onChange={(val) => {
-      //         const nextCountry =
-      //           resolveOptionValue(countryOptions, getInputValue(val)) ||
-      //           String(getInputValue(val) ?? "");
-      //         const previousCountry =
-      //           resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
-      //           "IN";
-
-      //         handleChange(field.key, nextCountry);
-      //         const stateKey = findPairedKey(field.key, "country", "state");
-      //         if (stateKey) {
-      //           const firstState = nextCountry
-      //             ? (getProvinceOptions(nextCountry)?.[0]?.value ?? "")
-      //             : "";
-      //           handleChange(stateKey, firstState);
-      //         }
-      //         const phoneKey = findPairedKey(field.key, "country", "phone");
-      //         if (phoneKey) {
-      //           const { dialCode: newDialCode } =
-      //             getPhoneMetaForCountry(nextCountry);
-      //           const currentPhone = String(formData[phoneKey] ?? "").trim();
-
-      //           // Keep user-typed digits, replace only the dial code prefix
-      //           const digits = currentPhone.replace(/^\+\d{1,4}/, "").trim();
-      //           handleChange(
-      //             phoneKey,
-      //             digits ? `${newDialCode}${digits}` : newDialCode,
-      //           );
-      //         }
-      //         if (previousCountry !== nextCountry) {
-      //           clearPairedZipField(field.key);
-      //         }
-      //       }}
-      //     >
-      //       <s-option value="">Select a country</s-option>
-      //       {countryOptions.map((opt) => (
-      //         <s-option key={opt.value} value={opt.value}>
-      //           {opt.label}
-      //         </s-option>
-      //       ))}
-      //     </s-select>
-      //   );
-      // }
       case "country": {
         const countryOptions = field.options?.length
           ? field.options
           : getCountryOptions();
         const selectedCountry =
-          resolveOptionValue(countryOptions, formData[field.key] ?? "IN") || "IN";
+          resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
+          "IN";
 
-        return (
+        return renderFieldWithMessage(
+          field,
           <s-select
             label={field.label}
             value={selectedCountry}
@@ -837,14 +784,14 @@ function Extension() {
                 resolveOptionValue(countryOptions, getInputValue(val)) ||
                 String(getInputValue(val) ?? "");
               const previousCountry =
-                resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
-                "IN";
+                resolveOptionValue(
+                  countryOptions,
+                  formData[field.key] ?? "IN",
+                ) || "IN";
 
-              // ✅ Single batched state update — prevents race condition / glitch
               setFormData((prev) => {
                 const updated = { ...prev, [field.key]: nextCountry };
 
-                // Reset paired state/province field
                 const stateKey =
                   findPairedKey(field.key, "country", "state") ||
                   findPairedKey(field.key, "country", "province");
@@ -853,7 +800,6 @@ function Extension() {
                   updated[stateKey] = provinces?.[0]?.value ?? "";
                 }
 
-                // Reset paired phone dial code, preserving user-typed digits
                 const phoneKey = findPairedKey(field.key, "country", "phone");
                 if (phoneKey) {
                   const { dialCode: newDialCode } =
@@ -865,7 +811,6 @@ function Extension() {
                     : newDialCode;
                 }
 
-                // Clear zip/postal if country actually changed
                 if (previousCountry !== nextCountry) {
                   const zipKey =
                     findPairedKey(field.key, "country", "zip") ||
@@ -873,7 +818,6 @@ function Extension() {
                   if (zipKey) updated[zipKey] = "";
                 }
 
-                // If billing same as shipping — mirror all bill* fields from ship*
                 if (prev["billSameAsShip"] === true) {
                   Object.keys(updated).forEach((k) => {
                     if (k.startsWith("ship")) {
@@ -886,7 +830,6 @@ function Extension() {
                 return updated;
               });
 
-              // ✅ Clear field errors for country + its dependent fields in one go
               setFieldErrors((prev) => {
                 const next = { ...prev };
                 delete next[field.key];
@@ -914,7 +857,7 @@ function Extension() {
                 {opt.label}
               </s-option>
             ))}
-          </s-select>
+          </s-select>,
         );
       }
 
@@ -922,16 +865,20 @@ function Extension() {
         const countryKey = findPairedKey(field.key, "state", "country");
         const countryOptions = getCountryOptions();
         const selectedCountry = countryKey
-          ? (resolveOptionValue(countryOptions, formData[countryKey] ?? "IN") ||
-            "IN")
+          ? resolveOptionValue(countryOptions, formData[countryKey] ?? "IN") ||
+            "IN"
           : "IN";
         const stateOptions = field.options?.length
           ? field.options
           : getProvinceOptions(selectedCountry);
         const currentState = String(formData[field.key] ?? "");
         const resolvedState = resolveOptionValue(stateOptions, currentState);
-        const selectedState = resolvedState || (currentState === "" ? (stateOptions[0]?.value ?? "") : "");
-        return (
+        const selectedState =
+          resolvedState ||
+          (currentState === "" ? (stateOptions[0]?.value ?? "") : "");
+
+        return renderFieldWithMessage(
+          field,
           <s-select
             label={field.label}
             value={selectedState}
@@ -955,11 +902,9 @@ function Extension() {
                 </s-option>
               ))
             ) : (
-              <s-option value="">
-                — No states available —
-              </s-option>
+              <s-option value="">— No states available —</s-option>
             )}
-          </s-select>
+          </s-select>,
         );
       }
 
@@ -974,7 +919,8 @@ function Extension() {
           dialCode,
         );
 
-        return (
+        return renderFieldWithMessage(
+          field,
           <s-stack
             key={`phone-${selectedCountry}`}
             direction="block"
@@ -986,7 +932,7 @@ function Extension() {
               </s-box>
               <s-box inlineSize="60%">
                 <s-text-field
-                  label="Phone number"
+                  label={getFieldLabel(field, "Phone number")}
                   value={currentDigits}
                   type="tel"
                   inputMode="numeric"
@@ -1003,21 +949,24 @@ function Extension() {
                 />
               </s-box>
             </s-stack>
-          </s-stack>
+          </s-stack>,
         );
       }
 
+      // ✅ FIX 2: default case now uses renderFieldWithMessage
       default:
-        return (
+        return renderFieldWithMessage(
+          field,
           <s-text-field
-            label={field.label}
+            label={getFieldLabel(field)}
             value={formData[field.key] ?? ""}
             onChange={(val) => handleChange(field.key, val)}
-          />
+          />,
         );
     }
   };
 
+  // ✅ FIX 3: renderGroup no longer references undefined `field`
   const renderGroup = (group) => {
     const colCount = group.fields.length || 2;
     const wideCols = Array(colCount).fill("fill").join(" ");
@@ -1056,16 +1005,28 @@ function Extension() {
       setErrorMessage("Shop domain not loaded yet.");
       return;
     }
+
+    // ✅ FIX 4: Validate before submit — shows inline errors immediately
+    if (!validateForm()) return;
+
     setLoading(true);
     setErrorMessage("");
+
     try {
       const form = new FormData();
       Object.entries(formData).forEach(([key, value]) => {
-        form.append(
-          key,
-          typeof value === "boolean" ? (value ? "true" : "false") : value,
-        );
+        let finalValue =
+          typeof value === "boolean" ? (value ? "true" : "false") : value;
+
+        // ✅ FIX 5: Sanitize phone — remove space between dial code and digits
+        // "+91 9876543210" → "+919876543210"
+        if (typeof finalValue === "string" && /^\+\d+\s/.test(finalValue)) {
+          finalValue = finalValue.replace(/\s+/g, "");
+        }
+
+        form.append(key, finalValue);
       });
+
       if (customerId) form.append("shopifyCustomerId", customerId);
 
       const res = await fetch(
@@ -1074,6 +1035,7 @@ function Extension() {
       );
       const text = await res.text();
       console.log(text, "text from registration API");
+
       let result;
       try {
         result = JSON.parse(text);
@@ -1081,15 +1043,30 @@ function Extension() {
       } catch {
         throw new Error("Invalid JSON from server");
       }
-      if (!res.ok) {
-        setErrorMessage(result?.error || "Request failed");
-        return;
-      }
+
       if (result.success) {
         setSubmitted(true);
         return;
       }
-      setErrorMessage(result.error || "Something went wrong");
+
+      // ✅ FIX 6: Map server field errors to inline errors below the exact input
+      const rawError = result?.error || "Something went wrong";
+
+      // Server returns "fieldKey: Some message" — parse and match to form field
+      const match = rawError.match(/^([a-zA-Z_]+):\s*(.+)$/);
+      if (match) {
+        const [, serverKey, serverMsg] = match;
+        const matchedKey = Object.keys(formData).find((k) =>
+          k.toLowerCase().includes(serverKey.toLowerCase()),
+        );
+        if (matchedKey) {
+          setFieldErrors((prev) => ({ ...prev, [matchedKey]: serverMsg }));
+          return; // inline error shown — no top banner needed
+        }
+      }
+
+      // Fallback: no matching field found → show top banner
+      setErrorMessage(rawError);
     } catch (err) {
       console.error("Submit ERROR:", err.message);
       setErrorMessage(err.message || "Network error");
@@ -1233,7 +1210,7 @@ function Extension() {
         );
       })}
 
-      {/* ── Submit button ── */}
+    
 
       {/* ── Submit button (only shown when fields exist) ── */}
       {accountCheckComplete && fields.length === 0 ? (

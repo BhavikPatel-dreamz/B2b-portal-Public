@@ -352,58 +352,63 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       // ── EDIT ────────────────────────────────────────────────
       case "edit": {
-        const {
-          locationId, name, externalId, country, firstName, lastName,
-          address1, address2, city, province, zip, phone,
-          recipient, billingSameAsShipping,
-        } = body;
+  const {
+    locationId, name, externalId, country, firstName, lastName,
+    address1, address2, city, province, zip, phone,
+    recipient, billingSameAsShipping, isDefault, // ✅ Added
+  } = body;
 
-        if (!locationId) {
-          return Response.json(
-            { error: "Location ID is required for editing" },
-            { status: 400 },
-          );
-        }
+  if (!locationId) {
+    return Response.json(
+      { error: "Location ID is required for editing" },
+      { status: 400 },
+    );
+  }
 
-        // Treat empty string as null (clear the field), undefined as "don't update"
-        const phoneValue =
-          phone === undefined ? undefined : phone === "" ? null : phone;
-        const externalIdValue =
-          externalId === undefined ? undefined : externalId === "" ? null : externalId;
-        const recipientValue =
-          recipient === undefined ? undefined : recipient === "" ? null : recipient;
+  // Treat empty string as null (clear the field), undefined as "don't update"
+  const phoneValue =
+    phone === undefined ? undefined : phone === "" ? null : phone;
+  const externalIdValue =
+    externalId === undefined ? undefined : externalId === "" ? null : externalId;
+  const recipientValue =
+    recipient === undefined ? undefined : recipient === "" ? null : recipient;
 
-        const result = await updateCompanyLocation(
-          locationId, shop, store.accessToken,
-          {
-            name:                 name || undefined,
-            externalId:           externalIdValue,
-            country:              country || undefined,
-            firstName:            firstName?.trim() || undefined,
-            lastName:             lastName?.trim() || undefined,
-            address1:             address1 || undefined,
-            address2:             address2 || undefined,
-            city:                 city || undefined,
-            province:             province || undefined,
-            zip:                  zip || undefined,
-            phone:                phoneValue,
-            recipient:            recipientValue,
-            billingSameAsShipping: billingSameAsShipping || undefined,
-          },
-        );
+  // ✅ Convert isDefault to boolean or undefined (don't update if not provided)
+  const isDefaultValue =
+    isDefault === undefined ? undefined : isDefault === true || isDefault === "true";
 
-        if (result.error) {
-          return Response.json(
-            { error: result.error, userErrors: result.userErrors },
-            { status: 400 },
-          );
-        }
+  const result = await updateCompanyLocation(
+    locationId, shop, store.accessToken,
+    {
+      name:                  name || undefined,
+      externalId:            externalIdValue,
+      country:               country || undefined,
+      firstName:             firstName?.trim() || undefined,
+      lastName:              lastName?.trim() || undefined,
+      address1:              address1 || undefined,
+      address2:              address2 || undefined,
+      city:                  city || undefined,
+      province:              province || undefined,
+      zip:                   zip || undefined,
+      phone:                 phoneValue,
+      recipient:             recipientValue,
+      billingSameAsShipping: billingSameAsShipping || undefined,
+      isDefault:             isDefaultValue, // ✅ Added
+    },
+  );
 
-        // ✅ Bust cache so next GET returns updated data
-        clearCompanyLocationsCache(shop, companyId);
+  if (result.error) {
+    return Response.json(
+      { error: result.error, userErrors: result.userErrors },
+      { status: 400 },
+    );
+  }
 
-        return Response.json({ success: true });
-      }
+  // ✅ Bust cache so next GET returns updated data
+  clearCompanyLocationsCache(shop, companyId);
+
+  return Response.json({ success: true });
+}
 
       // ── DELETE ──────────────────────────────────────────────
       case "delete": {

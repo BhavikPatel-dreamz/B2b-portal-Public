@@ -18,6 +18,8 @@ type LoaderData = {
   totalCreditUsed?: number;
   availableCredit?: number;
   pendingCreditAmount?: number;
+  currentMonthB2BOrders?: number;
+  currentMonthRevenue?: number;
 };
 
 // ============================================================
@@ -73,6 +75,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.log("🐢 Dashboard stats cache MISS → querying DB");
 
     // ── SLOW PATH — run all queries in parallel ───────────────
+    // Calculate current month start
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    
     const [
       totalOrders,
       totalCompanies,
@@ -82,6 +88,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       totalUsers,
       creditStats,
       usedCreditStats,
+      currentMonthB2BOrdersCount,
+      currentMonthRevenueSum,
     ] = await Promise.all([
       prisma.b2BOrder.groupBy({
         by: ["shopifyOrderId"],
@@ -109,6 +117,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         },
         _sum: { remainingBalance: true },
       }),
+      prisma.b2BOrder.count({
+        where: {
+          shopId: store.id,
+          createdAt: { gte: monthStart },
+          orderStatus: { not: "cancelled" },
+        },
+      }),
+      prisma.b2BOrder.aggregate({
+        _sum: { orderTotal: true },
+        where: {
+          shopId: store.id,
+          createdAt: { gte: monthStart },
+          orderStatus: { not: "cancelled" },
+        },
+      }),
     ]);
 
     const totalCreditAllowed = Number(creditStats._sum.creditLimit || 0);
@@ -125,6 +148,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       totalCreditUsed,
       availableCredit:   totalCreditAllowed - totalCreditUsed,
       pendingCreditAmount: 0,
+      currentMonthB2BOrders: currentMonthB2BOrdersCount,
+      currentMonthRevenue: Number(currentMonthRevenueSum._sum.orderTotal || 0),
     };
 
     // ✅ Store in cache
@@ -1211,6 +1236,56 @@ export default function Home() {
                 </div>
               </div>
             </div>
+
+            {/* New Action 3: B2B Order (Current Month Data) */}
+            <Link
+              to="/app/companies"
+              style={{
+                textDecoration: "none",
+                color: "inherit",
+                flex: "1",
+                minWidth: "280px",
+              }}
+            >
+              <div className="action-item">
+                <div className="action-header">
+                  <div className="action-icon">📦</div>
+                  <div className="action-content">
+                    <h3 className="action-title">B2B Order (Current Month Data)</h3>
+                    <p className="action-description">{data.currentMonthB2BOrders || 0} orders this month</p>
+                  </div>
+                </div>
+                <div className="action-footer">
+                  <span className="action-meta-text">Current month orders</span>
+                  <button className="action-button">View Orders →</button>
+                </div>
+              </div>
+            </Link>
+
+            {/* New Action 4: Revenue from B2B companies (current month) */}
+            <Link
+              to="/app/companies"
+              style={{
+                textDecoration: "none",
+                color: "inherit",
+                flex: "1",
+                minWidth: "280px",
+              }}
+            >
+              <div className="action-item">
+                <div className="action-header">
+                  <div className="action-icon">💰</div>
+                  <div className="action-content">
+                    <h3 className="action-title">Revenue from B2B companies (current month)</h3>
+                    <p className="action-description">${(data.currentMonthRevenue || 0).toLocaleString()} revenue</p>
+                  </div>
+                </div>
+                <div className="action-footer">
+                  <span className="action-meta-text">B2B revenue summary</span>
+                  <button className="action-button">View Revenue →</button>
+                </div>
+              </div>
+            </Link>
           </div>
         </div>
       </div>

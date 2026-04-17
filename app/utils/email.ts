@@ -229,7 +229,7 @@ export async function sendRegistrationEmailForCustomer(
   const shopDomain = storeData?.shopDomain || "store.com";
   const storefrontUrl = shopDomain.startsWith("http")
     ? shopDomain
-    : `https://${shopDomain}`;
+    : `https://${shopDomain}/apps/b2b-portal-public/smartb2b`;
 
   const html = convertToHtmlEmail(
     processedTemplate,
@@ -466,7 +466,7 @@ const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVari
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
   const storefrontUrl = shopDomain.startsWith("http")
     ? shopDomain
-    : `https://${shopDomain}`;
+    : `https://${shopDomain}/apps/b2b-portal-public/smartb2b`;
   const html = convertToHtmlEmail(
     processedTemplate,
     shopDomain,
@@ -659,7 +659,7 @@ export async function sendCustomerRegistrationRejectdEmail({
 
   if (
     emailTemplateConfig &&
-    emailTemplateConfig.customerRegistrationRejectd === false
+    emailTemplateConfig.customerRegistrationRejected === false
   ) {
     return { success: true, skipped: true } as RegistrationEmailResult;
   }
@@ -689,7 +689,7 @@ const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVari
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
   const storefrontUrl = shopDomain.startsWith("http")
     ? shopDomain
-    : `https://${shopDomain}`;
+    : `https://${shopDomain}/apps/b2b-portal-public/smartb2b`;
   const html = convertToHtmlEmail(
     processedTemplate,
     shopDomain,

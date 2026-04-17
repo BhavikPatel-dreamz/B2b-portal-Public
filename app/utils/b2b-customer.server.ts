@@ -1669,7 +1669,7 @@ export async function getCustomerCompanyInfo(
       // Credit
       CreditLimit: creditLimitNum,
       usedCredit: usedCreditNum,
-      pendingCredit: creditInfo?.availableCredit ?? new Decimal(0).toNumber(),
+      pendingCredit: creditInfo?.availableCredit,
       creditUsagePercentage,
 
       // ✅ New stats
@@ -3040,6 +3040,17 @@ export async function getCompanyLocations(
             name
             phone
             externalId
+            buyerExperienceConfiguration {
+              checkoutToDraft
+              payNowOnly
+              editableShippingAddress
+              paymentTermsTemplate {
+                id
+                name
+                paymentTermsType
+                dueInDays
+              }
+            }
             shippingAddress {
               address1
               address2
@@ -3060,7 +3071,7 @@ export async function getCompanyLocations(
               firstName
               lastName
             }
-            metafields(first: 10, namespace: "custom") {
+            metafields(first: 20, namespace: "custom") {
               edges {
                 node {
                   key
@@ -3171,7 +3182,19 @@ export async function getCompanyLocations(
       },
     );
 
-    // Get locations with customer count and recipient from metafields
+    // Helper to extract a metafield value by key
+    const getMetafieldValue = (
+      metafields: { edges: Array<{ node: { key: string; value: string } }> },
+      key: string,
+    ): string => {
+      const found = metafields?.edges?.find(
+        (edge: { node: { key: string; value: string } }) =>
+          edge.node.key === key,
+      );
+      return found?.node.value ?? "";
+    };
+
+    // Get locations with customer count, recipient, and isDefault from metafields
     const locations = company.locations.edges.map(
       (edge: {
         node: {
@@ -3179,6 +3202,17 @@ export async function getCompanyLocations(
           name: string;
           phone: string;
           externalId: string;
+          buyerExperienceConfiguration: {
+            checkoutToDraft: boolean;
+            payNowOnly: boolean;
+            editableShippingAddress: boolean;
+            paymentTermsTemplate: {
+              id: string;
+              name: string;
+              paymentTermsType: string;
+              dueInDays: number;
+            } | null;
+          } | null;
           shippingAddress: {
             address1: string;
             address2: string;
@@ -3217,17 +3251,10 @@ export async function getCompanyLocations(
 
         const rootPhone = location.phone || "";
 
-        // Extract recipient from metafields
-        let recipient = "";
-        if (location.metafields?.edges) {
-          const recipientMetafield = location.metafields.edges.find(
-            (edge: { node: { key: string; value: string } }) =>
-              edge.node.key === "recipient",
-          );
-          if (recipientMetafield) {
-            recipient = recipientMetafield.node.value;
-          }
-        }
+        // Extract metafields
+        const recipient = getMetafieldValue(location.metafields, "recipient");
+        const isDefault =
+          getMetafieldValue(location.metafields, "is_default") === "true";
 
         const shippingAddr = location.shippingAddress;
         const billingAddr = location.billingAddress;
@@ -3247,6 +3274,9 @@ export async function getCompanyLocations(
           id: location.id,
           name: location.name,
           externalId: location.externalId,
+          isDefault,
+          buyerExperienceConfiguration:
+            location.buyerExperienceConfiguration ?? null,
           shippingAddress: {
             address1: location.shippingAddress?.address1 || "",
             address2: location.shippingAddress?.address2 || "",
@@ -3257,7 +3287,7 @@ export async function getCompanyLocations(
             firstName: location.shippingAddress?.firstName || "",
             lastName: location.shippingAddress?.lastName || "",
             phone: rootPhone,
-            recipient: recipient,
+            recipient,
           },
           billingAddress: {
             address1: location.billingAddress?.address1 || "",
@@ -3269,7 +3299,7 @@ export async function getCompanyLocations(
             firstName: location.billingAddress?.firstName || "",
             lastName: location.billingAddress?.lastName || "",
             phone: rootPhone,
-            recipient: recipient,
+            recipient,
           },
           billingSameAsShipping,
           assignedUsers: customerInfo.count,
@@ -3402,197 +3432,7 @@ export async function getCompanyLocationById(
   }
 }
 
-// export async function updateCompanyCustomer(
-//   contactId: string,
-//   companyId: string,
-//   shopName: string,
-//   accessToken: string,
-//   customerData: {
-//     firstName?: string;
-//     lastName?: string;
-//     email?: string;
-//     locationRoles?: Array<{
-//       roleId?: string;
-//       roleName?: string;
-//       locationId?: string;
-//       locationName?: string;
-//     }>;
-//     credit?: number;
-//   },
-// ) {
-//   try {
-//     const results: Record<string, unknown> = {
-//       success: true,
-//       updates: {},
-//       warnings: [],
-//     };
 
-//     const makeGraphQLRequest = async (
-//       query: string,
-//       variables: Record<string, unknown>,
-//     ) => {
-//       const response = await fetch(
-//         `https://${shopName}/admin/api/2025-01/graphql.json`,
-//         {
-//           method: "POST",
-//           headers: {
-//             "Content-Type": "application/json",
-//             "X-Shopify-Access-Token": accessToken,
-//           },
-//           body: JSON.stringify({ query, variables }),
-//         },
-//       );
-//       return await response.json();
-//     };
-
-//     // ---- Get Customer ID From Contact ----
-//     const contactGid = contactId.startsWith("gid://")
-//       ? contactId
-//       : `gid://shopify/CompanyContact/${contactId}`;
-
-//     console.log("📝 Contact ID:", contactId);
-//     console.log("📝 Generated contactGid:", contactGid);
-
-//     const getCustomerResult = await makeGraphQLRequest(
-//       `query getCompanyContact($id: ID!) {
-//         companyContact(id: $id) {
-//           customer {
-//             id
-//           }
-//           roleAssignments(first: 50) {
-//             edges {
-//               node {
-//                 id
-//                 role {
-//                   id
-//                   name
-//                 }
-//                 company {
-//                   id
-//                 }
-//                 companyLocation {
-//                   id
-//                   name
-//                 }
-//               }
-//             }
-//           }
-//         }
-//       }`,
-//       { id: contactGid },
-//     );
-
-//     console.log("📝 Customer query result:", getCustomerResult);
-
-//     if (getCustomerResult.errors?.length) {
-//       return { success: false, error: getCustomerResult.errors[0].message };
-//     }
-
-//     const customerId = getCustomerResult.data?.companyContact?.customer?.id;
-//     if (!customerId) {
-//       return { success: false, error: "Customer ID not found for contact" };
-//     }
-
-//     // Get existing role assignments with full details
-//     const existingRoleAssignments =
-//       getCustomerResult.data?.companyContact?.roleAssignments?.edges?.map(
-//         (edge: {
-//           node: {
-//             id: string;
-//             role: { id: string; name: string };
-//             companyLocation: { id: string; name: string };
-//           };
-//         }) => ({
-//           id: edge.node.id,
-//           roleId: edge.node.role?.id,
-//           roleName: edge.node.role?.name,
-//           locationId: edge.node.companyLocation?.id,
-//           locationName: edge.node.companyLocation?.name,
-//         }),
-//       ) || [];
-
-//     // ---- Update Customer Info ----
-//     if (
-//       customerData.email ||
-//       customerData.firstName ||
-//       customerData.lastName ||
-//       customerData.credit !== undefined
-//     ) {
-//       const payload: Record<string, unknown> = { id: customerId };
-
-//       if (customerData.email) payload.email = customerData.email;
-//       if (customerData.firstName) payload.firstName = customerData.firstName;
-//       if (customerData.lastName) payload.lastName = customerData.lastName;
-
-//       if (customerData.credit !== undefined) {
-//         payload.metafields = [
-//           {
-//             namespace: "custom",
-//             key: "credit",
-//             value: customerData.credit.toString(),
-//             type: "number_integer",
-//           },
-//         ];
-//       }
-
-//       console.log("📝 Customer update payload:", payload);
-
-//       const updateResponse = await makeGraphQLRequest(
-//         `mutation customerUpdate($input: CustomerInput!) {
-//           customerUpdate(input: $input) {
-//             userErrors {
-//               field
-//               message
-//             }
-//             customer {
-//               id
-//             }
-//           }
-//         }`,
-//         { input: payload },
-//       );
-
-//       console.log("📝 Customer update response:", updateResponse);
-
-//       if (updateResponse.data?.customerUpdate?.userErrors?.length) {
-//         return {
-//           success: false,
-//           error: updateResponse.data.customerUpdate.userErrors[0].message,
-//         };
-//       }
-
-//       results.updates.customerInfo = "updated";
-//     }
-
-//     // ---- Update Role Assignments ----
-//     if (customerData.locationRoles !== undefined) {
-//       console.log("🎯 New locationRoles:", customerData.locationRoles);
-
-//       const roleUpdateResult = await smartRoleUpdate(
-//         contactGid,
-//         companyId,
-//         existingRoleAssignments,
-//         customerData.locationRoles,
-//         shopName,
-//         accessToken,
-//       );
-
-//       if (!roleUpdateResult.success) {
-//         results.warnings.push(roleUpdateResult.error || "Role update failed");
-//       }
-
-//       results.updates.roleAndLocation = roleUpdateResult.message || "updated";
-//     }
-//     console.log(results, "445454");
-//     return results;
-//   } catch (error) {
-//     console.error("❌ Error updating customer:", error);
-//     return {
-//       success: false,
-//       error: error instanceof Error ? error.message : "Unknown error",
-//     };
-//   }
-// }
 
 export async function updateCompanyCustomer(
   contactId: string,
@@ -5706,6 +5546,7 @@ export async function updateCompanyLocation(
     recipient?: string | null;
     note?: string;
     billingSameAsShipping?: boolean;
+    isDefault?: boolean; // ✅ Added
   },
 ) {
   try {
@@ -5964,8 +5805,36 @@ export async function updateCompanyLocation(
       }
     }
 
-    // Step 3: Update recipient metafield if provided
+    // Step 3: Update recipient and/or isDefault metafields if provided
+    const metafieldsToUpdate: {
+      ownerId: string;
+      namespace: string;
+      key: string;
+      value: string;
+      type: string;
+    }[] = [];
+
     if (locationData.recipient !== undefined) {
+      metafieldsToUpdate.push({
+        ownerId: locationId,
+        namespace: "custom",
+        key: "recipient",
+        value: locationData.recipient === null ? "" : locationData.recipient,
+        type: "single_line_text_field",
+      });
+    }
+
+    if (locationData.isDefault !== undefined) {
+      metafieldsToUpdate.push({
+        ownerId: locationId,
+        namespace: "custom",
+        key: "is_default",
+        value: locationData.isDefault ? "true" : "false",
+        type: "single_line_text_field",
+      });
+    }
+
+    if (metafieldsToUpdate.length > 0) {
       const metafieldMutation = `
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
@@ -5982,10 +5851,6 @@ export async function updateCompanyLocation(
         }
       `;
 
-      // If recipient is null or empty string, we want to clear it (set to empty string)
-      const recipientValue =
-        locationData.recipient === null ? "" : locationData.recipient;
-
       const metafieldResponse = await fetch(
         `https://${shopName}/admin/api/2025-01/graphql.json`,
         {
@@ -5996,39 +5861,29 @@ export async function updateCompanyLocation(
           },
           body: JSON.stringify({
             query: metafieldMutation,
-            variables: {
-              metafields: [
-                {
-                  ownerId: locationId,
-                  namespace: "custom",
-                  key: "recipient",
-                  value: recipientValue,
-                  type: "single_line_text_field",
-                },
-              ],
-            },
+            variables: { metafields: metafieldsToUpdate },
           }),
         },
       );
 
       const metafieldResult = await metafieldResponse.json();
       console.log(
-        "📦 Recipient metafield update result:",
+        "📦 Metafields update result:",
         JSON.stringify(metafieldResult, null, 2),
       );
 
       if (metafieldResult.errors) {
         console.warn(
-          "⚠️ Failed to update recipient metafield:",
+          "⚠️ Failed to update metafields:",
           metafieldResult.errors,
         );
         hasErrors = true;
-        errors.push("Failed to update recipient field");
+        errors.push("Failed to update metafields");
       }
 
       if (metafieldResult.data?.metafieldsSet?.userErrors?.length > 0) {
         console.warn(
-          "⚠️ Recipient metafield user errors:",
+          "⚠️ Metafield user errors:",
           metafieldResult.data.metafieldsSet.userErrors,
         );
         hasErrors = true;
@@ -7052,6 +6907,46 @@ async function createOrUpdateLocalUser({
       },
     },
   });
+  const existingRegitration = await prisma.registrationSubmission.findUnique({
+    where: {
+       shopId_email: {
+        email: email,
+        shopId: store.id,
+      },
+    },
+  })
+  if(!existingRegitration){
+
+   const registrationSubmission = await prisma.registrationSubmission.upsert({
+              where: {
+                shopId_email: { shopId: store.id, email: email },
+              },
+              update: {
+                email: email,
+                companyName: companyAccount?.name,
+                firstName: firstName || "",
+                lastName: lastName || "",
+                shopifyCustomerId,
+                status: "APPROVED",
+                shopId: store.id,
+                workflowCompleted: true,
+              },
+              create: {
+                email: email,
+                companyName: companyAccount?.name,
+                firstName: firstName || "",
+                lastName: lastName || "",
+                shopifyCustomerId,
+                status: "APPROVED",
+                shopId: store.id,
+                contactTitle: "",
+                shipping: "",
+                billing: "",
+                workflowCompleted: true,
+              },
+            });
+            console.log(`✅ Created registration submission for ${email} with ID: ${registrationSubmission.id}`);
+  }
 
   if (!existingUser) {
     // Create user in local database with placeholder password
@@ -7089,4 +6984,5 @@ async function createOrUpdateLocalUser({
       `✅ Updated existing local user: ${existingUser.id} with Shopify customer ID: ${shopifyCustomerId}`,
     );
   }
+
 }
