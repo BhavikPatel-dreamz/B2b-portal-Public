@@ -1060,7 +1060,7 @@ export default function CompanyDashboard() {
   }, [recalculateFetcher.state, recalculateFetcher.data]);
 
   return (
-    <s-page heading={`${data.company.name} - Credit Dashboard`}>
+    <s-page heading={`${data.company.name} - Dashboard`}>
       <div style={{ marginBottom: 16 }}>
         <Link
           to="/app/companies"

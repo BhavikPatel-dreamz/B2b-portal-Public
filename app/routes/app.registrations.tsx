@@ -2535,6 +2535,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             status: "APPROVED",
             shopifyCustomerId: customerId,
             workflowCompleted: true,
+            reviewNotes,
+            reviewedAt: new Date(),
           },
         });
 
@@ -4309,6 +4311,7 @@ function ConfigureCompanyUI({
     taxSetting: string;
     taxId: string;
     selectedCatalogIds: string[];
+    reviewNotes: string;
   }) => void;
   onCancel: () => void;
   isApproving: boolean;
@@ -4321,6 +4324,7 @@ function ConfigureCompanyUI({
   const [orderSubmission, setOrderSubmission]     = useState<"auto" | "draft">("auto");
   const [taxSetting, setTaxSetting]               = useState("collect");
   const [taxId, setTaxId]                         = useState(() => getSubmissionTaxId(submission));
+  const [reviewNotes, setReviewNotes]             = useState(submission.reviewNotes || "");
   const [showEditModal, setShowEditModal]         = useState(false);
   const [activeStep, setActiveStep]               = useState<"details" | "configuration">("details");
   const [isDetailsEditing, setIsDetailsEditing]   = useState(false);
@@ -4371,8 +4375,9 @@ function ConfigureCompanyUI({
     setShowEditModal(false);
     setIsDetailsEditing(false);
     setShowCatalogList(false);
+    setReviewNotes(submission.reviewNotes || "");
     advanceToConfigurationRef.current = false;
-  }, [submission.id]);
+  }, [submission.id, submission.reviewNotes]);
  
   // ── Pre-select catalogs already assigned to this location ──
   useEffect(() => {
@@ -4644,6 +4649,11 @@ function ConfigureCompanyUI({
                   {contactName} has been approved and their account is now active under{" "}
                   <strong>{companyDisplayName}</strong>.
                 </div>
+                {reviewNotes.trim() ? (
+                  <div style={{ fontSize: 13, color: "#166534", marginTop: 8 }}>
+                    Note sent to the customer: {reviewNotes.trim()}
+                  </div>
+                ) : null}
                 <button
                   onClick={onCancel}
                   style={{
@@ -5096,6 +5106,46 @@ function ConfigureCompanyUI({
                 </div>
               </div>
             </div>
+
+            <div
+              style={{
+                background: "white",
+                borderRadius: 10,
+                border: "1px solid #e3e3e3",
+                padding: 16,
+              }}
+            >
+              <h3 style={{ margin: "0 0 8px 0", fontSize: 14, fontWeight: 600 }}>
+                Approval note
+              </h3>
+              <div style={{ fontSize: 12, color: "#5c5f62", marginBottom: 10 }}>
+                This note will be saved with the registration and sent to the customer.
+              </div>
+              <label
+                htmlFor="approval-review-note"
+                style={{ display: "block", fontSize: 0, lineHeight: 0 }}
+              >
+                Approval note
+              </label>
+              <textarea
+                id="approval-review-note"
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                rows={4}
+                placeholder="Add an optional note for this approval"
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #c9ccd0",
+                  fontSize: 14,
+                  background: "white",
+                  boxSizing: "border-box",
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                }}
+              />
+            </div>
           </div>
  
           {!isDone && activeStep === "configuration" ? (
@@ -5135,6 +5185,7 @@ function ConfigureCompanyUI({
                     taxSetting,
                     taxId,
                     selectedCatalogIds,
+                    reviewNotes,
                   });
                 }}
                 disabled={isApproving || editFetcher.state !== "idle"}
@@ -5296,6 +5347,22 @@ export function RegistrationApprovalsPanel({
     () => localSubmissions.filter((s) => s.status === statusFilter),
     [localSubmissions, statusFilter],
   );
+  const registrationTableColumnWidths = [
+    "20%",
+    "15%",
+    "22%",
+    "14%",
+    "10%",
+    "12%",
+    "128px",
+  ];
+  const registrationCellStyle = {
+    padding: "14px 12px",
+    color: "#303030",
+    fontSize: 14,
+    verticalAlign: "top" as const,
+    overflowWrap: "anywhere" as const,
+  };
 
   // ── Pipeline state ────────────────────────────────────────────────────────
   const [selected, setSelected] = useState<RegistrationSubmission | null>(null);
@@ -5316,6 +5383,8 @@ export function RegistrationApprovalsPanel({
     orderSubmission: "auto" | "draft";
     taxSetting: string;
     taxId: string;
+    selectedCatalogIds: string[];
+    reviewNotes: string;
   } | null>(null);
 
   // Store resolved customer/company in refs so pipeline useEffect always has latest
@@ -5410,6 +5479,8 @@ export function RegistrationApprovalsPanel({
       orderSubmission: "auto" | "draft";
       taxSetting: string;
       taxId: string;
+      selectedCatalogIds: string[];
+      reviewNotes: string;
     }) => {
       const sub = selectedRef.current;
       if (!sub) return;
@@ -5468,7 +5539,7 @@ export function RegistrationApprovalsPanel({
           taxId: opts.taxId,
           taxSetting: opts.taxSetting,
           selectedCatalogIds: JSON.stringify(opts.selectedCatalogIds),
-          reviewNotes: "",
+          reviewNotes: opts.reviewNotes,
         },
         { method: "post" },
       );
@@ -5486,6 +5557,8 @@ export function RegistrationApprovalsPanel({
         status: "APPROVED",
         shopifyCustomerId: customerRef.current?.id ?? sub.shopifyCustomerId,
         workflowCompleted: true,
+        reviewNotes: opts.reviewNotes || null,
+        reviewedAt: new Date().toISOString(),
       };
 
       setSelected(approvedSubmission);
@@ -5653,9 +5726,15 @@ export function RegistrationApprovalsPanel({
                 style={{
                   width: "100%",
                   borderCollapse: "collapse",
-                  minWidth: 960,
+                  tableLayout: "fixed",
+                  minWidth: 860,
                 }}
               >
+                <colgroup>
+                  {registrationTableColumnWidths.map((width, index) => (
+                    <col key={`registration-col-${index}`} style={{ width }} />
+                  ))}
+                </colgroup>
                 <thead>
                   <tr style={{ background: "#fff" }}>
                     {[
@@ -5675,6 +5754,7 @@ export function RegistrationApprovalsPanel({
                           fontSize: 14,
                           color: "#303030",
                           borderBottom: "1px solid #e3e3e3",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {h}
@@ -5712,19 +5792,24 @@ export function RegistrationApprovalsPanel({
                         key={submission.id}
                         style={{ borderTop: "1px solid #f1f2f4" }}
                       >
-                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                        <td style={registrationCellStyle}>
                           {submission.companyName}
                         </td>
-                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                        <td style={registrationCellStyle}>
                           {contactName}
                         </td>
-                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                        <td style={registrationCellStyle}>
                           {submission.email}
                         </td>
-                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                        <td style={registrationCellStyle}>
                           {phone}
                         </td>
-                        <td style={{ padding: "14px 12px" }}>
+                        <td
+                          style={{
+                            ...registrationCellStyle,
+                            overflowWrap: "normal",
+                          }}
+                        >
                           <span
                             style={{
                               display: "inline-flex",
@@ -5739,7 +5824,12 @@ export function RegistrationApprovalsPanel({
                             {submission.status}
                           </span>
                         </td>
-                        <td style={{ padding: "14px 12px", color: "#303030", fontSize: 14 }}>
+                        <td
+                          style={{
+                            ...registrationCellStyle,
+                            whiteSpace: "normal",
+                          }}
+                        >
                           {new Intl.DateTimeFormat("en-IN", {
                             day: "2-digit",
                             month: "2-digit",
@@ -5748,7 +5838,13 @@ export function RegistrationApprovalsPanel({
                             minute: "2-digit",
                           }).format(new Date(submission.createdAt))}
                         </td>
-                        <td style={{ padding: "14px 12px", whiteSpace: "nowrap" }}>
+                        <td
+                          style={{
+                            ...registrationCellStyle,
+                            whiteSpace: "nowrap",
+                            overflowWrap: "normal",
+                          }}
+                        >
                           {submission.status === "PENDING" ? (
                             <div
                               style={{

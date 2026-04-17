@@ -65,7 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           shopifyCustomerId: customerGid,
           shopId: store.id,
         },
-        select: { status: true },
+        select: { status: true, reviewNotes: true },
       }),
       prisma.user.findFirst({
         where: {
@@ -82,6 +82,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     if (customer?.status === "PENDING") {
       return json({
         message: "Your account has already been submitted and is under review",
+        reviewNotes: customer.reviewNotes ?? null,
       });
     }
 
@@ -102,6 +103,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     if (customer?.status === "REJECTED") {
       return json({
         message: "Your account has been rejected. Please contact the support team.",
+        reviewNotes: customer.reviewNotes ?? null,
       });
     }
  

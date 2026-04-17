@@ -62,6 +62,7 @@ function Extension() {
   const [errorMessage, setErrorMessage] = useState("");
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [statusMessage, setStatusMessage] = useState("");
+  const [reviewNotes, setReviewNotes] = useState("");
   const [shopDomain, setShopDomain] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -129,18 +130,22 @@ function Extension() {
           { method: "GET", headers: { Accept: "application/json" } },
         );
         const result = await res.json();
-        const { config, message, redirectTo } = result;
+        const { config, message, redirectTo, reviewNotes: nextReviewNotes } =
+          result;
         if (redirectTo) {
+          setReviewNotes(nextReviewNotes || "");
           setIsRedirecting(true);
           window.location.replace(redirectTo);
           return;
         }
         if (message) {
           setStatusMessage(message);
+          setReviewNotes(nextReviewNotes || "");
           setAccountCheckComplete(true);
           return;
         }
         if (config?.fields) {
+          setReviewNotes("");
           setFields(config.fields);
           const initial = {};
           const processFields = (arr) => {
@@ -1119,6 +1124,9 @@ function Extension() {
           <s-stack direction="block" gap="small">
             <s-heading>{bannerTitle}</s-heading>
             <s-text>{statusMessage}</s-text>
+            {reviewNotes ? (
+              <s-text tone="subdued">Note: {reviewNotes}</s-text>
+            ) : null}
           </s-stack>
         </s-banner>
       </s-box>

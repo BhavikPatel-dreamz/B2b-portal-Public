@@ -1369,6 +1369,65 @@ export async function getCustomerCompanyInfo(
       };
     }
 
+    const extractId = (id?: string | null) => {
+      if (!id) return "";
+      return id.split("/").pop() || id;
+    };
+
+    const primaryProfile = companyProfiles[0];
+    const primaryRoleAssignments: Array<{
+      role: string;
+      locationId: string | null;
+    }> =
+      primaryProfile?.roleAssignments?.edges?.map(
+        (edge: {
+          node: {
+            role?: { name?: string | null };
+            companyLocation?: { id?: string | null };
+          };
+        }) => ({
+          role: edge.node.role?.name ?? "",
+          locationId: edge.node.companyLocation?.id ?? null,
+        }),
+      ) ?? [];
+
+    const primaryRoles = primaryRoleAssignments.map((assignment) =>
+      assignment.role.toLowerCase(),
+    );
+    const primaryAssignedLocationIds: string[] = [
+      ...new Set<string>(
+        primaryRoleAssignments
+          .map((assignment) => extractId(assignment.locationId))
+          .filter((locationId): locationId is string => Boolean(locationId)),
+      ),
+    ];
+    const hasPrimaryCompanyAdminRole = primaryRoles.some(
+      (role) =>
+        (role === "admin" || role === "company admin") &&
+        !role.includes("location"),
+    );
+    const isPrimaryMainContact =
+      primaryProfile?.company?.mainContact?.customer?.id ===
+      `gid://shopify/Customer/${customerId}`;
+    const hasPrimaryUnrestrictedLocationAccess =
+      (isPrimaryMainContact || hasPrimaryCompanyAdminRole) &&
+      primaryAssignedLocationIds.length === 0;
+
+    const filterOrderEdgesByLocation = (edges: any[] | undefined | null) => {
+      if (!Array.isArray(edges)) return [];
+      if (hasPrimaryUnrestrictedLocationAccess) return edges;
+      if (primaryAssignedLocationIds.length === 0) return [];
+
+      return edges.filter((edge) => {
+        const orderLocationId = extractId(
+          edge?.node?.purchasingEntity?.location?.id ?? "",
+        );
+        return orderLocationId
+          ? primaryAssignedLocationIds.includes(orderLocationId)
+          : false;
+      });
+    };
+
     // ─── 2. Extract primary company numeric ID ───────────────────────────────
     const primaryCompanyGid = companyProfiles[0]?.company?.id as string;
     // "gid://shopify/Company/123456" → "123456"
@@ -1420,22 +1479,30 @@ export async function getCustomerCompanyInfo(
         headers: shopifyHeaders,
         body: JSON.stringify({
           query: `
-            query {
-              orders(
-                first: 250
-                query: "company_id:${primaryCompanyNumericId} created_at:>=${startOfMonth} created_at:<=${endOfMonth}"
-              ) {
-                edges {
-                  node {
+      query {
+        orders(
+          first: 250
+          query: "company_id:${primaryCompanyNumericId} created_at:>=${startOfMonth} created_at:<=${endOfMonth}"
+        ) {
+          edges {
+            node {
+              id
+              purchasingEntity {
+                ... on PurchasingCompany {
+                  location {
                     id
+                    name
                   }
-                }
-                pageInfo {
-                  hasNextPage
                 }
               }
             }
-          `,
+          }
+          pageInfo {
+            hasNextPage
+          }
+        }
+      }
+    `,
         }),
       }),
 
@@ -1479,6 +1546,14 @@ export async function getCustomerCompanyInfo(
           edges {
             node {
               id
+              purchasingEntity {
+                ... on PurchasingCompany {
+                  location {
+                    id
+                    name
+                  }
+                }
+              }
               totalPriceSet {
                 shopMoney {
                   amount
@@ -1505,14 +1580,21 @@ export async function getCustomerCompanyInfo(
       currentMonthCompletedOrdersRes.json(),
     ]);
 
+    const filteredCurrentMonthOrders = filterOrderEdgesByLocation(
+      currentMonthOrdersData?.data?.orders?.edges,
+    );
+    const filteredCurrentMonthCompletedOrders = filterOrderEdgesByLocation(
+      currentMonthCompletedOrdersData?.data?.orders?.edges,
+    );
+
     const currentMonthOrderCount: number =
-      currentMonthOrdersData?.data?.orders?.edges?.length ?? 0;
+      filteredCurrentMonthOrders.length;
 
     const pendingDraftOrderCount: number =
       pendingDraftOrdersData?.data?.draftOrders?.edges?.length ?? 0;
 
     const currentMonthUsedCredit: number =
-      currentMonthCompletedOrdersData?.data?.orders?.edges?.reduce(
+      filteredCurrentMonthCompletedOrders.reduce(
         (
           sum: number,
           edge: { node: { totalPriceSet: { shopMoney: { amount: string } } } },
@@ -1634,7 +1716,7 @@ export async function getCustomerCompanyInfo(
           roleAssignments,
           assignedLocationIds: uniqueLocationIds,
           locationRoles: Object.values(locationRoles),
-          hasAllLocationAccess: isAdmin,
+          hasAllLocationAccess: isAdmin && uniqueLocationIds.length === 0,
           title: profile.title,
         };
       },
@@ -1642,6 +1724,7 @@ export async function getCustomerCompanyInfo(
 
     // ─── 7. Credit calculations ───────────────────────────────────────────────
     const creditInfo = await calculateAvailableCredit(companyData?.id ?? "");
+
     const creditLimitNum = parseFloat(
       companyData?.creditLimit?.toString() ?? "0",
     );
@@ -3055,6 +3138,7 @@ export async function getCompanyLocations(
               address1
               address2
               city
+              phone
               province
               zip
               country
@@ -3065,6 +3149,7 @@ export async function getCompanyLocations(
               address1
               address2
               city
+              phone
               province
               zip
               country
@@ -3219,6 +3304,7 @@ export async function getCompanyLocations(
             city: string;
             province: string;
             zip: string;
+            phone: string;
             country: string;
             firstName: string;
             lastName: string;
@@ -3227,6 +3313,7 @@ export async function getCompanyLocations(
             address1: string;
             address2: string;
             city: string;
+            phone: string;
             province: string;
             zip: string;
             country: string;
@@ -3265,6 +3352,7 @@ export async function getCompanyLocations(
               billingAddr.city === shippingAddr.city &&
               billingAddr.province === shippingAddr.province &&
               billingAddr.zip === shippingAddr.zip &&
+              billingAddr.phone === shippingAddr.phone &&
               billingAddr.country === shippingAddr.country &&
               billingAddr.firstName === shippingAddr.firstName &&
               billingAddr.lastName === shippingAddr.lastName
@@ -3286,7 +3374,7 @@ export async function getCompanyLocations(
             country: location.shippingAddress?.country || "",
             firstName: location.shippingAddress?.firstName || "",
             lastName: location.shippingAddress?.lastName || "",
-            phone: rootPhone,
+            phone: location.shippingAddress?.phone || rootPhone,
             recipient,
           },
           billingAddress: {
@@ -3298,7 +3386,7 @@ export async function getCompanyLocations(
             country: location.billingAddress?.country || "",
             firstName: location.billingAddress?.firstName || "",
             lastName: location.billingAddress?.lastName || "",
-            phone: rootPhone,
+            phone: location.billingAddress?.phone || rootPhone,
             recipient,
           },
           billingSameAsShipping,
@@ -5873,10 +5961,7 @@ export async function updateCompanyLocation(
       );
 
       if (metafieldResult.errors) {
-        console.warn(
-          "⚠️ Failed to update metafields:",
-          metafieldResult.errors,
-        );
+        console.warn("⚠️ Failed to update metafields:", metafieldResult.errors);
         hasErrors = true;
         errors.push("Failed to update metafields");
       }
@@ -6528,6 +6613,198 @@ export async function getAdvancedCompanyOrders(
   }
 }
 
+export async function getCompanyOrderById(
+  shopName: string,
+  accessToken: string,
+  params: {
+    companyId: string;
+    orderId: string;
+    allowedLocationIds?: string[];
+  },
+) {
+  try {
+    const { companyId, orderId, allowedLocationIds } = params;
+
+    const extractId = (id?: string | null) => {
+      if (!id) return "";
+      return id.split("/").pop() || id;
+    };
+
+    const cleanCompanyId = extractId(companyId);
+    const normalizedOrderId = orderId.startsWith("gid://shopify/Order/")
+      ? orderId
+      : `gid://shopify/Order/${extractId(orderId)}`;
+
+    const query = `
+      query getOrderForInvoice($id: ID!) {
+        order(id: $id) {
+          id
+          name
+          createdAt
+          processedAt
+          updatedAt
+          note
+          displayFinancialStatus
+          displayFulfillmentStatus
+          statusPageUrl
+          customer {
+            id
+            firstName
+            lastName
+            email
+            phone
+          }
+          purchasingEntity {
+            ... on PurchasingCompany {
+              company {
+                id
+                name
+              }
+              location {
+                id
+                name
+              }
+            }
+          }
+          subtotalPriceSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+          totalTaxSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+          totalPriceSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+          shippingAddress {
+            firstName
+            lastName
+            company
+            address1
+            address2
+            city
+            province
+            country
+            zip
+            phone
+          }
+          billingAddress {
+            firstName
+            lastName
+            company
+            address1
+            address2
+            city
+            province
+            country
+            zip
+            phone
+          }
+          lineItems(first: 50) {
+            edges {
+              node {
+                id
+                name
+                quantity
+                originalUnitPriceSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                product {
+                  id
+                  title
+                  handle
+                }
+                variant {
+                  id
+                  title
+                  sku
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query,
+          variables: { id: normalizedOrderId },
+        }),
+      },
+    );
+
+    const data = await response.json();
+
+    if (data.errors?.length) {
+      return { error: data.errors[0]?.message || "Failed to fetch order" };
+    }
+
+    const order = data.data?.order;
+    if (!order) {
+      return { error: "Order not found" };
+    }
+
+    const orderCompanyId = extractId(order?.purchasingEntity?.company?.id);
+    if (!orderCompanyId || orderCompanyId !== cleanCompanyId) {
+      return { error: "Order not found for this company" };
+    }
+
+    if (allowedLocationIds?.length) {
+      const normalizedAllowedIds = allowedLocationIds.map((id) =>
+        extractId(id),
+      );
+      const orderLocationId = extractId(order?.purchasingEntity?.location?.id);
+
+      if (!orderLocationId || !normalizedAllowedIds.includes(orderLocationId)) {
+        return { error: "Unauthorized access to order" };
+      }
+    }
+
+    const locationId = order?.purchasingEntity?.location?.id ?? "";
+    const locationName =
+      order?.purchasingEntity?.location?.name ||
+      order?.billingAddress?.company ||
+      order?.shippingAddress?.company ||
+      "Company Order";
+
+    return {
+      order: {
+        ...order,
+        locationId,
+        locationName,
+        companyLocation: {
+          id: locationId,
+          name: locationName,
+        },
+      },
+    };
+  } catch (error) {
+    console.error("Error fetching company order by id:", error);
+    return {
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}
+
 export async function getCompanyOrdersCount(
   shopName: string,
   accessToken: string,
@@ -6909,43 +7186,44 @@ async function createOrUpdateLocalUser({
   });
   const existingRegitration = await prisma.registrationSubmission.findUnique({
     where: {
-       shopId_email: {
+      shopId_email: {
         email: email,
         shopId: store.id,
       },
     },
-  })
-  if(!existingRegitration){
-
-   const registrationSubmission = await prisma.registrationSubmission.upsert({
-              where: {
-                shopId_email: { shopId: store.id, email: email },
-              },
-              update: {
-                email: email,
-                companyName: companyAccount?.name,
-                firstName: firstName || "",
-                lastName: lastName || "",
-                shopifyCustomerId,
-                status: "APPROVED",
-                shopId: store.id,
-                workflowCompleted: true,
-              },
-              create: {
-                email: email,
-                companyName: companyAccount?.name,
-                firstName: firstName || "",
-                lastName: lastName || "",
-                shopifyCustomerId,
-                status: "APPROVED",
-                shopId: store.id,
-                contactTitle: "",
-                shipping: "",
-                billing: "",
-                workflowCompleted: true,
-              },
-            });
-            console.log(`✅ Created registration submission for ${email} with ID: ${registrationSubmission.id}`);
+  });
+  if (!existingRegitration) {
+    const registrationSubmission = await prisma.registrationSubmission.upsert({
+      where: {
+        shopId_email: { shopId: store.id, email: email },
+      },
+      update: {
+        email: email,
+        companyName: companyAccount?.name,
+        firstName: firstName || "",
+        lastName: lastName || "",
+        shopifyCustomerId,
+        status: "APPROVED",
+        shopId: store.id,
+        workflowCompleted: true,
+      },
+      create: {
+        email: email,
+        companyName: companyAccount?.name,
+        firstName: firstName || "",
+        lastName: lastName || "",
+        shopifyCustomerId,
+        status: "APPROVED",
+        shopId: store.id,
+        contactTitle: "",
+        shipping: "",
+        billing: "",
+        workflowCompleted: true,
+      },
+    });
+    console.log(
+      `✅ Created registration submission for ${email} with ID: ${registrationSubmission.id}`,
+    );
   }
 
   if (!existingUser) {
@@ -6984,5 +7262,4 @@ async function createOrUpdateLocalUser({
       `✅ Updated existing local user: ${existingUser.id} with Shopify customer ID: ${shopifyCustomerId}`,
     );
   }
-
 }

@@ -41,6 +41,7 @@ export default [
     route("customer-company", "routes/api.proxy/customer-company.tsx"),
     route("locationmanagement", "routes/api.proxy/locationmanagement.tsx"),
     route("notification", "routes/api.proxy/notification.tsx"),
+    route("order-invoice", "routes/api.proxy/order-invoice.tsx"),
     route("orders", "routes/api.proxy/orders.tsx"),
     route("product-search", "routes/api.proxy/product-search.tsx"),
     route("registration", "routes/api.proxy/registration.tsx"),
