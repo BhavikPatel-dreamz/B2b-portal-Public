@@ -37,7 +37,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       body: JSON.stringify({
         query: `
           query searchProducts($query: String!, $cursor: String) {
-            products(first: 30, after: $cursor, query: $query) {
+            products(first: 10, after: $cursor, query: $query) {
               edges {
                 cursor
                 node {
