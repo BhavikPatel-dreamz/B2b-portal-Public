@@ -6,20 +6,17 @@ import { apiVersion } from "../../shopify.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop } = await validateB2BCustomerAccess(request);
   const url = new URL(request.url);
-
   const query = url.searchParams.get("q")?.trim() || "";
-  const cursor = url.searchParams.get("cursor"); 
 
   if (!query) {
-    return { products: [], pageInfo: { hasNextPage: false } };
+    return { products: [] };
   }
 
   const normalizedQuery = query.toLowerCase();
-
   const shopifySearchQuery =
     normalizedQuery === "all"
       ? "status:active published_status:published"
-      : `status:active published_status:published title:${normalizedQuery}*`; // 👈 optimized (no wildcard both sides)
+      : `status:active published_status:published title:*${query}*`;
 
   const store = await getStoreByDomain(shop);
   if (!store || !store.accessToken) {
@@ -39,14 +36,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           query searchProducts($query: String!, $cursor: String) {
             products(first: 10, after: $cursor, query: $query) {
               edges {
-                cursor
                 node {
                   id
                   title
                   featuredImage {
                     url
                   }
-                  variants(first: 10) {  
+                  variants(first: 10) {
                     edges {
                       node {
                         id
@@ -57,16 +53,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                   }
                 }
               }
-              pageInfo {
-                hasNextPage
-                endCursor
-              }
             }
           }
         `,
         variables: {
+          // When q=all, return all active published products.
           query: shopifySearchQuery,
-          cursor: cursor || null, 
         },
       }),
     }
@@ -76,35 +68,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (data.errors) {
     console.error("Shopify API Error:", data.errors);
-    return { products: [], pageInfo: { hasNextPage: false } };
+    return { products: [] };
   }
 
-  const products = data.data.products.edges.map(
-    (edge: {
-      cursor: string;
-      node: {
-        id: string;
-        title: string;
-        featuredImage?: { url: string };
-        variants: {
-          edges: { node: { id: string; title: string; price: string } }[];
-        };
-      };
-    }) => ({
-      id: edge.node.id,
-      title: edge.node.title,
-      image: edge.node.featuredImage?.url,
-      cursor: edge.cursor, 
-      variants: edge.node.variants.edges.map((v) => ({
-        id: v.node.id,
-        title: v.node.title,
-        price: v.node.price,
-      })),
-    })
-  );
+  const products = data.data.products.edges.map((edge: { node: { id: string; title: string; featuredImage?: { url: string }; variants: { edges: { node: { id: string; title: string; price: string } }[] } } } ) => ({
+    id: edge.node.id,
+    title: edge.node.title,
+    image: edge.node.featuredImage?.url,
+    variants: edge.node.variants.edges.map((v: { node: { id: string; title: string; price: string } }) => ({
+      id: v.node.id,
+      title: v.node.title,
+      price: v.node.price,
+    })),
+  }));
 
-  return {
-    products,
-    pageInfo: data.data.products.pageInfo, 
-  };
+  return { products };
 };
