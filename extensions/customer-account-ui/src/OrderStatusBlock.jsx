@@ -20,37 +20,103 @@ const SECTION_LABELS = {
 };
 
 const COUNTRY_PHONE_META = {
+  // India
   IN: { dialCode: "+91", flagEmoji: "🇮🇳" },
   INDIA: { dialCode: "+91", flagEmoji: "🇮🇳" },
+  // United States
   US: { dialCode: "+1", flagEmoji: "🇺🇸" },
   USA: { dialCode: "+1", flagEmoji: "🇺🇸" },
   "UNITED STATES": { dialCode: "+1", flagEmoji: "🇺🇸" },
+  // Canada
   CA: { dialCode: "+1", flagEmoji: "🇨🇦" },
   CANADA: { dialCode: "+1", flagEmoji: "🇨🇦" },
+  // United Kingdom
   GB: { dialCode: "+44", flagEmoji: "🇬🇧" },
   UK: { dialCode: "+44", flagEmoji: "🇬🇧" },
   "UNITED KINGDOM": { dialCode: "+44", flagEmoji: "🇬🇧" },
+  // Australia
   AU: { dialCode: "+61", flagEmoji: "🇦🇺" },
   AUSTRALIA: { dialCode: "+61", flagEmoji: "🇦🇺" },
+  // New Zealand
   NZ: { dialCode: "+64", flagEmoji: "🇳🇿" },
   "NEW ZEALAND": { dialCode: "+64", flagEmoji: "🇳🇿" },
+  // Singapore
   SG: { dialCode: "+65", flagEmoji: "🇸🇬" },
   SINGAPORE: { dialCode: "+65", flagEmoji: "🇸🇬" },
+  // United Arab Emirates
   AE: { dialCode: "+971", flagEmoji: "🇦🇪" },
   "UNITED ARAB EMIRATES": { dialCode: "+971", flagEmoji: "🇦🇪" },
+  // Saudi Arabia
   SA: { dialCode: "+966", flagEmoji: "🇸🇦" },
   "SAUDI ARABIA": { dialCode: "+966", flagEmoji: "🇸🇦" },
+  // Germany
   DE: { dialCode: "+49", flagEmoji: "🇩🇪" },
   GERMANY: { dialCode: "+49", flagEmoji: "🇩🇪" },
+  // France
   FR: { dialCode: "+33", flagEmoji: "🇫🇷" },
   FRANCE: { dialCode: "+33", flagEmoji: "🇫🇷" },
+  // Italy
   IT: { dialCode: "+39", flagEmoji: "🇮🇹" },
   ITALY: { dialCode: "+39", flagEmoji: "🇮🇹" },
+  // Spain
   ES: { dialCode: "+34", flagEmoji: "🇪🇸" },
   SPAIN: { dialCode: "+34", flagEmoji: "🇪🇸" },
+  // Netherlands
   NL: { dialCode: "+31", flagEmoji: "🇳🇱" },
   NETHERLANDS: { dialCode: "+31", flagEmoji: "🇳🇱" },
+  // Austria
+  AT: { dialCode: "+43", flagEmoji: "🇦🇹" },
+  AUSTRIA: { dialCode: "+43", flagEmoji: "🇦🇹" },
+  // Belgium
+  BE: { dialCode: "+32", flagEmoji: "🇧🇪" },
+  BELGIUM: { dialCode: "+32", flagEmoji: "🇧🇪" },
+  // Czech Republic
+  CZ: { dialCode: "+420", flagEmoji: "🇨🇿" },
+  "CZECH REPUBLIC": { dialCode: "+420", flagEmoji: "🇨🇿" },
+  // Denmark
+  DK: { dialCode: "+45", flagEmoji: "🇩🇰" },
+  DENMARK: { dialCode: "+45", flagEmoji: "🇩🇰" },
+  // Finland
+  FI: { dialCode: "+358", flagEmoji: "🇫🇮" },
+  FINLAND: { dialCode: "+358", flagEmoji: "🇫🇮" },
+  // Hong Kong
+  HK: { dialCode: "+852", flagEmoji: "🇭🇰" },
+  "HONG KONG": { dialCode: "+852", flagEmoji: "🇭🇰" },
+  // Ireland
+  IE: { dialCode: "+353", flagEmoji: "🇮🇪" },
+  IRELAND: { dialCode: "+353", flagEmoji: "🇮🇪" },
+  // Israel
+  IL: { dialCode: "+972", flagEmoji: "🇮🇱" },
+  ISRAEL: { dialCode: "+972", flagEmoji: "🇮🇱" },
+  // Japan
+  JP: { dialCode: "+81", flagEmoji: "🇯🇵" },
+  JAPAN: { dialCode: "+81", flagEmoji: "🇯🇵" },
+  // Malaysia
+  MY: { dialCode: "+60", flagEmoji: "🇲🇾" },
+  MALAYSIA: { dialCode: "+60", flagEmoji: "🇲🇾" },
+  // Norway
+  NO: { dialCode: "+47", flagEmoji: "🇳🇴" },
+  NORWAY: { dialCode: "+47", flagEmoji: "🇳🇴" },
+  // Poland
+  PL: { dialCode: "+48", flagEmoji: "🇵🇱" },
+  POLAND: { dialCode: "+48", flagEmoji: "🇵🇱" },
+  // Portugal
+  PT: { dialCode: "+351", flagEmoji: "🇵🇹" },
+  PORTUGAL: { dialCode: "+351", flagEmoji: "🇵🇹" },
+  // South Korea
+  KR: { dialCode: "+82", flagEmoji: "🇰🇷" },
+  "SOUTH KOREA": { dialCode: "+82", flagEmoji: "🇰🇷" },
+  // Sweden
+  SE: { dialCode: "+46", flagEmoji: "🇸🇪" },
+  SWEDEN: { dialCode: "+46", flagEmoji: "🇸🇪" },
+  // Switzerland
+  CH: { dialCode: "+41", flagEmoji: "🇨🇭" },
+  SWITZERLAND: { dialCode: "+41", flagEmoji: "🇨🇭" },
 };
+
+const FORM_ROW_BREAKPOINT = 680;
+const PHONE_ROW_BREAKPOINT = 420;
+const ACTION_ROW_BREAKPOINT = 520;
 
 function Extension() {
   const [fields, setFields] = useState([]);
@@ -651,6 +717,16 @@ function Extension() {
     return rows;
   };
 
+  const getResponsiveInlineSize = (
+    desktopSize,
+    breakpoint = FORM_ROW_BREAKPOINT,
+  ) => `@container (inline-size > ${breakpoint}px) ${desktopSize}, 100%`;
+
+const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
+  const desktopColumns = row.map((field) => `${getFieldWidthPercent(field)}fr`);
+  return `@container (inline-size > ${breakpoint}px) ${desktopColumns.join(" ")}, 1fr`;
+};
+
   // =============================================
   // RENDER ROW
   // =============================================
@@ -660,28 +736,26 @@ function Extension() {
     if (row.length === 1) {
       const field = row[0];
       return (
-        <s-box key={key}>
-          {field?.type === "group" ? renderGroup(field) : renderField(field)}
-        </s-box>
+        <s-query-container key={key}>
+          <s-box>
+            {field?.type === "group" ? renderGroup(field) : renderField(field)}
+          </s-box>
+        </s-query-container>
       );
     }
 
     return (
-      <s-stack key={key} direction="inline" gap="base">
-        {row.map((field, fieldIndex) => {
-          const w = getFieldWidthPercent(field);
-          return (
-            <s-box
-              key={field.key || `${rowIndex}-${fieldIndex}`}
-              inlineSize={`${w}%`}
-            >
+      <s-query-container key={key}>
+        <s-grid gridTemplateColumns={getRowGridTemplate(row)} gap="base">
+          {row.map((field, fieldIndex) => (
+            <s-box key={field.key || `${rowIndex}-${fieldIndex}`}>
               {field?.type === "group"
                 ? renderGroup(field)
                 : renderField(field)}
             </s-box>
-          );
-        })}
-      </s-stack>
+          ))}
+        </s-grid>
+      </s-query-container>
     );
   };
 
@@ -691,7 +765,9 @@ function Extension() {
     if (field.type === "heading") {
       return (
         <s-box
-          inlineSize={`${Math.min(100, Math.max(25, field.headingWidth ?? 100))}%`}
+          inlineSize={getResponsiveInlineSize(
+            `${Math.min(100, Math.max(25, field.headingWidth ?? 100))}%`,
+          )}
         >
           <s-stack
             direction="block"
@@ -888,7 +964,6 @@ function Extension() {
         return renderFieldWithMessage(
           field,
           <s-select
-            key={`state-select-${selectedCountry}`}
             label={field.label}
             value={selectedState}
             onChange={(val) => {
@@ -919,9 +994,7 @@ function Extension() {
 
       case "phone": {
         const countryKey = findPairedKey(field.key, "phone", "country");
-        const selectedCountry = countryKey
-          ? (formData[countryKey] ?? "IN")
-          : "IN";
+        const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
         const { dialCode, flagEmoji } = getPhoneMetaForCountry(selectedCountry);
         const currentDigits = getPhoneDigitsWithoutDialCode(
           formData[field.key],
@@ -930,35 +1003,22 @@ function Extension() {
 
         return renderFieldWithMessage(
           field,
-          <s-stack
+          <s-text-field
             key={`phone-${selectedCountry}`}
-            direction="block"
-            gap="tight"
-          >
-            <s-stack direction="inline" gap="small" blockAlignment="end">
-              <s-box inlineSize="27%">
-                <s-text-field value={`${flagEmoji} ${dialCode}`} disabled />
-              </s-box>
-              <s-box inlineSize="60%">
-                <s-text-field
-                  label={getFieldLabel(field, "Phone number")}
-                  value={currentDigits}
-                  type="tel"
-                  inputMode="numeric"
-                  placeholder="Enter phone number"
-                  onChange={(val) => {
-                    const typedValue =
-                      val?.target?.value ?? val?.value ?? val ?? "";
-                    const digits = sanitizePhoneDigits(typedValue);
-                    handleChange(
-                      field.key,
-                      digits ? `${dialCode} ${digits}` : dialCode,
-                    );
-                  }}
-                />
-              </s-box>
-            </s-stack>
-          </s-stack>,
+            label={`${getFieldLabel(field, "Phone")} ${flagEmoji} ${dialCode}`}
+            value={currentDigits}
+            type="tel"
+            inputMode="numeric"
+            placeholder="Number"
+            onChange={(val) => {
+              const typedValue = val?.target?.value ?? val?.value ?? val ?? "";
+              const digits = sanitizePhoneDigits(typedValue);
+              handleChange(
+                field.key,
+                digits ? `${dialCode} ${digits}` : dialCode,
+              );
+            }}
+          />,
         );
       }
 
@@ -978,11 +1038,11 @@ function Extension() {
   // ✅ FIX 3: renderGroup no longer references undefined `field`
   const renderGroup = (group) => {
     const colCount = group.fields.length || 2;
-    const wideCols = Array(colCount).fill("fill").join(" ");
+    const wideCols = Array(colCount).fill("1fr").join(" ");
     return (
       <s-query-container>
         <s-grid
-          columns={`@container (inline-size > 480px) '${wideCols}', '1fr'`}
+          gridTemplateColumns={`@container (inline-size > 480px) ${wideCols}, 1fr`}
           gap="base"
         >
           {group.fields.map((f) => (
@@ -1157,98 +1217,112 @@ function Extension() {
   //  MAIN RENDER
   // ═══════════════════════════════════════════════════════════
   return (
-    <s-stack direction="block" gap="large">
-      {/* ── Top-level fields (no section) ── */}
-      {topLevelFields.length > 0 && (
-        <s-box padding="base">
-          <s-stack direction="block" gap="base">
-            {buildFieldRows(topLevelFields).map((row, rowIndex) =>
-              renderRow(row, rowIndex),
-            )}
-          </s-stack>
-        </s-box>
-      )}
-
-      {/* ── Legacy Apple Pay notice ── */}
-      {isLegacyApplePay && (
-        <s-banner tone="info">
-          <s-text>Legacy Apple Pay is currently active on this account.</s-text>
-        </s-banner>
-      )}
-
-      {/* ── Inline error banner ── */}
-      {errorMessage && (
-        <s-banner tone="critical">
-          <s-stack direction="block" gap="small">
-            <s-heading>Submission Error</s-heading>
-            <s-text>{errorMessage}</s-text>
-          </s-stack>
-        </s-banner>
-      )}
-
-      {/* ── One s-section per section group ── */}
-      {Object.entries(grouped).map(([section, sectionFields]) => {
-        const visibleSectionFields = getVisibleSectionFields(
-          section,
-          sectionFields,
-        );
-        const sectionMeta = getSectionMeta(section, visibleSectionFields);
-
-        return (
-          <s-section key={section} padding>
+    <s-query-container>
+      <s-stack direction="block" gap="large">
+        {/* ── Top-level fields (no section) ── */}
+        {topLevelFields.length > 0 && (
+          <s-box padding="base">
             <s-stack direction="block" gap="base">
-              {/* Section heading + divider */}
-              {shouldShowSectionHeading(section, visibleSectionFields) && (
-                <s-box inlineSize={`${sectionMeta.width}%`}>
-                  <s-stack
-                    direction="block"
-                    gap="base"
-                    inlineAlignment={getInlineAlignment(sectionMeta.alignment)}
-                  >
-                    <s-heading>{sectionMeta.title}</s-heading>
-                    <s-divider />
-                  </s-stack>
-                </s-box>
+              {buildFieldRows(topLevelFields).map((row, rowIndex) =>
+                renderRow(row, rowIndex),
               )}
-
-              {/* Fields — row by row */}
-              <s-stack direction="block" gap="base">
-                {buildFieldRows(visibleSectionFields).map((row, rowIndex) =>
-                  renderRow(row, rowIndex),
-                )}
-              </s-stack>
             </s-stack>
-          </s-section>
-        );
-      })}
+          </s-box>
+        )}
 
-      {/* ── Submit button (only shown when fields exist) ── */}
-      {accountCheckComplete && fields.length === 0 ? (
-        <s-banner tone="warning">
-          <s-text>
-            Registration is currently unavailable. No form fields have been
-            configured. Please contact the store administrator.
-          </s-text>
-        </s-banner>
-      ) : fields.length > 0 ? (
-        <s-box>
-          <s-stack direction="inline" gap="base" blockAlignment="center">
-            <s-button
-              variant="primary"
-              onClick={handleSubmit}
-              disabled={loading}
-              loading={loading}
+        {/* ── Legacy Apple Pay notice ── */}
+        {isLegacyApplePay && (
+          <s-banner tone="info">
+            <s-text>
+              Legacy Apple Pay is currently active on this account.
+            </s-text>
+          </s-banner>
+        )}
+
+        {/* ── Inline error banner ── */}
+        {errorMessage && (
+          <s-banner tone="critical">
+            <s-stack direction="block" gap="small">
+              <s-heading>Submission Error</s-heading>
+              <s-text>{errorMessage}</s-text>
+            </s-stack>
+          </s-banner>
+        )}
+
+        {/* ── One s-section per section group ── */}
+        {Object.entries(grouped).map(([section, sectionFields]) => {
+          const visibleSectionFields = getVisibleSectionFields(
+            section,
+            sectionFields,
+          );
+          const sectionMeta = getSectionMeta(section, visibleSectionFields);
+
+          return (
+            <s-section key={section} padding>
+              <s-stack direction="block" gap="base">
+                {/* Section heading + divider */}
+                {shouldShowSectionHeading(section, visibleSectionFields) && (
+                  <s-box
+                    inlineSize={getResponsiveInlineSize(
+                      `${sectionMeta.width}%`,
+                    )}
+                  >
+                    <s-stack
+                      direction="block"
+                      gap="base"
+                      inlineAlignment={getInlineAlignment(
+                        sectionMeta.alignment,
+                      )}
+                    >
+                      <s-heading>{sectionMeta.title}</s-heading>
+                      <s-divider />
+                    </s-stack>
+                  </s-box>
+                )}
+
+                {/* Fields — row by row */}
+                <s-stack direction="block" gap="base">
+                  {buildFieldRows(visibleSectionFields).map((row, rowIndex) =>
+                    renderRow(row, rowIndex),
+                  )}
+                </s-stack>
+              </s-stack>
+            </s-section>
+          );
+        })}
+
+        {/* ── Submit button (only shown when fields exist) ── */}
+        {accountCheckComplete && fields.length === 0 ? (
+          <s-banner tone="warning">
+            <s-text>
+              Registration is currently unavailable. No form fields have been
+              configured. Please contact the store administrator.
+            </s-text>
+          </s-banner>
+        ) : fields.length > 0 ? (
+          <s-box>
+            <s-stack
+              direction={`@container (inline-size > ${ACTION_ROW_BREAKPOINT}px) inline, block`}
+              gap="base"
+              blockAlignment="center"
             >
-              {loading ? "Submitting…" : "Register"}
-            </s-button>
-            {loading && (
-              <s-text tone="subdued">
-                Please wait while we process your request…
-              </s-text>
-            )}
-          </s-stack>
-        </s-box>
-      ) : null}
-    </s-stack>
+              <s-button
+                variant="primary"
+                onClick={handleSubmit}
+                disabled={loading}
+                loading={loading}
+              >
+                {loading ? "Submitting…" : "Register"}
+              </s-button>
+              {loading && (
+                <s-text tone="subdued">
+                  Please wait while we process your request…
+                </s-text>
+              )}
+            </s-stack>
+          </s-box>
+        ) : null}
+      </s-stack>
+    </s-query-container>
   );
 }
