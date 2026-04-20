@@ -130,8 +130,12 @@ function Extension() {
           { method: "GET", headers: { Accept: "application/json" } },
         );
         const result = await res.json();
-        const { config, message, redirectTo, reviewNotes: nextReviewNotes } =
-          result;
+        const {
+          config,
+          message,
+          redirectTo,
+          reviewNotes: nextReviewNotes,
+        } = result;
         if (redirectTo) {
           setReviewNotes(nextReviewNotes || "");
           setIsRedirecting(true);
@@ -268,7 +272,7 @@ function Extension() {
         replaceWord.charAt(0).toUpperCase() + replaceWord.slice(1),
       ),
     ];
-    return variants.find((v) => v in formData) ?? null;
+    return variants.find((v) => v !== sourceKey && v in formData) ?? null;
   };
 
   const clearPairedZipField = (sourceKey) => {
@@ -364,8 +368,7 @@ function Extension() {
     return phone.replace(/^\+\d{1,4}\s*/, "");
   };
 
-  const sanitizePhoneDigits = (value) =>
-    String(value || "").replace(/\D/g, "");
+  const sanitizePhoneDigits = (value) => String(value || "").replace(/\D/g, "");
 
   const getAutofillValue = (field) => {
     if (!customerDetails) return "";
@@ -871,7 +874,7 @@ function Extension() {
         const countryOptions = getCountryOptions();
         const selectedCountry = countryKey
           ? resolveOptionValue(countryOptions, formData[countryKey] ?? "IN") ||
-            "IN"
+          "IN"
           : "IN";
         const stateOptions = field.options?.length
           ? field.options
@@ -885,6 +888,7 @@ function Extension() {
         return renderFieldWithMessage(
           field,
           <s-select
+            key={`state-select-${selectedCountry}`}
             label={field.label}
             value={selectedState}
             onChange={(val) => {
@@ -1217,8 +1221,6 @@ function Extension() {
           </s-section>
         );
       })}
-
-    
 
       {/* ── Submit button (only shown when fields exist) ── */}
       {accountCheckComplete && fields.length === 0 ? (
