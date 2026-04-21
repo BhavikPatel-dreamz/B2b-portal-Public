@@ -100,7 +100,11 @@ declare global {
     | Map<
         string,
         {
-          data: { id: string; submissionEmail: string | null };
+          data: {
+            id: string;
+            contactEmail: string | null;
+            submissionEmail: string | null;
+          };
           timestamp: number;
         }
       >
@@ -114,7 +118,11 @@ const cache: Map<string, { data: any; timestamp: number }> =
 const storeCache: Map<
   string,
   {
-    data: { id: string; submissionEmail: string | null };
+    data: {
+      id: string;
+      contactEmail: string | null;
+      submissionEmail: string | null;
+    };
     timestamp: number;
   }
 > =
@@ -157,7 +165,7 @@ async function getStoreForShop(shop: string) {
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: shop },
-    select: { id: true, submissionEmail: true },
+    select: { id: true, contactEmail: true, submissionEmail: true },
   });
 
   if (store) {
@@ -461,7 +469,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   switch (intent) {
     // ── SYNC COMPANIES ──────────────────────────────────────
     case "syncCompanies": {
-      const result = await syncShopifyCompanies(admin, store, store.submissionEmail);
+      const result = await syncShopifyCompanies(
+        admin,
+        store,
+        store.contactEmail || store.submissionEmail,
+      );
 
       // Sync changes data — bust all pages
       if (result.success) clearAdminCompaniesCache(shop);
@@ -580,6 +592,23 @@ export default function CompaniesPage() {
   const [query, setQuery] = useState(searchQuery);
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
   const actionButtonWidth = 124;
+  const pageShellStyle = {
+    background: "#f1f2f4",
+    minHeight: "100vh",
+    padding: "24px",
+    boxSizing: "border-box",
+  } as const;
+  const contentPanelStyle = {
+    width: "100%",
+    maxWidth: 1400,
+    margin: "0 auto",
+    background: "#ffffff",
+    border: "1px solid #dfe3e8",
+    borderRadius: 16,
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+    padding: "16px 18px 20px",
+    boxSizing: "border-box",
+  } as const;
 
   // Auto-refresh effect (30 seconds interval)
   useEffect(() => {
@@ -665,7 +694,8 @@ export default function CompaniesPage() {
 
   return (
     <s-page heading="Companies">
-      <s-section>
+      <div style={pageShellStyle}>
+        <div style={contentPanelStyle}>
         <div
           style={{
             display: "flex",
@@ -807,7 +837,15 @@ export default function CompaniesPage() {
               heading={searchQuery ? "No companies found" : "No companies yet"}
             />
           ) : (
-          <div style={{ position: "relative" }}>
+          <div
+            style={{
+              position: "relative",
+              overflow: "hidden",
+              border: "1px solid #e3e7ec",
+              borderRadius: 12,
+              background: "#ffffff",
+            }}
+          >
             {isSearching && (
               <div
                 style={{
@@ -852,6 +890,8 @@ export default function CompaniesPage() {
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
+                tableLayout: "fixed",
+                fontSize: 13,
                 opacity: isSearching ? 0.5 : 1,
                 pointerEvents: isSearching ? "none" : "auto",
               }}
@@ -859,42 +899,42 @@ export default function CompaniesPage() {
               <thead>
                 <tr>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "15%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "21%" }}
                   >
                     Company
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "15%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "23%" }}
                   >
                     Contact
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "5%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "5%" }}
                   >
                     Users
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "10%" }}
                   >
                     Credit Limit
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "10%" }}
                   >
                     Used Credit
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "12%" }}
                   >
                     Available Credit
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "8%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "7%" }}
                   >
                     Usage %
                   </th>
                   <th
-                    style={{ textAlign: "left", padding: "8px", width: "10%" }}
+                    style={{ textAlign: "left", padding: "10px 8px", width: "12%" }}
                   >
                     Actions
                   </th>
@@ -919,7 +959,14 @@ export default function CompaniesPage() {
                             : "transparent",
                         }}
                       >
-                        <td style={{ padding: "8px" }}>
+                        <td
+                          style={{
+                            padding: "10px 8px",
+                            lineHeight: 1.45,
+                            overflowWrap: "anywhere",
+                            verticalAlign: "top",
+                          }}
+                        >
                           {company.name}
                           <br />
                           {company.shopifyCompanyId
@@ -930,7 +977,14 @@ export default function CompaniesPage() {
                             : "–"}
                         </td>
 
-                        <td style={{ padding: "8px" }}>
+                        <td
+                          style={{
+                            padding: "10px 8px",
+                            lineHeight: 1.45,
+                            overflowWrap: "anywhere",
+                            verticalAlign: "top",
+                          }}
+                        >
                           {company.contactName || company.contactEmail ? (
                             <span>
                               {company.contactName ? (
@@ -949,22 +1003,25 @@ export default function CompaniesPage() {
                             <span style={{ color: "#5c5f62" }}>Not set</span>
                           )}
                         </td>
-                        <td style={{ padding: "8px" }}>{company.userCount}</td>
-                        <td style={{ padding: "8px" }}>
+                        <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
+                          {company.userCount}
+                        </td>
+                        <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
                           {formatCredit(company.creditLimit)}
                         </td>
                         <td
                           style={{
-                            padding: "8px",
+                            padding: "10px 8px",
                             color: "#d72c0d",
                             fontWeight: 500,
+                            verticalAlign: "top",
                           }}
                         >
                           {formatCredit(company.usedCredit)}
                         </td>
                         <td
                           style={{
-                            padding: "8px",
+                            padding: "10px 8px",
                             color:
                               parseFloat(company.availableCredit) >= 0
                                 ? "#008060"
@@ -973,13 +1030,14 @@ export default function CompaniesPage() {
                               parseFloat(company.availableCredit) < 0
                                 ? 600
                                 : 500,
+                            verticalAlign: "top",
                           }}
                         >
                           {formatCredit(company.availableCredit)}
                         </td>
                         <td
                           style={{
-                            padding: "8px",
+                            padding: "10px 8px",
                             color:
                               company.creditUsagePercentage >= 90
                                 ? "#d72c0d"
@@ -987,18 +1045,24 @@ export default function CompaniesPage() {
                                   ? "#b98900"
                                   : "#008060",
                             fontWeight: 500,
+                            verticalAlign: "top",
                           }}
                         >
                           {company.creditUsagePercentage}%
                         </td>
                         <td
                           style={{
-                            padding: "8px",
-                            width: 148,
+                            padding: "10px 8px",
+                            width: "12%",
                             verticalAlign: "middle",
                           }}
                         >
-                          <div style={{ width: actionButtonWidth }}>
+                          <div
+                            style={{
+                              width: actionButtonWidth,
+                              maxWidth: "100%",
+                            }}
+                          >
                             <s-button
                               type="button"
                               variant="secondary"
@@ -1047,6 +1111,7 @@ export default function CompaniesPage() {
               justifyContent: "center",
               alignItems: "center",
               gap: 12,
+              flexWrap: "wrap",
               marginTop: 24,
               paddingTop: 24,
               borderTop: "1px solid #e3e3e3",
@@ -1138,7 +1203,8 @@ export default function CompaniesPage() {
             </span>
           </div>
         )}
-      </s-section>
+        </div>
+      </div>
     </s-page>
   );
 }

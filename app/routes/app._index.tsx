@@ -40,6 +40,7 @@ type ActionResponse = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+ 
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop }, 
@@ -78,6 +79,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shopDomain: true,
       shopName: true,
       storeOwnerName: true,
+      contactEmail: true,
       submissionEmail: true,
     },
   });
@@ -90,7 +92,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }, { status: 404 });
   }
 
-  const result = await syncShopifyCompanies(admin, store, store.submissionEmail);
+  const result = await syncShopifyCompanies(
+    admin,
+    store,
+    store.contactEmail || store.submissionEmail,
+  );
 
   return Response.json({
     intent,

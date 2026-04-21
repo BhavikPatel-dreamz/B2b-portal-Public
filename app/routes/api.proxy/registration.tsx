@@ -1194,10 +1194,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           `${registration?.firstName || ""} ${registration?.lastName || ""}`,
         );
 
-        if (store.submissionEmail) {
+        const adminNotificationEmail =
+          store.contactEmail || store.submissionEmail;
+        if (adminNotificationEmail) {
           const adminEmailResult = await sendRegistrationEmailForAdmin(
             store.id,
-            store.submissionEmail,
+            adminNotificationEmail,
             store.storeOwnerName || "",
             email,
             companyName,

@@ -1100,7 +1100,7 @@ export default function SettingsPage() {
                   <input
                     id="themeColor"
                     type="color"
-                    defaultValue={store?.themeColor || "#005bd3"}
+                    defaultValue={store?.themeColor || "#0f172a"}
                     style={{
                       width: 52,
                       height: 36,
@@ -1152,7 +1152,7 @@ export default function SettingsPage() {
                         )
                       ) {
                         colorInput.value = e.target.value;
-                      }
+                      }maxWidth: 1200
                     }}
                   />
                 </div>
@@ -1162,7 +1162,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div
+            {/* <div
               style={{
                 display: activeTab === "store" ? "grid" : "none",
                 gap: 6,
@@ -1198,144 +1198,6 @@ export default function SettingsPage() {
                     e.target.style.boxShadow = "none";
                   }}
                 />
-
-                <s-text tone="neutral">
-                  or use custom privacy policy text instead
-                </s-text>
-
-                {/* Privacy Policy Rich Text Editor Toolbar */}
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 4,
-                    padding: 8,
-                    background: "#f6f6f7",
-                    border: "1px solid #c9cccf",
-                    borderRadius: "8px 8px 0 0",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("bold")}
-                    title="Bold"
-                  >
-                    <strong>B</strong>
-                  </ToolbarButton>
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("italic")}
-                    title="Italic"
-                  >
-                    <em>I</em>
-                  </ToolbarButton>
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("underline")}
-                    title="Underline"
-                  >
-                    <u>U</u>
-                  </ToolbarButton>
-
-                  <div
-                    style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
-                  />
-
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("insertUnorderedList")}
-                    title="Bullet List"
-                  >
-                    ≡
-                  </ToolbarButton>
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("insertOrderedList")}
-                    title="Numbered List"
-                  >
-                    ≣
-                  </ToolbarButton>
-
-                  <div
-                    style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
-                  />
-
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("justifyLeft")}
-                    title="Align Left"
-                  >
-                    ⫴
-                  </ToolbarButton>
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("justifyCenter")}
-                    title="Align Center"
-                  >
-                    ≡
-                  </ToolbarButton>
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("justifyRight")}
-                    title="Align Right"
-                  >
-                    ⫵
-                  </ToolbarButton>
-
-                  <div
-                    style={{ width: 1, background: "#c9cccf", margin: "0 4px" }}
-                  />
-
-                  <ToolbarButton
-                    onClick={() => formatPrivacy("removeFormat")}
-                    title="Clear Formatting"
-                  >
-                    ✕
-                  </ToolbarButton>
-                </div>
-
-                {/* Privacy Policy Editor with Placeholder */}
-                <div style={{ position: "relative" }}>
-                  {/* Placeholder Text - Only visible when empty */}
-                  {!privacyHasContent && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 10,
-                        left: 12,
-                        right: 12,
-                        color: "#8c9196",
-                        fontSize: 14,
-                        pointerEvents: "none",
-                        lineHeight: 1.6,
-                        whiteSpace: "pre-wrap",
-                        userSelect: "none",
-                      }}
-                    >
-                      {PRIVACY_PLACEHOLDER}
-                    </div>
-                  )}
-
-                  <div
-                    ref={privacyEditorRef}
-                    contentEditable
-                    onInput={handlePrivacyInput}
-                    onFocus={(e) => {
-                      e.currentTarget.style.borderColor = "#005bd3";
-                      e.currentTarget.style.boxShadow = "0 0 0 1px #005bd3";
-                    }}
-                    onBlur={(e) => {
-                      e.currentTarget.style.borderColor = "#c9cccf";
-                      e.currentTarget.style.boxShadow = "none";
-                    }}
-                    style={{
-                      padding: "10px 12px",
-                      border: "1px solid #c9cccf",
-                      borderTop: "none",
-                      borderRadius: "0 0 8px 8px",
-                      fontSize: 14,
-                      outline: "none",
-                      minHeight: 120,
-                      maxHeight: 400,
-                      overflowY: "auto",
-                      background: "#fff",
-                      lineHeight: 1.6,
-                    }}
-                  />
-                </div>
-
                 <input
                   ref={privacyHiddenInputRef}
                   type="hidden"
@@ -1343,7 +1205,7 @@ export default function SettingsPage() {
                   id="privacyPolicyContent"
                 />
               </div>
-            </div>
+            </div> */}
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <s-button
