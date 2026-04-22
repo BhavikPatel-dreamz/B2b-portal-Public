@@ -1514,7 +1514,7 @@ export default function Welcome() {
       <div className="setup-container">
         {/* Header */}
         <div className="setup-header" style={{marginBottom: '24px', display: 'flex'}}>
-          <h1>Welcome to B2B portal,</h1>
+          <h1>Welcome to SmartB2B portal,</h1>
         </div>
 
        

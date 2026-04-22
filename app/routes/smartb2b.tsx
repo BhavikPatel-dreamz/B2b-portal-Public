@@ -30,7 +30,7 @@ function FrontendLandingPage({ customerId, shop }) {
             if (window.ShopifyCompanyApp && window.ShopifyCompanyApp.init) {
               window.ShopifyCompanyApp.init({
                 containerId: 'shopify-company-app-root',
-                proxyUrl: '/apps/b2b-portal-public/api/proxy',
+                proxyUrl: '/apps/b2b-portal-public-dev/api/proxy',
                 customerId: ${JSON.stringify(customerId)},
                 shop: ${JSON.stringify(shop)}
               });
