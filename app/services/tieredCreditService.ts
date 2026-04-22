@@ -212,7 +212,7 @@ export async function deductTieredCredit(
       orderId,
     },
   })
-  console.log
+  
   if (orderTransactions) {
     await prisma.creditTransaction.update({
       where: { id: orderTransactions.id },
@@ -244,6 +244,9 @@ export async function deductTieredCredit(
       createdBy: userId,
     },
   });
+  console.log("Credit transaction created:", orderTransaction);
+  }
+ 
 
   // Update user credit usage if they have a limit
   if (creditInfo.user.hasUserLimit) {

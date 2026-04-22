@@ -1,0 +1,74 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "c6da0a0589e2c3c978aadf2afec07db7"
+name = "SmartB2B"
+application_url = "https://smartb2b.dynamicdreamz.com"
+embedded = true
+
+[webhooks]
+api_version = "2026-01"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/create" ]
+  uri = "/webhooks/draft_orders/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/update" ]
+  uri = "/webhooks/draft_orders/update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/edited" ]
+  uri = "/webhooks/orders/edited"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/delete" ]
+  uri = "/webhooks/draft_orders/delete"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/updated" ]
+  uri = "/webhooks/orders/updated"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/create" ]
+  uri = "/webhooks/customers/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/cancelled" ]
+  uri = "/webhooks/orders/cancelled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/delete" ]
+  uri = "/webhooks/customers/delete"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_validations,read_companies,write_companies,read_customers,write_customers,write_draft_orders,read_draft_orders,write_locations,read_locations,write_online_store_navigation,read_orders,write_orders,read_products,write_products,read_shipping,write_content,customer_read_customers"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://smartb2b.dynamicdreamz.com/api/auth" ]
+
+[app_proxy]
+url = "https://smartb2b.dynamicdreamz.com"
+subpath = "pages"
+prefix = "apps"
+
+[build]
+automatically_update_urls_on_dev = true
