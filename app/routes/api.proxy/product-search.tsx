@@ -8,7 +8,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
   const query = url.searchParams.get("q")?.trim() || "";
-  const cursor = url.searchParams.get("cursor"); 
+  const cursor = url.searchParams.get("cursor");
+  const sortKey = url.searchParams.get("sort") || "TITLE"; // 👈 NEW: e.g. TITLE, CREATED_AT, UPDATED_AT
 
   if (!query) {
     return { products: [], pageInfo: { hasNextPage: false } };
@@ -19,7 +20,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shopifySearchQuery =
     normalizedQuery === "all"
       ? "status:active published_status:published"
-      : `status:active published_status:published title:${normalizedQuery}*`; // 👈 optimized (no wildcard both sides)
+      : `status:active published_status:published title:${normalizedQuery}*`;
 
   const store = await getStoreByDomain(shop);
   if (!store || !store.accessToken) {
@@ -36,8 +37,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
       body: JSON.stringify({
         query: `
-          query searchProducts($query: String!, $cursor: String) {
-            products(first: 10, after: $cursor, query: $query) {
+          query searchProducts($query: String!, $cursor: String, $sortKey: ProductSortKeys) {
+            products(first: 10, after: $cursor, query: $query, sortKey: $sortKey) {
               edges {
                 cursor
                 node {
@@ -46,12 +47,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                   featuredImage {
                     url
                   }
-                  variants(first: 10) {  
+                  variants(first: 10) {
                     edges {
                       node {
                         id
                         title
                         price
+                        inventoryQuantity        # 👈 NEW: stock count per variant
+                        inventoryPolicy          # 👈 NEW: CONTINUE | DENY (sell when out of stock?)
+                        availableForSale         # 👈 NEW: true if purchasable right now
                       }
                     }
                   }
@@ -66,7 +70,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         `,
         variables: {
           query: shopifySearchQuery,
-          cursor: cursor || null, 
+          cursor: cursor || null,
+          sortKey,  // 👈 NEW
         },
       }),
     }
@@ -87,24 +92,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         title: string;
         featuredImage?: { url: string };
         variants: {
-          edges: { node: { id: string; title: string; price: string } }[];
+          edges: {
+            node: {
+              id: string;
+              title: string;
+              price: string;
+              inventoryQuantity: number;   // 👈 NEW
+              inventoryPolicy: string;     // 👈 NEW
+              availableForSale: boolean;   // 👈 NEW
+            };
+          }[];
         };
       };
     }) => ({
       id: edge.node.id,
       title: edge.node.title,
       image: edge.node.featuredImage?.url,
-      cursor: edge.cursor, 
+      cursor: edge.cursor,
       variants: edge.node.variants.edges.map((v) => ({
         id: v.node.id,
         title: v.node.title,
         price: v.node.price,
+        inventoryQuantity: v.node.inventoryQuantity,   // 👈 NEW
+        inventoryPolicy: v.node.inventoryPolicy,       // 👈 NEW
+        availableForSale: v.node.availableForSale,     // 👈 NEW
+        inStock: v.node.inventoryQuantity > 0          // 👈 NEW: convenience boolean
+          || v.node.inventoryPolicy === "CONTINUE",
       })),
+      // 👇 NEW: rolled-up stock across all variants
+      totalInventory: edge.node.variants.edges.reduce(
+        (sum, v) => sum + (v.node.inventoryQuantity ?? 0),
+        0
+      ),
     })
   );
 
   return {
     products,
-    pageInfo: data.data.products.pageInfo, 
+    pageInfo: data.data.products.pageInfo,
   };
 };

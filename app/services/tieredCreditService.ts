@@ -206,7 +206,32 @@ export async function deductTieredCredit(
   }
 
   // Create company credit transaction
-  await prisma.creditTransaction.create({
+  const orderTransactions = await prisma.creditTransaction.findFirst({
+    where: {
+      companyId,
+      orderId,
+    },
+  })
+  console.log
+  if (orderTransactions) {
+    await prisma.creditTransaction.update({
+      where: { id: orderTransactions.id },
+      data: {
+        companyId,
+        userId,
+        orderId,
+        transactionType: "order_updated",
+        creditAmount: amountDecimal.negated(), // Negative for deduction
+        previousBalance: creditInfo.company.availableCredit,
+        newBalance: creditInfo.company.availableCredit.minus(amountDecimal),
+        notes: `Credit updated for order ${orderId} by user ${userId}`,
+        createdBy: userId,
+      },
+    });
+    console.log("Credit transaction updated for existing order:", orderId);
+
+  }else{
+    const orderTransaction = await prisma.creditTransaction.create({
     data: {
       companyId,
       userId,

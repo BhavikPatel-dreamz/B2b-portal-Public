@@ -59,7 +59,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return json({ error: "Missing customerId" }, { status: 400 });
     }
  
-    const [customer, userData] = await Promise.all([
+    const [customer, userData,companyData] = await Promise.all([
       prisma.registrationSubmission.findFirst({
         where: {
           shopifyCustomerId: customerGid,
@@ -77,6 +77,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           shopifyCustomerId: true,
         },
       }),
+      prisma.companyAccount.findFirst({
+        where: {
+          shopId: store.id,
+
+        },
+        select: {
+          id: true,
+          name: true,
+          isDisable: true,
+        }
+      })
     ]);
 
     if (customer?.status === "PENDING") {
@@ -106,6 +117,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         reviewNotes: customer.reviewNotes ?? null,
       });
     }
+    if(companyData?.isDisable == true){
+      return json(
+        {
+          message: "Your company account has been deactivated. Please contact the support team.",
+        },
+      )}
  
  
     const formFieldConfig = await prisma.formFieldConfig.findUnique({

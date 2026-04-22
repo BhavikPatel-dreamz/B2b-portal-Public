@@ -263,6 +263,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           userCreditUsed: new Decimal(0), // Add required field
           paymentStatus: "pending",
           orderStatus: "draft",
+          shopifyOrderId:"",
           remainingBalance: new Decimal(totalAmount),
           paidAmount: new Decimal(0),
         },

@@ -1456,6 +1456,11 @@ export async function getCustomerCompanyInfo(
     };
     const shopifyUrl = `https://${shopName}/admin/api/2025-01/graphql.json`;
 
+
+    const company = await prisma.companyAccount.findFirst({
+        where: { contactEmail: customer.email },
+      })
+
     const [
       registrationData,
       companyData,
@@ -1506,30 +1511,12 @@ export async function getCustomerCompanyInfo(
         }),
       }),
 
-      // Shopify: pending (open) draft orders for this company
-      fetch(shopifyUrl, {
-        method: "POST",
-        headers: shopifyHeaders,
-        body: JSON.stringify({
-          query: `
-            query {
-              draftOrders(
-                first: 250
-                query: "company_id:${primaryCompanyNumericId} status:open"
-              ) {
-                edges {
-                  node {
-                    id
-                    status
-                  }
-                }
-                pageInfo {
-                  hasNextPage
-                }
-              }
-            }
-          `,
-        }),
+     
+      prisma.b2BOrder.findMany({
+        where: {
+          companyId: company?.id,
+          orderStatus: "draft",
+        },
       }),
 
       // Shopify: current month COMPLETED orders to sum used credit this month
@@ -1576,7 +1563,7 @@ export async function getCustomerCompanyInfo(
       currentMonthCompletedOrdersData,
     ] = await Promise.all([
       currentMonthOrdersRes.json(),
-      pendingDraftOrdersRes.json(),
+      pendingDraftOrdersRes,
       currentMonthCompletedOrdersRes.json(),
     ]);
 
@@ -1591,7 +1578,7 @@ export async function getCustomerCompanyInfo(
       filteredCurrentMonthOrders.length;
 
     const pendingDraftOrderCount: number =
-      pendingDraftOrdersData?.data?.draftOrders?.edges?.length ?? 0;
+      pendingDraftOrdersData.length;
 
     const currentMonthUsedCredit: number =
       filteredCurrentMonthCompletedOrders.reduce(
