@@ -9,6 +9,34 @@ embedded = true
 api_version = "2026-01"
 
   [[webhooks.subscriptions]]
+  topics = [ "draft_orders/delete" ]
+  uri = "/webhooks/draft_orders/delete"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/edited" ]
+  uri = "/webhooks/orders/edited"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/delete" ]
+  uri = "/webhooks/customers/delete"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/updated" ]
+  uri = "/webhooks/orders/updated"
+
+  [[webhooks.subscriptions]]
   topics = [ "orders/create" ]
   uri = "/webhooks/orders/create"
 
@@ -17,48 +45,20 @@ api_version = "2026-01"
   uri = "/webhooks/draft_orders/create"
 
   [[webhooks.subscriptions]]
-  topics = [ "draft_orders/update" ]
-  uri = "/webhooks/draft_orders/update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/edited" ]
-  uri = "/webhooks/orders/edited"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "draft_orders/delete" ]
-  uri = "/webhooks/draft_orders/delete"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/updated" ]
-  uri = "/webhooks/orders/updated"
+  topics = [ "orders/cancelled" ]
+  uri = "/webhooks/orders/cancelled"
 
   [[webhooks.subscriptions]]
   topics = [ "customers/create" ]
   uri = "/webhooks/customers/create"
 
   [[webhooks.subscriptions]]
-  topics = [ "orders/cancelled" ]
-  uri = "/webhooks/orders/cancelled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "customers/delete" ]
-  uri = "/webhooks/customers/delete"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/paid" ]
-  uri = "/webhooks/orders/paid"
+  topics = [ "draft_orders/update" ]
+  uri = "/webhooks/draft_orders/update"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_validations,read_companies,write_companies,read_customers,write_customers,write_draft_orders,read_draft_orders,write_locations,read_locations,write_online_store_navigation,read_orders,write_orders,read_products,write_products,read_shipping,write_content,customer_read_customers"
+scopes = "customer_read_customers,read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,read_shipping,write_companies,write_content,write_customers,write_draft_orders,write_locations,write_online_store_navigation,write_orders,write_products,write_validations"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 
