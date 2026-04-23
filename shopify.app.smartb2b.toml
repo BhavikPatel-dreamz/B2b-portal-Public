@@ -67,7 +67,7 @@ redirect_urls = [ "https://smartb2b.dynamicdreamz.com/api/auth" ]
 
 [app_proxy]
 url = "https://smartb2b.dynamicdreamz.com"
-subpath = "b2b-portal-public"
+subpath = "b2b-portal-public-3"
 prefix = "apps"
 
 [build]
