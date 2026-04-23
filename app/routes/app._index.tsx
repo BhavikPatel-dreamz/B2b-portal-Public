@@ -38,9 +38,68 @@ type ActionResponse = {
   errors?: string[];
 };
 
+type ThemeSummary = {
+  name: string;
+  role: string;
+  gid: string;
+  numericId: string | undefined;
+};
+
+const hasReadThemesScopeError = (error: unknown) => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const graphQLErrors = (error as {
+    body?: {
+      errors?: {
+        graphQLErrors?: Array<{ message?: string }>;
+      };
+    };
+  }).body?.errors?.graphQLErrors;
+
+  return (graphQLErrors ?? []).some((graphQLError) =>
+    graphQLError.message?.includes("read_themes"),
+  );
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
- 
+  const { admin, session } = await authenticate.admin(request);
+
+  let themes: ThemeSummary[] = [];
+  let missingScope = false;
+
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      {
+        themes(first: 10) {
+          nodes {
+            id
+            name
+            role
+          }
+        }
+      }`
+    );
+
+    const { data } = await response.json();
+
+    themes = (data?.themes?.nodes ?? []).map((theme: { id: string; name: string; role: string }) => ({
+      name: theme.name,
+      role: theme.role,
+      gid: theme.id,
+      numericId: theme.id.split("/").pop(),
+    }));
+    
+  } catch (error) {
+    if (hasReadThemesScopeError(error)) {
+      missingScope = true;
+      console.warn("Skipping theme load on app index because read_themes is not granted for this shop.");
+    } else {
+      console.error("Unable to load themes for app index", error);
+    }
+  }
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop }, 
@@ -55,6 +114,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 
   return Response.json({
+    themes,
+    missingScope,
     store
   });
 };
@@ -107,8 +168,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Welcome() {
-  const { store } = useLoaderData<typeof loader>() as { 
-    store: { shopDomain: string } | null 
+  const { store, themes } = useLoaderData<typeof loader>() as {
+    themes: ThemeSummary[];
+    store: { shopDomain: string } | null
   };
   const syncFetcher = useFetcher<ActionResponse>();
   const navigate = useNavigate();
@@ -136,6 +198,11 @@ export default function Welcome() {
     return store.shopDomain.split('.')[0];
   };
 
+  const mainTheme = themes.find((theme) => theme.role === "MAIN");
+  const themeAdminHref = mainTheme?.numericId
+    ? `https://admin.shopify.com/store/${getStoreName()}/themes/${mainTheme.numericId}/editor`
+    : `https://admin.shopify.com/store/${getStoreName()}/themes`;
+
 
 
   const [selectedTutorial, setSelectedTutorial] = useState<Tutorial | null>(null);
@@ -153,7 +220,7 @@ export default function Welcome() {
     {
       label: "Activate app extensions",
       actionLabel: "Manage installation",
-      href: `https://admin.shopify.com/store/${getStoreName()}/themes`,
+      href: themeAdminHref,
       external: true,
     },
     {
