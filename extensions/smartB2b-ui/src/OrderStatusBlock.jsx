@@ -7,7 +7,7 @@ import { useEffect, useState } from "preact/hooks";
 export default async () => {
   render(<Extension />, document.body);
 };
-const API_URL = "https://smartb2b.dynamicdreamz.com";
+const API_URL = "https://dd-79.dynamicdreamz.com";
 // "https://dd-79.dynamicdreamz.com"
 //"https://b2b-portal-public.vercel.app"
 // "https://smartb2b.dynamicdreamz.com";

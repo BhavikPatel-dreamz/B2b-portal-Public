@@ -6,8 +6,8 @@
 api_version = "2026-01"
 
 [[extensions]]
-name = "customer-account-ui"
-handle = "customer-account-ui"
+name = "smartB2b-ui"
+handle = "smartB2b-ui"
 type = "ui_extension"
 uid = "9ebaa5f0-a0d8-25bf-6290-c55f579e4dfac7c7fcd2"
 
