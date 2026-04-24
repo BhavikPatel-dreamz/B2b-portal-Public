@@ -3,9 +3,16 @@ import { cartValidationsGenerateRun } from "../src/cart_validations_generate_run
 
 
 describe("Cart Validation Function", () => {
+  const atCheckout = {
+    buyerJourney: {
+      step: "CHECKOUT_INTERACTION",
+    },
+  };
+
   describe("Credit validation", () => {
     it("should allow cart when sufficient credit is available", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [{ quantity: 1 }],
           cost: {
@@ -28,6 +35,7 @@ describe("Cart Validation Function", () => {
 
     it("should block cart when insufficient credit", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [{ quantity: 1 }],
           cost: {
@@ -54,6 +62,7 @@ describe("Cart Validation Function", () => {
 
     it("should block cart when credit limit is reached", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [{ quantity: 1 }],
           cost: {
@@ -78,6 +87,7 @@ describe("Cart Validation Function", () => {
 
     it("should work with non-B2B customers (no purchasing company)", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [{ quantity: 1 }],
           cost: {
@@ -99,6 +109,7 @@ describe("Cart Validation Function", () => {
   describe("User and Company Credit validation", () => {
     it("should allow orders with sufficient company credit", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [
             { quantity: 1 },
@@ -125,6 +136,7 @@ describe("Cart Validation Function", () => {
 
     it("should block cart when company credit metafield is missing", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [{ quantity: 1 }],
           cost: {
@@ -149,6 +161,7 @@ describe("Cart Validation Function", () => {
 
     it("should block cart when user-level credit is insufficient", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [{ quantity: 1 }],
           cost: {
@@ -181,6 +194,7 @@ describe("Cart Validation Function", () => {
   describe("Credit limit scenarios", () => {
     it("should block orders when credit is insufficient", () => {
       const input = {
+        ...atCheckout,
         cart: {
           lines: [
             { quantity: 1 },
@@ -204,6 +218,32 @@ describe("Cart Validation Function", () => {
       const errors = result.operations[0].validationAdd.errors;
       expect(errors).toHaveLength(1);
       expect(errors.some(e => e.message.includes("Insufficient company credit"))).toBe(true);
+    });
+
+    it("should not block during cart interaction", () => {
+      const input = {
+        buyerJourney: {
+          step: "CART_INTERACTION",
+        },
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "200.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "900.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(0);
     });
   });
 });

@@ -1,4 +1,7 @@
 query CartValidationsGenerateRunInput {
+  buyerJourney {
+    step
+  }
   cart {
     lines {
       quantity

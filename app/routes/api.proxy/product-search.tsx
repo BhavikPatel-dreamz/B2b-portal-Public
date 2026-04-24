@@ -3,13 +3,38 @@ import { validateB2BCustomerAccess } from "../../utils/proxy.server";
 import { getStoreByDomain } from "../../services/store.server";
 import { apiVersion } from "../../shopify.server";
 
+type ProductResponse = {
+  products: {
+    id: string;
+    title: string;
+    image?: string;
+    cursor: string;
+    totalInventory: number;
+    variants: {
+      id: string;
+      title: string;
+      price: string;
+      currencyCode: string;
+      inventoryQuantity: number;
+      inventoryPolicy: string;
+      availableForSale: boolean;
+      inStock: boolean;
+    }[];
+  }[];
+  pageInfo: {
+    hasNextPage: boolean;
+    endCursor: string | null;
+  };
+};
+
+const responseCache = new Map<string, ProductResponse>();
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop } = await validateB2BCustomerAccess(request);
   const url = new URL(request.url);
 
   const query = url.searchParams.get("q")?.trim() || "";
   const cursor = url.searchParams.get("cursor");
-  const sortKey = url.searchParams.get("sort") || "TITLE"; // 👈 NEW: e.g. TITLE, CREATED_AT, UPDATED_AT
 
   if (!query) {
     return { products: [], pageInfo: { hasNextPage: false } };
@@ -22,60 +47,73 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? "status:active published_status:published"
       : `status:active published_status:published title:${normalizedQuery}*`;
 
+  const cacheKey = `${shop}:${normalizedQuery}:${cursor || "first"}`;
+
+  if (responseCache.has(cacheKey)) {
+    return responseCache.get(cacheKey);
+  }
+
   const store = await getStoreByDomain(shop);
+
   if (!store || !store.accessToken) {
     throw new Error("Store not found");
   }
 
-  const response = await fetch(
-    `https://${shop}/admin/api/${apiVersion}/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": store.accessToken,
-      },
-      body: JSON.stringify({
-        query: `
-          query searchProducts($query: String!, $cursor: String, $sortKey: ProductSortKeys) {
-            products(first: 10, after: $cursor, query: $query, sortKey: $sortKey) {
-              edges {
-                cursor
-                node {
-                  id
-                  title
-                  featuredImage {
-                    url
-                  }
-                  variants(first: 10) {
-                    edges {
-                      node {
-                        id
-                        title
-                        price
-                        inventoryQuantity        # 👈 NEW: stock count per variant
-                        inventoryPolicy          # 👈 NEW: CONTINUE | DENY (sell when out of stock?)
-                        availableForSale         # 👈 NEW: true if purchasable right now
-                      }
-                    }
+  const endpoint = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": store.accessToken,
+    },
+    body: JSON.stringify({
+      query: `
+      query searchProducts($query: String!, $cursor: String) {
+        shop {
+          currencyCode
+        }
+        products(first: 10, after: $cursor, query: $query) {
+          edges {
+            cursor
+            node {
+              id
+              title
+              totalInventory
+              featuredImage {
+                url
+              }
+              variants(first: 3) {
+                edges {
+                  node {
+                    id
+                    title
+                    price
+                    inventoryQuantity
+                    inventoryPolicy
+                    availableForSale
                   }
                 }
               }
-              pageInfo {
-                hasNextPage
-                endCursor
-              }
             }
           }
-        `,
-        variables: {
-          query: shopifySearchQuery,
-          cursor: cursor || null,
-          sortKey,  // 👈 NEW
-        },
-      }),
-    }
-  );
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    `,
+      variables: {
+        query: shopifySearchQuery,
+        cursor: cursor || null,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Shopify API request failed");
+  }
 
   const data = await response.json();
 
@@ -84,12 +122,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return { products: [], pageInfo: { hasNextPage: false } };
   }
 
+  const shopCurrency = data.data.shop.currencyCode;
+
   const products = data.data.products.edges.map(
     (edge: {
       cursor: string;
       node: {
         id: string;
         title: string;
+        totalInventory: number;
         featuredImage?: { url: string };
         variants: {
           edges: {
@@ -97,9 +138,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               id: string;
               title: string;
               price: string;
-              inventoryQuantity: number;   // 👈 NEW
-              inventoryPolicy: string;     // 👈 NEW
-              availableForSale: boolean;   // 👈 NEW
+              inventoryQuantity: number;
+              inventoryPolicy: string;
+              availableForSale: boolean;
             };
           }[];
         };
@@ -109,26 +150,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       title: edge.node.title,
       image: edge.node.featuredImage?.url,
       cursor: edge.cursor,
+      totalInventory: edge.node.totalInventory,
       variants: edge.node.variants.edges.map((v) => ({
         id: v.node.id,
         title: v.node.title,
-        price: v.node.price,
-        inventoryQuantity: v.node.inventoryQuantity,   // 👈 NEW
-        inventoryPolicy: v.node.inventoryPolicy,       // 👈 NEW
-        availableForSale: v.node.availableForSale,     // 👈 NEW
-        inStock: v.node.inventoryQuantity > 0          // 👈 NEW: convenience boolean
-          || v.node.inventoryPolicy === "CONTINUE",
+        price: v.node.price ?? "0",
+        currencyCode: shopCurrency,
+        inventoryQuantity: v.node.inventoryQuantity ?? 0,
+        inventoryPolicy: v.node.inventoryPolicy,
+        availableForSale: v.node.availableForSale,
+        inStock:
+          v.node.availableForSale &&
+          (v.node.inventoryQuantity > 0 ||
+            v.node.inventoryPolicy === "CONTINUE"),
       })),
-      // 👇 NEW: rolled-up stock across all variants
-      totalInventory: edge.node.variants.edges.reduce(
-        (sum, v) => sum + (v.node.inventoryQuantity ?? 0),
-        0
-      ),
-    })
+    }),
   );
 
-  return {
+  const result: ProductResponse = {
     products,
     pageInfo: data.data.products.pageInfo,
   };
+
+  responseCache.set(cacheKey, result);
+  setTimeout(() => {
+    responseCache.delete(cacheKey);
+  }, 30 * 1000);
+
+  return result;
 };

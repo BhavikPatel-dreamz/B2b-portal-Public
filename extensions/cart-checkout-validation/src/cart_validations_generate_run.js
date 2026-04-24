@@ -10,12 +10,32 @@
  * @returns {CartValidationsGenerateRunResult}
  */
 export function cartValidationsGenerateRun(input) {
+  /**
+   * @type {{ message: string; target: string; }[]}
+   */
   const errors = [];
+  const buyerJourneyStep = input.buyerJourney?.step;
+  const shouldValidateCredit =
+    buyerJourneyStep === "CHECKOUT_INTERACTION" ||
+    buyerJourneyStep === "CHECKOUT_COMPLETION";
+
   const parseDecimal = (value) => {
     if (value == null || value === "") return null;
     const parsed = Number.parseFloat(String(value));
     return Number.isFinite(parsed) ? parsed : null;
   };
+
+  if (!shouldValidateCredit) {
+    return {
+      operations: [
+        {
+          validationAdd: {
+            errors,
+          },
+        },
+      ],
+    };
+  }
 
   // Check company credit validation
   const buyerIdentity = input.cart.buyerIdentity;

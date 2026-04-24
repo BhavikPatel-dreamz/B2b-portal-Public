@@ -300,6 +300,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             newBalance: new Decimal(0), // Will be recalculated
             notes: `Order creation failed - Shopify sync error. Credit restored.`,
             createdBy: "system",
+            createdAt: new Date(),
+            
           },
         });
 

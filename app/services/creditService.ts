@@ -172,6 +172,8 @@ export async function deductCredit(
         newBalance,
         notes: `Credit deducted for order ${orderId} (updated)`,
         createdBy: userId,
+       createdAt: new Date(),
+        
       },
     });
   } else {
@@ -186,6 +188,8 @@ export async function deductCredit(
         newBalance,
         notes: `Credit deducted for order ${orderId}`,
         createdBy: userId,
+        createdAt: new Date(),
+        
       },
     });
   }

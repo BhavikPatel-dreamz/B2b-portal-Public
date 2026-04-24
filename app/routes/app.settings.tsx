@@ -412,6 +412,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               createdBy: "Admin",
               previousBalance: existing.newBalance, // ← old "new" becomes "previous"
               newBalance: defaultCompanyCreditLimitRaw, // ← updated balance
+              createdAt: new Date(), // ← keep original creation time
             },
           });
         } else {
@@ -423,6 +424,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               createdBy: "Admin",
               previousBalance: "0", // ← no previous, so 0
               newBalance: defaultCompanyCreditLimitRaw, // ← new balance = credit limit
+              createdAt: new Date(),
             },
           });
         }

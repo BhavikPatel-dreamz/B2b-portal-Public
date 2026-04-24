@@ -251,6 +251,7 @@ export async function createCreditTransaction(
       newBalance: new Prisma.Decimal(data.newBalance.toString()),
       notes: data.notes,
       createdBy: data.createdBy,
+      createdAt: new Date(),
     },
   });
 }
@@ -767,6 +768,8 @@ export async function updateCredit(
               companyId: updatedCompany.id,
               notes: `Credit limit updated to ${credit.toString()} and synced to Shopify`,
               orderId: null,
+             createdAt: new Date(),
+              
             },
           });
         } else {
@@ -780,6 +783,7 @@ export async function updateCredit(
               companyId: updatedCompany.id,
               notes: `Credit limit updated to ${credit.toString()} and synced to Shopify`,
               orderId: null,
+             createdAt: new Date(),
             },
           });
         }
