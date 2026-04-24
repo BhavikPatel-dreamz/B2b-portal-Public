@@ -55,6 +55,22 @@ interface ActionResponse {
   errors?: string[];
 }
 
+interface RegistrationsLoaderData {
+  submissions: RegistrationSubmission[];
+  formConfig: FormConfig;
+  shippingCountryOptions: CountryOption[];
+  shippingProvincesByCountry: Record<string, CountryOption[]>;
+  paymentTermsTemplates: Array<{
+    id: string;
+    name: string;
+    paymentTermsType: string;
+    dueInDays: number | null;
+  }>;
+  allCatalogs: any[];
+  priceLists: any[];
+  storeMissing: boolean;
+}
+
 type SortOrder = "newest" | "oldest";
 
 function normalizeSort(value: string | null): SortOrder {
@@ -587,10 +603,28 @@ export default function CompaniesPage() {
   const revalidator = useRevalidator();
   const navigate = useNavigate();
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
+  const registrationsFetcher = useFetcher<RegistrationsLoaderData>();
 
   // Controlled search input
   const [query, setQuery] = useState(searchQuery);
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
+  const [selectedTab, setSelectedTab] =
+    useState<RegistrationStatusTab>(activeTab);
+  const [registrationData, setRegistrationData] =
+    useState<RegistrationsLoaderData | null>(() =>
+      formConfig
+        ? {
+            submissions,
+            formConfig,
+            shippingCountryOptions,
+            shippingProvincesByCountry,
+            paymentTermsTemplates,
+            allCatalogs,
+            priceLists,
+            storeMissing,
+          }
+        : null,
+    );
   const actionButtonWidth = 124;
   const pageShellStyle = {
     background: "#f1f2f4",
@@ -612,6 +646,10 @@ export default function CompaniesPage() {
 
   // Auto-refresh effect (30 seconds interval)
   useEffect(() => {
+    if (selectedTab !== "companies") {
+      return;
+    }
+
     const AUTO_REFRESH_INTERVAL = 30 * 1000; // 30 seconds
 
     intervalIdRef.current = setInterval(() => {
@@ -624,7 +662,58 @@ export default function CompaniesPage() {
         clearInterval(intervalIdRef.current);
       }
     };
-  }, [revalidator]);
+  }, [revalidator, selectedTab]);
+
+  useEffect(() => {
+    if (!registrationsFetcher.data) {
+      return;
+    }
+
+    setRegistrationData(registrationsFetcher.data);
+  }, [registrationsFetcher.data]);
+
+  const loadRegistrations = () => {
+    if (registrationData || registrationsFetcher.state !== "idle") {
+      return;
+    }
+
+    const registrationParams = new URLSearchParams();
+    const shop = searchParams.get("shop");
+
+    if (shop) {
+      registrationParams.set("shop", shop);
+    }
+
+    const queryString = registrationParams.toString();
+    registrationsFetcher.load(
+      queryString ? `/app/registrations?${queryString}` : "/app/registrations",
+    );
+  };
+
+  const updateTabInUrl = (nextTab: RegistrationStatusTab) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextUrl = new URL(window.location.href);
+
+    if (nextTab === "companies") {
+      nextUrl.searchParams.delete("tab");
+    } else {
+      nextUrl.searchParams.set("tab", nextTab);
+    }
+
+    window.history.replaceState(window.history.state, "", nextUrl);
+  };
+
+  const handleTabChange = (nextTab: RegistrationStatusTab) => {
+    setSelectedTab(nextTab);
+    updateTabInUrl(nextTab);
+
+    if (nextTab !== "companies") {
+      loadRegistrations();
+    }
+  };
 
   const exportCompaniesCsv = () => {
     downloadCsv("companies.csv", [
@@ -662,6 +751,10 @@ export default function CompaniesPage() {
 
   const isUpdating = updateFetcher.state !== "idle";
   const isSyncing = syncFetcher.state !== "idle";
+  const isLoadingRegistrationTab =
+    selectedTab !== "companies" &&
+    !registrationData &&
+    registrationsFetcher.state !== "idle";
 
   // derive searching state from router navigation
   const navigation = useNavigation();
@@ -709,31 +802,35 @@ export default function CompaniesPage() {
             { key: "pending", label: "Pending", count: pendingCount },
             { key: "rejected", label: "Rejected", count: rejectedCount },
           ].map((tab) => (
-            <Link
+            <button
               key={tab.key}
-              to={`?${new URLSearchParams({
-                ...(tab.key !== "companies" ? { tab: tab.key } : {}),
-                page: "1",
-              })}`}
+              type="button"
+              onClick={() => handleTabChange(tab.key as RegistrationStatusTab)}
               style={{
+                appearance: "none",
+                background: "transparent",
+                borderLeft: "none",
+                borderRight: "none",
+                borderTop: "none",
+                cursor: "pointer",
                 padding: "8px 16px",
-                textDecoration: "none",
                 borderBottom:
-                  activeTab === tab.key
+                  selectedTab === tab.key
                     ? "2px solid #2c6ecb"
                     : "2px solid transparent",
-                color: activeTab === tab.key ? "#2c6ecb" : "#5c5f62",
-                fontWeight: activeTab === tab.key ? 600 : 400,
+                color: selectedTab === tab.key ? "#2c6ecb" : "#5c5f62",
+                fontWeight: selectedTab === tab.key ? 600 : 400,
                 marginBottom: -1,
+                fontSize: 14,
               }}
             >
               {tab.label}
               {typeof tab.count === "number" ? ` (${tab.count})` : ""}
-            </Link>
+            </button>
           ))}
         </div>
 
-        {activeTab === "companies" ? (
+        {selectedTab === "companies" ? (
           <div
             style={{
               display: "flex",
@@ -831,7 +928,7 @@ export default function CompaniesPage() {
           </div>
         ) : null}
 
-        {activeTab === "companies" ? (
+        {selectedTab === "companies" ? (
           companies.length === 0 ? (
             <s-empty-state
               heading={searchQuery ? "No companies found" : "No companies yet"}
@@ -1086,25 +1183,56 @@ export default function CompaniesPage() {
             </table>
           </div>
           )
-        ) : (
+        ) : isLoadingRegistrationTab ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              minHeight: 220,
+              border: "1px solid #e3e7ec",
+              borderRadius: 12,
+              background: "#ffffff",
+            }}
+          >
+            <div style={{ textAlign: "center" }}>
+              <div
+                style={{
+                  display: "inline-block",
+                  width: 24,
+                  height: 24,
+                  border: "3px solid #e0e0e0",
+                  borderTop: "3px solid #1a1b1d",
+                  borderRadius: "50%",
+                  animation: "spin 0.8s linear infinite",
+                }}
+              />
+              <p style={{ marginTop: 8, color: "#5c5f62", fontSize: 13 }}>
+                Loading registrations...
+              </p>
+            </div>
+          </div>
+        ) : registrationData ? (
           <RegistrationApprovalsPanel
-            submissions={submissions}
-            storeMissing={storeMissing}
-            formConfig={formConfig!}
-            shippingCountryOptions={shippingCountryOptions}
-            shippingProvincesByCountry={shippingProvincesByCountry}
-            paymentTermsTemplates={paymentTermsTemplates}
-            allCatalogs={allCatalogs}
-            priceLists={priceLists}
-            forcedStatusFilter={activeTab.toUpperCase() as "PENDING" | "APPROVED" | "REJECTED"}
+            submissions={registrationData.submissions}
+            storeMissing={registrationData.storeMissing}
+            formConfig={registrationData.formConfig}
+            shippingCountryOptions={registrationData.shippingCountryOptions}
+            shippingProvincesByCountry={registrationData.shippingProvincesByCountry}
+            paymentTermsTemplates={registrationData.paymentTermsTemplates}
+            allCatalogs={registrationData.allCatalogs}
+            priceLists={registrationData.priceLists}
+            forcedStatusFilter={selectedTab.toUpperCase() as "PENDING" | "APPROVED" | "REJECTED"}
             hideStatusTabs
             embedded
             heading="Registrations"
           />
+        ) : (
+          <s-empty-state heading="No registration data available" />
         )}
 
         {/* Pagination */}
-        {activeTab === "companies" && totalPages > 1 && (
+        {selectedTab === "companies" && totalPages > 1 && (
           <div
             style={{
               display: "flex",
