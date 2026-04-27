@@ -210,7 +210,7 @@ export default function Welcome() {
     {
       label: "Customize the application form",
       actionLabel: "View form editor",
-      href: "/app/regitration-form",
+      href: "/app/registration-form",
     },
     {
       label: "Review approval preset",
@@ -1666,7 +1666,7 @@ export default function Welcome() {
             <div className="overview-item">
               <div>
                 <div className="overview-item-header">
-                  <span className="overview-icon">⌂</span>
+                  <span className="overview-icon" style={{ fontSize: "24px" }}>⌂</span>
                   <span>Pending applications</span>
                 </div>
                 <div className="overview-count">0</div>
@@ -1682,7 +1682,7 @@ export default function Welcome() {
             <div className="overview-item">
               <div>
                 <div className="overview-item-header">
-                  <span className="overview-icon">⇩</span>
+                  <span className="overview-icon" style={{ fontSize: "20px" }}>⇩</span>
                   <span>Company import</span>
                 </div>
                 <p className="overview-description">

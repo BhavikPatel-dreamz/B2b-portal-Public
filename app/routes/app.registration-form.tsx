@@ -123,7 +123,7 @@ export interface StoredField {
   phoneDefaultCountry?: string;
 }
 
-type MetafieldTarget =   "customer" | "company_location" | "company" | "customer_locations" | "orders" | "products" | "product_variants";
+type MetafieldTarget = "customer" | "company_location" | "company" | "customer_locations" | "orders" | "products" | "product_variants";
 type MetafieldDefinitionMap = Record<FieldType, Record<MetafieldTarget, string[]>>;
 
 export interface StoredStepGroup {
@@ -277,43 +277,43 @@ export function serializeConfig(config: FormConfig): StoredConfig {
               : null;
 
           return {
-          paletteKey: f.paletteKey,
-          key: f.key,
-          label: f.label,
-          ...(f.description ? { description: f.description } : {}),
-          ...(f.defaultValue ? { defaultValue: f.defaultValue } : {}),
-          ...(f.validationMessage ? { validationMessage: f.validationMessage } : {}),
-          ...(f.hideTypedCharacters ? { hideTypedCharacters: f.hideTypedCharacters } : {}),
-          ...(f.headingTag ? { headingTag: f.headingTag } : {}),
-          ...(f.headingAlignment ? { headingAlignment: f.headingAlignment } : {}),
-          ...(typeof f.headingWidth === "number" ? { headingWidth: f.headingWidth } : {}),
-          ...(typeof f.paragraphFontSize === "number" ? { paragraphFontSize: f.paragraphFontSize } : {}),
-          ...(f.linkUrl ? { linkUrl: f.linkUrl } : {}),
-          ...(typeof f.linkOpenInNewTab === "boolean" ? { linkOpenInNewTab: f.linkOpenInNewTab } : {}),
-          ...(f.linkAlignment ? { linkAlignment: f.linkAlignment } : {}),
-          ...(sectionLabel ? { sectionLabel } : {}),
-          ...(sectionHeadingSettings?.label ? { sectionHeadingLabel: sectionHeadingSettings.label } : {}),
-          ...(sectionHeadingSettings?.headingTag ? { sectionHeadingTag: sectionHeadingSettings.headingTag } : {}),
-          ...(sectionHeadingSettings?.alignment ? { sectionHeadingAlignment: sectionHeadingSettings.alignment } : {}),
-          ...(typeof sectionHeadingSettings?.width === "number" ? { sectionHeadingWidth: sectionHeadingSettings.width } : {}),
-          ...(typeof sectionHeadingSettings?.hidden === "boolean" ? { sectionHeadingHidden: sectionHeadingSettings.hidden } : {}),
-          type: f.type,
-          order: f.order,
-          ...(f.required ? { required: f.required } : {}),
-          ...(f.width && f.width !== "full"
-            ? { width: f.width }
-            : f.width === "full"
+            paletteKey: f.paletteKey,
+            key: f.key,
+            label: f.label,
+            ...(f.description ? { description: f.description } : {}),
+            ...(f.defaultValue ? { defaultValue: f.defaultValue } : {}),
+            ...(f.validationMessage ? { validationMessage: f.validationMessage } : {}),
+            ...(f.hideTypedCharacters ? { hideTypedCharacters: f.hideTypedCharacters } : {}),
+            ...(f.headingTag ? { headingTag: f.headingTag } : {}),
+            ...(f.headingAlignment ? { headingAlignment: f.headingAlignment } : {}),
+            ...(typeof f.headingWidth === "number" ? { headingWidth: f.headingWidth } : {}),
+            ...(typeof f.paragraphFontSize === "number" ? { paragraphFontSize: f.paragraphFontSize } : {}),
+            ...(f.linkUrl ? { linkUrl: f.linkUrl } : {}),
+            ...(typeof f.linkOpenInNewTab === "boolean" ? { linkOpenInNewTab: f.linkOpenInNewTab } : {}),
+            ...(f.linkAlignment ? { linkAlignment: f.linkAlignment } : {}),
+            ...(sectionLabel ? { sectionLabel } : {}),
+            ...(sectionHeadingSettings?.label ? { sectionHeadingLabel: sectionHeadingSettings.label } : {}),
+            ...(sectionHeadingSettings?.headingTag ? { sectionHeadingTag: sectionHeadingSettings.headingTag } : {}),
+            ...(sectionHeadingSettings?.alignment ? { sectionHeadingAlignment: sectionHeadingSettings.alignment } : {}),
+            ...(typeof sectionHeadingSettings?.width === "number" ? { sectionHeadingWidth: sectionHeadingSettings.width } : {}),
+            ...(typeof sectionHeadingSettings?.hidden === "boolean" ? { sectionHeadingHidden: sectionHeadingSettings.hidden } : {}),
+            type: f.type,
+            order: f.order,
+            ...(f.required ? { required: f.required } : {}),
+            ...(f.width && f.width !== "full"
               ? { width: f.width }
-              : {}),
-          ...(f.section ? { section: f.section } : {}),
-          ...(f.options ? { options: f.options } : {}),
-          ...(f.placeholder ? { placeholder: f.placeholder } : {}),
-          ...(f.content ? { content: f.content } : {}),
-          ...(f.metafieldTarget ? { metafieldTarget: f.metafieldTarget } : {}),
-          ...(f.metafieldDefinition ? { metafieldDefinition: f.metafieldDefinition } : {}),
-          ...(f.phoneDefaultCountry ? { phoneDefaultCountry: f.phoneDefaultCountry } : {}),
-        };
-      },
+              : f.width === "full"
+                ? { width: f.width }
+                : {}),
+            ...(f.section ? { section: f.section } : {}),
+            ...(f.options ? { options: f.options } : {}),
+            ...(f.placeholder ? { placeholder: f.placeholder } : {}),
+            ...(f.content ? { content: f.content } : {}),
+            ...(f.metafieldTarget ? { metafieldTarget: f.metafieldTarget } : {}),
+            ...(f.metafieldDefinition ? { metafieldDefinition: f.metafieldDefinition } : {}),
+            ...(f.phoneDefaultCountry ? { phoneDefaultCountry: f.phoneDefaultCountry } : {}),
+          };
+        },
       );
     return { step, fields: storedFields };
   });
@@ -1171,18 +1171,28 @@ function CanvasField({
         </div>
 
         {/* Delete button area shows on hover for all fields */}
-    {showDeleteIcon && canDelete ? (
-  <button
-    onClick={(e) => {
-      e.stopPropagation();
-      onRemove();
-    }}
+        {showDeleteIcon && canDelete ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
             style={{
-              border: "none", background: "none", cursor: "pointer",
-              color: "#c91d2e", padding: "8px 2px", flexShrink: 0,
-              borderRadius: 4, opacity: showDeleteIcon ? 1 : 0, transition: "opacity 0.12s",
-              display: "flex", alignItems: "center",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              color: "#c91d2e",
+              padding: "4px",
+              flexShrink: 0,
+              borderRadius: 4,
+              opacity: showDeleteIcon ? 1 : 0,
+              transition: "opacity 0.12s",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               pointerEvents: showDeleteIcon ? "auto" : "none",
+              marginTop: isDisplay || isCheck ? 0 : 32, // Align with input field
+              alignSelf: "flex-start",
             }}
             title="Remove field"
           >
@@ -1195,7 +1205,7 @@ function CanvasField({
           </button>
         ) : (
           /* Placeholder spacer so layout doesn't shift */
-          <div style={{ width: 18, flexShrink: 0 }} />
+          <div style={{ width: 18, flexShrink: 0, marginTop: isDisplay || isCheck ? 0 : 32 }} />
         )}
       </div>
     </div>
@@ -1497,7 +1507,7 @@ export default function FormEditor() {
     return new URL(`/store/${normalizedShopName}/settings/custom_data`, "https://admin.shopify.com").toString();
   }, [shopName]);
 
-  
+
 
   const fetcher = useFetcher<{
     success: boolean;
@@ -1588,8 +1598,6 @@ export default function FormEditor() {
     | null
   >(null);
 
-  
-
   const isSaving = fetcher.state !== "idle";
   const pendingSubmitRef = useRef(false);
 
@@ -1617,7 +1625,7 @@ export default function FormEditor() {
             ? normalizeParagraphHtml(fieldEditorDraft.content)
             : fieldEditorDraft.content.trim();
         const nextLinkUrl = fieldEditorDraft.linkUrl.trim();
-        
+
         // Auto-generate key from label for custom fields
         const isCustomField = editingField.paletteKey.startsWith("c_") || editingField.category === "custom";
         const nextKey = isCustomField ? generateKeyFromLabel(nextLabel) : editingField.key;
@@ -1627,39 +1635,39 @@ export default function FormEditor() {
           fields: nextConfig.fields.map((field) =>
             field.id === editingField.id
               ? {
-                  ...field,
-                  label: nextLabel,
-                  key: nextKey,
-                  description: fieldEditorDraft.description.trim() || undefined,
-                  defaultValue: fieldEditorDraft.defaultValue,
-                  validationMessage: fieldEditorDraft.validationMessage.trim() || undefined,
-                  hideTypedCharacters: fieldEditorDraft.hideTypedCharacters,
-                  required: fieldEditorDraft.required,
-                  width: fieldEditorDraft.width >= 60 ? "full" : "half",
-                  metafieldTarget: fieldEditorDraft.metafieldTarget,
-                  metafieldDefinition: fieldEditorDraft.metafieldDefinition || undefined,
-                  phoneDefaultCountry: fieldEditorDraft.phoneDefaultCountry,
-                  ...(editingField.type === "heading"
+                ...field,
+                label: nextLabel,
+                key: nextKey,
+                description: fieldEditorDraft.description.trim() || undefined,
+                defaultValue: fieldEditorDraft.defaultValue,
+                validationMessage: fieldEditorDraft.validationMessage.trim() || undefined,
+                hideTypedCharacters: fieldEditorDraft.hideTypedCharacters,
+                required: fieldEditorDraft.required,
+                width: fieldEditorDraft.width >= 60 ? "full" : "half",
+                metafieldTarget: fieldEditorDraft.metafieldTarget,
+                metafieldDefinition: fieldEditorDraft.metafieldDefinition || undefined,
+                phoneDefaultCountry: fieldEditorDraft.phoneDefaultCountry,
+                ...(editingField.type === "heading"
+                  ? {
+                    content: nextContent,
+                    headingTag: fieldEditorDraft.headingTag,
+                    headingAlignment: fieldEditorDraft.alignment,
+                    headingWidth: fieldEditorDraft.width,
+                  }
+                  : editingField.type === "paragraph"
                     ? {
-                        content: nextContent,
-                        headingTag: fieldEditorDraft.headingTag,
-                        headingAlignment: fieldEditorDraft.alignment,
-                        headingWidth: fieldEditorDraft.width,
-                      }
-                    : editingField.type === "paragraph"
+                      content: nextContent,
+                      paragraphFontSize: fieldEditorDraft.paragraphFontSize,
+                    }
+                    : editingField.type === "link"
                       ? {
-                          content: nextContent,
-                          paragraphFontSize: fieldEditorDraft.paragraphFontSize,
-                        }
-                      : editingField.type === "link"
-                        ? {
-                            content: nextContent,
-                            linkUrl: nextLinkUrl,
-                            linkOpenInNewTab: fieldEditorDraft.linkOpenInNewTab,
-                            linkAlignment: fieldEditorDraft.alignment,
-                          }
-                        : {}),
-                }
+                        content: nextContent,
+                        linkUrl: nextLinkUrl,
+                        linkOpenInNewTab: fieldEditorDraft.linkOpenInNewTab,
+                        linkAlignment: fieldEditorDraft.alignment,
+                      }
+                      : {}),
+              }
               : field,
           ),
         };
@@ -1675,13 +1683,13 @@ export default function FormEditor() {
         fields: nextConfig.fields.map((field) =>
           field.section === activeSection && field.stepIndex === activeStepIndex
             ? {
-                ...field,
-                sectionLabel: nextContent || field.sectionLabel,
-                sectionHeadingLabel: nextLabel || field.sectionHeadingLabel,
-                sectionHeadingTag: sectionEditorDraft.headingTag,
-                sectionHeadingAlignment: sectionEditorDraft.alignment,
-                sectionHeadingWidth: sectionEditorDraft.width,
-              }
+              ...field,
+              sectionLabel: nextContent || field.sectionLabel,
+              sectionHeadingLabel: nextLabel || field.sectionHeadingLabel,
+              sectionHeadingTag: sectionEditorDraft.headingTag,
+              sectionHeadingAlignment: sectionEditorDraft.alignment,
+              sectionHeadingWidth: sectionEditorDraft.width,
+            }
             : field,
         ),
       };
@@ -1733,27 +1741,27 @@ export default function FormEditor() {
   }, [fetcher.data, config, shopify]);
 
   useEffect(() => {
-  if (config.fields.length === 0) {
-    const shippingFields = PALETTE.shipping.map((item, i) => ({
-      id: uid(),
-      paletteKey: item.paletteKey,
-      category: "shipping",
-      type: item.type,
-      label: item.label,
-      key: `${item.key}_${uid()}`,
-      section: item.section,
-      required: item.required,
-      width: item.width ?? "full",
-      stepIndex: 0,
-      order: i,
-    }));
+    if (config.fields.length === 0) {
+      const shippingFields = PALETTE.shipping.map((item, i) => ({
+        id: uid(),
+        paletteKey: item.paletteKey,
+        category: "shipping",
+        type: item.type,
+        label: item.label,
+        key: `${item.key}_${uid()}`,
+        section: item.section,
+        required: item.required,
+        width: item.width ?? "full",
+        stepIndex: 0,
+        order: i,
+      }));
 
-    setConfig((prev) => ({
-      ...prev,
-      fields: [...prev.fields, ...shippingFields],
-    }));
-  }
-}, []);
+      setConfig((prev) => ({
+        ...prev,
+        fields: [...prev.fields, ...shippingFields],
+      }));
+    }
+  }, []);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const stepFields = useMemo(
@@ -1769,41 +1777,41 @@ export default function FormEditor() {
       stepFields.map((field) =>
         activeField && field.id === activeField.id
           ? {
-              ...field,
-              label: fieldEditorDraft.label,
-              key: (field.paletteKey.startsWith("c_") || field.category === "custom") 
-                ? generateKeyFromLabel(fieldEditorDraft.label)
-                : field.key,
-              description: fieldEditorDraft.description,
-              defaultValue: fieldEditorDraft.defaultValue,
-              validationMessage: fieldEditorDraft.validationMessage,
-              hideTypedCharacters: fieldEditorDraft.hideTypedCharacters,
-              required: fieldEditorDraft.required,
-              width: fieldEditorDraft.width >= 60 ? "full" : "half",
-              metafieldTarget: fieldEditorDraft.metafieldTarget,
-              metafieldDefinition: fieldEditorDraft.metafieldDefinition || undefined,
-              phoneDefaultCountry: fieldEditorDraft.phoneDefaultCountry,
-              ...(activeField.type === "heading"
+            ...field,
+            label: fieldEditorDraft.label,
+            key: (field.paletteKey.startsWith("c_") || field.category === "custom")
+              ? generateKeyFromLabel(fieldEditorDraft.label)
+              : field.key,
+            description: fieldEditorDraft.description,
+            defaultValue: fieldEditorDraft.defaultValue,
+            validationMessage: fieldEditorDraft.validationMessage,
+            hideTypedCharacters: fieldEditorDraft.hideTypedCharacters,
+            required: fieldEditorDraft.required,
+            width: fieldEditorDraft.width >= 60 ? "full" : "half",
+            metafieldTarget: fieldEditorDraft.metafieldTarget,
+            metafieldDefinition: fieldEditorDraft.metafieldDefinition || undefined,
+            phoneDefaultCountry: fieldEditorDraft.phoneDefaultCountry,
+            ...(activeField.type === "heading"
+              ? {
+                content: fieldEditorDraft.content,
+                headingTag: fieldEditorDraft.headingTag,
+                headingAlignment: fieldEditorDraft.alignment,
+                headingWidth: fieldEditorDraft.width,
+              }
+              : activeField.type === "paragraph"
                 ? {
-                    content: fieldEditorDraft.content,
-                    headingTag: fieldEditorDraft.headingTag,
-                    headingAlignment: fieldEditorDraft.alignment,
-                    headingWidth: fieldEditorDraft.width,
-                  }
-                : activeField.type === "paragraph"
+                  content: fieldEditorDraft.content,
+                  paragraphFontSize: fieldEditorDraft.paragraphFontSize,
+                }
+                : activeField.type === "link"
                   ? {
-                      content: fieldEditorDraft.content,
-                      paragraphFontSize: fieldEditorDraft.paragraphFontSize,
-                    }
-                  : activeField.type === "link"
-                    ? {
-                        content: fieldEditorDraft.content,
-                        linkUrl: fieldEditorDraft.linkUrl,
-                        linkOpenInNewTab: fieldEditorDraft.linkOpenInNewTab,
-                        linkAlignment: fieldEditorDraft.alignment,
-                      }
-                : {}),
-            }
+                    content: fieldEditorDraft.content,
+                    linkUrl: fieldEditorDraft.linkUrl,
+                    linkOpenInNewTab: fieldEditorDraft.linkOpenInNewTab,
+                    linkAlignment: fieldEditorDraft.alignment,
+                  }
+                  : {}),
+          }
           : field,
       ),
     [activeField, fieldEditorDraft, stepFields],
@@ -1921,8 +1929,8 @@ export default function FormEditor() {
           type: paletteItem.type,
           label: paletteItem.label,
           key: activeCategory === "custom"
-  ? `${generateKeyFromLabel(paletteItem.label)}_${uid()}`
-  : `${paletteItem.key}_${uid()}`,
+            ? `${generateKeyFromLabel(paletteItem.label)}_${uid()}`
+            : `${paletteItem.key}_${uid()}`,
           section: inheritedSection,
           required: paletteItem.required,
           validationMessage: paletteItem.type === "phone" ? "Please provide a valid phone number" : undefined,
@@ -2008,14 +2016,14 @@ export default function FormEditor() {
       fields: prev.fields.map((field) =>
         field.stepIndex === activeStepIndex && field.section === section
           ? {
-              ...field,
-              sectionLabel: settings.content,
-              sectionHeadingLabel: settings.label,
-              sectionHeadingTag: settings.headingTag,
-              sectionHeadingAlignment: settings.alignment,
-              sectionHeadingWidth: settings.width,
-              sectionHeadingHidden: settings.hidden ?? false,
-            }
+            ...field,
+            sectionLabel: settings.content,
+            sectionHeadingLabel: settings.label,
+            sectionHeadingTag: settings.headingTag,
+            sectionHeadingAlignment: settings.alignment,
+            sectionHeadingWidth: settings.width,
+            sectionHeadingHidden: settings.hidden ?? false,
+          }
           : field,
       ),
     }));
@@ -2063,41 +2071,41 @@ export default function FormEditor() {
       fields: prev.fields.map((field) =>
         field.id === activeField.id
           ? {
-              ...field,
-              label: nextLabel,
-              key: (activeField.paletteKey.startsWith("c_") || activeField.category === "custom")
-            ? generateKeyFromLabel(nextLabel)  // ← derive key from label
-            : field.key,        
-              description: fieldEditorDraft.description.trim() || undefined,
-              defaultValue: fieldEditorDraft.defaultValue,
-              validationMessage: fieldEditorDraft.validationMessage.trim() || undefined,
-              hideTypedCharacters: fieldEditorDraft.hideTypedCharacters,
-              required: fieldEditorDraft.required,
-              width: fieldEditorDraft.width >= 60 ? "full" : "half",
-              metafieldTarget: fieldEditorDraft.metafieldTarget,
-              metafieldDefinition: fieldEditorDraft.metafieldDefinition || undefined,
-              phoneDefaultCountry: fieldEditorDraft.phoneDefaultCountry,
-              ...(activeField.type === "heading"
+            ...field,
+            label: nextLabel,
+            key: (activeField.paletteKey.startsWith("c_") || activeField.category === "custom")
+              ? generateKeyFromLabel(nextLabel)  // ← derive key from label
+              : field.key,
+            description: fieldEditorDraft.description.trim() || undefined,
+            defaultValue: fieldEditorDraft.defaultValue,
+            validationMessage: fieldEditorDraft.validationMessage.trim() || undefined,
+            hideTypedCharacters: fieldEditorDraft.hideTypedCharacters,
+            required: fieldEditorDraft.required,
+            width: fieldEditorDraft.width >= 60 ? "full" : "half",
+            metafieldTarget: fieldEditorDraft.metafieldTarget,
+            metafieldDefinition: fieldEditorDraft.metafieldDefinition || undefined,
+            phoneDefaultCountry: fieldEditorDraft.phoneDefaultCountry,
+            ...(activeField.type === "heading"
+              ? {
+                content: nextContent,
+                headingTag: fieldEditorDraft.headingTag,
+                headingAlignment: fieldEditorDraft.alignment,
+                headingWidth: fieldEditorDraft.width,
+              }
+              : activeField.type === "paragraph"
                 ? {
-                    content: nextContent,
-                    headingTag: fieldEditorDraft.headingTag,
-                    headingAlignment: fieldEditorDraft.alignment,
-                    headingWidth: fieldEditorDraft.width,
-                  }
-                : activeField.type === "paragraph"
+                  content: nextContent,
+                  paragraphFontSize: fieldEditorDraft.paragraphFontSize,
+                }
+                : activeField.type === "link"
                   ? {
-                      content: nextContent,
-                      paragraphFontSize: fieldEditorDraft.paragraphFontSize,
-                    }
-                  : activeField.type === "link"
-                    ? {
-                        content: nextContent,
-                        linkUrl: nextLinkUrl,
-                        linkOpenInNewTab: fieldEditorDraft.linkOpenInNewTab,
-                        linkAlignment: fieldEditorDraft.alignment,
-                      }
-                : {}),
-            }
+                    content: nextContent,
+                    linkUrl: nextLinkUrl,
+                    linkOpenInNewTab: fieldEditorDraft.linkOpenInNewTab,
+                    linkAlignment: fieldEditorDraft.alignment,
+                  }
+                  : {}),
+          }
           : field,
       ),
     }));
@@ -2150,9 +2158,9 @@ export default function FormEditor() {
           fields: prev.fields.map((field) =>
             field.section === section && field.stepIndex === activeStepIndex
               ? {
-                  ...field,
-                  sectionHeadingHidden: true,
-                }
+                ...field,
+                sectionHeadingHidden: true,
+              }
               : field,
           ),
         };
@@ -2442,10 +2450,10 @@ export default function FormEditor() {
   ]);
 
   const removeFieldIfAllowed = useCallback((id: string) => {
-  const field = config.fields.find((f) => f.id === id);
-  if (field?.required) return; // Block deletion of required fields
-  removeField(id);
-}, [config.fields, removeField]);
+    const field = config.fields.find((f) => f.id === id);
+    if (field?.required) return; // Block deletion of required fields
+    removeField(id);
+  }, [config.fields, removeField]);
 
   // ═════════════════════════════════════════════════════════════════════════════
   // RENDER
@@ -2618,7 +2626,7 @@ export default function FormEditor() {
                         ? "Edit paragraph field"
                         : activeField.type === "link"
                           ? "Edit link field"
-                        : `Edit ${activeField.label.toLowerCase()} field`}
+                          : `Edit ${activeField.label.toLowerCase()} field`}
                   </span>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
@@ -2631,7 +2639,7 @@ export default function FormEditor() {
                       onClick={saveFieldEditor}
                       style={{ border: "1px solid #d1d5db", background: "#fff", borderRadius: 8, padding: "5px 14px", fontSize: 12, cursor: "pointer", color: "#111827", fontWeight: 600 }}
                     >
-                      Done 
+                      Done
                     </button>
                   </div>
                 </div>
@@ -3984,7 +3992,7 @@ export default function FormEditor() {
       </div>
 
       {/* ── Bottom hint ────────────────────────────────────────────────────── */}
-     
+
     </s-page>
   );
 }

@@ -2079,12 +2079,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        const RegitrationData = await prisma.registrationSubmission.findFirst({
+        const RegistrationData = await prisma.registrationSubmission.findFirst({
           where: { email: customerEmail },
         });
 
         const contactName =
-          `${RegitrationData?.firstName} ${RegitrationData?.lastName}`.trim();
+          `${RegistrationData?.firstName} ${RegistrationData?.lastName}`.trim();
 
         const companyAccount = await prisma.companyAccount.upsert({
           where: {
@@ -2112,8 +2112,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             shopId_email: { shopId: store.id, email: customerEmail },
           },
           update: {
-            firstName: RegitrationData?.firstName || null,
-            lastName: RegitrationData?.lastName || null,
+            firstName: RegistrationData?.firstName || null,
+            lastName: RegistrationData?.lastName || null,
             shopifyCustomerId: customerId,
             companyId: companyAccount.id,
             companyRole: "admin",
@@ -2123,8 +2123,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
           create: {
             email: customerEmail,
-            firstName: RegitrationData?.firstName || null,
-            lastName: RegitrationData?.lastName || null,
+            firstName: RegistrationData?.firstName || null,
+            lastName: RegistrationData?.lastName || null,
             password: "",
             shopifyCustomerId: customerId,
             shopId: store.id,
@@ -2162,7 +2162,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        const RegitrationData = await prisma.registrationSubmission.findFirst({
+        const RegistrationData = await prisma.registrationSubmission.findFirst({
           where: { email },
         });
 
@@ -2172,7 +2172,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           store.storeOwnerName || "Store Owner",
           email,
           companyName,
-          `${RegitrationData?.firstName} ${RegitrationData?.lastName}` || "",
+          `${RegistrationData?.firstName} ${RegistrationData?.lastName}` || "",
           note,
         );
 

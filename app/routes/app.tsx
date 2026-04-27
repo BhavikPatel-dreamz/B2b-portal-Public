@@ -2,7 +2,6 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
-
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -21,11 +20,9 @@ export default function App() {
         <s-link href="/app/home">Home</s-link>
         <s-link href="/app/companies">B2B Companies</s-link>
         {/* <s-link href="/app/companies?tab=pending">Registrations</s-link> */}
-        <s-link href="/app/regitration-form">Registrations Form</s-link>
+        <s-link href="/app/registration-form">Registrations Form</s-link>
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/notifications">Notifications</s-link>
-
-        
       </s-app-nav>
       <Outlet />
     </AppProvider>

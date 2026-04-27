@@ -1102,11 +1102,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    const regitrationData = await prisma.registrationSubmission.findFirst({
+    const RegistrationData = await prisma.registrationSubmission.findFirst({
       where: { shopId: store.id, email },
     });
 
-    if (regitrationData?.companyName === companyName) {
+    if (RegistrationData?.companyName === companyName) {
       return json({ success: false, error: "Company already registered." }, { status: 409 });
     }
 

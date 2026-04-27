@@ -736,7 +736,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     0,
     creditSummary.creditLimit.toNumber() - creditSummary.usedCredit.toNumber(),
   );
-  const RegitrationData =await prisma.registrationSubmission.findFirst({
+  const RegistrationData =await prisma.registrationSubmission.findFirst({
     where:{
       email:dashboardData.company.contactEmail
     }
@@ -746,7 +746,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     company: {
       id: dashboardData.company.id,
       name: dashboardData.company.name,
-      contactName: dashboardData.company.contactName || dashboardData.company.contactName  === null ? `${RegitrationData?.firstName || ""}${RegitrationData?.lastName || ""}` : "-",
+      contactName: dashboardData.company.contactName || dashboardData.company.contactName  === null ? `${RegistrationData?.firstName || ""}${RegistrationData?.lastName || ""}` : "-",
       contactEmail: dashboardData.company.contactEmail,
       shopifyCompanyId: dashboardData.company.shopifyCompanyId,
       paymentTermsTemplateId: dashboardData.company.paymentTerm || "",

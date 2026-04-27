@@ -7171,7 +7171,7 @@ async function createOrUpdateLocalUser({
       },
     },
   });
-  const existingRegitration = await prisma.registrationSubmission.findUnique({
+  const existingRegistration = await prisma.registrationSubmission.findUnique({
     where: {
       shopId_email: {
         email: email,
@@ -7179,7 +7179,7 @@ async function createOrUpdateLocalUser({
       },
     },
   });
-  if (!existingRegitration) {
+  if (!existingRegistration) {
     const registrationSubmission = await prisma.registrationSubmission.upsert({
       where: {
         shopId_email: { shopId: store.id, email: email },
