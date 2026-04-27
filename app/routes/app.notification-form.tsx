@@ -272,7 +272,7 @@ const TEMPLATE_VARIABLES = [
 function createDefaultTemplateValues(): TemplateStoreValues {
   return {
     "customer-application-received": {
-      enabled: true,
+      enabled: false,
       subject: TEMPLATE_ITEMS.find(
         (item) => item.id === "customer-application-received",
       )!.initialSubject,
@@ -281,7 +281,7 @@ function createDefaultTemplateValues(): TemplateStoreValues {
       )!.initialHtml,
     },
     "customer-application-approved": {
-      enabled: true,
+      enabled: false,
       subject: TEMPLATE_ITEMS.find(
         (item) => item.id === "customer-application-approved",
       )!.initialSubject,
@@ -290,7 +290,7 @@ function createDefaultTemplateValues(): TemplateStoreValues {
       )!.initialHtml,
     },
     "customer-application-rejected": {
-      enabled: true,
+      enabled: false,
       subject: TEMPLATE_ITEMS.find(
         (item) => item.id === "customer-application-rejected",
       )!.initialSubject,
@@ -299,7 +299,7 @@ function createDefaultTemplateValues(): TemplateStoreValues {
       )!.initialHtml,
     },
     "admin-application-received": {
-      enabled: true,
+      enabled: false,
       subject: TEMPLATE_ITEMS.find(
         (item) => item.id === "admin-application-received",
       )!.initialSubject,
@@ -675,7 +675,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       customerRegistrationRejectedTemplate:
         existing?.customerRegistrationRejectedTemplate ||
         defaults["customer-application-rejected"].html,
-      adminRequest: existing?.adminRequest ?? true,
+      adminRequest: existing?.adminRequest ?? false,
       adminRequestSubject:
         existing?.adminRequestSubject ||
         defaults["admin-application-received"].subject,
@@ -714,11 +714,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     const toggleData = {
-      customerRegistration: existing?.customerRegistration ?? true,
+      customerRegistration: existing?.customerRegistration ?? false,
       customerRegistrationApproved:
-        existing?.customerRegistrationApproved ?? true,
+        existing?.customerRegistrationApproved ?? false,
       customerRegistrationRejected:
-        existing?.customerRegistrationRejected ?? true,
+        existing?.customerRegistrationRejected ?? false,
       customerRegistrationSubject:
         existing?.customerRegistrationSubject ||
         defaults["customer-application-received"].subject,
@@ -800,11 +800,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Preserve other template settings
     const allData = {
-      customerRegistration: existing?.customerRegistration ?? true,
+      customerRegistration: existing?.customerRegistration ?? false,
       customerRegistrationApproved:
-        existing?.customerRegistrationApproved ?? true,
+        existing?.customerRegistrationApproved ?? false,
       customerRegistrationRejected:
-        existing?.customerRegistrationRejected ?? true,
+        existing?.customerRegistrationRejected ?? false,
       customerRegistrationSubject:
         existing?.customerRegistrationSubject ||
         defaults["customer-application-received"].subject,
@@ -823,7 +823,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       customerRegistrationRejectedTemplate:
         existing?.customerRegistrationRejectedTemplate ||
         defaults["customer-application-rejected"].html,
-      adminRequest: existing?.adminRequest ?? true,
+      adminRequest: existing?.adminRequest ?? false,
       adminRequestSubject:
         existing?.adminRequestSubject ||
         defaults["admin-application-received"].subject,
@@ -913,11 +913,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Preserve other template settings
     const allData = {
-      customerRegistration: existing?.customerRegistration ?? true,
+      customerRegistration: existing?.customerRegistration ?? false,
       customerRegistrationApproved:
-        existing?.customerRegistrationApproved ?? true,
+        existing?.customerRegistrationApproved ?? false,
       customerRegistrationRejected:
-        existing?.customerRegistrationRejected ?? true,
+        existing?.customerRegistrationRejected ?? false,
       customerRegistrationSubject:
         existing?.customerRegistrationSubject ||
         defaults["customer-application-received"].subject,
@@ -936,7 +936,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       customerRegistrationRejectedTemplate:
         existing?.customerRegistrationRejectedTemplate ||
         defaults["customer-application-rejected"].html,
-      adminRequest: existing?.adminRequest ?? true,
+      adminRequest: existing?.adminRequest ?? false,
       adminRequestSubject:
         existing?.adminRequestSubject ||
         defaults["admin-application-received"].subject,
@@ -1171,7 +1171,7 @@ export default function NotificationForm() {
     setTemplateValues((prev) => ({
       ...prev,
       [saveFetcher.data!.templateId!]: {
-        enabled: saveFetcher.data!.enabled ?? true,
+        enabled: saveFetcher.data!.enabled ?? false,
         subject:
           saveFetcher.data!.subject ||
           prev[saveFetcher.data!.templateId!].subject,

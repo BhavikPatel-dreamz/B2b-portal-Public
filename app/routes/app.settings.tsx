@@ -154,6 +154,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: { shopId: store.id },
       });
       await prisma.user.deleteMany({ where: { shopId: store.id } });
+      await prisma.emailTemplates.deleteMany({ where: { shopId: store.id } });
 
       // Mark store as uninstalled
       await deleteStore(shop);
@@ -568,14 +569,6 @@ const ToggleRow = ({
   );
 };
 
-const EMAIL_PLACEHOLDER = `Hello {{storeOwnerName}},
-
-A new company has submitted a B2B registration request on {{shopName}}.`;
-
-const PRIVACY_PLACEHOLDER = `Privacy Policy
-
-This privacy policy describes how we collect, use, and protect your personal information.`;
-
 type SettingsTabId = "store" | "onboarding" | "company" | "theme";
 
 const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
@@ -644,20 +637,7 @@ export default function SettingsPage() {
       hiddenInputRef.current.value = hasContent ? htmlContent : "";
     }
   };
-
-  // Update handlePrivacyInput function
-  const handlePrivacyInput = () => {
-    if (privacyEditorRef.current && privacyHiddenInputRef.current) {
-      const htmlContent = privacyEditorRef.current.innerHTML;
-      const textContent = privacyEditorRef.current.innerText.trim();
-
-      // Check if there's actual content
-      const hasContent = textContent.length > 0;
-      setPrivacyHasContent(hasContent);
-
-      privacyHiddenInputRef.current.value = hasContent ? htmlContent : "";
-    }
-  };
+ 
 
   // Update useEffect for initialization
   useEffect(() => {
@@ -733,64 +713,10 @@ export default function SettingsPage() {
     { var: "{{shopName}}", desc: "Shopify store's name" },
   ];
 
-  // Email editor functions
-  const format = (command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    editorRef.current?.focus();
-  };
-
-  const insertVariable = (variable: string) => {
-    if (editorRef.current) {
-      const selection = window.getSelection();
-      if (!selection || !selection.rangeCount) return;
-
-      const range = selection.getRangeAt(0);
-      range.deleteContents();
-
-      const textNode = document.createTextNode(variable);
-      range.insertNode(textNode);
-
-      range.setStartAfter(textNode);
-      range.setEndAfter(textNode);
-      selection.removeAllRanges();
-      selection.addRange(range);
-
-      handleInput();
-      editorRef.current.focus();
-    }
-    setShowDropdown(false);
-  };
-
-  const formatPrivacy = (command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    privacyEditorRef.current?.focus();
-  };
-
   const handleDelete = () => {
     deleteFetcher.submit({ intent: "delete" }, { method: "post" });
   };
 
-  // // Feedback message
-  // const feedback = useMemo(() => {
-  //   const data = fetcher.data || deleteFetcher.data;
-  //   if (!data) return null;
-
-  //   if (!data.success && data.errors?.length) {
-  //     return {
-  //       tone: "critical" as const,
-  //       title: "Error",
-  //       messages: data.errors,
-  //     };
-  //   }
-  //   if (data.success && data.message) {
-  //     return {
-  //       tone: "success" as const,
-  //       title: data.message,
-  //       messages: [],
-  //     };
-  //   }
-  //   return null;
-  // }, [fetcher.data, deleteFetcher.data]);
 
   // Early return if store is missing
   if (storeMissing) {
@@ -912,40 +838,7 @@ export default function SettingsPage() {
                   Store name shown across emails or customer views.
                 </s-text>
               </div>
-              {/* 
-                <div style={{ display: "grid", gap: 6 }}>
-                  <label
-                    htmlFor="submissionEmail"
-                    style={{ fontWeight: 600, fontSize: 14 }}
-                  >
-                    Registration notification email
-                  </label>
-                  <input
-                    id="submissionEmail"
-                    name="submissionEmail"
-                    type="email"
-                    defaultValue={store?.submissionEmail}
-                    placeholder="ops@yourstore.com"
-                    style={{
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #c9cccf",
-                      fontSize: 14,
-                      outline: "none",
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = "#005bd3";
-                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = "#c9cccf";
-                      e.target.style.boxShadow = "none";
-                    }}
-                  />
-                  <s-text tone="neutral">
-                    Email address that receives new B2B registration submissions.
-                  </s-text>
-                </div> */}
+             
 
               <div style={{ display: "grid", gap: 6 }}>
                 <label
@@ -1164,50 +1057,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* <div
-              style={{
-                display: activeTab === "store" ? "grid" : "none",
-                gap: 6,
-              }}
-            >
-              <div style={{ display: "grid", gap: 6 }}>
-                <label
-                  htmlFor="privacyPolicylink"
-                  style={{ fontWeight: 600, fontSize: 14 }}
-                >
-                  Privacy Policy
-                </label>
-
-                <input
-                  id="privacyPolicylink"
-                  name="privacyPolicylink"
-                  type="url"
-                  defaultValue={store?.privacyPolicylink}
-                  placeholder="https://www.example.com/privacy"
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #c9cccf",
-                    fontSize: 14,
-                    outline: "none",
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = "#005bd3";
-                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = "#c9cccf";
-                    e.target.style.boxShadow = "none";
-                  }}
-                />
-                <input
-                  ref={privacyHiddenInputRef}
-                  type="hidden"
-                  name="privacyPolicyContent"
-                  id="privacyPolicyContent"
-                />
-              </div>
-            </div> */}
+            
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <s-button

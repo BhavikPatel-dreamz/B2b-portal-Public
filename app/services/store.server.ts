@@ -121,6 +121,20 @@ export async function deleteStore(shopDomain: string) {
   return await prisma.store.update({
     where: { shopDomain },
     data: {
+      shopName: null,
+      accessToken: null,
+      scope: null,
+      isActive: false,
+      autoApproveB2BOnboarding: false,
+      orderConfirmationToMainAccount: false,
+      allowQuickOrderForUser: false,
+      contactEmail:null,
+      submissionEmail: null,
+      companyWelcomeEmailTemplate: null,
+      companyWelcomeEmailEnabled: false,
+      themeColor: null,
+      privacyPolicylink: null,
+      privacyPolicyContent: null,
       deletedAt: new Date(),
     },
   });

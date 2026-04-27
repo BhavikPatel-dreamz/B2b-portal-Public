@@ -629,18 +629,18 @@ export default function CompaniesPage() {
   const pageShellStyle = {
     background: "#f1f2f4",
     minHeight: "100vh",
-    padding: "24px",
+    padding: "15px",
     boxSizing: "border-box",
   } as const;
   const contentPanelStyle = {
-    width: "100%",
+    width: "115%",
     maxWidth: 1400,
     margin: "0 auto",
     background: "#ffffff",
     border: "1px solid #dfe3e8",
     borderRadius: 16,
     boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-    padding: "16px 18px 20px",
+    padding: "10px 10px 14px",
     boxSizing: "border-box",
   } as const;
 

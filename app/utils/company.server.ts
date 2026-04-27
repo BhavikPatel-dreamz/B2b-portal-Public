@@ -192,7 +192,6 @@ export const syncShopifyCompanies = async (
               companyId: upsertedCompany.id,
               companyRole: "admin",
               role: UserRole.STORE_ADMIN,
-              status: UserStatus.APPROVED,
               isActive: true,
             },
             create: {
@@ -210,35 +209,32 @@ export const syncShopifyCompanies = async (
             },
           });
 
-          const registrationSubmission =
-            await prisma.registrationSubmission.upsert({
-              where: {
-                shopId_email: { shopId: store.id, email: mainContact.email },
-              },
-              update: {
-                email: mainContact.email,
-                companyName: upsertedCompany.name,
-                firstName: mainContact.firstName || "",
-                lastName: mainContact.lastName || "",
-                shopifyCustomerId,
-                status: "APPROVED",
-                shopId: store.id,
-                workflowCompleted: true,
-              },
-              create: {
-                email: mainContact.email,
-                companyName: upsertedCompany.name,
-                firstName: mainContact.firstName || "",
-                lastName: mainContact.lastName || "",
-                shopifyCustomerId,
-                status: "APPROVED",
-                shopId: store.id,
-                contactTitle: "",
-                shipping: EMPTY_ADDRESS_JSON,
-                billing: EMPTY_ADDRESS_JSON,
-                workflowCompleted: true,
-              },
-            });
+          await prisma.registrationSubmission.upsert({
+            where: {
+              shopId_email: { shopId: store.id, email: mainContact.email },
+            },
+            update: {
+              email: mainContact.email,
+              companyName: upsertedCompany.name,
+              firstName: mainContact.firstName || "",
+              lastName: mainContact.lastName || "",
+              shopifyCustomerId,
+              shopId: store.id,
+            },
+            create: {
+              email: mainContact.email,
+              companyName: upsertedCompany.name,
+              firstName: mainContact.firstName || "",
+              lastName: mainContact.lastName || "",
+              shopifyCustomerId,
+              status: UserStatus.APPROVED,
+              shopId: store.id,
+              contactTitle: "",
+              shipping: EMPTY_ADDRESS_JSON,
+              billing: EMPTY_ADDRESS_JSON,
+              workflowCompleted: true,
+            },
+          });
 
           await syncShopifyUsers(admin, store, upsertedCompany.id);
           await syncShopifyOrders(admin, store, upsertedCompany.id);
@@ -518,7 +514,6 @@ export const syncShopifyUsers = async (
                 companyId: localCompany.id,
                 companyRole: userRole == "STORE_ADMIN" ? "admin" : "member",
                 shopId: store.id,
-                status: "APPROVED",
                 isActive: true,
                 role: userRole,
               },
