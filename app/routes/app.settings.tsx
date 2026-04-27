@@ -55,6 +55,11 @@ function clearAdminCompaniesCache(shop: string) {
   }
 }
 
+function sanitizeNonNegativeDecimal(value: string) {
+  if (!value) return value;
+  return value.startsWith("-") ? value.replace(/^-+/, "") : value;
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
@@ -939,7 +944,7 @@ export default function SettingsPage() {
                   min="0"
                   step="0.01"
                   defaultValue={store?.defaultCompanyCreditLimit || ""}
-                  placeholder="1000"
+                  placeholder="0"
                   style={{
                     padding: "10px 12px",
                     borderRadius: 8,
@@ -951,13 +956,31 @@ export default function SettingsPage() {
                     e.target.style.borderColor = "#005bd3";
                     e.target.style.boxShadow = "0 0 0 1px #005bd3";
                   }}
+                  onInput={(e) => {
+                    const input = e.currentTarget;
+                    const sanitizedValue = sanitizeNonNegativeDecimal(
+                      input.value,
+                    );
+
+                    if (input.value !== sanitizedValue) {
+                      input.value = sanitizedValue;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "-") {
+                      e.preventDefault();
+                    }
+                  }}
                   onBlur={(e) => {
+                    e.currentTarget.value = sanitizeNonNegativeDecimal(
+                      e.currentTarget.value,
+                    );
                     e.target.style.borderColor = "#c9cccf";
                     e.target.style.boxShadow = "none";
                   }}
                 />
                 <s-text tone="neutral">
-                  Credit limit prefilled for new companies. Default is 1000.
+                  Credit limit prefilled for new companies.
                 </s-text>
               </div>
 

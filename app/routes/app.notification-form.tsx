@@ -1887,7 +1887,7 @@ export default function NotificationForm() {
                 marginBottom: 18,
               }}
             >
-              Back to notifications
+              ← Back to notifications
             </button>
 
             <div
@@ -2429,7 +2429,7 @@ export default function NotificationForm() {
 
   // ── Main notifications list view ─────────────────────────────────────────────
 return (
-    <s-page heading="Notification">
+    <s-page heading="Notifications">
       <div
         style={{
           background: "#f6f6f7",
