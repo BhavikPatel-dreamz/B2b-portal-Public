@@ -5,6 +5,7 @@ import type {
   LoaderFunctionArgs,
 } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -593,6 +594,7 @@ export default function SettingsPage() {
   // Fetchers
   const fetcher = useFetcher<ActionResponse>();
   const deleteFetcher = useFetcher<ActionResponse>();
+  const shopify = useAppBridge();
 
   const [showDropdown, setShowDropdown] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -615,6 +617,19 @@ export default function SettingsPage() {
       }, 2000);
     }
   }, [deleteFetcher.data]);
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+
+    if (fetcher.data.success) {
+      shopify.toast.show?.(fetcher.data.message || "Settings saved");
+      return;
+    }
+
+    if (fetcher.data.errors?.length) {
+      shopify.toast.show?.(fetcher.data.errors[0]);
+    }
+  }, [fetcher.data, fetcher.state, shopify]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
