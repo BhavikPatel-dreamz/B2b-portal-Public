@@ -440,9 +440,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const message = shouldSyncCompanyCreditLimit
-    ? `Settings saved. Default credit limit applied to ${updatedCompanyCount} ${
-        updatedCompanyCount === 1 ? "company" : "companies"
-      }.`
+    ? `Settings saved. Default credit limit applied to ${updatedCompanyCount} ${updatedCompanyCount === 1 ? "company" : "companies"
+    }.`
     : defaultCompanyCreditLimit === null
       ? "Settings saved. Default credit limit cleared."
       : "Settings saved";
@@ -657,7 +656,7 @@ export default function SettingsPage() {
       hiddenInputRef.current.value = hasContent ? htmlContent : "";
     }
   };
- 
+
 
   // Update useEffect for initialization
   useEffect(() => {
@@ -858,7 +857,7 @@ export default function SettingsPage() {
                   Store name shown across emails or customer views.
                 </s-text>
               </div>
-             
+
 
               <div style={{ display: "grid", gap: 6 }}>
                 <label
@@ -952,50 +951,43 @@ export default function SettingsPage() {
                 >
                   Default credit limit
                 </label>
+                <style>{`
+                /* Remove spinners for number input */
+                input[type="number"]::-webkit-inner-spin-button,
+                input[type="number"]::-webkit-outer-spin-button {
+                  -webkit-appearance: none;
+                  margin: 0;
+                }
+                input[type="number"] {
+                  -moz-appearance: textfield;
+                }
+              `}</style>
                 <input
                   id="defaultCompanyCreditLimit"
                   name="defaultCompanyCreditLimit"
                   type="number"
                   min="0"
-                  step="0.01"
                   defaultValue={store?.defaultCompanyCreditLimit || ""}
-                  placeholder="0"
+                  placeholder="1000"
                   style={{
                     padding: "10px 12px",
                     borderRadius: 8,
                     border: "1px solid #c9cccf",
                     fontSize: 14,
                     outline: "none",
+                    width: "100%",
                   }}
                   onFocus={(e) => {
                     e.target.style.borderColor = "#005bd3";
                     e.target.style.boxShadow = "0 0 0 1px #005bd3";
                   }}
-                  onInput={(e) => {
-                    const input = e.currentTarget;
-                    const sanitizedValue = sanitizeNonNegativeDecimal(
-                      input.value,
-                    );
-
-                    if (input.value !== sanitizedValue) {
-                      input.value = sanitizedValue;
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "-") {
-                      e.preventDefault();
-                    }
-                  }}
                   onBlur={(e) => {
-                    e.currentTarget.value = sanitizeNonNegativeDecimal(
-                      e.currentTarget.value,
-                    );
                     e.target.style.borderColor = "#c9cccf";
                     e.target.style.boxShadow = "none";
                   }}
                 />
                 <s-text tone="neutral">
-                  Credit limit prefilled for new companies.
+                  Credit limit prefilled for new companies. Default is 1000.
                 </s-text>
               </div>
 
@@ -1085,7 +1077,7 @@ export default function SettingsPage() {
                         )
                       ) {
                         colorInput.value = e.target.value;
-                      }maxWidth: 1200
+                      } maxWidth: 1200
                     }}
                   />
                 </div>
@@ -1095,7 +1087,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            
+
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <s-button
