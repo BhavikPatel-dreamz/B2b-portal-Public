@@ -223,7 +223,7 @@ function Extension() {
               if (f.type === "group") {
                 processFields(f.fields);
               } else if (f.type === "checkbox") {
-                initial[f.key] = false;
+                initial[f.key] = f.key === "billSameAsShip";
               } else if (f.type === "country") {
                 initial[f.key] = "IN";
               } else if (f.type === "state") {

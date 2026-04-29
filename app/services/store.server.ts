@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { FREE_PLAN, PAID_PLAN } from "../billing-plans.shared";
 
 export interface CreateStoreInput {
   shopDomain: string;
@@ -11,6 +12,8 @@ export interface UpdateStoreInput {
   shopName?: string;
   accessToken?: string;
   scope?: string;
+  plan?: string | null;
+  planKey?: string | null;
   isActive?: boolean;
   logo?: string | null;
   submissionEmail?: string | null;
@@ -95,6 +98,64 @@ export async function updateStore(id: string, data: UpdateStoreInput) {
     where: { id },
     data: {
       ...data,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+function getStorePlanValue(subscriptionName?: string | null) {
+  if (subscriptionName === FREE_PLAN) {
+    return "free";
+  }
+
+  if (subscriptionName === PAID_PLAN) {
+    return "approved payment";
+  }
+
+  return null;
+}
+
+type AppSubscriptionSummary = {
+  id?: string | null;
+  name?: string | null;
+  status?: string | null;
+};
+
+export async function syncStoreSubscriptionState(
+  shopDomain: string,
+  appSubscriptions: AppSubscriptionSummary[] = [],
+) {
+  const activeSubscription =
+    appSubscriptions.find((subscription) => subscription.status === "ACTIVE") ||
+    null;
+
+  return await prisma.store.updateMany({
+    where: { shopDomain },
+    data: {
+      plan: getStorePlanValue(activeSubscription?.name),
+      planKey: activeSubscription?.id ?? null,
+      updatedAt: new Date(),
+    },
+  });
+}
+
+export async function setStoreFreePlan(shopDomain: string) {
+  return await prisma.store.updateMany({
+    where: { shopDomain },
+    data: {
+      plan: "free",
+      planKey: "free",
+      updatedAt: new Date(),
+    },
+  });
+}
+
+export async function clearStorePlan(shopDomain: string) {
+  return await prisma.store.updateMany({
+    where: { shopDomain },
+    data: {
+      plan: null,
+      planKey: null,
       updatedAt: new Date(),
     },
   });

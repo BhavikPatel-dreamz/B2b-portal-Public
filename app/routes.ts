@@ -76,6 +76,9 @@ export default [
       "companies/:companyId/users",
       "routes/app.companies.$companyId.users.tsx",
     ),
+    route("select-plan", "routes/app.select-plan.tsx"),
+    route("cancel-subscription", "routes/app.cancel-subscription.tsx"),
+    route("billing-example", "routes/app.billing-example.tsx"),
   ]),
 
   // App Proxy routes (public, no auth required)

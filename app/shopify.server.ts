@@ -4,11 +4,16 @@ import {
   AppDistribution,
   shopifyApp,
   DeliveryMethod,
+  BillingInterval,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import type { Session } from "@shopify/shopify-api";
 import { Prisma } from "@prisma/client";
 import prisma from "./db.server";
+import {
+  PAID_PLAN,
+  USAGE_PLAN,
+} from "./billing-plans.shared";
 import { upsertStore } from "./services/store.server";
 import { registerCartValidationFunction, debugListAllShopifyFunctions } from "./services/cartValidationRegistration.server";
 import {
@@ -47,6 +52,28 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorageWithStore(prisma),
   distribution: AppDistribution.AppStore,
+  billing: {
+    [PAID_PLAN]: {
+      lineItems: [
+        {
+          amount: 49,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
+    },
+    [USAGE_PLAN]: {
+      lineItems: [
+        {
+          amount: 5,
+          currencyCode: "USD",
+          interval: BillingInterval.Usage,
+          terms: "Usage based",
+      
+        },
+      ],
+    },
+  },
   future: {
     expiringOfflineAccessTokens: true,
   },
