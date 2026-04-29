@@ -67,6 +67,8 @@ model Store {
   privacyPolicyContent String?
   companyWelcomeEmailTemplate String?  // Custom template for company sync emails
   companyWelcomeEmailEnabled Boolean   @default(true)  // Enable/disable company sync notifications
+  completedSetupSteps   Json?     // Array of strings for completed step labels
+  setupFinished         Boolean   @default(false)
   isActive      Boolean   @default(true)
   installedAt   DateTime  @default(now())
   uninstalledAt DateTime?
@@ -259,7 +261,7 @@ model Notification {
   activityType       String?
   activeAction       String?  // URL for the action/product
   isRead             Boolean  @default(false)
-  shopifyOrderId     String  
+  shopifyOrderId     String?  
   // Shop relation
   shopId        String
   createdAt     DateTime @default(now())
@@ -300,7 +302,7 @@ model B2BOrder {
   shopId           String
   shop             Store     @relation("StoreOrders", fields: [shopId], references: [id], onDelete: Cascade)
 
-  shopifyOrderId  String   @unique   // ← add this
+  shopifyOrderId  String?   @unique   // ← change this to optional
 
   orderTotal       Decimal   @db.Decimal(14, 2)
   creditUsed       Decimal   @db.Decimal(14, 2)  // How much credit was used for this order

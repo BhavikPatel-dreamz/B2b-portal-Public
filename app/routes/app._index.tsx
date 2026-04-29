@@ -107,7 +107,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!store) {
     return Response.json(
-      { submissions: [], storeMissing: true },
+      { submissions: [], storeMissing: true, themes: [] },
       { status: 404 },
     );
   }
@@ -116,7 +116,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return Response.json({
     themes,
     missingScope,
-    store
+    store,
+    completedSetupSteps: store.completedSetupSteps || [],
+    setupFinished: store.setupFinished
   });
 };
 
@@ -124,6 +126,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "");
+
+  if (intent === "markStepComplete") {
+    const label = String(formData.get("label") || "");
+    const store = await prisma.store.findUnique({
+      where: { shopDomain: session.shop },
+      select: { id: true, completedSetupSteps: true }
+    });
+
+    if (!store) return Response.json({ success: false, error: "Store not found" });
+
+    const currentSteps = (store.completedSetupSteps as string[]) || [];
+    if (!currentSteps.includes(label)) {
+      await prisma.store.update({
+        where: { id: store.id },
+        data: {
+          completedSetupSteps: [...currentSteps, label]
+        }
+      });
+    }
+
+    return Response.json({ success: true });
+  }
+
+  if (intent === "finishSetup") {
+    await prisma.store.update({
+      where: { shopDomain: session.shop },
+      data: { setupFinished: true }
+    });
+    return Response.json({ success: true });
+  }
 
   if (intent !== "syncCompanies") {
     return Response.json({
@@ -168,25 +200,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Welcome() {
-  const { store, themes } = useLoaderData<typeof loader>() as {
+  const { store, themes = [], completedSetupSteps = [], setupFinished = false } = useLoaderData<typeof loader>() as {
     themes: ThemeSummary[];
-    store: { shopDomain: string } | null
+    store: { shopDomain: string; id: string } | null;
+    completedSetupSteps: string[];
+    setupFinished: boolean;
   };
   const syncFetcher = useFetcher<ActionResponse>();
+  const setupFetcher = useFetcher();
   const navigate = useNavigate();
   const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
-  const [showSetupEssentials, setShowSetupEssentials] = useState(true);
-  const [isSetupFinished, setIsSetupFinished] = useState(false);
-  const [completedSetupItems, setCompletedSetupItems] = useState<string[]>([]);
+  const [showSetupEssentials, setShowSetupEssentials] = useState(!setupFinished);
 
-  
+
   const [completedSteps, setCompletedSteps] = useState({
     step1: false,
     step2: false,
     step3: false
   });
 
- const toggleStep = (step: keyof CompletedStepsState) => {
+  const toggleStep = (step: keyof CompletedStepsState) => {
     setCompletedSteps(prev => ({
       ...prev,
       [step]: !prev[step]
@@ -262,26 +295,17 @@ export default function Welcome() {
     }
   ];
 
-  const setupStorageKey = store?.shopDomain
-    ? `setup-essentials-${store.shopDomain}`
-    : "setup-essentials";
-  const setupDismissedStorageKey = `${setupStorageKey}-dismissed`;
 
   const isSetupItemComplete = (label: string) =>
-    completedSetupItems.includes(label);
+    completedSetupSteps.includes(label);
 
   const markSetupItemComplete = (label: string) => {
-    setCompletedSetupItems((prev) => {
-      if (prev.includes(label)) {
-        return prev;
-      }
+    if (isSetupItemComplete(label)) return;
 
-      const next = [...prev, label];
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(setupStorageKey, JSON.stringify(next));
-      }
-      return next;
-    });
+    setupFetcher.submit(
+      { intent: "markStepComplete", label },
+      { method: "post" }
+    );
   };
 
   const areAllSetupItemsComplete =
@@ -289,14 +313,16 @@ export default function Welcome() {
     setupEssentials.every((item) => isSetupItemComplete(item.label));
 
   const handleFinishAndClose = () => {
-    if (!areAllSetupItemsComplete || typeof window === "undefined") {
+    if (!areAllSetupItemsComplete) {
       return;
     }
 
-    window.localStorage.setItem(setupDismissedStorageKey, "true");
-    setIsSetupFinished(true);
+    setupFetcher.submit(
+      { intent: "finishSetup" },
+      { method: "post" }
+    );
+    setShowSetupEssentials(false);
   };
-
   const openModal = (tutorial: Tutorial) => {
     setSelectedTutorial(tutorial);
   };
@@ -310,40 +336,6 @@ export default function Welcome() {
       navigate("/app/companies");
     }
   }, [navigate, syncFetcher.data, syncFetcher.state]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const storedSteps = window.localStorage.getItem(setupStorageKey);
-
-    if (!storedSteps) {
-      return;
-    }
-
-    try {
-      const parsedSteps = JSON.parse(storedSteps);
-      if (Array.isArray(parsedSteps)) {
-        setCompletedSetupItems(parsedSteps);
-      }
-    } catch {
-      window.localStorage.removeItem(setupStorageKey);
-    }
-  }, [setupStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const isDismissed = window.localStorage.getItem(setupDismissedStorageKey) === "true";
-
-    if (isDismissed) {
-      setShowSetupEssentials(true);
-      setIsSetupFinished(true);
-    }
-  }, [setupDismissedStorageKey]);
 
 
   return (
@@ -1644,9 +1636,9 @@ export default function Welcome() {
               <button
                 className="setup-essentials-button"
                 onClick={handleFinishAndClose}
-                disabled={!areAllSetupItemsComplete || isSetupFinished}
+                disabled={!areAllSetupItemsComplete || setupFinished}
               >
-                {isSetupFinished ? "Finished" : "Finish and close"}
+                {setupFinished ? "Finished" : "Finish and close"}
               </button>
             </div>
           </div>

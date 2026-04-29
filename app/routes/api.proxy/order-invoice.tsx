@@ -222,16 +222,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           line-height: 1.1;
         }
         .meta {
-          text-align: right;
+          display: grid;
+          grid-template-columns: auto auto;
+          gap: 6px 16px;
           font-size: 14px;
           color: var(--muted);
+          line-height: 1.4;
+        }
+        .meta div {
+          display: contents;
         }
         .meta strong {
           color: var(--ink);
+          text-align: right;
+          font-weight: 600;
         }
         .section-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 16px;
           padding: 24px 32px;
         }
@@ -328,7 +336,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             flex-direction: column;
           }
           .meta {
-            text-align: left;
+            justify-content: start;
+            gap: 4px 12px;
           }
           .section-grid {
             grid-template-columns: 1fr;
@@ -372,10 +381,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             <div>${escapeHtml(order?.purchasingEntity?.company?.name || company.companyName || "-")}</div>
           </div>
           <div class="card">
-            <h2>Billing Address</h2>
-            ${renderAddress(order.billingAddress)}
-          </div>
-          <div class="card">
             <h2>Shipping Address</h2>
             ${renderAddress(order.shippingAddress)}
           </div>
@@ -388,7 +393,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 <th>Description</th>
                 <th class="num">Qty</th>
                 <th class="num">Unit Price</th>
-                <th class="num">Line Total</th>
+                <th class="num">Total</th>
               </tr>
             </thead>
             <tbody>

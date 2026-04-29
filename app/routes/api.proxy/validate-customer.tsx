@@ -218,8 +218,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           redirectTo: "/apps/b2b-portal/registration",
           message: "Your company account has been deactivated. Please contact the support team.",
           alreadySubmitted: true,
-        },
-        true, // cache it
+        }, // cache it
       );
     }
 

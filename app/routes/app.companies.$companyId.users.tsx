@@ -5,6 +5,7 @@ import prisma from "../db.server";
 import { getCompanyUsers } from "../services/company.server";
 
 type LoaderData = {
+  shop: string;
   company: {
     name: string;
     shopifyCompanyId: string | null;
@@ -45,6 +46,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
 
   return Response.json({
+    shop: session.shop,
     company: {
       name: data.company.name,
       shopifyCompanyId: data.company.shopifyCompanyId,
@@ -149,7 +151,7 @@ export default function CompanyUsersPage() {
           </h3>
           {data.company.shopifyCompanyId && (
             <a
-              href={`https://admin.shopify.com/store/${data.company.shopifyCompanyId.replace("gid://shopify/Company/", "")}/customers`}
+              href={`https://admin.shopify.com/store/${data.shop.split(".")[0]}/customers`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
