@@ -1759,6 +1759,8 @@ export async function getCustomerCompanyInfo(
     const availableCreditNum = creditInfo
       ? parseFloat(creditInfo.availableCredit.toString())
       : 0;
+
+    // Credit usage percentage should be based on total used credit vs limit
     const creditUsagePercentage =
       creditLimitNum > 0
         ? Math.round((usedCreditNum / creditLimitNum) * 100)

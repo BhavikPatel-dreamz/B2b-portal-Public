@@ -36,7 +36,7 @@ export async function calculateAvailableCredit(
     company.creditLimit = new Decimal(0);
   }
 
-  // Calculate used credit: sum of remainingBalance from all unpaid orders (pending/partial orders)
+  // Calculate total used credit: sum of remainingBalance from all unpaid orders (pending/partial orders)
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {
       companyId,
@@ -52,12 +52,23 @@ export async function calculateAvailableCredit(
     ? new Decimal(ordersWithBalance._sum.remainingBalance)
     : new Decimal(0);
 
-  // Pending credit is separate - these would be orders in draft state that haven't been confirmed yet
-  // For now, we're not tracking true "pending" credit separate from "used" credit
-  const pendingCredit = new Decimal(0);
+  // Calculate pending credit: sum of remainingBalance for early-stage orders
+  const pendingOrders = await prisma.b2BOrder.aggregate({
+    where: {
+      companyId,
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { in: ["draft", "submitted", "processing"] },
+    },
+    _sum: {
+      remainingBalance: true,
+    },
+  });
+
+  const pendingCredit = pendingOrders._sum.remainingBalance
+    ? new Decimal(pendingOrders._sum.remainingBalance)
+    : new Decimal(0);
 
   const availableCredit = new Decimal(company.creditLimit).minus(usedCredit);
-  // pendingCredit is 0, so we only subtract usedCredit
 
 
 
