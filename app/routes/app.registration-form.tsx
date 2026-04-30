@@ -9,6 +9,7 @@ import {
 
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { APP_ADMIN_CONTENT_STYLE } from "app/utils/app-layout.shared";
 import prisma from "../db.server";
 import { authenticate } from "app/shopify.server";
 import { DEFAULT_CONFIG } from "app/utils/form-config.shared";
@@ -2473,17 +2474,18 @@ export default function FormEditor() {
 
   return (
     <s-page heading="B2B/Wholesale registration form">
-      <div
-        style={{
-          display: "flex",
-          border: "1px solid #dde2e8",
-          borderRadius: 12,
-          overflow: "hidden",
-          minHeight: 720,
-          background: "#fff",
-          boxShadow: "0 10px 26px rgba(15, 23, 42, 0.05)",
-        }}
-      >
+      <div style={APP_ADMIN_CONTENT_STYLE}>
+        <div
+          style={{
+            display: "flex",
+            border: "1px solid #dde2e8",
+            borderRadius: 12,
+            overflow: "hidden",
+            minHeight: 720,
+            background: "#fff",
+            boxShadow: "0 10px 26px rgba(15, 23, 42, 0.05)",
+          }}
+        >
         {showFieldCategorySidebar ? (
           <div style={{ width: 128, borderRight: "1px solid #e5e7eb", background: "#fff", flexShrink: 0 }}>
             <div style={{ padding: "8px 0" }}>
@@ -3988,6 +3990,7 @@ export default function FormEditor() {
               </div>
             )}
           </div>
+        </div>
         </div>
       </div>
 

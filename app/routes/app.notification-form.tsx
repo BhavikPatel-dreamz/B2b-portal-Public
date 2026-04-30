@@ -7,6 +7,7 @@ import type {
 } from "react-router";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 
+import { APP_ADMIN_CONTENT_STYLE } from "../utils/app-layout.shared";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 
@@ -1872,7 +1873,7 @@ export default function NotificationForm() {
             padding: "8px 28px 40px",
           }}
         >
-          <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+          <div style={APP_ADMIN_CONTENT_STYLE}>
             <button
               type="button"
               onClick={() => setSearchParams({})}
@@ -2437,7 +2438,7 @@ return (
           padding: "8px 28px 40px",
         }}
       >
-        <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+        <div style={APP_ADMIN_CONTENT_STYLE}>
           <h1
             style={{
               margin: "0 0 24px",

@@ -7,6 +7,7 @@ import type {
 import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { APP_ADMIN_CONTENT_STYLE } from "../utils/app-layout.shared";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import {
@@ -757,20 +758,21 @@ export default function SettingsPage() {
 
   return (
     <s-page heading="Store setting">
-      <s-section heading="Settings">
-        {feeprismaack && (
-          <div style={{ marginBottom: 12 }}>
-            <s-banner tone={feeprismaack.tone} heading={feeprismaack.title}>
-              {feeprismaack.messages.length > 0 && (
-                <s-unordered-list>
-                  {feeprismaack.messages.map((msg) => (
-                    <s-list-item key={msg}>{msg}</s-list-item>
-                  ))}
-                </s-unordered-list>
-              )}
-            </s-banner>
-          </div>
-        )}
+      <div style={APP_ADMIN_CONTENT_STYLE}>
+        <s-section heading="Settings">
+          {feeprismaack && (
+            <div style={{ marginBottom: 12 }}>
+              <s-banner tone={feeprismaack.tone} heading={feeprismaack.title}>
+                {feeprismaack.messages.length > 0 && (
+                  <s-unordered-list>
+                    {feeprismaack.messages.map((msg) => (
+                      <s-list-item key={msg}>{msg}</s-list-item>
+                    ))}
+                  </s-unordered-list>
+                )}
+              </s-banner>
+            </div>
+          )}
 
         <div
           style={{
@@ -1579,7 +1581,8 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-      </s-section>
+        </s-section>
+      </div>
     </s-page>
   );
 }

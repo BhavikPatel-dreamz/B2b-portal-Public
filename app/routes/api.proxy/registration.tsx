@@ -1231,6 +1231,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? "Registration submitted and approved successfully!"
         : "Registration submitted successfully!",
       autoApproved,
+      redirectTo: autoApproved
+        ? `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`
+        : null,
       registrationdata: finalRegistration,
       customer,
       company: {

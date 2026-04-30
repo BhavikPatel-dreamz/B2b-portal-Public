@@ -248,7 +248,7 @@ export default function Welcome() {
     {
       label: "Review approval preset",
       actionLabel: "Manage preset",
-      href: "/app/companies?tab=pending",
+      href: "/app/settings",
     },
     {
       label: "Activate app extensions",
@@ -259,7 +259,7 @@ export default function Welcome() {
     {
       label: "Configure email notifications",
       actionLabel: "Manage notifications",
-      href: "/app/settings",
+      href: "/app/notifications",
     },
   ];
   const tutorials = [

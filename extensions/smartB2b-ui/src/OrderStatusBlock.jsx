@@ -1114,6 +1114,12 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
       }
 
       if (result.success) {
+        if (result.redirectTo) {
+          setIsRedirecting(true);
+          window.location.replace(result.redirectTo);
+          return;
+        }
+
         setSubmitted(true);
         return;
       }

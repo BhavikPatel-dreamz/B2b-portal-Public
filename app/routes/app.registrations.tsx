@@ -14,6 +14,7 @@ import {
   boundary,
   AdminApiContext,
 } from "@shopify/shopify-app-react-router/server";
+import { APP_ADMIN_CONTENT_STYLE } from "../utils/app-layout.shared";
 import {
   assignCatalogToLocation,
   fetchAllCatalogs,
@@ -6025,7 +6026,7 @@ export function RegistrationApprovalsPanel({
 
   return (
     <s-page heading={heading}>
-      {content}
+      <div style={APP_ADMIN_CONTENT_STYLE}>{content}</div>
     </s-page>
   );
 }
