@@ -5,7 +5,6 @@ import {
   LoaderFunctionArgs,
   useFetcher,
   useLoaderData,
-  useRevalidator,
   useSearchParams,
 } from "react-router";
 
@@ -108,6 +107,22 @@ export interface ActionJson {
     };
   };
 }
+
+type RegistrationLoaderData = {
+  submissions: RegistrationSubmission[];
+  storeMissing: boolean;
+  formConfig: FormConfig;
+  shippingCountryOptions: CountryOption[];
+  shippingProvincesByCountry: Record<string, CountryOption[]>;
+  paymentTermsTemplates: Array<{
+    id: string;
+    name: string;
+    paymentTermsType: string;
+    dueInDays: number | null;
+  }>;
+  allCatalogs: CatalogNode[];
+  priceLists: PriceListNode[];
+};
 
 const normalizeCustomerId = (id?: string | null) => {
   if (!id) return null;
@@ -1365,6 +1380,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        clearRegistrationViewCaches(shop);
+
         return Response.json({
           intent,
           success: true,
@@ -1507,6 +1524,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
+
+        clearRegistrationViewCaches(shop);
 
         return Response.json({
           intent,
@@ -2408,23 +2427,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         if (locationId && selectedCatalogIds.length > 0) {
-          for (const catalogId of selectedCatalogIds) {
-            const result = await assignCatalogToLocation(
-              admin,
-              catalogId,
-              locationId,
-            );
+          const catalogAssignmentResults = await Promise.all(
+            selectedCatalogIds.map((catalogId) =>
+              assignCatalogToLocation(admin, catalogId, locationId),
+            ),
+          );
+          const failedCatalogAssignment = catalogAssignmentResults.find(
+            (result) => !result.success,
+          );
 
-            if (!result.success) {
-              return Response.json({
-                intent,
-                success: false,
-                errors:
-                  result.errors.length > 0
-                    ? result.errors
-                    : ["Failed to assign catalog to company location"],
-              });
-            }
+          if (failedCatalogAssignment) {
+            return Response.json({
+              intent,
+              success: false,
+              errors:
+                failedCatalogAssignment.errors.length > 0
+                  ? failedCatalogAssignment.errors
+                  : ["Failed to assign catalog to company location"],
+            });
           }
         }
 
@@ -2520,16 +2540,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        await sendCustomerRegistrationApprovalEmail({
-          storeId: store.id,
-          storeOwnerName: store.storeOwnerName || "Store Owner",
-          email: customerEmail,
-          companyName,
-          contactName:
-            `${registrationData?.firstName || firstName || ""} ${registrationData?.lastName || lastName || ""}`.trim(),
-          note: reviewNotes,
-        });
-
         await prisma.registrationSubmission.update({
           where: { id: registrationId },
           data: {
@@ -2542,6 +2552,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
 
         clearRegistrationViewCaches(shop, companyId);
+
+        void sendCustomerRegistrationApprovalEmail({
+          storeId: store.id,
+          storeOwnerName: store.storeOwnerName || "Store Owner",
+          email: customerEmail,
+          companyName,
+          contactName:
+            `${registrationData?.firstName || firstName || ""} ${registrationData?.lastName || lastName || ""}`.trim(),
+          note: reviewNotes,
+        }).catch((error) => {
+          console.error("Failed to send approval email", error);
+        });
 
         return Response.json({
           intent,
@@ -5397,17 +5419,55 @@ export function RegistrationApprovalsPanel({
 
   const flowFetcher = useFetcher<ActionJson>();
   const rejectFetcher = useFetcher<ActionJson>();
-  const revalidator = useRevalidator();
+  const refreshFetcher = useFetcher<RegistrationLoaderData>();
   const shopify = useAppBridge();
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    if (!refreshFetcher.data?.submissions) {
+      return;
+    }
+
+    setLocalSubmissions(refreshFetcher.data.submissions);
+  }, [refreshFetcher.data]);
+
   // Auto-refresh effect (30 seconds interval) for pending and rejected tabs
   useEffect(() => {
+    if (statusFilter === "APPROVED") {
+      return;
+    }
+
     const AUTO_REFRESH_INTERVAL = 30 * 1000;
 
     intervalIdRef.current = setInterval(() => {
-      console.log("🔄 Auto-refreshing registrations list");
-      revalidator.revalidate();
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+
+      if (
+        showConfigureUI ||
+        showRejectModal ||
+        flowFetcher.state !== "idle" ||
+        rejectFetcher.state !== "idle" ||
+        refreshFetcher.state !== "idle"
+      ) {
+        return;
+      }
+
+      const params = new URLSearchParams();
+      const shop = searchParams.get("shop");
+
+      if (shop) {
+        params.set("shop", shop);
+      }
+
+      params.set("status", statusFilter);
+
+      const queryString = params.toString();
+      console.log("🔄 Background refreshing registrations list");
+      refreshFetcher.load(
+        queryString ? `/app/registrations?${queryString}` : "/app/registrations",
+      );
     }, AUTO_REFRESH_INTERVAL);
 
     return () => {
@@ -5415,7 +5475,16 @@ export function RegistrationApprovalsPanel({
         clearInterval(intervalIdRef.current);
       }
     };
-  }, [revalidator]);
+  }, [
+    flowFetcher.state,
+    refreshFetcher,
+    refreshFetcher.state,
+    rejectFetcher.state,
+    searchParams,
+    showConfigureUI,
+    showRejectModal,
+    statusFilter,
+  ]);
 
   const isFlowLoading = flowFetcher.state !== "idle";
   const isCheckingCustomer =
@@ -5570,14 +5639,12 @@ export function RegistrationApprovalsPanel({
 
       setPipelineStep("done");
       shopify.toast.show?.("Registration approved successfully!");
-      revalidator.revalidate();
       return;
     }
   }, [
     flowFetcher,
     flowFetcher.data,
     flowFetcher.state,
-    revalidator,
     shopify,
     updateLocalSubmission,
   ]);
@@ -5623,7 +5690,6 @@ export function RegistrationApprovalsPanel({
       setShowRejectModal(false);
       setRejectTarget(null);
       setRejectNote("");
-      revalidator.revalidate();
       shopify.toast.show?.("Registration rejected");
       return;
     }
@@ -5636,7 +5702,6 @@ export function RegistrationApprovalsPanel({
   }, [
     rejectFetcher.data,
     rejectFetcher.state,
-    revalidator,
     shopify,
     updateLocalSubmission,
   ]);

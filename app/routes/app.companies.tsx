@@ -626,6 +626,19 @@ export default function CompaniesPage() {
         }
         : null,
     );
+  const derivedRegistrationCounts = registrationData?.submissions.reduce(
+    (counts, submission) => {
+      if (submission.status === "PENDING") counts.pending += 1;
+      if (submission.status === "APPROVED") counts.approved += 1;
+      if (submission.status === "REJECTED") counts.rejected += 1;
+      return counts;
+    },
+    { pending: 0, approved: 0, rejected: 0 },
+  );
+  const displayedPendingCount =
+    derivedRegistrationCounts?.pending ?? pendingCount;
+  const displayedRejectedCount =
+    derivedRegistrationCounts?.rejected ?? rejectedCount;
   const actionButtonWidth = 124;
   const pageShellStyle = {
     background: "#f1f2f4",
@@ -800,8 +813,8 @@ export default function CompaniesPage() {
           >
             {[
               { key: "companies", label: "Company List", count: null },
-              { key: "pending", label: "Pending", count: pendingCount },
-              { key: "rejected", label: "Rejected", count: rejectedCount },
+              { key: "pending", label: "Pending", count: displayedPendingCount },
+              { key: "rejected", label: "Rejected", count: displayedRejectedCount },
             ].map((tab) => (
               <button
                 key={tab.key}

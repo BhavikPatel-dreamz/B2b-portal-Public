@@ -53,8 +53,6 @@ type ProductResponse = {
   };
 };
 
-const responseCache = new Map<string, ProductResponse>();
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop } = await validateB2BCustomerAccess(request);
   const url = new URL(request.url);
@@ -72,12 +70,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     normalizedQuery === "all"
       ? "status:active published_status:published"
       : `status:active published_status:published title:${normalizedQuery}*`;
-
-  const cacheKey = `${shop}:${normalizedQuery}:${cursor || "first"}`;
-
-  if (responseCache.has(cacheKey)) {
-    return responseCache.get(cacheKey);
-  }
 
   const store = await getStoreByDomain(shop);
 
@@ -185,11 +177,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     products,
     pageInfo: data.data.products.pageInfo,
   };
-
-  responseCache.set(cacheKey, result);
-  setTimeout(() => {
-    responseCache.delete(cacheKey);
-  }, 30 * 1000);
 
   return result;
 };
