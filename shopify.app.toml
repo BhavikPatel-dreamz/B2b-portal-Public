@@ -12,6 +12,38 @@ automatically_update_urls_on_dev = true
 api_version = "2026-01"
 
   [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/update" ]
+  uri = "/webhooks/draft_orders/update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/create" ]
+  uri = "/webhooks/draft_orders/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/edited" ]
+  uri = "/webhooks/orders/edited"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/delete" ]
+  uri = "/webhooks/customers/delete"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/cancelled" ]
+  uri = "/webhooks/orders/cancelled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
   topics = [ "orders/updated" ]
   uri = "/webhooks/orders/updated"
 
@@ -20,48 +52,20 @@ api_version = "2026-01"
   uri = "/webhooks/draft_orders/delete"
 
   [[webhooks.subscriptions]]
-  topics = [ "orders/create" ]
-  uri = "/webhooks/orders/create"
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
   [[webhooks.subscriptions]]
   topics = [ "customers/create" ]
   uri = "/webhooks/customers/create"
 
   [[webhooks.subscriptions]]
-  topics = [ "orders/cancelled" ]
-  uri = "/webhooks/orders/cancelled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "draft_orders/update" ]
-  uri = "/webhooks/draft_orders/update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/edited" ]
-  uri = "/webhooks/orders/edited"
-
-  [[webhooks.subscriptions]]
-  topics = [ "draft_orders/create" ]
-  uri = "/webhooks/draft_orders/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/paid" ]
-  uri = "/webhooks/orders/paid"
-
-  [[webhooks.subscriptions]]
-  topics = [ "customers/delete" ]
-  uri = "/webhooks/customers/delete"
+  topics = [ "shop/update" ]
+  uri = "/webhooks/shop/update"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "customer_read_customers,read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,write_companies,write_customers,write_draft_orders,write_locations,write_orders,write_products,write_validations,write_content,write_online_store_navigation,read_shipping"
+scopes = "customer_read_customers,read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,read_shipping,read_themes,write_companies,write_content,write_customers,write_draft_orders,write_locations,write_online_store_navigation,write_orders,write_products,write_validations"
 
 [auth]
 redirect_urls = [ "https://smartb2b.dynamicdreamz.com/api/auth" ]

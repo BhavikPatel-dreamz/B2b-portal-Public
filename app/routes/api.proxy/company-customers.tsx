@@ -3,28 +3,28 @@ import { authenticate } from "../../shopify.server";
 import { getStoreByDomain } from "../../services/store.server";
 
 export const loader = async ({ request }: ActionFunctionArgs) => {
-
     try {
-        // Authenticate the proxy request
         await authenticate.public.appProxy(request);
 
         const url = new URL(request.url);
         const companyId = url.searchParams.get('companyId');
-        const shop = url.searchParams.get('shop');
+        const shopDomain = url.searchParams.get('shop');
 
-        if (!companyId || !shop) {
+        if (!companyId || !shopDomain) {
             return Response.json({ error: 'Company ID and shop required' }, { status: 400 });
         }
 
-        // Get the store to get the access token
-        const store = await getStoreByDomain(shop);
+        const store = await getStoreByDomain(shopDomain);
         if (!store || !store.accessToken) {
             return Response.json({ error: 'Store not found or unauthorized' }, { status: 404 });
         }
 
-        // GraphQL query to fetch company customers
+        // Updated query to include shop currencyCode
         const query = `
             query getCompanyCustomers($companyId: ID!, $first: Int) {
+                shop {
+                    currencyCode
+                }
                 company(id: $companyId) {
                     id
                     name
@@ -46,7 +46,7 @@ export const loader = async ({ request }: ActionFunctionArgs) => {
             }
         `;
 
-        const response = await fetch(`https://${shop}/admin/api/2023-07/graphql.json`, {
+        const response = await fetch(`https://${shopDomain}/admin/api/2023-07/graphql.json`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -56,14 +56,10 @@ export const loader = async ({ request }: ActionFunctionArgs) => {
                 query,
                 variables: {
                     companyId: companyId.startsWith('gid://') ? companyId : `gid://shopify/Company/${companyId}`,
-                    first: 100, // Fetch up to 100 customers
+                    first: 100,
                 },
             }),
         });
-
-        if (!response.ok) {
-            throw new Error(`GraphQL API error: ${response.status} ${response.statusText}`);
-        }
 
         const result = await response.json();
 
@@ -73,12 +69,13 @@ export const loader = async ({ request }: ActionFunctionArgs) => {
         }
 
         const company = result.data?.company;
+        const currencyCode = result.data?.shop?.currencyCode; 
+
         if (!company) {
             return Response.json({ error: 'Company not found' }, { status: 404 });
         }
 
-        // Transform the customer data
-        const customers = company.contacts.edges.map((edge: { node: { id: string; customer: { id: string; firstName: string; lastName: string; email: string; phone: string } } }) => ({
+        const customers = company.contacts.edges.map((edge: any) => ({
             id: edge.node.customer.id.replace('gid://shopify/Customer/', ''),
             firstName: edge.node.customer.firstName,
             lastName: edge.node.customer.lastName,
@@ -89,6 +86,7 @@ export const loader = async ({ request }: ActionFunctionArgs) => {
         return Response.json({
             customers,
             companyName: company.name,
+            currencyCode, 
         });
 
     } catch (error) {

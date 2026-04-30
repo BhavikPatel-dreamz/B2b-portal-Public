@@ -5,6 +5,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { countCompanies } from "../services/company.server";
 import { countRegistrations } from "../services/registration.server";
 import prisma from "../db.server";
+import { formatCredit } from "../utils/company.utils";
 
 
 type LoaderData = {
@@ -20,6 +21,7 @@ type LoaderData = {
   pendingCreditAmount?: number;
   currentMonthB2BOrders?: number;
   currentMonthRevenue?: number;
+  currencyCode?: string;
 };
 
 // ============================================================
@@ -150,6 +152,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       pendingCreditAmount: 0,
       currentMonthB2BOrders: currentMonthB2BOrdersCount,
       currentMonthRevenue: Number(currentMonthRevenueSum._sum.orderTotal || 0),
+      currencyCode: store.currencyCode || "USD",
     };
 
     // ✅ Store in cache
@@ -1039,7 +1042,7 @@ export default function Home() {
                     Total Credit Allowed • <a href="#">Learn more →</a>
                   </div>
                   <div className="credit-value">
-                    ${data.totalCreditAllowed.toLocaleString()}
+                    {formatCredit(data.totalCreditAllowed.toString(), data.currencyCode)}
                   </div>
                   <div className="credit-badge success">
                     ✓ Healthy credit balance
@@ -1050,7 +1053,7 @@ export default function Home() {
                 <div className="credit-stat">
                   <div className="credit-label">Credit Used</div>
                   <div className="credit-value">
-                    ${data.totalCreditUsed.toLocaleString()}
+                    {formatCredit(data.totalCreditUsed.toString(), data.currencyCode)}
                   </div>
                   <div className="credit-badge info">
                     {creditUsagePercentage}% Almost used
@@ -1061,7 +1064,7 @@ export default function Home() {
                 <div className="credit-stat">
                   <div className="credit-label">Available Credit</div>
                   <div className="credit-value">
-                    ${data.availableCredit.toLocaleString()}
+                    {formatCredit(data.availableCredit.toString(), data.currencyCode)}
                   </div>
                   <div className="credit-badge success">✓ No risk detected</div>
                 </div>
@@ -1277,7 +1280,7 @@ export default function Home() {
                   <div className="action-icon">💰</div>
                   <div className="action-content">
                     <h3 className="action-title">Revenue from B2B companies (current month)</h3>
-                    <p className="action-description">${(data.currentMonthRevenue || 0).toLocaleString()} revenue</p>
+                    <p className="action-description">{formatCredit((data.currentMonthRevenue || 0).toString(), data.currencyCode)} revenue</p>
                   </div>
                 </div>
                 <div className="action-footer">

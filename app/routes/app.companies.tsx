@@ -69,6 +69,7 @@ interface RegistrationsLoaderData {
   allCatalogs: any[];
   priceLists: any[];
   storeMissing: boolean;
+  currencyCode: string;
 }
 
 type SortOrder = "newest" | "oldest";
@@ -170,7 +171,16 @@ export const clearAdminCompaniesCache = (shop: string) => {
       cache.delete(key);
     }
   }
-  console.log("🧹 Admin companies cache cleared for:", prefix);
+  
+  // Also clear store cache when companies cache is cleared
+  storeCache.delete(shop);
+  
+  console.log("🧹 Admin companies and store cache cleared for:", shop);
+};
+
+export const clearAdminCompaniesStoreCache = (shop: string) => {
+  storeCache.delete(shop);
+  console.log("🧹 Admin companies store cache cleared for:", shop);
 };
 
 async function getStoreForShop(shop: string) {
@@ -181,7 +191,7 @@ async function getStoreForShop(shop: string) {
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: shop },
-    select: { id: true, contactEmail: true, submissionEmail: true },
+    select: { id: true, contactEmail: true, submissionEmail: true, currencyCode: true },
   });
 
   if (store) {
@@ -399,6 +409,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       allCatalogs: registrationData.allCatalogs,
       priceLists: registrationData.priceLists,
       storeMissing: false,
+      currencyCode: store.currencyCode || "USD",
       totalCount: totalItems,
       currentPage: page,
       totalPages,
@@ -428,17 +439,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         paymentTermsTemplates: [],
         allCatalogs: [],
         priceLists: [],
-        storeMissing: false,
+        storeMissing: true,
+        currencyCode: "USD",
         totalCount: 0,
         currentPage: 1,
         totalPages: 0,
         searchQuery: "",
-        sortOrder: "newest" as const,
-      },
-      { status: 500 },
-    );
-  }
-};
+        sortOrder: "newest",
+        },
+        { status: 500 },
+        );
+        }
+        };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await parseForm(request.clone());
@@ -580,6 +592,7 @@ export default function CompaniesPage() {
     allCatalogs,
     priceLists,
     storeMissing,
+    currencyCode,
     totalCount,
     currentPage,
     totalPages,
@@ -609,6 +622,7 @@ export default function CompaniesPage() {
           allCatalogs,
           priceLists,
           storeMissing,
+          currencyCode,
         }
         : null,
     );
@@ -1137,7 +1151,7 @@ export default function CompaniesPage() {
                               {company.userCount}
                             </td>
                             <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
-                              {formatCredit(company.creditLimit)}
+                              {formatCredit(company.creditLimit, currencyCode)}
                             </td>
                             <td
                               style={{
@@ -1147,7 +1161,7 @@ export default function CompaniesPage() {
                                 verticalAlign: "top",
                               }}
                             >
-                              {formatCredit(company.usedCredit)}
+                              {formatCredit(company.usedCredit, currencyCode)}
                             </td>
                             <td
                               style={{
@@ -1163,7 +1177,7 @@ export default function CompaniesPage() {
                                 verticalAlign: "top",
                               }}
                             >
-                              {formatCredit(company.availableCredit)}
+                              {formatCredit(company.availableCredit, currencyCode)}
                             </td>
                             <td
                               style={{

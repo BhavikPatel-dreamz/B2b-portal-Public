@@ -32,6 +32,7 @@ export default [
     "webhooks/draft_orders/delete",
     "routes/webhooks.draft_orders_delete.tsx",
   ),
+  route("webhooks/shop/update", "routes/webhooks.shop.update.tsx"),
 
   // API Proxy routes (using prefix for folder organization)
   ...prefix("api/proxy", [

@@ -228,14 +228,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           font-size: 14px;
           color: var(--muted);
           line-height: 1.4;
+          justify-content: end;
         }
         .meta div {
           display: contents;
         }
         .meta strong {
           color: var(--ink);
-          text-align: right;
           font-weight: 600;
+          justify-self: end;
+          white-space: nowrap;
+        }
+        .meta span {
+          justify-self: start;
         }
         .section-grid {
           display: grid;
@@ -334,10 +339,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
           .header {
             flex-direction: column;
+            gap: 16px;
           }
           .meta {
             justify-content: start;
+            justify-items: start;
             gap: 4px 12px;
+          }
+          .meta strong {
+            justify-self: start;
           }
           .section-grid {
             grid-template-columns: 1fr;
@@ -367,11 +377,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             <h1>${escapeHtml(order.name || "Order Invoice")}</h1>
           </div>
           <div class="meta">
-            <div><strong>Invoice Date:</strong> ${escapeHtml(formatDate(order.createdAt))}</div>
-            <div><strong>Order ID:</strong> ${escapeHtml(order.id)}</div>
-            <div><strong>Location:</strong> ${escapeHtml(order.locationName || "-")}</div>
-            <div><strong>Financial Status:</strong> ${escapeHtml(order.displayFinancialStatus || "-")}</div>
-            <div><strong>Fulfillment Status:</strong> ${escapeHtml(order.displayFulfillmentStatus || "-")}</div>
+            <div><strong>Invoice Date:</strong> <span>${escapeHtml(formatDate(order.createdAt))}</span></div>
+            <div><strong>Order ID:</strong> <span>${escapeHtml(order.id?.split("/").pop() || order.id)}</span></div>
+            <div><strong>Location:</strong> <span>${escapeHtml(order.locationName || "-")}</span></div>
+            <div><strong>Financial Status:</strong> <span>${escapeHtml(order.displayFinancialStatus || "-")}</span></div>
+            <div><strong>Fulfillment Status:</strong> <span>${escapeHtml(order.displayFulfillmentStatus || "-")}</span></div>
           </div>
         </div>
 

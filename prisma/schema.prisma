@@ -64,6 +64,7 @@ model Store {
   accessToken   String?
   scope         String?
   logo          String?
+  currencyCode  String?   @default("USD")
   submissionEmail String?
   privacyPolicylink String?
   privacyPolicyContent String?

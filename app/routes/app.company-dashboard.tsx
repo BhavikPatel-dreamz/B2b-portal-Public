@@ -65,6 +65,7 @@ type LoaderData = {
     createdAt: string;
   }>;
   totalUsers: number;
+  currencyCode: string;
 };
 
 const buildUserErrorList = (payload: any): string[] => {
@@ -787,6 +788,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     })),
     totalUsers: dashboardData.totalUsers,
     pendingOrderCount: 0,
+    currencyCode: store.currencyCode || "USD",
   } satisfies LoaderData);
 };
 
@@ -798,10 +800,10 @@ function getCreditStatusColor(
   return "critical";
 }
 
-function formatCurrency(amount: number): string {
+function formatCurrency(amount: number, currency: string = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: currency,
   }).format(amount);
 }
 
@@ -1006,6 +1008,15 @@ export default function CompanyDashboard() {
     }
   }, [updateFetcher.state]);
 
+  // Synchronize local state with loader data
+  useEffect(() => {
+    setCreditLimitValue(data.creditLimit.toString());
+  }, [data.creditLimit]);
+
+  useEffect(() => {
+    setSelectedPaymentTerms(data.company.paymentTermsTemplateId || "");
+  }, [data.company.paymentTermsTemplateId]);
+
   useEffect(() => {
     if (
       creditFetcher.state === "idle" &&
@@ -1013,7 +1024,6 @@ export default function CompanyDashboard() {
       creditFetcher.data.success
     ) {
       setIsEditingCredit(false);
-      window.location.reload();
     }
   }, [creditFetcher.state, creditFetcher.data]);
 
@@ -1024,7 +1034,6 @@ export default function CompanyDashboard() {
       paymentTermsFetcher.data.success
     ) {
       setIsEditingPaymentTerms(false);
-      window.location.reload();
     }
   }, [paymentTermsFetcher.state, paymentTermsFetcher.data]);
 
@@ -1046,9 +1055,8 @@ export default function CompanyDashboard() {
         setRecalculationPreview(null);
 
         if (response.success) {
-          // Optionally show success message or reload the page
+          // Optionally show success message
           console.log("✅ Credit recalculation completed successfully");
-          window.location.reload(); // Reload to see updated data
         } else {
           console.error("❌ Credit recalculation failed:", response.errors);
           alert(
@@ -1426,7 +1434,7 @@ export default function CompanyDashboard() {
                       color: "#202223",
                     }}
                   >
-                    {formatCurrency(data.creditLimit)}
+                    {formatCurrency(data.creditLimit, data.currencyCode)}
                   </div>
                   <button
                     onClick={() => setIsEditingCredit(true)}
@@ -1556,7 +1564,7 @@ export default function CompanyDashboard() {
                 Credit Limit
               </div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>
-                {formatCurrency(data.creditLimit)}
+                {formatCurrency(data.creditLimit, data.currencyCode)}
               </div>
             </div>
             <div>
@@ -1570,7 +1578,7 @@ export default function CompanyDashboard() {
                   color: creditStatusColor,
                 }}
               >
-                {formatCurrency(data.availableCredit)}
+                {formatCurrency(data.availableCredit, data.currencyCode)}
               </div>
             </div>
             <div>
@@ -1578,7 +1586,7 @@ export default function CompanyDashboard() {
                 Used Credit
               </div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>
-                {formatCurrency(data.usedCredit)}
+                {formatCurrency(data.usedCredit, data.currencyCode)}
               </div>
             </div>
             <div>
@@ -1586,7 +1594,7 @@ export default function CompanyDashboard() {
                 Pending Credit
               </div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>
-                {formatCurrency(data.pendingCredit)}
+                {formatCurrency(data.pendingCredit, data.currencyCode)}
               </div>
               <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 2 }}>
                 {data.pendingOrderCount} pending orders
@@ -1953,24 +1961,24 @@ export default function CompanyDashboard() {
                       }}
                     >
                       {tx.orderTotal >= 0 ? "+" : ""}
-                      {formatCurrency(tx.orderTotal)}
+                      {formatCurrency(tx.orderTotal, data.currencyCode)}
                     </td>
                     <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
-                      {formatCurrency(tx.paidAmount)}
-                    </td>
-
-                    <td
-                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
-                    >
-                      {formatCurrency(tx.creditUsed)}
+                      {formatCurrency(tx.paidAmount, data.currencyCode)}
                     </td>
 
                     <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
-                      {formatCurrency(tx.remainingBalance)}
+                      {formatCurrency(tx.creditUsed, data.currencyCode)}
+                    </td>
+
+                    <td
+                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
+                    >
+                      {formatCurrency(tx.remainingBalance, data.currencyCode)}
                     </td>
                     {/* <td style={{ padding: 12, fontSize: 13 }}>
                       {tx.notes || "—"}
@@ -2092,6 +2100,7 @@ export default function CompanyDashboard() {
                               ? recalculationPreview.creditLimit.toNumber()
                               : ((recalculationPreview.creditLimit as number) ??
                                   0),
+                            data.currencyCode,
                           )}
                         </span>
                       </div>
@@ -2121,6 +2130,7 @@ export default function CompanyDashboard() {
                               ? recalculationPreview.unpaidOrdersTotal.toNumber()
                               : ((recalculationPreview.unpaidOrdersTotal as number) ??
                                   0),
+                            data.currencyCode,
                           )}
                         </span>
                       </div>

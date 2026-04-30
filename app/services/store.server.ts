@@ -6,6 +6,7 @@ export interface CreateStoreInput {
   shopName?: string;
   accessToken?: string;
   scope?: string;
+  currencyCode?: string;
 }
 
 export interface UpdateStoreInput {
@@ -16,6 +17,7 @@ export interface UpdateStoreInput {
   planKey?: string | null;
   isActive?: boolean;
   logo?: string | null;
+  currencyCode?: string | null;
   submissionEmail?: string | null;
   companyWelcomeEmailTemplate?: string | null;
   companyWelcomeEmailEnabled?: boolean;
@@ -40,11 +42,13 @@ export async function upsertStore(data: CreateStoreInput) {
       shopName: data.shopName,
       accessToken: data.accessToken,
       scope: data.scope,
+      currencyCode: data.currencyCode,
     },
     update: {
       shopName: data.shopName,
       accessToken: data.accessToken,
       scope: data.scope,
+      currencyCode: data.currencyCode,
       isActive: true,
       uninstalledAt: null,
     },

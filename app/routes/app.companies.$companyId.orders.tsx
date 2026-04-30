@@ -10,6 +10,7 @@ type LoaderData = {
     shopifyCompanyId: string | null;
   };
   shop: string;
+  currencyCode: string;
   orders: Array<{
     id: string;
     shopifyOrderId: string | null;
@@ -56,6 +57,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       shopifyCompanyId: data.company.shopifyCompanyId,
     },
     shop: session.shop,
+    currencyCode: store.currencyCode || "USD",
     orders: data.orders.map((order) => ({
       id: order.id,
       shopifyOrderId: order.shopifyOrderId,
@@ -73,10 +75,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   } satisfies LoaderData);
 };
 
-function formatCurrency(amount: number): string {
+function formatCurrency(amount: number, currency: string = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: currency,
   }).format(amount);
 }
 
@@ -339,17 +341,17 @@ export default function CompanyOrdersPage() {
                     <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
-                      {formatCurrency(order.orderTotal)}
+                      {formatCurrency(order.orderTotal, data.currencyCode)}
                     </td>
                     <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
-                      {formatCurrency(order.paidAmount)}
+                      {formatCurrency(order.paidAmount, data.currencyCode)}
                     </td>
                     <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
-                      {formatCurrency(order.remainingBalance)}
+                      {formatCurrency(order.remainingBalance, data.currencyCode)}
                     </td>
                     <td style={{ padding: 12 }}>
                       {getPaymentStatusBadge(order.paymentStatus)}

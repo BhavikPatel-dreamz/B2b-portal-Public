@@ -30,6 +30,11 @@ class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> 
     if (!session.accessToken) return saved;
 
     try {
+      // For background session saves, we might not have a full 'admin' object easily available
+      // but we can try to fetch the shop info if we have the accessToken.
+      // However, to keep it simple and reliable, we mostly rely on afterAuth for the initial setup
+      // and SHOP_UPDATE webhooks for ongoing changes.
+      
       await upsertStore({
         shopDomain: session.shop,
         accessToken: session.accessToken,
@@ -85,10 +90,25 @@ const shopify = shopifyApp({
       let store;
 
       try {
+        // Fetch shop details including currency
+        const response = await admin.graphql(
+          `#graphql
+          query {
+            shop {
+              name
+              currencyCode
+            }
+          }`
+        );
+        const shopData = await response.json();
+        const shop = shopData?.data?.shop;
+
         store = await upsertStore({
           shopDomain: session.shop,
           accessToken: session.accessToken ?? "",
           scope: session.scope,
+          shopName: shop?.name,
+          currencyCode: shop?.currencyCode,
         });
 
       
@@ -106,6 +126,14 @@ const shopify = shopifyApp({
         console.log(`✅ Store bootstrap completed for ${session.shop}`);
       } catch (error) {
         console.error("❌ Error during store bootstrap:", error);
+      }
+
+      // Register webhooks
+      try {
+        await shopify.registerWebhooks({ session });
+        console.log(`✅ Webhooks registered for ${session.shop}`);
+      } catch (error) {
+        console.error(`❌ Failed to register webhooks for ${session.shop}:`, error);
       }
 
       // First, debug what functions are available
@@ -162,6 +190,10 @@ const shopify = shopifyApp({
     CUSTOMERS_DELETE: {
       deliveryMethod: DeliveryMethod.Http,
       callbackUrl: "/webhooks/customers/delete",
+    },
+    SHOP_UPDATE: {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: "/webhooks/shop/update",
     },
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
