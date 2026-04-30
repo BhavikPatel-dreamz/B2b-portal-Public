@@ -137,8 +137,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }
 
-    // ── STEP 6: Check if user is disabled ───────────────────
-    if (registration?.isDisable === true) {
+    // ── STEP 6: Check if user or company is disabled ────────
+    const isUserDisabled =
+      registration?.isDisable === true ||
+      user?.isActive === false ||
+      user?.company?.isDisable === true;
+
+    if (isUserDisabled) {
       const customerName =
         `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
         (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
@@ -148,24 +153,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         hasB2BAccess: false,
         customerId: loggedInCustomerId,
         customerName,
-        isDisable: registration?.isDisable,
+        isDisable: true,
         customerStatus: registration?.status || user?.status || null,
         redirectTo: "/apps/b2b-portal/registration",
-        message: "Your company account has been deactivated. Please contact the support team.",
+        message:
+          "Your company account has been deactivated. Please contact the support team.",
         alreadySubmitted: true,
       });
     }
 
     // ── STEP 7: Determine access ─────────────────────────────
+    const status = registration?.status || user?.status;
+    const customerName =
+      `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
+      (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
+
     if (hasB2BInShopify) {
-      const isApprovedViaRegistration = registration?.status === "APPROVED";
-      const isApprovedViaUser = user?.status === "APPROVED" && user.isActive;
+      const isApproved = status === "APPROVED";
 
-      if (isApprovedViaRegistration || isApprovedViaUser) {
-        const customerName =
-          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
-          (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
-
+      if (isApproved) {
         return Response.json({
           isLoggedIn: true,
           hasB2BAccess: true,
@@ -175,21 +181,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           themeColor: store.themeColor,
           customerId: loggedInCustomerId,
           customerName,
-          customerStatus: isApprovedViaRegistration
-            ? registration.status
-            : user?.status,
+          customerStatus: status,
           accessMethod,
           ...additionalInfo,
           message: "Access granted",
         });
       }
 
-      // Exists but not approved (PENDING)
+      // Exists but not approved
       if (registration || user) {
-        const status = registration?.status || user?.status;
-        const customerName =
-          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
-          (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
+        let message = "Your account exists but is not approved yet";
+        if (status === "REJECTED") {
+          message = "Your account has been rejected. Please contact the support team.";
+        } else if (status === "PENDING") {
+          message = "Your account has already been submitted and is under review";
+        }
 
         return Response.json({
           isLoggedIn: true,
@@ -198,13 +204,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           customerName,
           customerStatus: status,
           redirectTo: "/apps/b2b-portal/registration",
-          message: "Your account exists but is not approved yet",
+          message,
           alreadySubmitted: true,
         });
       }
 
       // No registration and no user record
-      console.log("⚠️ Customer has B2B in Shopify but not registered in our database");
+      console.log(
+        "⚠️ Customer has B2B in Shopify but not registered in our database",
+      );
       return Response.json({
         isLoggedIn: true,
         hasB2BAccess: false,
@@ -218,17 +226,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.log("⚠️ Customer does not have B2B access in Shopify");
 
       if (registration || user) {
-        const status = registration?.status || user?.status;
-        const customerName =
-          `${registration?.firstName || ""} ${registration?.lastName || ""}`.trim() ||
-          (user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "");
-
         let message = "Your account has already been submitted and is under review";
 
         if (status === "APPROVED") {
-          message = "Your account is approved, but B2B access is not yet configured in Shopify.";
+          message =
+            "Your account is approved, but B2B access is not yet configured in Shopify.";
         } else if (status === "REJECTED") {
-          message = "Your account has been rejected. Please contact the support team.";
+          message =
+            "Your account has been rejected. Please contact the support team.";
         }
 
         return Response.json({

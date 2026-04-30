@@ -1456,10 +1456,8 @@ export async function getCustomerCompanyInfo(
     };
     const shopifyUrl = `https://${shopName}/admin/api/2025-01/graphql.json`;
 
-
-    const company = await prisma.companyAccount.findFirst({
-        where: { contactEmail: customer.email },
-      })
+    // Get store to ensure we have shopId for lookups
+    const store = await getStoreByDomain(shopName);
 
     const [
       registrationData,
@@ -1468,14 +1466,41 @@ export async function getCustomerCompanyInfo(
       pendingDraftOrdersRes,
       currentMonthCompletedOrdersRes,
     ] = await Promise.all([
-      // DB: registration info
+      // DB: registration info (Case-insensitive email lookup)
       prisma.registrationSubmission.findFirst({
-        where: { email: customer.email },
+        where: {
+          email: {
+            equals: customer.email,
+            mode: "insensitive",
+          },
+          shopId: store?.id,
+        },
       }),
 
-      // DB: company account for credit info
+      // DB: company account for credit info - Use primaryCompanyGid OR numeric ID for precision
       prisma.companyAccount.findFirst({
-        where: { contactEmail: customer.email },
+        where: {
+          OR: [
+            { shopifyCompanyId: primaryCompanyGid },
+            { shopifyCompanyId: primaryCompanyNumericId },
+          ],
+          shopId: store?.id,
+        },
+        include: {
+          _count: {
+            select: {
+              users: true,
+              orders: {
+                where: {
+                  createdAt: {
+                    gte: startOfMonth,
+                    lte: endOfMonth,
+                  },
+                },
+              },
+            },
+          },
+        },
       }),
 
       // Shopify: current month orders for this company
@@ -1511,10 +1536,16 @@ export async function getCustomerCompanyInfo(
         }),
       }),
 
-     
+      // Fetch draft orders from DB for this specific company
       prisma.b2BOrder.findMany({
         where: {
-          companyId: company?.id,
+          company: {
+            OR: [
+              { shopifyCompanyId: primaryCompanyGid },
+              { shopifyCompanyId: primaryCompanyNumericId },
+            ],
+            shopId: store?.id,
+          },
           orderStatus: "draft",
         },
       }),
@@ -1574,11 +1605,11 @@ export async function getCustomerCompanyInfo(
       currentMonthCompletedOrdersData?.data?.orders?.edges,
     );
 
+    // Prefer database count for current month orders if company found in DB
     const currentMonthOrderCount: number =
-      filteredCurrentMonthOrders.length;
+      companyData?._count?.orders ?? filteredCurrentMonthOrders.length;
 
-    const pendingDraftOrderCount: number =
-      pendingDraftOrdersData.length;
+    const pendingDraftOrderCount: number = pendingDraftOrdersData.length;
 
     const currentMonthUsedCredit: number =
       filteredCurrentMonthCompletedOrders.reduce(
@@ -1697,7 +1728,11 @@ export async function getCustomerCompanyInfo(
           mainContact: company.mainContact?.customer ?? null,
           totalSpent: company.totalSpent,
           locationsCount: company.locationsCount?.count ?? 0,
-          userCount: company.contactsCount?.count ?? 0,
+          // Prefer DB user count for the primary company
+          userCount:
+            company.id === primaryCompanyGid
+              ? companyData?._count?.users ?? company.contactsCount?.count ?? 0
+              : company.contactsCount?.count ?? 0,
           updatedAt: company.updatedAt,
           roles,
           roleAssignments,
@@ -1721,6 +1756,9 @@ export async function getCustomerCompanyInfo(
     const pendingCreditNum = creditInfo
       ? parseFloat(creditInfo.pendingCredit.toString())
       : 0;
+    const availableCreditNum = creditInfo
+      ? parseFloat(creditInfo.availableCredit.toString())
+      : 0;
     const creditUsagePercentage =
       creditLimitNum > 0
         ? Math.round((usedCreditNum / creditLimitNum) * 100)
@@ -1739,7 +1777,8 @@ export async function getCustomerCompanyInfo(
       // Credit
       CreditLimit: creditLimitNum,
       usedCredit: usedCreditNum,
-      pendingCredit: creditInfo?.availableCredit,
+      pendingCredit: pendingCreditNum,
+      availableCredit: availableCreditNum,
       creditUsagePercentage,
 
       // ✅ New stats
@@ -1747,7 +1786,8 @@ export async function getCustomerCompanyInfo(
       pendingDraftOrderCount,
       currentMonthUsedCredit,
       totalLocationCount: companies[0]?.locationsCount ?? 0,
-      userCount: companies[0]?.userCount ?? 0,
+      // Prefer DB user count for primary company
+      userCount: companyData?._count?.users ?? companies[0]?.userCount ?? 0,
 
       // Company + access flags
       companies,

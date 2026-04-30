@@ -3,9 +3,6 @@ import { authenticateApiProxyWithPermissions } from "../../utils/proxy.server";
 import prisma from "app/db.server";
 import { getCreditTransactionsByCompany } from "app/services/company.server";
 
-
-
-
 // ============================================================
 // 📦 LOADER — GET request
 // ============================================================

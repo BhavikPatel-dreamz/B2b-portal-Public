@@ -229,7 +229,7 @@ export async function sendRegistrationEmailForCustomer(
   const shopDomain = storeData?.shopDomain || "store.com";
   const storefrontUrl = shopDomain.startsWith("http")
     ? shopDomain
-    : `https://${shopDomain}/apps/b2b-portal-public/smartb2b`;
+    : `https://${shopDomain}/apps/b2b-portal-public-3/smartb2b`;
 
   const html = convertToHtmlEmail(
     processedTemplate,
@@ -466,7 +466,7 @@ const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVari
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
   const storefrontUrl = shopDomain.startsWith("http")
     ? shopDomain
-    : `https://${shopDomain}/apps/b2b-portal-public/smartb2b`;
+    : `https://${shopDomain}/apps/b2b-portal-public-3/smartb2b`;
   const html = convertToHtmlEmail(
     processedTemplate,
     shopDomain,
@@ -689,7 +689,7 @@ const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVari
   const shopDomain = storeData?.shopDomain || "shop-domain.myshopify.com";
   const storefrontUrl = shopDomain.startsWith("http")
     ? shopDomain
-    : `https://${shopDomain}/apps/b2b-portal-public/smartb2b`;
+    : `https://${shopDomain}/apps/b2b-portal-public-3/smartb2b`;
   const html = convertToHtmlEmail(
     processedTemplate,
     shopDomain,
