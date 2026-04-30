@@ -65,6 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       currentMonthUsedCredit: companyInfo.currentMonthUsedCredit,
       totalLocationCount: companyInfo.totalLocationCount,
       userCount: companyInfo.userCount,
+      currencyCode: companyInfo.companies?.[0]?.totalSpent?.currencyCode || "USD",
 
       companies: companyInfo.companies,
     });
@@ -144,6 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({
       ordersCount: 0, // We need to fetch orders count separately if not in company info
       totalSpend: formattedSpend,
+      currencyCode: currency,
       locationsCount: company.locationsCount,
       companyName: company.companyName,
     });
