@@ -5,7 +5,6 @@ import {
   calculateAvailableCredit,
   validateTieredCreditForOrder,
   deductTieredCredit,
-  restoreTieredCredit,
 } from "../../services/tieredCreditService";
 
 import prisma from "../../db.server";
@@ -291,7 +290,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         await prisma.b2BOrder.delete({ where: { id: b2bOrder.id } });
 
         // Restore credit by creating a reversal transaction
-        await restoreTieredCredit(companyId, user.id, b2bOrder.id, totalAmount, "cancelled");
+        await prisma.creditTransaction.create({
+          data: {
+            companyId,
+            orderId: b2bOrder.id,
+            transactionType: "order_cancelled",
+            creditAmount: new Decimal(totalAmount),
+            previousBalance: new Decimal(0), // Will be recalculated
+            newBalance: new Decimal(0), // Will be recalculated
+            notes: `Order creation failed - Shopify sync error. Credit restored.`,
+            createdBy: "system",
+            createdAt: new Date(),
+            
+          },
+        });
 
         return Response.json(
           {
@@ -347,7 +359,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           await prisma.b2BOrder.delete({ where: { id: b2bOrder.id } });
 
           // Restore credit
-          await restoreTieredCredit(companyId, user.id, b2bOrder.id, totalAmount, "cancelled");
+          await prisma.creditTransaction.create({
+            data: {
+              companyId,
+              orderId: b2bOrder.id,
+              transactionType: "order_cancelled",
+              creditAmount: new Decimal(totalAmount),
+              previousBalance: new Decimal(0),
+              newBalance: new Decimal(0),
+              notes: `Order creation failed - Database error. Credit restored.`,
+              createdBy: "system",
+            },
+          });
         } catch (rollbackError) {
           console.error("Error during rollback:", rollbackError);
         }

@@ -1456,49 +1456,35 @@ export async function getCustomerCompanyInfo(
     };
     const shopifyUrl = `https://${shopName}/admin/api/2025-01/graphql.json`;
 
-    // Get store to ensure we have shopId for lookups
-    const store = await getStoreByDomain(shopName);
+    // Fetch store first to get shopId for robust lookups
+    const storeRecord = await prisma.store.findUnique({
+      where: { shopDomain: shopName },
+      select: { id: true },
+    });
+    const shopId = storeRecord?.id || "";
+
+    // Fetch company account using the unique shopId + shopifyCompanyId
+    const companyAccount = await prisma.companyAccount.findUnique({
+      where: {
+        shopId_shopifyCompanyId: {
+          shopId,
+          shopifyCompanyId: primaryCompanyGid,
+        },
+      },
+    });
 
     const [
       registrationData,
-      companyData,
       currentMonthOrdersRes,
       pendingDraftOrdersRes,
       currentMonthCompletedOrdersRes,
     ] = await Promise.all([
-      // DB: registration info (Case-insensitive email lookup)
-      prisma.registrationSubmission.findFirst({
+      // DB: registration info - scoped by shopId
+      prisma.registrationSubmission.findUnique({
         where: {
-          email: {
-            equals: customer.email,
-            mode: "insensitive",
-          },
-          shopId: store?.id,
-        },
-      }),
-
-      // DB: company account for credit info - Use primaryCompanyGid OR numeric ID for precision
-      prisma.companyAccount.findFirst({
-        where: {
-          OR: [
-            { shopifyCompanyId: primaryCompanyGid },
-            { shopifyCompanyId: primaryCompanyNumericId },
-          ],
-          shopId: store?.id,
-        },
-        include: {
-          _count: {
-            select: {
-              users: true,
-              orders: {
-                where: {
-                  createdAt: {
-                    gte: startOfMonth,
-                    lte: endOfMonth,
-                  },
-                },
-              },
-            },
+          shopId_email: {
+            shopId,
+            email: customer.email,
           },
         },
       }),
@@ -1536,19 +1522,15 @@ export async function getCustomerCompanyInfo(
         }),
       }),
 
-      // Fetch draft orders from DB for this specific company
-      prisma.b2BOrder.findMany({
-        where: {
-          company: {
-            OR: [
-              { shopifyCompanyId: primaryCompanyGid },
-              { shopifyCompanyId: primaryCompanyNumericId },
-            ],
-            shopId: store?.id,
-          },
-          orderStatus: "draft",
-        },
-      }),
+      // Only fetch draft orders if we have a valid company account
+      companyAccount
+        ? prisma.b2BOrder.findMany({
+            where: {
+              companyId: companyAccount.id,
+              orderStatus: "draft",
+            },
+          })
+        : Promise.resolve([]),
 
       // Shopify: current month COMPLETED orders to sum used credit this month
       fetch(shopifyUrl, {
@@ -1605,9 +1587,7 @@ export async function getCustomerCompanyInfo(
       currentMonthCompletedOrdersData?.data?.orders?.edges,
     );
 
-    // Prefer database count for current month orders if company found in DB
-    const currentMonthOrderCount: number =
-      companyData?._count?.orders ?? filteredCurrentMonthOrders.length;
+    const currentMonthOrderCount: number = filteredCurrentMonthOrders.length;
 
     const pendingDraftOrderCount: number = pendingDraftOrdersData.length;
 
@@ -1728,11 +1708,7 @@ export async function getCustomerCompanyInfo(
           mainContact: company.mainContact?.customer ?? null,
           totalSpent: company.totalSpent,
           locationsCount: company.locationsCount?.count ?? 0,
-          // Prefer DB user count for the primary company
-          userCount:
-            company.id === primaryCompanyGid
-              ? companyData?._count?.users ?? company.contactsCount?.count ?? 0
-              : company.contactsCount?.count ?? 0,
+          userCount: company.contactsCount?.count ?? 0,
           updatedAt: company.updatedAt,
           roles,
           roleAssignments,
@@ -1745,10 +1721,10 @@ export async function getCustomerCompanyInfo(
     );
 
     // ─── 7. Credit calculations ───────────────────────────────────────────────
-    const creditInfo = await calculateAvailableCredit(companyData?.id ?? "");
+    const creditInfo = await calculateAvailableCredit(companyAccount?.id ?? "");
 
     const creditLimitNum = parseFloat(
-      companyData?.creditLimit?.toString() ?? "0",
+      companyAccount?.creditLimit?.toString() ?? "0",
     );
     const usedCreditNum = creditInfo
       ? parseFloat(creditInfo.usedCredit.toString())
@@ -1759,8 +1735,6 @@ export async function getCustomerCompanyInfo(
     const availableCreditNum = creditInfo
       ? parseFloat(creditInfo.availableCredit.toString())
       : 0;
-
-    // Credit usage percentage should be based on total used credit vs limit
     const creditUsagePercentage =
       creditLimitNum > 0
         ? Math.round((usedCreditNum / creditLimitNum) * 100)
@@ -1779,8 +1753,8 @@ export async function getCustomerCompanyInfo(
       // Credit
       CreditLimit: creditLimitNum,
       usedCredit: usedCreditNum,
-      pendingCredit: pendingCreditNum,
       availableCredit: availableCreditNum,
+      pendingCredit: pendingCreditNum,
       creditUsagePercentage,
 
       // ✅ New stats
@@ -1788,8 +1762,7 @@ export async function getCustomerCompanyInfo(
       pendingDraftOrderCount,
       currentMonthUsedCredit,
       totalLocationCount: companies[0]?.locationsCount ?? 0,
-      // Prefer DB user count for primary company
-      userCount: companyData?._count?.users ?? companies[0]?.userCount ?? 0,
+      userCount: companies[0]?.userCount ?? 0,
 
       // Company + access flags
       companies,
@@ -3548,8 +3521,6 @@ export async function getCompanyLocationById(
     };
   }
 }
-
-
 
 export async function updateCompanyCustomer(
   contactId: string,

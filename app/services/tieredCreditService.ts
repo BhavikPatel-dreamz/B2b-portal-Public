@@ -69,12 +69,49 @@ export async function calculateTieredCreditAvailability(
   companyId: string,
   userId: string,
 ): Promise<TieredCreditAvailability | null> {
-  // Use unified calculateAvailableCredit for company metrics
-  const companyCreditInfo = await calculateAvailableCredit(companyId);
+  // Get company credit info (reusing existing function)
+  const company = await prisma.companyAccount.findUnique({
+    where: { id: companyId },
+    select: { creditLimit: true },
+  });
 
-  if (!companyCreditInfo) {
+  if (!company) {
     return null;
   }
+
+  // Calculate company credit usage
+  const ordersWithBalance = await prisma.b2BOrder.aggregate({
+    where: {
+      companyId,
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { notIn: ["cancelled"] },
+    },
+    _sum: {
+      remainingBalance: true,
+    },
+  });
+
+  const companyUsedCredit = ordersWithBalance._sum.remainingBalance
+    ? new Decimal(ordersWithBalance._sum.remainingBalance)
+    : new Decimal(0);
+
+  const pendingOrders = await prisma.b2BOrder.aggregate({
+    where: {
+      companyId,
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { in: ["draft", "submitted", "processing"] },
+    },
+    _sum: {
+      remainingBalance: true,
+    },
+  });
+
+  const companyPendingCredit = pendingOrders._sum.remainingBalance
+    ? new Decimal(pendingOrders._sum.remainingBalance)
+    : new Decimal(0);
+  const companyAvailableCredit = company.creditLimit
+    .minus(companyUsedCredit)
+    .minus(companyPendingCredit);
 
   // Get user credit info
   const userCreditInfo = await calculateUserCredit(userId);
@@ -84,10 +121,10 @@ export async function calculateTieredCreditAvailability(
 
   return {
     company: {
-      creditLimit: companyCreditInfo.creditLimit,
-      usedCredit: companyCreditInfo.usedCredit,
-      pendingCredit: companyCreditInfo.pendingCredit,
-      availableCredit: companyCreditInfo.availableCredit,
+      creditLimit: company.creditLimit,
+      usedCredit: companyUsedCredit,
+      pendingCredit: companyPendingCredit,
+      availableCredit: companyAvailableCredit,
     },
     user: userCreditInfo,
     canCreateOrder: true, // Will be determined by validation functions
@@ -420,21 +457,14 @@ export async function setUserCreditLimit(
       : "Credit limit removed (unlimited)";
 
     if (user.companyId) {
-      const creditInfo = await calculateTieredCreditAvailability(
-        user.companyId,
-        userId,
-      );
-      const currentBalance =
-        creditInfo?.company.availableCredit ?? new Decimal(0);
-
       await prisma.creditTransaction.create({
         data: {
           companyId: user.companyId,
           userId: userId,
           transactionType: "credit_adjustment",
           creditAmount: new Decimal(0), // No actual credit change, just limit adjustment
-          previousBalance: currentBalance,
-          newBalance: currentBalance,
+          previousBalance: new Decimal(0),
+          newBalance: new Decimal(0),
           notes: changeMessage,
           createdBy: setByUserId,
         },

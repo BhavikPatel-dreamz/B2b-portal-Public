@@ -17,8 +17,6 @@ import {
 } from "../services/store.server";
 import { createUser, getUserByEmail } from "app/services/user.server";
 import { getCompaniesByShop } from "app/services/company.server";
-import { calculateAvailableCredit } from "app/services/creditService";
-import { Prisma } from "@prisma/client";
 
 interface LoaderData {
   storeMissing: boolean;
@@ -391,45 +389,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let updatedCompanyCount = 0;
 
   if (shouldSyncCompanyCreditLimit) {
+    // ── Step 1: Update company credit limits ────────────────────
+    const result = await prisma.companyAccount.updateMany({
+      where: { shopId: store.id },
+      data: { creditLimit: defaultCompanyCreditLimitRaw },
+    });
+    updatedCompanyCount = result.count;
+
+    // ── Step 2: Fetch company IDs ────────────────────────────────
     const companies = await prisma.companyAccount.findMany({
       where: { shopId: store.id },
+      select: { id: true },
     });
 
-    updatedCompanyCount = companies.length;
+    const companyIds = companies.map((c) => c.id);
 
-    // ── Step 1 & 3: Update company credit limits & Create transactions ─────
+    // ── Step 3: Upsert credit transactions per company ───────────
     await Promise.all(
-      companies.map(async (company) => {
-        // 1. Calculate balance BEFORE
-        const balanceBefore = await calculateAvailableCredit(company.id);
-        const previousBalance =
-          balanceBefore?.availableCredit ?? new Prisma.Decimal(0);
-
-        // 2. Update the company
-        await prisma.companyAccount.update({
-          where: { id: company.id },
-          data: { creditLimit: defaultCompanyCreditLimitRaw },
+      companyIds.map(async (companyId) => {
+        const existing = await prisma.creditTransaction.findFirst({
+          where: { companyId },
         });
 
-        // 3. Calculate balance AFTER
-        const balanceAfter = await calculateAvailableCredit(company.id);
-        const newBalance =
-          balanceAfter?.availableCredit ?? new Prisma.Decimal(0);
-        const creditAmount = newBalance.minus(previousBalance);
-
-        // 4. Create new transaction log
-        return prisma.creditTransaction.create({
-          data: {
-            companyId: company.id,
-            creditAmount,
-            transactionType: "Credit Added",
-            createdBy: "Admin",
-            previousBalance,
-            newBalance,
-            notes: `Default credit limit of ${defaultCompanyCreditLimitRaw} applied via settings`,
-            createdAt: new Date(),
-          },
-        });
+        if (existing) {
+          return prisma.creditTransaction.update({
+            where: { id: existing.id },
+            data: {
+              creditAmount: defaultCompanyCreditLimitRaw,
+              transactionType: "Credit Added",
+              createdBy: "Admin",
+              previousBalance: existing.newBalance, // ← old "new" becomes "previous"
+              newBalance: defaultCompanyCreditLimitRaw, // ← updated balance
+              createdAt: new Date(), // ← keep original creation time
+            },
+          });
+        } else {
+          return prisma.creditTransaction.create({
+            data: {
+              companyId,
+              creditAmount: defaultCompanyCreditLimitRaw,
+              transactionType: "Credit Added",
+              createdBy: "Admin",
+              previousBalance: "0", // ← no previous, so 0
+              newBalance: defaultCompanyCreditLimitRaw, // ← new balance = credit limit
+              createdAt: new Date(),
+            },
+          });
+        }
       }),
     );
   }

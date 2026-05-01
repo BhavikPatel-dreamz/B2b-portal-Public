@@ -36,7 +36,25 @@ export async function calculateAvailableCredit(
     company.creditLimit = new Decimal(0);
   }
 
-  // Calculate total used credit: sum of remainingBalance from all unpaid orders (pending/partial orders)
+  // Calculate used credit: sum of creditUsed from all unpaid orders (pending/partial orders)
+  const orderUpdate = await prisma.b2BOrder.findFirst({
+    where: {
+      companyId,
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { notIn: ["cancelled"] }, // All unpaid orders except cancelled
+    },
+  });
+  
+  if (orderUpdate) {
+    await prisma.b2BOrder.update({
+      where: {
+        id: orderUpdate?.id,
+      },
+      data: {
+        creditUsed: orderUpdate?.orderTotal,
+      },
+    });
+  }
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {
       companyId,
@@ -44,31 +62,20 @@ export async function calculateAvailableCredit(
       orderStatus: { notIn: ["cancelled"] }, // All unpaid orders except cancelled
     },
     _sum: {
-      remainingBalance: true, // Use remainingBalance to account for partial payments
+      creditUsed: true, // Sum of credit used, not remainingBalance
     },
   });
 
-  const usedCredit = ordersWithBalance._sum.remainingBalance
-    ? new Decimal(ordersWithBalance._sum.remainingBalance)
+  const usedCredit = ordersWithBalance._sum.creditUsed
+    ? new Decimal(ordersWithBalance._sum.creditUsed)
     : new Decimal(0);
 
-  // Calculate pending credit: sum of remainingBalance for early-stage orders
-  const pendingOrders = await prisma.b2BOrder.aggregate({
-    where: {
-      companyId,
-      paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { in: ["draft", "submitted", "processing"] },
-    },
-    _sum: {
-      remainingBalance: true,
-    },
-  });
-
-  const pendingCredit = pendingOrders._sum.remainingBalance
-    ? new Decimal(pendingOrders._sum.remainingBalance)
-    : new Decimal(0);
+  // Pending credit is separate - these would be orders in draft state that haven't been confirmed yet
+  // For now, we're not tracking true "pending" credit separate from "used" credit
+  const pendingCredit = new Decimal(0);
 
   const availableCredit = new Decimal(company.creditLimit).minus(usedCredit);
+  // pendingCredit is 0, so we only subtract usedCredit
 
 
 
