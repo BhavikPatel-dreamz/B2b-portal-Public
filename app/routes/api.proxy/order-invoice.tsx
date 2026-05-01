@@ -203,6 +203,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           padding: 28px 32px 20px;
           display: flex;
           justify-content: space-between;
+          align-items: flex-start;
           gap: 24px;
           border-bottom: 1px solid var(--line);
           background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
@@ -223,12 +224,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
         .meta {
           display: grid;
-          grid-template-columns: auto auto;
-          gap: 6px 16px;
+          grid-template-columns: auto 1fr;
+          gap: 6px 12px;
           font-size: 14px;
           color: var(--muted);
           line-height: 1.4;
           justify-content: end;
+          width: 280px;
         }
         .meta div {
           display: contents;
@@ -236,11 +238,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         .meta strong {
           color: var(--ink);
           font-weight: 600;
-          justify-self: end;
+          justify-self: start;
           white-space: nowrap;
         }
         .meta span {
-          justify-self: start;
+          justify-self: end;
+          text-align: right;
         }
         .section-grid {
           display: grid;
@@ -342,12 +345,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             gap: 16px;
           }
           .meta {
+            width: auto;
+            grid-template-columns: auto auto;
             justify-content: start;
             justify-items: start;
             gap: 4px 12px;
           }
           .meta strong {
             justify-self: start;
+          }
+          .meta span {
+            justify-self: start;
+            text-align: left;
           }
           .section-grid {
             grid-template-columns: 1fr;
