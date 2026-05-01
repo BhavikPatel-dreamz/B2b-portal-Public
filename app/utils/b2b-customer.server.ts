@@ -1435,11 +1435,7 @@ export async function getCustomerCompanyInfo(
 
     // ─── 3. Current month date range ─────────────────────────────────────────
     const now = new Date();
-    const startOfMonth = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      1,
-    ).toISOString();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(
       now.getFullYear(),
       now.getMonth() + 1,
@@ -1447,7 +1443,10 @@ export async function getCustomerCompanyInfo(
       23,
       59,
       59,
-    ).toISOString();
+    );
+
+    const startStr = startOfMonth.toISOString().split("T")[0];
+    const endStr = endOfMonth.toISOString().split("T")[0];
 
     // ─── 4. Parallel: DB lookups + Shopify order/draft queries ───────────────
     const shopifyHeaders = {
@@ -1473,91 +1472,43 @@ export async function getCustomerCompanyInfo(
       },
     });
 
-    const [
-      registrationData,
-      currentMonthOrdersRes,
-      pendingDraftOrdersRes,
-      currentMonthCompletedOrdersRes,
-    ] = await Promise.all([
-      // DB: registration info - scoped by shopId
-      prisma.registrationSubmission.findUnique({
-        where: {
-          shopId_email: {
-            shopId,
-            email: customer.email,
-          },
-        },
-      }),
-
-      // Shopify: current month orders for this company
-      fetch(shopifyUrl, {
-        method: "POST",
-        headers: shopifyHeaders,
-        body: JSON.stringify({
-          query: `
-      query {
-        orders(
-          first: 250
-          query: "company_id:${primaryCompanyNumericId} created_at:>=${startOfMonth} created_at:<=${endOfMonth}"
-        ) {
-          edges {
-            node {
-              id
-              purchasingEntity {
-                ... on PurchasingCompany {
-                  location {
-                    id
-                    name
-                  }
-                }
-              }
-            }
-          }
-          pageInfo {
-            hasNextPage
-          }
-        }
-      }
-    `,
-        }),
-      }),
-
-      // Only fetch draft orders if we have a valid company account
-      companyAccount
-        ? prisma.b2BOrder.findMany({
-            where: {
-              companyId: companyAccount.id,
-              orderStatus: "draft",
+    const [registrationData, currentMonthOrdersRes, pendingDraftOrdersRes] =
+      await Promise.all([
+        // DB: registration info - scoped by shopId
+        prisma.registrationSubmission.findUnique({
+          where: {
+            shopId_email: {
+              shopId,
+              email: customer.email,
             },
-          })
-        : Promise.resolve([]),
+          },
+        }),
 
-      // Shopify: current month COMPLETED orders to sum used credit this month
-      fetch(shopifyUrl, {
-        method: "POST",
-        headers: shopifyHeaders,
-        body: JSON.stringify({
-          query: `
+        // Shopify: all current month orders for this company
+        fetch(shopifyUrl, {
+          method: "POST",
+          headers: shopifyHeaders,
+          body: JSON.stringify({
+            query: `
       query {
         orders(
           first: 250
-          query: "company_id:${primaryCompanyNumericId} created_at:>=${startOfMonth} created_at:<=${endOfMonth} financial_status:paid"
+          query: "company_id:${primaryCompanyNumericId} created_at:>=${startStr} created_at:<=${endStr}"
         ) {
           edges {
             node {
               id
-              purchasingEntity {
-                ... on PurchasingCompany {
-                  location {
-                    id
-                    name
-                  }
-                }
-              }
+              cancelledAt
               totalPriceSet {
                 shopMoney {
                   amount
-                  currencyCode
+                }
+              }
+              purchasingEntity {
+                ... on PurchasingCompany {
+                  location {
+                    id
+                  }
                 }
               }
             }
@@ -1565,44 +1516,53 @@ export async function getCustomerCompanyInfo(
         }
       }
     `,
+          }),
         }),
-      }),
-    ]);
+
+        // Only fetch draft orders if we have a valid company account
+        companyAccount
+          ? prisma.b2BOrder.findMany({
+              where: {
+                companyId: companyAccount.id,
+                orderStatus: "draft",
+              },
+            })
+          : Promise.resolve([]),
+      ]);
 
     // ─── 5. Parse order / draft responses ────────────────────────────────────
-    const [
-      currentMonthOrdersData,
-      pendingDraftOrdersData,
-      currentMonthCompletedOrdersData,
-    ] = await Promise.all([
+    const [currentMonthOrdersData, pendingDraftOrdersData] = await Promise.all([
       currentMonthOrdersRes.json(),
       pendingDraftOrdersRes,
-      currentMonthCompletedOrdersRes.json(),
     ]);
 
-    const filteredCurrentMonthOrders = filterOrderEdgesByLocation(
-      currentMonthOrdersData?.data?.orders?.edges,
+    const allCurrentMonthOrders =
+      currentMonthOrdersData?.data?.orders?.edges || [];
+
+    // Filter out cancelled orders and apply location permissions
+    const validCurrentMonthOrders = allCurrentMonthOrders.filter(
+      (edge: any) => !edge.node.cancelledAt,
     );
-    const filteredCurrentMonthCompletedOrders = filterOrderEdgesByLocation(
-      currentMonthCompletedOrdersData?.data?.orders?.edges,
+
+    const filteredCurrentMonthOrders = filterOrderEdgesByLocation(
+      validCurrentMonthOrders,
     );
 
     const currentMonthOrderCount: number = filteredCurrentMonthOrders.length;
 
     const pendingDraftOrderCount: number = pendingDraftOrdersData.length;
 
-    const currentMonthUsedCredit: number =
-      filteredCurrentMonthCompletedOrders.reduce(
-        (
-          sum: number,
-          edge: { node: { totalPriceSet: { shopMoney: { amount: string } } } },
-        ) => {
-          return (
-            sum + parseFloat(edge.node.totalPriceSet?.shopMoney?.amount ?? "0")
-          );
-        },
-        0,
-      ) ?? 0;
+    const currentMonthUsedCredit: number = filteredCurrentMonthOrders.reduce(
+      (
+        sum: number,
+        edge: { node: { totalPriceSet: { shopMoney: { amount: string } } } },
+      ) => {
+        return (
+          sum + parseFloat(edge.node.totalPriceSet?.shopMoney?.amount ?? "0")
+        );
+      },
+      0,
+    );
 
     // ─── 6. Process company profiles ─────────────────────────────────────────
     const companies = companyProfiles.map(
