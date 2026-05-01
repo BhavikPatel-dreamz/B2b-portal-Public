@@ -377,6 +377,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const isDefaultValue =
     isDefault === undefined ? undefined : isDefault === true || isDefault === "true";
 
+  // ── UNSET OTHER DEFAULTS ──────────────────────────────
+  // If we're setting THIS location as default, we must unset others
+  if (isDefaultValue === true) {
+    try {
+      const locationsRes = await getCompanyLocations(companyId, shop, store.accessToken);
+      const otherDefaultLocations = (locationsRes.locations || []).filter(
+        (loc: any) => loc.isDefault && loc.id !== locationId
+      );
+
+      if (otherDefaultLocations.length > 0) {
+        console.log(`🔄 Unsetting default for ${otherDefaultLocations.length} other locations`);
+        await Promise.all(
+          otherDefaultLocations.map((loc: any) =>
+            updateCompanyLocation(loc.id, shop, store.accessToken, { isDefault: false })
+          )
+        );
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to unset other default locations:", err);
+      // Continue with main update anyway
+    }
+  }
+
   const result = await updateCompanyLocation(
     locationId, shop, store.accessToken,
     {

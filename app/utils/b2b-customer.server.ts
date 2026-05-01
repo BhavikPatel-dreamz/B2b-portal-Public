@@ -1472,7 +1472,7 @@ export async function getCustomerCompanyInfo(
       },
     });
 
-    const [registrationData, currentMonthOrdersRes, pendingDraftOrdersRes] =
+    const [registrationData, currentMonthOrdersRes, allUnpaidOrdersRes, pendingDraftOrdersRes] =
       await Promise.all([
         // DB: registration info - scoped by shopId
         prisma.registrationSubmission.findUnique({
@@ -1493,7 +1493,7 @@ export async function getCustomerCompanyInfo(
       query {
         orders(
           first: 250
-          query: "company_id:${primaryCompanyNumericId} created_at:>=${startStr} created_at:<=${endStr}"
+          query: "purchasing_entity_id:${primaryCompanyGid} created_at:>=${startStr} created_at:<=${endStr}"
         ) {
           edges {
             node {
@@ -1519,6 +1519,35 @@ export async function getCustomerCompanyInfo(
           }),
         }),
 
+        // Shopify: ALL unpaid orders for this company (real-time credit calculation)
+        fetch(shopifyUrl, {
+          method: "POST",
+          headers: shopifyHeaders,
+          body: JSON.stringify({
+            query: `
+      query {
+        orders(
+          first: 250
+          query: "purchasing_entity_id:${primaryCompanyGid} financial_status:pending OR financial_status:partially_paid"
+        ) {
+          edges {
+            node {
+              id
+              cancelledAt
+              displayFinancialStatus
+              totalPriceSet {
+                shopMoney {
+                  amount
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+          }),
+        }),
+
         // Only fetch draft orders if we have a valid company account
         companyAccount
           ? prisma.b2BOrder.findMany({
@@ -1531,13 +1560,24 @@ export async function getCustomerCompanyInfo(
       ]);
 
     // ─── 5. Parse order / draft responses ────────────────────────────────────
-    const [currentMonthOrdersData, pendingDraftOrdersData] = await Promise.all([
+    const [currentMonthOrdersData, allUnpaidOrdersData, pendingDraftOrdersData] = await Promise.all([
       currentMonthOrdersRes.json(),
+      allUnpaidOrdersRes.json(),
       pendingDraftOrdersRes,
     ]);
 
+    if (currentMonthOrdersData.errors) {
+      console.error("Shopify Current Month Orders Query Errors:", currentMonthOrdersData.errors);
+    }
+    if (allUnpaidOrdersData.errors) {
+      console.error("Shopify Unpaid Orders Query Errors:", allUnpaidOrdersData.errors);
+    }
+
     const allCurrentMonthOrders =
       currentMonthOrdersData?.data?.orders?.edges || [];
+
+    const allUnpaidOrders = 
+      allUnpaidOrdersData?.data?.orders?.edges || [];
 
     // Filter out cancelled orders and apply location permissions
     const validCurrentMonthOrders = allCurrentMonthOrders.filter(
@@ -1681,20 +1721,24 @@ export async function getCustomerCompanyInfo(
     );
 
     // ─── 7. Credit calculations ───────────────────────────────────────────────
-    const creditInfo = await calculateAvailableCredit(companyAccount?.id ?? "");
-
     const creditLimitNum = parseFloat(
       companyAccount?.creditLimit?.toString() ?? "0",
     );
-    const usedCreditNum = creditInfo
-      ? parseFloat(creditInfo.usedCredit.toString())
-      : 0;
-    const pendingCreditNum = creditInfo
-      ? parseFloat(creditInfo.pendingCredit.toString())
-      : 0;
-    const availableCreditNum = creditInfo
-      ? parseFloat(creditInfo.availableCredit.toString())
-      : 0;
+
+    // Calculate REAL-TIME used credit from Shopify (all unpaid orders across all time)
+    // This ensures that immediately after an order is placed, the credit used updates
+    const usedCreditNum = allUnpaidOrders.reduce((sum: number, edge: any) => {
+      if (edge.node.cancelledAt) return sum;
+      return sum + parseFloat(edge.node.totalPriceSet?.shopMoney?.amount ?? "0");
+    }, 0);
+
+    // Calculate pending credit from local draft orders
+    const pendingCreditNum = pendingDraftOrdersData.reduce((sum: number, order: any) => {
+      return sum + parseFloat(order.remainingBalance?.toString() ?? "0");
+    }, 0);
+
+    const availableCreditNum = Math.max(0, creditLimitNum - usedCreditNum - pendingCreditNum);
+    
     const creditUsagePercentage =
       creditLimitNum > 0
         ? Math.round((usedCreditNum / creditLimitNum) * 100)
@@ -5635,7 +5679,7 @@ export async function updateCompanyLocation(
         note?: string;
       } = {};
 
-      if (locationData.name !== undefined) {
+      if (locationData.name !== undefined && locationData.name.trim() !== "") {
         input.name = locationData.name;
       }
 
@@ -5652,33 +5696,35 @@ export async function updateCompanyLocation(
         input.note = locationData.note;
       }
 
-      console.log("📝 Updating basic fields:", JSON.stringify(input, null, 2));
+      if (Object.keys(input).length > 0) {
+        console.log("📝 Updating basic fields:", JSON.stringify(input, null, 2));
 
-      const response = await fetch(
-        `https://${shopName}/admin/api/2025-01/graphql.json`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
+        const response = await fetch(
+          `https://${shopName}/admin/api/2025-01/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": accessToken,
+            },
+            body: JSON.stringify({
+              query: updateMutation,
+              variables: { companyLocationId: locationId, input },
+            }),
           },
-          body: JSON.stringify({
-            query: updateMutation,
-            variables: { companyLocationId: locationId, input },
-          }),
-        },
-      );
-
-      const result = await response.json();
-      console.log("📦 Basic update result:", JSON.stringify(result, null, 2));
-
-      if (result.data?.companyLocationUpdate?.userErrors?.length > 0) {
-        hasErrors = true;
-        errors.push(
-          ...result.data.companyLocationUpdate.userErrors.map(
-            (e: { message: string }) => e.message,
-          ),
         );
+
+        const result = await response.json();
+        console.log("📦 Basic update result:", JSON.stringify(result, null, 2));
+
+        if (result.data?.companyLocationUpdate?.userErrors?.length > 0) {
+          hasErrors = true;
+          errors.push(
+            ...result.data.companyLocationUpdate.userErrors.map(
+              (e: { message: string }) => e.message,
+            ),
+          );
+        }
       }
     }
 
@@ -5745,30 +5791,38 @@ export async function updateCompanyLocation(
         lastName?: string;
       } = {
         address1:
-          locationData.address1 !== undefined
+          locationData.address1 !== undefined &&
+          locationData.address1.trim() !== ""
             ? locationData.address1
-            : existingShipping.address1 || "",
+            : existingShipping.address1 || "---",
         city:
-          locationData.city !== undefined
+          locationData.city !== undefined && locationData.city.trim() !== ""
             ? locationData.city
-            : existingShipping.city || "",
+            : existingShipping.city || "---",
         zip:
-          locationData.zip !== undefined
+          locationData.zip !== undefined && locationData.zip.trim() !== ""
             ? locationData.zip
-            : existingShipping.zip || "",
+            : existingShipping.zip || "---",
         countryCode:
-          locationData.country !== undefined
+          locationData.country !== undefined &&
+          locationData.country.trim() !== ""
             ? locationData.country
             : existingShipping.country || "US",
       };
 
-      if (locationData.firstName !== undefined) {
+      if (
+        locationData.firstName !== undefined &&
+        locationData.firstName.trim() !== ""
+      ) {
         addressInput.firstName = locationData.firstName;
       } else if (existingShipping.firstName) {
         addressInput.firstName = existingShipping.firstName;
       }
 
-      if (locationData.lastName !== undefined) {
+      if (
+        locationData.lastName !== undefined &&
+        locationData.lastName.trim() !== ""
+      ) {
         addressInput.lastName = locationData.lastName;
       } else if (existingShipping.lastName) {
         addressInput.lastName = existingShipping.lastName;
@@ -5862,12 +5916,16 @@ export async function updateCompanyLocation(
       type: string;
     }[] = [];
 
-    if (locationData.recipient !== undefined) {
+    if (
+      locationData.recipient !== undefined &&
+      locationData.recipient !== null &&
+      locationData.recipient.trim() !== ""
+    ) {
       metafieldsToUpdate.push({
         ownerId: locationId,
         namespace: "custom",
         key: "recipient",
-        value: locationData.recipient === null ? "" : locationData.recipient,
+        value: locationData.recipient,
         type: "single_line_text_field",
       });
     }
