@@ -5925,12 +5925,18 @@ export async function updateCompanyLocation(
       );
 
       const metafieldResult = await metafieldResponse.json();
-      if (metafieldResult.errors || metafieldResult.data?.metafieldsSet?.userErrors?.length > 0) {
-        console.error("❌ [updateCompanyLocation] Metafield set error:", JSON.stringify(metafieldResult, null, 2));
+      if (
+        metafieldResult.errors ||
+        metafieldResult.data?.metafieldsSet?.userErrors?.length > 0
+      ) {
+        console.error(
+          "❌ [updateCompanyLocation] Metafield set error:",
+          JSON.stringify(metafieldResult, null, 2),
+        );
       } else {
         console.log("✅ [updateCompanyLocation] Metafield set success");
       }
-
+    }
 
     if (hasErrors) {
       return {
