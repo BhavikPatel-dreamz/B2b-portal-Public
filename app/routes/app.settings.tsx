@@ -605,6 +605,54 @@ export default function SettingsPage() {
 
   const [emailHasContent, setEmailHasContent] = useState(false);
   const [privacyHasContent, setPrivacyHasContent] = useState(false);
+  const pageShellStyle = {
+    background: "#f1f2f4",
+    minHeight: "100vh",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+  } as const;
+  const pageHeroStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto 18px",
+    padding: "16px 22px",
+    borderRadius: 14,
+    border: "1px solid #dfe3e8",
+    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+  } as const;
+  const pageEyebrowStyle = {
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase" as const,
+    color: "#2c6ecb",
+    marginBottom: "6px",
+  } as const;
+  const pageHeroTitleStyle = {
+    fontSize: "22px",
+    lineHeight: 1.15,
+    fontWeight: 650,
+    color: "#202223",
+    margin: 0,
+  } as const;
+  const pageHeroTextStyle = {
+    fontSize: "14px",
+    color: "#5c5f62",
+    margin: "8px 0 0",
+  } as const;
+  const contentPanelStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto",
+    background: "#ffffff",
+    border: "1px solid #dfe3e8",
+    borderRadius: 16,
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+    padding: "16px",
+    boxSizing: "border-box",
+  } as const;
 
   // Update the useEffect for successful deletion
   useEffect(() => {
@@ -708,16 +756,22 @@ export default function SettingsPage() {
   // TypeScript now knows if storeMissing is false, store exists
   if (loaderData.storeMissing) {
     return (
-      <s-page heading="Store settings">
-        <s-section>
+      <div style={pageShellStyle}>
+        <div style={pageHeroStyle}>
+          <h1 style={pageHeroTitleStyle}>Settings</h1>
+          <p style={pageHeroTextStyle}>
+            Maintain branding, emails, defaults, and store-wide B2B preferences.
+          </p>
+        </div>
+        <div style={contentPanelStyle}>
           <s-banner tone="critical" heading="Store not found">
             <s-paragraph>
               The current shop is missing from the database. Please reinstall
               the app to continue.
             </s-paragraph>
           </s-banner>
-        </s-section>
-      </s-page>
+        </div>
+      </div>
     );
   }
 
@@ -741,25 +795,37 @@ export default function SettingsPage() {
   // Early return if store is missing
   if (storeMissing) {
     return (
-      <s-page heading="Store settings">
-        <s-section>
+      <div style={pageShellStyle}>
+        <div style={pageHeroStyle}>
+          <h1 style={pageHeroTitleStyle}>Settings</h1>
+          <p style={pageHeroTextStyle}>
+            Maintain branding, emails, defaults, and store-wide B2B preferences.
+          </p>
+        </div>
+        <div style={contentPanelStyle}>
           <s-banner tone="critical" heading="Store not found">
             <s-paragraph>
               The current shop is missing from the database. Please reinstall
               the app to continue.
             </s-paragraph>
           </s-banner>
-        </s-section>
-      </s-page>
+        </div>
+      </div>
     );
   }
 
   const { store } = loaderData;
 
   return (
-    <s-page heading="Store setting">
-      <div style={APP_ADMIN_CONTENT_STYLE}>
-        <s-section heading="Settings">
+    <div style={pageShellStyle}>
+      <div style={pageHeroStyle}>
+        <h1 style={pageHeroTitleStyle}>Settings</h1>
+        <p style={pageHeroTextStyle}>
+          Maintain branding, emails, defaults, and store-wide B2B preferences.
+        </p>
+      </div>
+      <div style={contentPanelStyle}>
+        <div style={{ width: "100%" }}>
           {feeprismaack && (
             <div style={{ marginBottom: 12 }}>
               <s-banner tone={feeprismaack.tone} heading={feeprismaack.title}>
@@ -774,16 +840,26 @@ export default function SettingsPage() {
             </div>
           )}
 
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 12,
-            boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-            padding: 24,
-            marginBottom: 24,
-          }}
-        >
-          <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+              padding: 16,
+              marginBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: "#202223",
+                marginBottom: 16,
+              }}
+            >
+              Settings
+            </div>
+            <fetcher.Form method="post" style={{ display: "grid", gap: 16 }}>
             <div
               style={{
                 display: "flex",
@@ -1079,7 +1155,7 @@ export default function SettingsPage() {
                         )
                       ) {
                         colorInput.value = e.target.value;
-                      } maxWidth: 1200
+                      }
                     }}
                   />
                 </div>
@@ -1581,9 +1657,9 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-        </s-section>
+        </div>
       </div>
-    </s-page>
+      </div>
   );
 }
 

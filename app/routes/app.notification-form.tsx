@@ -7,7 +7,6 @@ import type {
 } from "react-router";
 import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 
-import { APP_ADMIN_CONTENT_STYLE } from "../utils/app-layout.shared";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 
@@ -1161,6 +1160,48 @@ export default function NotificationForm() {
     editorRef.current.innerHTML = templateValues[selectedTemplate.id].html;
     setEditorHasContent(editorRef.current.innerText.trim().length > 0);
   }, [selectedTemplate, templateValues]);
+  const pageShellStyle = {
+    background: "#f1f2f4",
+    minHeight: "100vh",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+  } as const;
+  const pageHeroStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto 18px",
+    padding: "16px 22px",
+    borderRadius: 14,
+    border: "1px solid #dfe3e8",
+    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+  } as const;
+  const pageEyebrowStyle = {
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase" as const,
+    color: "#2c6ecb",
+    marginBottom: "6px",
+  } as const;
+  const pageHeroTitleStyle = {
+    fontSize: "22px",
+    lineHeight: 1.15,
+    fontWeight: 650,
+    color: "#202223",
+    margin: 0,
+  } as const;
+  const pageHeroTextStyle = {
+    fontSize: "14px",
+    color: "#5c5f62",
+    margin: "8px 0 0",
+  } as const;
+  const pageContentStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto",
+  } as const;
 
   useEffect(() => {
     if (
@@ -1483,12 +1524,12 @@ export default function NotificationForm() {
                 emailDomainFetcher.state !== "idle" ? "not-allowed" : "pointer",
               opacity: emailDomainFetcher.state !== "idle" ? 0.7 : 1,
             }}
-          >
-            {emailDomainFetcher.state !== "idle" ? "Saving…" : "Save email"}
-          </button>
+            >
+              {emailDomainFetcher.state !== "idle" ? "Saving…" : "Save email"}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
   ) : null;
 
   // ── Schedule modal ────────────────────────────────────────────────────────────
@@ -1865,15 +1906,15 @@ export default function NotificationForm() {
   // ── Template editor view ──────────────────────────────────────────────────────
   if (selectedTemplate) {
     return (
-      <s-page heading="Notification templates">
-        <div
-          style={{
-            background: "#f6f6f7",
-            minHeight: "100vh",
-            padding: "8px 28px 40px",
-          }}
-        >
-          <div style={APP_ADMIN_CONTENT_STYLE}>
+      <>
+        <div style={pageShellStyle}>
+          <div style={pageHeroStyle}>
+            <h1 style={pageHeroTitleStyle}>Notification Templates</h1>
+            <p style={pageHeroTextStyle}>
+              Configure branded email templates and preview customer communications.
+            </p>
+          </div>
+          <div style={pageContentStyle}>
             <button
               type="button"
               onClick={() => setSearchParams({})}
@@ -2320,10 +2361,9 @@ export default function NotificationForm() {
                   </div>
                 </div>
               </div>
+              </div>
             </div>
           </div>
-        </div>
-
         {showPreview ? (
           <div
             style={{
@@ -2424,21 +2464,20 @@ export default function NotificationForm() {
         ) : null}
 
         {emailModal}
-      </s-page>
+      </>
     );
   }
 
   // ── Main notifications list view ─────────────────────────────────────────────
 return (
-    <s-page heading="Notifications">
-      <div
-        style={{
-          background: "#f6f6f7",
-          minHeight: "100vh",
-          padding: "8px 28px 40px",
-        }}
-      >
-        <div style={APP_ADMIN_CONTENT_STYLE}>
+    <div style={pageShellStyle}>
+      <div style={pageHeroStyle}>
+        <h1 style={pageHeroTitleStyle}>Notifications</h1>
+        <p style={pageHeroTextStyle}>
+          Manage customer and admin email templates, delivery options, and branding.
+        </p>
+      </div>
+      <div style={pageContentStyle}>
           <h1
             style={{
               margin: "0 0 24px",
@@ -2920,10 +2959,6 @@ return (
           </div>
         </div>
       </div>
-
-      {emailModal}
-      {scheduleModal}
-    </s-page>
   );
 }
 

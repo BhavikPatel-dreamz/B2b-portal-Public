@@ -204,9 +204,68 @@ export default function SelectPlan() {
       window.location.href = actionData.redirectTo;
     }
   }, [actionData]);
+  const pageShellStyle = {
+    background: "#f1f2f4",
+    minHeight: "100vh",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+  } as const;
+  const pageHeroStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto 18px",
+    padding: "16px 22px",
+    borderRadius: 14,
+    border: "1px solid #dfe3e8",
+    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+  } as const;
+  const pageEyebrowStyle = {
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase" as const,
+    color: "#2c6ecb",
+    marginBottom: "6px",
+  } as const;
+  const pageHeroTitleStyle = {
+    fontSize: "22px",
+    lineHeight: 1.15,
+    fontWeight: 650,
+    color: "#202223",
+    margin: 0,
+  } as const;
+  const pageHeroTextStyle = {
+    fontSize: "14px",
+    color: "#5c5f62",
+    margin: "8px 0 0",
+  } as const;
+  const contentPanelStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto",
+    boxSizing: "border-box",
+  } as const;
 
   return (
-    <s-page heading="Select a plan">
+    <div style={pageShellStyle}>
+      <div style={pageHeroStyle}>
+        <h1 style={pageHeroTitleStyle}>Plan Selection</h1>
+        <p style={pageHeroTextStyle}>
+          Compare available plans, subscribe, and manage your current billing status.
+        </p>
+      </div>
+      <div style={contentPanelStyle}>
+      <div
+        style={{
+          background: "#ffffff",
+          border: "1px solid #dfe3e8",
+          borderRadius: 16,
+          boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+          padding: "18px",
+        }}
+      >
       <s-section heading="Plans">
         <s-stack direction="inline" gap="base">
           <s-box padding="base" borderWidth="base" borderRadius="base">
@@ -322,8 +381,9 @@ export default function SelectPlan() {
           </s-stack>
         </s-box>
       </s-section>
-
-    </s-page>
+      </div>
+      </div>
+    </div>
   );
 }
 

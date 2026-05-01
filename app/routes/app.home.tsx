@@ -170,6 +170,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function Home() {
   const data = useLoaderData<LoaderData>();
+  const pageShellStyle = {
+    background: "#f1f2f4",
+    minHeight: "100vh",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+  } as const;
 
   // Credit statistics calculations
   const creditUsagePercentage =
@@ -199,18 +206,44 @@ export default function Home() {
     totalRegistrations > 0
       ? Math.round((data.rejectedRegistrations / totalRegistrations) * 100)
       : 0;
+  const pageHeroStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto 18px",
+    padding: "18px 22px",
+    borderRadius: 14,
+    border: "1px solid #dfe3e8",
+    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+  } as const;
+  const pageEyebrowStyle = {
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase" as const,
+    color: "#2c6ecb",
+    marginBottom: "6px",
+  } as const;
+  const pageHeroTitleStyle = {
+    fontSize: "28px",
+    lineHeight: 1.15,
+    fontWeight: 700,
+    color: "#202223",
+    margin: 0,
+  } as const;
+  const pageHeroTextStyle = {
+    fontSize: "14px",
+    color: "#5c5f62",
+    margin: "8px 0 0",
+  } as const;
 
   return (
-     <s-page heading="Dashboard Report">
-    <div
-      style={{
-        background: "#f1f2f4",
-        minHeight: "100vh",
-        padding: "12px",
-        fontFamily:
-          'var(--p-font-family-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
-      }}
-    >
+    //  <s-page heading="Dashboard Report">
+         <div style={pageShellStyle}>
+    <div style={pageHeroStyle}>
+      <h1 style={pageHeroTitleStyle}>Dashboard Report</h1>
+    </div>
+    <div className="dashboard-container" style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}>
       <style>{`
         * {
           box-sizing: border-box;
@@ -219,6 +252,11 @@ export default function Home() {
         .dashboard-container {
           max-width: 1400px;
           margin: 0 auto;
+          font-family: inherit;
+        }
+
+        .dashboard-container * {
+          font-family: inherit;
         }
 
         /* Main Content Grid */
@@ -1293,7 +1331,7 @@ export default function Home() {
         </div>
       </div>
     </div>
-    </s-page>
+    </div>
   );
 }
 
