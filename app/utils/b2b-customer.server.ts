@@ -4928,11 +4928,11 @@ export async function createCompanyLocation(
         firstName?: string;
         lastName?: string;
       } = {
-        address1: locationData.address1 || "",
+        address1: locationData.address1 || "Pending",
         address2: locationData.address2,
-        city: locationData.city || "",
-        zip: locationData.zip || "",
-        zoneCode: locationData.province || "GJ",
+        city: locationData.city || "Pending",
+        zip: locationData.zip || "00000",
+        zoneCode: locationData.province || undefined,
         countryCode: locationData.country || "IN",
       };
 
@@ -5635,7 +5635,7 @@ export async function updateCompanyLocation(
         note?: string;
       } = {};
 
-      if (locationData.name !== undefined) {
+      if (locationData.name !== undefined && locationData.name.trim() !== "") {
         input.name = locationData.name;
       }
 
@@ -5652,38 +5652,44 @@ export async function updateCompanyLocation(
         input.note = locationData.note;
       }
 
-      console.log("📝 Updating basic fields:", JSON.stringify(input, null, 2));
+      if (Object.keys(input).length > 0) {
+        console.log("📝 [updateCompanyLocation] Updating basic fields:", JSON.stringify({ locationId, input }, null, 2));
 
-      const response = await fetch(
-        `https://${shopName}/admin/api/2025-01/graphql.json`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
+        const response = await fetch(
+          `https://${shopName}/admin/api/2025-01/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": accessToken,
+            },
+            body: JSON.stringify({
+              query: updateMutation,
+              variables: { companyLocationId: locationId, input },
+            }),
           },
-          body: JSON.stringify({
-            query: updateMutation,
-            variables: { companyLocationId: locationId, input },
-          }),
-        },
-      );
-
-      const result = await response.json();
-      console.log("📦 Basic update result:", JSON.stringify(result, null, 2));
-
-      if (result.data?.companyLocationUpdate?.userErrors?.length > 0) {
-        hasErrors = true;
-        errors.push(
-          ...result.data.companyLocationUpdate.userErrors.map(
-            (e: { message: string }) => e.message,
-          ),
         );
-      }
-    }
 
-    // Step 2: Update address if any address field is provided (including firstName and lastName)
-    const hasAddressUpdate =
+        const result = await response.json();
+        if (result.errors || result.data?.companyLocationUpdate?.userErrors?.length > 0) {
+          console.error("❌ [updateCompanyLocation] Basic update error:", JSON.stringify(result, null, 2));
+        } else {
+          console.log("✅ [updateCompanyLocation] Basic update success");
+        }
+
+        if (result.data?.companyLocationUpdate?.userErrors?.length > 0) {
+          hasErrors = true;
+          errors.push(
+            ...result.data.companyLocationUpdate.userErrors.map(
+              (e: { message: string }) => e.message,
+            ),
+          );
+        }
+      }
+      }
+
+      // Step 2: Update address if any address field is provided (including firstName and lastName)
+      const hasAddressUpdate =
       locationData.address1 !== undefined ||
       locationData.address2 !== undefined ||
       locationData.city !== undefined ||
@@ -5693,7 +5699,8 @@ export async function updateCompanyLocation(
       locationData.firstName !== undefined ||
       locationData.lastName !== undefined;
 
-    if (hasAddressUpdate) {
+      if (hasAddressUpdate) {
+      console.log("🔍 [updateCompanyLocation] Fetching existing address for location:", locationId);
       // First, get existing address
       const queryMutation = `
         query getCompanyLocation($id: ID!) {
@@ -5730,10 +5737,15 @@ export async function updateCompanyLocation(
 
       const queryResult = await queryResponse.json();
       const existingLocation = queryResult.data?.companyLocation;
-      const existingShipping = existingLocation?.shippingAddress || {};
-      console.log("🏠 Existing address:", existingShipping);
+      if (!existingLocation) {
+        console.error("❌ [updateCompanyLocation] Location not found in Shopify:", locationId);
+        return { error: "Location not found in Shopify" };
+      }
+
+      const existingShipping = existingLocation.shippingAddress || {};
 
       // Build address input object
+      // Shopify requires address1, city, zip, and countryCode to be non-blank
       const addressInput: {
         address1: string;
         address2?: string;
@@ -5745,30 +5757,30 @@ export async function updateCompanyLocation(
         lastName?: string;
       } = {
         address1:
-          locationData.address1 !== undefined
+          locationData.address1 !== undefined && locationData.address1.trim() !== ""
             ? locationData.address1
-            : existingShipping.address1 || "",
+            : existingShipping.address1 || "Pending",
         city:
-          locationData.city !== undefined
+          locationData.city !== undefined && locationData.city.trim() !== ""
             ? locationData.city
-            : existingShipping.city || "",
+            : existingShipping.city || "Pending",
         zip:
-          locationData.zip !== undefined
+          locationData.zip !== undefined && locationData.zip.trim() !== ""
             ? locationData.zip
-            : existingShipping.zip || "",
+            : existingShipping.zip || "00000",
         countryCode:
-          locationData.country !== undefined
+          locationData.country !== undefined && locationData.country.trim() !== ""
             ? locationData.country
             : existingShipping.country || "US",
       };
 
-      if (locationData.firstName !== undefined) {
+      if (locationData.firstName !== undefined && locationData.firstName.trim() !== "") {
         addressInput.firstName = locationData.firstName;
       } else if (existingShipping.firstName) {
         addressInput.firstName = existingShipping.firstName;
       }
 
-      if (locationData.lastName !== undefined) {
+      if (locationData.lastName !== undefined && locationData.lastName.trim() !== "") {
         addressInput.lastName = locationData.lastName;
       } else if (existingShipping.lastName) {
         addressInput.lastName = existingShipping.lastName;
@@ -5790,23 +5802,17 @@ export async function updateCompanyLocation(
         addressInput.zoneCode = provinceValue;
       }
 
-      console.log(
-        "📍 Updating address:",
-        JSON.stringify(addressInput, null, 2),
-      );
+      console.log("📍 [updateCompanyLocation] Assigning address:", JSON.stringify(addressInput, null, 2));
 
       const addressMutation = `
         mutation companyLocationAssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
           companyLocationAssignAddress(locationId: $locationId, address: $address, addressTypes: $addressTypes) {
             addresses {
               address1
-              address2
               city
               zip
               province
               country
-              firstName
-              lastName
             }
             userErrors {
               field
@@ -5836,14 +5842,13 @@ export async function updateCompanyLocation(
       );
 
       const addressResult = await addressResponse.json();
-      console.log(
-        "📦 Address update result:",
-        JSON.stringify(addressResult, null, 2),
-      );
+      if (addressResult.errors || addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0) {
+        console.error("❌ [updateCompanyLocation] Address assignment error:", JSON.stringify(addressResult, null, 2));
+      } else {
+        console.log("✅ [updateCompanyLocation] Address assignment success");
+      }
 
-      if (
-        addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0
-      ) {
+      if (addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0) {
         hasErrors = true;
         errors.push(
           ...addressResult.data.companyLocationAssignAddress.userErrors.map(
@@ -5851,28 +5856,33 @@ export async function updateCompanyLocation(
           ),
         );
       }
-    }
+      }
 
-    // Step 3: Update recipient and/or isDefault metafields if provided
-    const metafieldsToUpdate: {
+      // Step 3: Update recipient and/or isDefault metafields if provided
+      const metafieldsToUpdate: {
       ownerId: string;
       namespace: string;
       key: string;
       value: string;
       type: string;
-    }[] = [];
+      }[] = [];
 
-    if (locationData.recipient !== undefined) {
+      // Only add recipient if it's not blank. Shopify single_line_text_field can't be blank.
+      if (
+      locationData.recipient !== undefined &&
+      locationData.recipient !== null &&
+      locationData.recipient.trim() !== ""
+      ) {
       metafieldsToUpdate.push({
         ownerId: locationId,
         namespace: "custom",
         key: "recipient",
-        value: locationData.recipient === null ? "" : locationData.recipient,
+        value: locationData.recipient.trim(),
         type: "single_line_text_field",
       });
-    }
+      }
 
-    if (locationData.isDefault !== undefined) {
+      if (locationData.isDefault !== undefined) {
       metafieldsToUpdate.push({
         ownerId: locationId,
         namespace: "custom",
@@ -5880,15 +5890,15 @@ export async function updateCompanyLocation(
         value: locationData.isDefault ? "true" : "false",
         type: "single_line_text_field",
       });
-    }
+      }
 
-    if (metafieldsToUpdate.length > 0) {
+      if (metafieldsToUpdate.length > 0) {
+      console.log("🏷️ [updateCompanyLocation] Setting metafields:", JSON.stringify(metafieldsToUpdate, null, 2));
       const metafieldMutation = `
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
             metafields {
               key
-              namespace
               value
             }
             userErrors {
@@ -5915,26 +5925,12 @@ export async function updateCompanyLocation(
       );
 
       const metafieldResult = await metafieldResponse.json();
-      console.log(
-        "📦 Metafields update result:",
-        JSON.stringify(metafieldResult, null, 2),
-      );
-
-      if (metafieldResult.errors) {
-        console.warn("⚠️ Failed to update metafields:", metafieldResult.errors);
-        hasErrors = true;
-        errors.push("Failed to update metafields");
+      if (metafieldResult.errors || metafieldResult.data?.metafieldsSet?.userErrors?.length > 0) {
+        console.error("❌ [updateCompanyLocation] Metafield set error:", JSON.stringify(metafieldResult, null, 2));
+      } else {
+        console.log("✅ [updateCompanyLocation] Metafield set success");
       }
 
-      if (metafieldResult.data?.metafieldsSet?.userErrors?.length > 0) {
-        console.warn(
-          "⚠️ Metafield user errors:",
-          metafieldResult.data.metafieldsSet.userErrors,
-        );
-        hasErrors = true;
-        errors.push(metafieldResult.data.metafieldsSet.userErrors[0].message);
-      }
-    }
 
     if (hasErrors) {
       return {
