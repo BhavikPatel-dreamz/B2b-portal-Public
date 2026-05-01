@@ -17,6 +17,7 @@ import {
 } from "../services/store.server";
 import { createUser, getUserByEmail } from "app/services/user.server";
 import { getCompaniesByShop } from "app/services/company.server";
+import { calculateAvailableCredit } from "../services/creditService";
 
 interface LoaderData {
   storeMissing: boolean;
@@ -389,55 +390,54 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let updatedCompanyCount = 0;
 
   if (shouldSyncCompanyCreditLimit) {
-    // ── Step 1: Update company credit limits ────────────────────
-    const result = await prisma.companyAccount.updateMany({
-      where: { shopId: store.id },
-      data: { creditLimit: defaultCompanyCreditLimitRaw },
-    });
-    updatedCompanyCount = result.count;
-
-    // ── Step 2: Fetch company IDs ────────────────────────────────
+    // ── Step 1: Fetch all companies for this shop ────────────────
     const companies = await prisma.companyAccount.findMany({
       where: { shopId: store.id },
-      select: { id: true },
+      select: { id: true, creditLimit: true },
     });
 
-    const companyIds = companies.map((c) => c.id);
+    // ── Step 2: Update each company and record transaction ────────
+    for (const company of companies) {
+      try {
+        // 1. Get current available credit before update
+        const previousCreditInfo = await calculateAvailableCredit(company.id);
 
-    // ── Step 3: Upsert credit transactions per company ───────────
-    await Promise.all(
-      companyIds.map(async (companyId) => {
-        const existing = await prisma.creditTransaction.findFirst({
-          where: { companyId },
+        if (!previousCreditInfo) continue;
+
+        // 2. Update company credit limit
+        await prisma.companyAccount.update({
+          where: { id: company.id },
+          data: { creditLimit: defaultCompanyCreditLimitRaw },
         });
 
-        if (existing) {
-          return prisma.creditTransaction.update({
-            where: { id: existing.id },
-            data: {
-              creditAmount: defaultCompanyCreditLimitRaw,
-              transactionType: "Credit Added",
-              createdBy: "Admin",
-              previousBalance: existing.newBalance, // ← old "new" becomes "previous"
-              newBalance: defaultCompanyCreditLimitRaw, // ← updated balance
-              createdAt: new Date(), // ← keep original creation time
-            },
-          });
-        } else {
-          return prisma.creditTransaction.create({
-            data: {
-              companyId,
-              creditAmount: defaultCompanyCreditLimitRaw,
-              transactionType: "Credit Added",
-              createdBy: "Admin",
-              previousBalance: "0", // ← no previous, so 0
-              newBalance: defaultCompanyCreditLimitRaw, // ← new balance = credit limit
-              createdAt: new Date(),
-            },
-          });
-        }
-      }),
-    );
+        // 3. Get new available credit after update
+        const currentCreditInfo = await calculateAvailableCredit(company.id);
+
+        if (!currentCreditInfo) continue;
+
+        const previousBalance = previousCreditInfo.availableCredit;
+        const newBalance = currentCreditInfo.availableCredit;
+        const creditAmount = newBalance.minus(previousBalance);
+
+        // 4. Create a NEW transaction record
+        await prisma.creditTransaction.create({
+          data: {
+            companyId: company.id,
+            transactionType: "Credit Added",
+            creditAmount: creditAmount,
+            previousBalance: previousBalance,
+            newBalance: newBalance,
+            notes: `Default credit limit applied: updated from ${previousCreditInfo.creditLimit.toString()} to ${defaultCompanyCreditLimitRaw}`,
+            createdBy: "Admin",
+            createdAt: new Date(),
+          },
+        });
+
+        updatedCompanyCount++;
+      } catch (err) {
+        console.error(`Failed to update credit for company ${company.id}:`, err);
+      }
+    }
   }
 
   const message = shouldSyncCompanyCreditLimit

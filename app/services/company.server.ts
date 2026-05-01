@@ -702,6 +702,8 @@ export async function getCompanyOrders(
   };
 }
 
+import { calculateAvailableCredit } from "./creditService";
+
 /**
  * Update company credit limit and sync to Shopify metadata
  */
@@ -718,6 +720,7 @@ export async function updateCredit(
   const id = (form.get("id") as string)?.trim();
   const creditRaw = (form.get("creditLimit") as string) || "0";
   const credit = parseCredit(creditRaw);
+  const updatedBy = (form.get("updatedBy") as string) || "Admin";
 
   if (!id) {
     return {
@@ -735,58 +738,53 @@ export async function updateCredit(
   }
 
   try {
-    // Update local database
+    // 1. Get current available credit before update
+    const previousCreditInfo = await calculateAvailableCredit(id);
+    if (!previousCreditInfo) {
+      return {
+        intent,
+        success: false,
+        errors: ["Company not found"],
+      };
+    }
+
+    // 2. Update local database
     const updatedCompany = await prisma.companyAccount.update({
       where: { id },
       data: { creditLimit: credit },
     });
 
-    // Sync to Shopify metadata if admin context is available and company has Shopify ID
+    // 3. Get new available credit after update
+    const currentCreditInfo = await calculateAvailableCredit(id);
+    if (!currentCreditInfo) {
+      throw new Error("Failed to recalculate credit after update");
+    }
+
+    const previousBalance = previousCreditInfo.availableCredit;
+    const newBalance = currentCreditInfo.availableCredit;
+    const creditAmount = newBalance.minus(previousBalance);
+
+    // 4. Record the transaction
+    await prisma.creditTransaction.create({
+      data: {
+        companyId: updatedCompany.id,
+        transactionType: "Credit Added",
+        creditAmount: creditAmount,
+        previousBalance: previousBalance,
+        newBalance: newBalance,
+        notes: `Credit limit updated from ${previousCreditInfo.creditLimit.toString()} to ${credit.toString()}`,
+        createdBy: updatedBy,
+        createdAt: new Date(),
+      },
+    });
+
+    // 5. Sync to Shopify metadata if admin context is available and company has Shopify ID
     if (admin && updatedCompany.shopifyCompanyId) {
       try {
-        // Use the comprehensive metafield sync function instead of individual metafield updates
         await syncCompanyCreditMetafields(admin, updatedCompany.id);
         console.log(
           `✅ Successfully synced all credit metafields for company ${updatedCompany.id}`,
         );
-        const creditTransactions = await prisma.creditTransaction.findFirst({
-          where: {
-            companyId: updatedCompany.id,
-            transactionType: "Credit Added",
-          },
-          orderBy: { createdAt: "desc" },
-        });
-        if (creditTransactions) {
-          await prisma.creditTransaction.update({
-            where: { id: creditTransactions.id },
-            data: {
-              previousBalance: creditTransactions.newBalance,
-              newBalance: credit,
-              creditAmount: credit.minus(creditTransactions.newBalance),
-              transactionType: "Credit Added",
-              createdBy: "Admin",
-              companyId: updatedCompany.id,
-              notes: `Credit limit updated to ${credit.toString()} and synced to Shopify`,
-              orderId: null,
-             createdAt: new Date(),
-              
-            },
-          });
-        } else {
-          await prisma.creditTransaction.create({
-            data: {
-              previousBalance: new Prisma.Decimal(0),
-              newBalance: credit,
-              creditAmount: credit,
-              transactionType: "Credit Added",
-              createdBy: "Admin",
-              companyId: updatedCompany.id,
-              notes: `Credit limit updated to ${credit.toString()} and synced to Shopify`,
-              orderId: null,
-             createdAt: new Date(),
-            },
-          });
-        }
       } catch (shopifyError) {
         console.error(
           "Failed to sync credit metafields to Shopify:",
