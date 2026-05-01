@@ -12,6 +12,7 @@ import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
 import { LoaderFunctionArgs } from "react-router";
 import { syncShopifyCompanies } from "app/utils/company.server";
+import { countRegistrations } from "../services/registration.server";
 
 
 type CompletedStepsState = {
@@ -113,12 +114,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
 
+// Fetch pending registrations count
+  const pendingRegistrations = await countRegistrations(store.id, "PENDING");
+
   return Response.json({
     themes,
     missingScope,
     store,
     completedSetupSteps: store.completedSetupSteps || [],
-    setupFinished: store.setupFinished
+    setupFinished: store.setupFinished,
+    pendingRegistrations,
   });
 };
 
@@ -200,11 +205,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Welcome() {
-  const { store, themes = [], completedSetupSteps = [], setupFinished = false } = useLoaderData<typeof loader>() as {
+  const { store, themes = [], completedSetupSteps = [], setupFinished = false, pendingRegistrations = 0 } = useLoaderData<typeof loader>() as {
     themes: ThemeSummary[];
     store: { shopDomain: string; id: string } | null;
     completedSetupSteps: string[];
     setupFinished: boolean;
+    pendingRegistrations: number;
   };
   const syncFetcher = useFetcher<ActionResponse>();
   const setupFetcher = useFetcher();
@@ -1654,21 +1660,21 @@ export default function Welcome() {
             </div>
           </div>
 
-          <div className="overview-grid">
+<div className="overview-grid">
             <div className="overview-item">
               <div>
                 <div className="overview-item-header">
                   <span className="overview-icon" style={{ fontSize: "24px" }}>⌂</span>
                   <span>Pending applications</span>
                 </div>
-                <div className="overview-count">0</div>
+                <div className="overview-count">{pendingRegistrations}</div>
               </div>
-              <a
-                className="overview-button disabled"
-                href="/app/companies?tab=pending"
+              <Link
+                className="overview-button"
+                to="/app/registrations?status=pending"
               >
                 Review applications
-              </a>
+              </Link>
             </div>
 
             <div className="overview-item">

@@ -14,6 +14,7 @@ import {
 } from "react-router";
 import { useEffect, useState, useRef } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import {
@@ -789,6 +790,7 @@ export default function CompaniesPage() {
 
   const updateFetcher = useFetcher<ActionResponse>();
   const syncFetcher = useFetcher<ActionResponse>();
+  const shopify = useAppBridge();
 
   const isUpdating = updateFetcher.state !== "idle";
   const isSyncing = syncFetcher.state !== "idle";
@@ -809,6 +811,25 @@ export default function CompaniesPage() {
       setPendingCompanyId(null);
     }
   }, [navigation.state]);
+
+  // Handle sync companies response
+  useEffect(() => {
+    if (syncFetcher.state !== "idle" || !syncFetcher.data) return;
+
+    const data = syncFetcher.data as ActionResponse & { syncedCount?: number };
+
+    if (data.success) {
+      const syncedCount = data.syncedCount ?? 0;
+      const message =
+        syncedCount === 0
+          ? "✓ Companies up to date"
+          : `✓ ${syncedCount} company(ies) synced successfully`;
+      shopify.toast.show?.(message);
+      revalidator.revalidate();
+    } else if (data.errors?.length) {
+      shopify.toast.show?.(data.errors[0], { isError: true });
+    }
+  }, [syncFetcher.data, syncFetcher.state, shopify, revalidator]);
 
   if (storeMissing) {
     return (
