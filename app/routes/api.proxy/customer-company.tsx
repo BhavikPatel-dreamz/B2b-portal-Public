@@ -60,6 +60,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       pendingCredit: companyInfo.pendingCredit,
       creditUsagePercentage: companyInfo.creditUsagePercentage,
 
+      // Plan status
+      plan: store.plan === "approved payment",
+
       // ✅ New stats
       currentMonthOrderCount: companyInfo.currentMonthOrderCount,
       pendingDraftOrderCount: companyInfo.pendingDraftOrderCount,
@@ -149,6 +152,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       currencyCode: currency,
       locationsCount: company.locationsCount,
       companyName: company.companyName,
+      plan: store.plan === "approved payment",
     });
   } catch (error) {
     console.error("Proxy error:", error);
