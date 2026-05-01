@@ -68,6 +68,7 @@ export async function calculateUserCredit(
 export async function calculateTieredCreditAvailability(
   companyId: string,
   userId: string,
+  excludeOrderId?: string,
 ): Promise<TieredCreditAvailability | null> {
   // Get company credit info (reusing existing function)
   const company = await prisma.companyAccount.findUnique({
@@ -85,6 +86,9 @@ export async function calculateTieredCreditAvailability(
       companyId,
       paymentStatus: { in: ["pending", "partial"] },
       orderStatus: { notIn: ["cancelled"] },
+      NOT: excludeOrderId ? { id: excludeOrderId } : undefined,
+      // If we have shopifyOrderId, we might need to check that too
+      shopifyOrderId: excludeOrderId ? { not: excludeOrderId } : undefined,
     },
     _sum: {
       remainingBalance: true,
@@ -95,11 +99,14 @@ export async function calculateTieredCreditAvailability(
     ? new Decimal(ordersWithBalance._sum.remainingBalance)
     : new Decimal(0);
 
+  // We'll keep pending credit calculation for information, but NOT subtract it twice
   const pendingOrders = await prisma.b2BOrder.aggregate({
     where: {
       companyId,
       paymentStatus: { in: ["pending", "partial"] },
       orderStatus: { in: ["draft", "submitted", "processing"] },
+      NOT: excludeOrderId ? { id: excludeOrderId } : undefined,
+      shopifyOrderId: excludeOrderId ? { not: excludeOrderId } : undefined,
     },
     _sum: {
       remainingBalance: true,
@@ -109,9 +116,9 @@ export async function calculateTieredCreditAvailability(
   const companyPendingCredit = pendingOrders._sum.remainingBalance
     ? new Decimal(pendingOrders._sum.remainingBalance)
     : new Decimal(0);
-  const companyAvailableCredit = company.creditLimit
-    .minus(companyUsedCredit)
-    .minus(companyPendingCredit);
+
+  // CORRECT FORMULA: Limit - Used (Used already includes Pending)
+  const companyAvailableCredit = company.creditLimit.minus(companyUsedCredit);
 
   // Get user credit info
   const userCreditInfo = await calculateUserCredit(userId);
@@ -127,7 +134,7 @@ export async function calculateTieredCreditAvailability(
       availableCredit: companyAvailableCredit,
     },
     user: userCreditInfo,
-    canCreateOrder: true, // Will be determined by validation functions
+    canCreateOrder: true,
     limitingFactor: "none",
   };
 }
@@ -139,6 +146,7 @@ export async function validateTieredCreditForOrder(
   companyId: string,
   userId: string,
   orderAmount: number | Decimal,
+  excludeOrderId?: string,
 ): Promise<{
   canCreate: boolean;
   limitingFactor: "company" | "user" | "none";
@@ -146,7 +154,11 @@ export async function validateTieredCreditForOrder(
   creditInfo?: TieredCreditAvailability;
 }> {
   const orderAmountDecimal = new Decimal(orderAmount);
-  const creditInfo = await calculateTieredCreditAvailability(companyId, userId);
+  const creditInfo = await calculateTieredCreditAvailability(
+    companyId,
+    userId,
+    excludeOrderId,
+  );
 
   if (!creditInfo) {
     return {
@@ -199,11 +211,18 @@ export async function deductTieredCredit(
 ): Promise<void> {
   const amountDecimal = new Decimal(amount);
 
-  // Get credit info before deduction
-  const creditInfo = await calculateTieredCreditAvailability(companyId, userId);
+  // Get credit info BEFORE deduction, excluding THIS order if it exists
+  const creditInfo = await calculateTieredCreditAvailability(
+    companyId,
+    userId,
+    orderId,
+  );
   if (!creditInfo) {
     throw new Error("Company or user not found");
   }
+
+  const previousBalance = creditInfo.company.availableCredit;
+  const newBalance = previousBalance.minus(amountDecimal);
 
   // Create company credit transaction
   const orderTransactions = await prisma.creditTransaction.findFirst({
@@ -211,8 +230,8 @@ export async function deductTieredCredit(
       companyId,
       orderId,
     },
-  })
-  
+  });
+
   if (orderTransactions) {
     await prisma.creditTransaction.update({
       where: { id: orderTransactions.id },
@@ -222,29 +241,28 @@ export async function deductTieredCredit(
         orderId,
         transactionType: "order_updated",
         creditAmount: amountDecimal.negated(), // Negative for deduction
-        previousBalance: creditInfo.company.availableCredit,
-        newBalance: creditInfo.company.availableCredit.minus(amountDecimal),
+        previousBalance: previousBalance,
+        newBalance: newBalance,
         notes: `Credit updated for order ${orderId} by user ${userId}`,
         createdBy: userId,
       },
     });
     console.log("Credit transaction updated for existing order:", orderId);
-
-  }else{
+  } else {
     const orderTransaction = await prisma.creditTransaction.create({
-    data: {
-      companyId,
-      userId,
-      orderId,
-      transactionType,
-      creditAmount: amountDecimal.negated(), // Negative for deduction
-      previousBalance: creditInfo.company.availableCredit,
-      newBalance: creditInfo.company.availableCredit.minus(amountDecimal),
-      notes: `Credit deducted for order ${orderId} by user ${userId}`,
-      createdBy: userId,
-    },
-  });
-  console.log("Credit transaction created:", orderTransaction);
+      data: {
+        companyId,
+        userId,
+        orderId,
+        transactionType,
+        creditAmount: amountDecimal.negated(), // Negative for deduction
+        previousBalance: previousBalance,
+        newBalance: newBalance,
+        notes: `Credit deducted for order ${orderId} by user ${userId}`,
+        createdBy: userId,
+      },
+    });
+    console.log("Credit transaction created:", orderTransaction);
   }
  
 

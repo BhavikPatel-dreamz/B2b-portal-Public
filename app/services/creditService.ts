@@ -16,6 +16,7 @@ interface CreditAvailability {
  */
 export async function calculateAvailableCredit(
   companyId: string,
+  excludeOrderId?: string,
 ): Promise<CreditAvailability | null> {
   const company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
@@ -37,32 +38,16 @@ export async function calculateAvailableCredit(
   }
 
   // Calculate used credit: sum of creditUsed from all unpaid orders (pending/partial orders)
-  const orderUpdate = await prisma.b2BOrder.findFirst({
-    where: {
-      companyId,
-      paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled"] }, // All unpaid orders except cancelled
-    },
-  });
-  
-  if (orderUpdate) {
-    await prisma.b2BOrder.update({
-      where: {
-        id: orderUpdate?.id,
-      },
-      data: {
-        creditUsed: orderUpdate?.orderTotal,
-      },
-    });
-  }
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {
       companyId,
       paymentStatus: { in: ["pending", "partial"] },
       orderStatus: { notIn: ["cancelled"] }, // All unpaid orders except cancelled
+      NOT: excludeOrderId ? { id: excludeOrderId } : undefined,
+      shopifyOrderId: excludeOrderId ? { not: excludeOrderId } : undefined,
     },
     _sum: {
-      creditUsed: true, // Sum of credit used, not remainingBalance
+      creditUsed: true, // Sum of credit used
     },
   });
 
@@ -75,9 +60,6 @@ export async function calculateAvailableCredit(
   const pendingCredit = new Decimal(0);
 
   const availableCredit = new Decimal(company.creditLimit).minus(usedCredit);
-  // pendingCredit is 0, so we only subtract usedCredit
-
-
 
   return {
     creditLimit: company.creditLimit,
@@ -93,12 +75,13 @@ export async function calculateAvailableCredit(
 export async function canCreateOrder(
   companyId: string,
   orderAmount: number | Decimal,
+  excludeOrderId?: string,
 ): Promise<{
   canCreate: boolean;
   availableCredit?: Decimal;
   message?: string;
 }> {
-  const creditInfo = await calculateAvailableCredit(companyId);
+  const creditInfo = await calculateAvailableCredit(companyId, excludeOrderId);
 
   if (!creditInfo) {
     return {
@@ -143,8 +126,8 @@ export async function deductCredit(
 ): Promise<CreditDeductionResult> {
   const amountDecimal = new Decimal(amount);
 
-  // Get current credit info
-  const creditInfo = await calculateAvailableCredit(companyId);
+  // Get current credit info BEFORE deduction, excluding THIS order if it exists
+  const creditInfo = await calculateAvailableCredit(companyId, orderId);
   if (!creditInfo) {
     throw new Error("Company not found");
   }
@@ -158,7 +141,7 @@ export async function deductCredit(
     where: {
       companyId,
       orderId,
-      transactionType: "order_created",
+      transactionType: { in: ["order_created", "order_updated"] },
     },
   });
 
@@ -170,10 +153,10 @@ export async function deductCredit(
         creditAmount: amountDecimal.negated(), // Negative because we're deducting
         previousBalance,
         newBalance,
+        transactionType: "order_updated",
         notes: `Credit deducted for order ${orderId} (updated)`,
         createdBy: userId,
-       createdAt: new Date(),
-        
+        createdAt: new Date(),
       },
     });
   } else {
@@ -189,10 +172,10 @@ export async function deductCredit(
         notes: `Credit deducted for order ${orderId}`,
         createdBy: userId,
         createdAt: new Date(),
-        
       },
     });
   }
+
 
   // Check if the order exists in our database before updating
   const existingOrder = await prisma.b2BOrder.findUnique({
