@@ -33,109 +33,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { companyId: companyAccountId },
     });
 
-    // ── Paginated enriched transactions from DB ──────────────────────
-    const dbTransactions = await getCreditTransactionsByCompany(companyAccountId, {
+    // ── Paginated enriched transactions ──────────────────────
+    const creditTransactions = await getCreditTransactionsByCompany(companyAccountId, {
       take: limit,
       skip,
     });
 
-    // ── REAL-TIME: Fetch recent orders from Shopify to bridge the webhook gap ─
-    // We only do this for the first page to keep it fast
-    let finalTransactions = [...dbTransactions];
-    
-    if (page === 1) {
-      try {
-        const startOfMonth = new Date();
-        startOfMonth.setDate(1);
-        startOfMonth.setHours(0, 0, 0, 0);
-
-        const shopifyUrl = `https://${store.shopDomain}/admin/api/2025-01/graphql.json`;
-        const shopifyRes = await fetch(shopifyUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": store.accessToken,
-          },
-          body: JSON.stringify({
-            query: `
-              query ($companyId: ID!, $processedAt: String) {
-                orders(first: 20, query: "purchasing_entity_id:$companyId created_at:>=$processedAt") {
-                  edges {
-                    node {
-                      id
-                      name
-                      createdAt
-                      displayFinancialStatus
-                      totalPriceSet {
-                        shopMoney {
-                          amount
-                          currencyCode
-                        }
-                      }
-                      customer {
-                        firstName
-                        lastName
-                        email
-                      }
-                    }
-                  }
-                }
-              }
-            `,
-            variables: { 
-              companyId: companyId, // Shopify GID
-              processedAt: startOfMonth.toISOString()
-            },
-          }),
-        });
-
-        const shopifyData = await shopifyRes.json();
-        const shopifyOrders = shopifyData?.data?.orders?.edges || [];
-
-        // Check which Shopify orders are missing from our DB transactions
-        const existingOrderIds = new Set(
-          dbTransactions.map((tx) => tx.orderId).filter(Boolean)
-        );
-
-        const missingTransactions = shopifyOrders
-          .filter((edge: any) => {
-            const order = edge.node;
-            const isUnpaid = ["PENDING", "PARTIALLY_PAID"].includes(order.displayFinancialStatus);
-            return isUnpaid && !existingOrderIds.has(order.id);
-          })
-          .map((edge: any) => {
-            const order = edge.node;
-            return {
-              id: `virtual-${order.id}`,
-              companyId: companyAccountId,
-              orderId: order.id,
-              transactionType: "order_created",
-              creditAmount: new Decimal(order.totalPriceSet.shopMoney.amount).negated(),
-              previousBalance: new Decimal(0), // We don't know the exact balance without a full crawl
-              newBalance: new Decimal(0),
-              notes: `Order ${order.name} (Syncing...)`,
-              createdBy: "Shopify Checkout",
-              createdByName: order.customer 
-                ? `${order.customer.firstName ?? ""} ${order.customer.lastName ?? ""}`.trim() || order.customer.email
-                : "Customer",
-              createdAt: new Date(order.createdAt),
-              isVirtual: true,
-            };
-          });
-
-        if (missingTransactions.length > 0) {
-          finalTransactions = [...missingTransactions, ...finalTransactions]
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-            .slice(0, limit);
-        }
-      } catch (err) {
-        console.warn("⚠️ Failed to fetch real-time orders for transaction list:", err);
-      }
-    }
-
     return Response.json({
       success: true,
-      data: finalTransactions,
+      data: creditTransactions,
       pagination: {
         page,
         limit,

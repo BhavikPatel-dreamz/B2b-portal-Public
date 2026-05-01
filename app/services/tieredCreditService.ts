@@ -280,12 +280,7 @@ export async function deductTieredCredit(
 
   // Update order with credit tracking
   const order = await prisma.b2BOrder.findFirst({
-    where: {
-      OR: [
-        { id: orderId },
-        { shopifyOrderId: orderId }
-      ]
-    },
+    where: { shopifyOrderId: orderId },
   });
   if (order) {
     await prisma.b2BOrder.update({
