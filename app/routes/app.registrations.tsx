@@ -5371,13 +5371,13 @@ export function RegistrationApprovalsPanel({
     [localSubmissions, statusFilter],
   );
   const registrationTableColumnWidths = [
-    "20%",
-    "15%",
-    "22%",
-    "14%",
-    "10%",
+    "18%",
     "12%",
-    "170px",
+    "20%",
+    "11%",
+    "11%",
+    "12%",
+    "16%",
   ];
   const registrationCellStyle = {
     padding: "14px 12px",
@@ -5749,8 +5749,10 @@ export function RegistrationApprovalsPanel({
               style={{
                 display: "flex",
                 gap: 8,
-                marginBottom: 14,
-                borderBottom: "1px solid #e3e3e3",
+                marginBottom: 16,
+                padding: "8px",
+                background: "#f8fafc",
+                borderRadius: 999,
                 overflowX: "auto",
               }}
             >
@@ -5759,19 +5761,16 @@ export function RegistrationApprovalsPanel({
                   key={status}
                   onClick={() => setStatusFilter(status)}
                   style={{
-                    padding: "10px 14px",
-                    background: "none",
-                    border: "none",
-                    borderBottom:
-                      statusFilter === status
-                        ? "2px solid #2c6ecb"
-                        : "2px solid transparent",
-                    color: statusFilter === status ? "#2c6ecb" : "#5c5f62",
-                    fontWeight: statusFilter === status ? 600 : 400,
+                    flexShrink: 0,
+                    padding: "10px 18px",
+                    background: statusFilter === status ? "#1d4ed8" : "white",
+                    color: statusFilter === status ? "white" : "#475569",
+                    border: statusFilter === status ? "1px solid #1d4ed8" : "1px solid #e2e8f0",
+                    borderRadius: 999,
+                    fontWeight: statusFilter === status ? 600 : 500,
                     cursor: "pointer",
-                    transition: "all 0.2s",
+                    transition: "background 0.2s, color 0.2s, border-color 0.2s",
                     whiteSpace: "nowrap",
-                    marginBottom: -1,
                     fontSize: 14,
                   }}
                 >
@@ -5787,7 +5786,15 @@ export function RegistrationApprovalsPanel({
               There are no {statusFilter.toLowerCase()} submissions yet.
             </s-paragraph>
           ) : (
-            <div style={{ overflowX: "auto" }}>
+            <div
+              style={{
+                overflowX: "auto",
+                borderRadius: 16,
+                border: "1px solid #e5e7eb",
+                boxShadow: "0 12px 24px rgba(15, 23, 42, 0.06)",
+                background: "white",
+              }}
+            >
               <table
                 style={{
                   width: "100%",
@@ -5856,7 +5863,11 @@ export function RegistrationApprovalsPanel({
                     return (
                       <tr
                         key={submission.id}
-                        style={{ borderTop: "1px solid #f1f2f4" }}
+                        style={{
+                          borderTop: "1px solid #f1f2f4",
+                          background: "white",
+                          transition: "background 0.15s ease",
+                        }}
                       >
                         <td style={registrationCellStyle}>
                           {submission.companyName}
@@ -5880,14 +5891,20 @@ export function RegistrationApprovalsPanel({
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
-                              padding: "4px 10px",
+                              padding: "6px 12px",
                               borderRadius: 999,
                               fontSize: 12,
                               fontWeight: 600,
+                              textTransform: "capitalize",
+                              letterSpacing: "0.02em",
                               ...statusStyles,
                             }}
                           >
-                            {submission.status}
+                            {submission.status === "PENDING"
+                              ? "Pending"
+                              : submission.status === "APPROVED"
+                              ? "Approved"
+                              : "Rejected"}
                           </span>
                         </td>
                         <td
