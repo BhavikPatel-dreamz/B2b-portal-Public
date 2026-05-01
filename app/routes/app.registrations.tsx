@@ -18,6 +18,8 @@ import {
   assignCatalogToLocation,
   fetchAllCatalogs,
   fetchPriceLists,
+  type CatalogNode,
+  type PriceListNode,
 } from "app/utils/b2b-customer.server";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
@@ -43,6 +45,7 @@ import {
 
 export interface RegistrationSubmission {
   paymentTermsTemplateId: string;
+  paymentTerm?: string | null;
   id: string;
   companyName: string;
   firstName: string;
@@ -111,6 +114,7 @@ export interface ActionJson {
 type RegistrationLoaderData = {
   submissions: RegistrationSubmission[];
   storeMissing: boolean;
+  isFreePlan: boolean;
   formConfig: FormConfig;
   shippingCountryOptions: CountryOption[];
   shippingProvincesByCountry: Record<string, CountryOption[]>;
@@ -578,6 +582,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     allCatalogs,
     priceLists,
     storeMissing: false,
+    isFreePlan: store.plan === "free",
   });
 };
 
@@ -1167,6 +1172,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const form = await parseForm(request);
   const intent = (form.intent as string) || "";
+  const isFreePlan = store.plan === "free";
+  const normalizePaymentTermsId = (value?: string | null) =>
+    isFreePlan ? null : value?.trim() || null;
 
   const resolveCompanyCreditLimit = (value?: string | null) => {
     const trimmed = value?.trim() || "";
@@ -1595,7 +1603,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       case "createCompany": {
         const companyName = (form.companyName as string)?.trim();
-        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+        const paymentTermsTemplateId = normalizePaymentTermsId(
+          form.paymentTerms as string,
+        );
         const creditLimitInput = (form.creditLimit as string)?.trim() || null;
         const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
         const customerEmail = (form.customerEmail as string)?.trim();
@@ -2207,7 +2217,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const registrationId = (form.registrationId as string)?.trim();
         const customerId = normalizeCustomerId(form.customerId as string);
         const companyName = (form.companyName as string)?.trim();
-        const paymentTermsTemplateId = (form.paymentTerms as string)?.trim();
+        const paymentTermsTemplateId = normalizePaymentTermsId(
+          form.paymentTerms as string,
+        );
         const taxId = (form.taxId as string)?.trim();
         const taxSetting = (form.taxSetting as string)?.trim() || "collect";
         const selectedCatalogIds = (() => {
@@ -2589,8 +2601,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const companyName = (form.companyName as string)?.trim();
         const contactName = (form.contactName as string)?.trim() || null;
         const contactEmail = (form.contactEmail as string)?.trim() || null;
-        const paymentTermsTemplateId =
-          (form.paymentTerm as string)?.trim() || null;
+        const paymentTermsTemplateId = normalizePaymentTermsId(
+          form.paymentTerm as string,
+        );
         const creditLimitInput = (form.creditLimit as string)?.trim() || null;
         const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
 
@@ -4301,6 +4314,7 @@ function ConfigureCompanyUI({
   shippingProvincesByCountry,
   onSubmissionUpdated,
   paymentTermsTemplates,
+  isFreePlan = false,
   // ── NEW props ──
   allCatalogs = [],
   priceLists = [],
@@ -4323,6 +4337,7 @@ function ConfigureCompanyUI({
     paymentTermsType: string;
     dueInDays: number | null;
   }>;
+  isFreePlan?: boolean;
   // ── NEW ──
   allCatalogs?: CatalogNode[];
   priceLists?: PriceListNode[];
@@ -4341,7 +4356,9 @@ function ConfigureCompanyUI({
   pipelineStep: PipelineStep;
   pipelineError?: string;
 }) {
-  const [paymentTermsId, setPaymentTermsId]     = useState(submission.paymentTerm || "");
+  const [paymentTermsId, setPaymentTermsId]     = useState(
+    isFreePlan ? "" : (submission.paymentTerm || ""),
+  );
   const [requireDeposit, setRequireDeposit]       = useState(false);
   const [allowOneTimeAddress, setAllowOneTimeAddress] = useState(false);
   const [orderSubmission, setOrderSubmission]     = useState<"auto" | "draft">("auto");
@@ -4399,8 +4416,9 @@ function ConfigureCompanyUI({
     setIsDetailsEditing(false);
     setShowCatalogList(false);
     setReviewNotes(submission.reviewNotes || "");
+    setPaymentTermsId(isFreePlan ? "" : (submission.paymentTerm || ""));
     advanceToConfigurationRef.current = false;
-  }, [submission.id, submission.reviewNotes]);
+  }, [isFreePlan, submission.id, submission.paymentTerm, submission.reviewNotes]);
  
   // ── Pre-select catalogs already assigned to this location ──
   useEffect(() => {
@@ -4941,51 +4959,52 @@ function ConfigureCompanyUI({
               )}
             </div>
  
-            {/* Payment terms */}
-            <div
-              style={{
-                background: "white", borderRadius: 10,
-                border: "1px solid #e3e3e3", padding: 16,
-              }}
-            >
-              <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}>
-                Payment terms
-              </h3>
-              <select
-                value={paymentTermsId}
-                onChange={(e) => setPaymentTermsId(e.target.value)}
+            {!isFreePlan && (
+              <div
                 style={{
-                  width: "100%", padding: "8px 12px", borderRadius: 8,
-                  border: "1px solid #c9ccd0", fontSize: 14,
-                  background: "white", boxSizing: "border-box", marginBottom: 10,
+                  background: "white", borderRadius: 10,
+                  border: "1px solid #e3e3e3", padding: 16,
                 }}
               >
-                <option value="">No payment terms</option>
-                {paymentTermsTemplates?.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-                {(!paymentTermsTemplates || paymentTermsTemplates.length === 0) && (
-                  <>
-                    <option value="net15">Within 15 days (Net 15)</option>
-                    <option value="net30">Within 30 days (Net 30)</option>
-                    <option value="net60">Within 60 days (Net 60)</option>
-                  </>
-                )}
-              </select>
-              <label
-                style={{
-                  display: "flex", alignItems: "center",
-                  gap: 8, fontSize: 13, cursor: "pointer", color: "#374151",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={requireDeposit}
-                  onChange={(e) => setRequireDeposit(e.target.checked)}
-                />
-                Require deposit on orders created at checkout
-              </label>
-            </div>
+                <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600 }}>
+                  Payment terms
+                </h3>
+                <select
+                  value={paymentTermsId}
+                  onChange={(e) => setPaymentTermsId(e.target.value)}
+                  style={{
+                    width: "100%", padding: "8px 12px", borderRadius: 8,
+                    border: "1px solid #c9ccd0", fontSize: 14,
+                    background: "white", boxSizing: "border-box", marginBottom: 10,
+                  }}
+                >
+                  <option value="">No payment terms</option>
+                  {paymentTermsTemplates?.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                  {(!paymentTermsTemplates || paymentTermsTemplates.length === 0) && (
+                    <>
+                      <option value="net15">Within 15 days (Net 15)</option>
+                      <option value="net30">Within 30 days (Net 30)</option>
+                      <option value="net60">Within 60 days (Net 60)</option>
+                    </>
+                  )}
+                </select>
+                <label
+                  style={{
+                    display: "flex", alignItems: "center",
+                    gap: 8, fontSize: 13, cursor: "pointer", color: "#374151",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={requireDeposit}
+                    onChange={(e) => setRequireDeposit(e.target.checked)}
+                  />
+                  Require deposit on orders created at checkout
+                </label>
+              </div>
+            )}
  
             {/* Checkout */}
             <div
@@ -5295,6 +5314,7 @@ function ConfigureCompanyUI({
 interface RegistrationApprovalsPanelProps {
   submissions: RegistrationSubmission[];
   storeMissing: boolean;
+  isFreePlan: boolean;
   formConfig: FormConfig;
   shippingCountryOptions: CountryOption[];
   shippingProvincesByCountry: Record<string, CountryOption[]>;
@@ -5315,6 +5335,7 @@ interface RegistrationApprovalsPanelProps {
 export function RegistrationApprovalsPanel({
   submissions,
   storeMissing,
+  isFreePlan,
   formConfig,
   shippingCountryOptions,
   shippingProvincesByCountry,
@@ -5996,6 +6017,7 @@ export function RegistrationApprovalsPanel({
           shippingProvincesByCountry={shippingProvincesByCountry}
           onSubmissionUpdated={handleSubmissionUpdated}
           paymentTermsTemplates={paymentTermsTemplates}
+          isFreePlan={isFreePlan}
           allCatalogs={allCatalogs}
           priceLists={priceLists}
           onApprove={handleConfigureApprove}
@@ -6121,6 +6143,7 @@ export default function RegistrationApprovals() {
     shippingCountryOptions: CountryOption[];
     shippingProvincesByCountry: Record<string, CountryOption[]>;
     storeMissing: boolean;
+    isFreePlan: boolean;
     allCatalogs: CatalogNode[];
     priceLists: PriceListNode[];
     paymentTermsTemplates: Array<{

@@ -1,6 +1,8 @@
 import { PAID_PLAN } from "app/billing-plans.shared";
 import { ActionFunctionArgs } from "react-router";
 import { clearStorePlan } from "app/services/store.server";
+import { clearAdminCompaniesCache } from "./app.companies";
+import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
 
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -26,6 +28,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (!billingCheck.hasActivePayment || !activeSubscription) {
     await clearStorePlan(session.shop);
+    clearAdminCompaniesCache(session.shop);
+    clearDashboardStatsCache(session.shop);
     return { ok: false, message: "No active subscription found to cancel." };
   }
 
@@ -38,6 +42,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("Cancelled subscription:", cancelledSubscription);
 
   await clearStorePlan(session.shop);
+  clearAdminCompaniesCache(session.shop);
+  clearDashboardStatsCache(session.shop);
 
   return { ok: true, cancelledSubscription };
 };

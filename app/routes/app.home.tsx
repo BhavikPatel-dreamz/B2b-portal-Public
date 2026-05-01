@@ -6,7 +6,10 @@ import { countCompanies } from "../services/company.server";
 import { countRegistrations } from "../services/registration.server";
 import prisma from "../db.server";
 import { formatCredit } from "../utils/company.utils";
-
+import {
+  DASHBOARD_STATS_TTL,
+  dashboardStatsCache,
+} from "../utils/dashboard-cache.server";
 
 type LoaderData = {
   totalCompanies?: number;
@@ -22,32 +25,7 @@ type LoaderData = {
   currentMonthB2BOrders?: number;
   currentMonthRevenue?: number;
   currencyCode?: string;
-};
-
-// ============================================================
-// 🗂️  DASHBOARD STATS CACHE SETUP
-// ============================================================
-
-declare global {
-  var __dashboardStatsCache:
-    | Map<string, { data: any; timestamp: number }>
-    | undefined;
-}
-
-const dashboardStatsCache: Map<string, { data: any; timestamp: number }> =
-  globalThis.__dashboardStatsCache ??
-  (globalThis.__dashboardStatsCache = new Map());
-
-const DASHBOARD_STATS_TTL = 3 * 60 * 1000; // 3 min
-
-// ============================================================
-// 🧹  CACHE HELPER
-// ============================================================
-
-export const clearDashboardStatsCache = (shop: string) => {
-  const key = `dashboard-stats-${shop}`;
-  dashboardStatsCache.delete(key);
-  console.log("🧹 Dashboard stats cache cleared for:", key);
+  isFreePlan?: boolean;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -153,6 +131,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       currentMonthB2BOrders: currentMonthB2BOrdersCount,
       currentMonthRevenue: Number(currentMonthRevenueSum._sum.orderTotal || 0),
       currencyCode: store.currencyCode || "USD",
+      isFreePlan: store.plan === "free",
     };
 
     // ✅ Store in cache
@@ -206,6 +185,7 @@ export default function Home() {
     totalRegistrations > 0
       ? Math.round((data.rejectedRegistrations / totalRegistrations) * 100)
       : 0;
+  const isFreePlan = data.isFreePlan === true;
   const pageHeroStyle = {
     width: "100%",
     maxWidth: 1200,
@@ -265,6 +245,10 @@ export default function Home() {
           grid-template-columns: 60% 40%;
           gap: 12px;
           margin-bottom: 12px;
+        }
+
+        .main-grid.free-plan-layout {
+          grid-template-columns: 1fr;
         }
 
         /* Credit Management Card */
@@ -836,6 +820,10 @@ export default function Home() {
   margin-top: 12px;
 }
 
+.order-card.order-card--standalone {
+  margin-top: 0;
+}
+
 .order-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1060,66 +1048,69 @@ export default function Home() {
         </div>
 
         {/* Main Content Grid */}
-        <div className="main-grid">
+        <div className={`main-grid${isFreePlan ? " free-plan-layout" : ""}`}>
           {/* Left Column */}
           <div>
             {/* Credit Management Overview */}
+            {!isFreePlan && (
+              <div className="credit-card">
+                <div className="card-header">
+                  <h2 className="card-title">Credit Management Overview</h2>
+                  <a href="#" className="manage-link">
+                    ⚙️ Manage credit
+                  </a>
+                </div>
 
-            <div className="credit-card">
-              <div className="card-header">
-                <h2 className="card-title">Credit Management Overview</h2>
-                <a href="#" className="manage-link">
-                  ⚙️ Manage credit
-                </a>
-              </div>
+                <div className="credit-stats-grid">
+                  {/* Total Credit Allowed */}
+                  <div className="credit-stat">
+                    <div className="credit-label">
+                      Total Credit Allowed • <a href="#">Learn more →</a>
+                    </div>
+                    <div className="credit-value">
+                      {formatCredit(data.totalCreditAllowed.toString(), data.currencyCode)}
+                    </div>
+                    <div className="credit-badge success">
+                      ✓ Healthy credit balance
+                    </div>
+                  </div>
 
-              <div className="credit-stats-grid">
-                {/* Total Credit Allowed */}
-                <div className="credit-stat">
-                  <div className="credit-label">
-                    Total Credit Allowed • <a href="#">Learn more →</a>
+                  {/* Credit Used */}
+                  <div className="credit-stat">
+                    <div className="credit-label">Credit Used</div>
+                    <div className="credit-value">
+                      {formatCredit(data.totalCreditUsed.toString(), data.currencyCode)}
+                    </div>
+                    <div className="credit-badge info">
+                      {creditUsagePercentage}% Almost used
+                    </div>
                   </div>
-                  <div className="credit-value">
-                    {formatCredit(data.totalCreditAllowed.toString(), data.currencyCode)}
-                  </div>
-                  <div className="credit-badge success">
-                    ✓ Healthy credit balance
+
+                  {/* Available Credit */}
+                  <div className="credit-stat">
+                    <div className="credit-label">Available Credit</div>
+                    <div className="credit-value">
+                      {formatCredit(data.availableCredit.toString(), data.currencyCode)}
+                    </div>
+                    <div className="credit-badge success">✓ No risk detected</div>
                   </div>
                 </div>
 
-                {/* Credit Used */}
-                <div className="credit-stat">
-                  <div className="credit-label">Credit Used</div>
-                  <div className="credit-value">
-                    {formatCredit(data.totalCreditUsed.toString(), data.currencyCode)}
-                  </div>
-                  <div className="credit-badge info">
-                    {creditUsagePercentage}% Almost used
-                  </div>
+                {/* Progress Bar */}
+                <div className="main-progress-bar">
+                  <div
+                    className="main-progress-fill"
+                    style={{ width: "100%" }}
+                  ></div>
                 </div>
-
-                {/* Available Credit */}
-                <div className="credit-stat">
-                  <div className="credit-label">Available Credit</div>
-                  <div className="credit-value">
-                    {formatCredit(data.availableCredit.toString(), data.currencyCode)}
-                  </div>
-                  <div className="credit-badge success">✓ No risk detected</div>
-                </div>
+                <div className="progress-percentage">100%</div>
               </div>
-
-              {/* Progress Bar */}
-              <div className="main-progress-bar">
-                <div
-                  className="main-progress-fill"
-                  style={{ width: "100%" }}
-                ></div>
-              </div>
-              <div className="progress-percentage">100%</div>
-            </div>
+            )}
 
             {/* Order Overview */}
-            <div className="order-card">
+            <div
+              className={`order-card${isFreePlan ? " order-card--standalone" : ""}`}
+            >
               <h2 className="card-title" style={{ marginBottom: "14px" }}>
                 Order Overview
               </h2>

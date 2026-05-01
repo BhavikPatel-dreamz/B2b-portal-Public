@@ -37,6 +37,7 @@ type LoaderCompany = {
   shopifyCompanyId: string | null;
   contactName: string | null;
   contactEmail: string | null;
+  paymentTerm: string | null;
   creditLimit: string;
   usedCredit: string;
   pendingCredit: string;
@@ -70,6 +71,7 @@ interface RegistrationsLoaderData {
   allCatalogs: any[];
   priceLists: any[];
   storeMissing: boolean;
+  isFreePlan: boolean;
   currencyCode: string;
 }
 
@@ -122,6 +124,9 @@ declare global {
           id: string;
           contactEmail: string | null;
           submissionEmail: string | null;
+          defaultCompanyCreditLimit: unknown;
+          plan: string | null;
+          currencyCode: string | null;
         };
         timestamp: number;
       }
@@ -140,6 +145,9 @@ const storeCache: Map<
       id: string;
       contactEmail: string | null;
       submissionEmail: string | null;
+      defaultCompanyCreditLimit: unknown;
+      plan: string | null;
+      currencyCode: string | null;
     };
     timestamp: number;
   }
@@ -192,7 +200,14 @@ async function getStoreForShop(shop: string) {
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: shop },
-    select: { id: true, contactEmail: true, submissionEmail: true, currencyCode: true },
+    select: {
+      id: true,
+      contactEmail: true,
+      submissionEmail: true,
+      defaultCompanyCreditLimit: true,
+      plan: true,
+      currencyCode: true,
+    },
   });
 
   if (store) {
@@ -231,7 +246,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // ── SLOW PATH — run auth + all DB queries 
     console.log("🐢 Cache MISS → running auth + DB");
 
-    const { session } = await authenticate.admin(request);
+    const { admin, session } = await authenticate.admin(request);
     const shop = session.shop; // authoritative shop from session
 
     const cacheKey = `admin-companies-${shop}-${activeTab}-${page}-${searchQuery}-${sortOrder}`;
@@ -263,10 +278,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           currentPage: 1,
           totalPages: 0,
           searchQuery: "",
+          isFreePlan: false,
         },
         { status: 404 },
       );
     }
+
+    const isFreePlan = store.plan === "free";
 
     // Build where clause with search
     const whereClause = {
@@ -280,6 +298,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ],
       }),
     };
+
+    const paymentTermsTemplatesPromise =
+      activeTab === "companies" && !isFreePlan
+        ? admin
+            .graphql(
+              `#graphql
+              query {
+                paymentTermsTemplates {
+                  id
+                  name
+                  paymentTermsType
+                  dueInDays
+                }
+              }`,
+            )
+            .then((response) => response.json())
+            .then(
+              (payload) =>
+                payload?.data?.paymentTermsTemplates ||
+                [],
+            )
+        : Promise.resolve(
+            [] as Array<{
+              id: string;
+              name: string;
+              paymentTermsType: string;
+              dueInDays: number | null;
+            }>,
+          );
 
     const registrationDataPromise =
       activeTab === "companies"
@@ -296,6 +343,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }>,
           allCatalogs: [] as any[],
           priceLists: [] as any[],
+          isFreePlan,
         })
         : (async () => {
           const { loader: registrationsLoader } = await import("./app.registrations");
@@ -322,10 +370,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             }>;
             allCatalogs: any[];
             priceLists: any[];
+            isFreePlan: boolean;
           };
         })();
 
-    const [totalCount, companies, pendingCount, approvedCount, rejectedCount, registrationData] = await Promise.all([
+    const [
+      totalCount,
+      companies,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+      registrationData,
+      paymentTermsTemplates,
+    ] = await Promise.all([
       prisma.companyAccount.count({ where: whereClause }),
       prisma.companyAccount.findMany({
         where: whereClause,
@@ -344,6 +401,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: { shopId: store.id, status: "REJECTED", shopifyCustomerId: { not: null } },
       }),
       registrationDataPromise,
+      paymentTermsTemplatesPromise,
     ]);
     const totalItems =
       activeTab === "companies"
@@ -372,6 +430,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         Number(entry._sum.creditUsed ?? 0),
       ]),
     );
+    const paymentTermsNameMap = new Map(
+      paymentTermsTemplates.map((template) => [template.id, template.name]),
+    );
 
     const companiesWithCredit = companies.map((company) => {
       const creditLimitNum = Number(company.creditLimit ?? 0);
@@ -385,11 +446,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return {
         ...company,
         contactName: company.contactName || "-",
-        creditLimit: company.creditLimit.toString(),
-        usedCredit: usedCreditNum.toString(),
+        paymentTerm: isFreePlan
+          ? null
+          : company.paymentTerm
+            ? paymentTermsNameMap.get(company.paymentTerm) || company.paymentTerm
+            : null,
+        creditLimit: isFreePlan ? "0" : company.creditLimit.toString(),
+        usedCredit: isFreePlan ? "0" : usedCreditNum.toString(),
         pendingCredit: "0",
-        availableCredit: availableCreditNum.toString(),
-        creditUsagePercentage,
+        availableCredit: isFreePlan ? "0" : availableCreditNum.toString(),
+        creditUsagePercentage: isFreePlan ? 0 : creditUsagePercentage,
         updatedAt: company.updatedAt.toISOString(),
         userCount: company._count.users,
         isDisable: company.isDisable || false,
@@ -406,7 +472,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       formConfig: registrationData.formConfig,
       shippingCountryOptions: registrationData.shippingCountryOptions,
       shippingProvincesByCountry: registrationData.shippingProvincesByCountry,
-      paymentTermsTemplates: registrationData.paymentTermsTemplates,
+      paymentTermsTemplates:
+        activeTab === "companies"
+          ? paymentTermsTemplates
+          : registrationData.paymentTermsTemplates,
       allCatalogs: registrationData.allCatalogs,
       priceLists: registrationData.priceLists,
       storeMissing: false,
@@ -416,6 +485,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       totalPages,
       searchQuery,
       sortOrder,
+      isFreePlan,
     };
 
     // ✅ Store in cache
@@ -447,6 +517,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         totalPages: 0,
         searchQuery: "",
         sortOrder: "newest",
+        isFreePlan: false,
         },
         { status: 500 },
         );
@@ -483,6 +554,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
+  const isFreePlan = store.plan === "free";
+
   switch (intent) {
     // ── SYNC COMPANIES ──────────────────────────────────────
     case "syncCompanies": {
@@ -505,6 +578,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ── UPDATE CREDIT
     case "updateCredit": {
+      if (isFreePlan) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit limit is not available on the free plan"],
+        });
+      }
+
       const formData = new FormData();
       formData.append("id", (form.id as string) || "");
       formData.append("creditLimit", (form.creditLimit as string) || "0");
@@ -524,7 +605,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const contactName = (form.contactName as string)?.trim() || null;
       const contactEmail = (form.contactEmail as string)?.trim() || null;
       const creditRaw = (form.creditLimit as string | undefined)?.trim() || "";
-      let credit = creditRaw ? parseCredit(creditRaw) : null;
+      let credit = isFreePlan
+        ? parseCredit("0")
+        : creditRaw
+          ? parseCredit(creditRaw)
+          : null;
 
       if (!name) {
         return Response.json({
@@ -532,13 +617,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
-      if (!creditRaw) {
-        const storeSettings = await prisma.store.findUnique({
-          where: { id: store.id },
-          select: { defaultCompanyCreditLimit: true },
-        });
-        credit =
-          storeSettings?.defaultCompanyCreditLimit ?? parseCredit("0");
+      if (!isFreePlan && !creditRaw) {
+        credit = store.defaultCompanyCreditLimit ?? parseCredit("0");
       }
 
       if (credit === null) {
@@ -578,890 +658,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return Response.json({ intent, success: false, errors: ["Unknown intent"] });
   }
 };
-export default function CompaniesPage() {
-  const {
-    companies,
-    submissions,
-    activeTab,
-    pendingCount,
-    approvedCount,
-    rejectedCount,
-    formConfig,
-    shippingCountryOptions,
-    shippingProvincesByCountry,
-    paymentTermsTemplates,
-    allCatalogs,
-    priceLists,
-    storeMissing,
-    currencyCode,
-    totalCount,
-    currentPage,
-    totalPages,
-    searchQuery,
-    sortOrder,
-  } = useLoaderData<typeof loader>();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const revalidator = useRevalidator();
-  const navigate = useNavigate();
-  const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
-  const registrationsFetcher = useFetcher<RegistrationsLoaderData>();
-
-  // Controlled search input
-  const [query, setQuery] = useState(searchQuery);
-  const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null);
-  const [selectedTab, setSelectedTab] =
-    useState<RegistrationStatusTab>(activeTab);
-  const [registrationData, setRegistrationData] =
-    useState<RegistrationsLoaderData | null>(() =>
-      formConfig
-        ? {
-          submissions,
-          formConfig,
-          shippingCountryOptions,
-          shippingProvincesByCountry,
-          paymentTermsTemplates,
-          allCatalogs,
-          priceLists,
-          storeMissing,
-          currencyCode,
-        }
-        : null,
-    );
-  const derivedRegistrationCounts = registrationData?.submissions.reduce(
-    (counts, submission) => {
-      if (submission.status === "PENDING") counts.pending += 1;
-      if (submission.status === "APPROVED") counts.approved += 1;
-      if (submission.status === "REJECTED") counts.rejected += 1;
-      return counts;
-    },
-    { pending: 0, approved: 0, rejected: 0 },
-  );
-  const displayedPendingCount =
-    derivedRegistrationCounts?.pending ?? pendingCount;
-  const displayedRejectedCount =
-    derivedRegistrationCounts?.rejected ?? rejectedCount;
-  const actionButtonWidth = 124;
-  const pageShellStyle = {
-    background: "#f1f2f4",
-    minHeight: "100vh",
-    padding: "24px",
-    boxSizing: "border-box",
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "San Francisco", "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
-  } as const;
-  const pageHeroStyle = {
-    width: "100%",
-    maxWidth: 1200,
-    margin: "0 auto 18px",
-    padding: "16px 22px",
-    borderRadius: 14,
-    border: "1px solid #dfe3e8",
-    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
-    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-  } as const;
-  const pageEyebrowStyle = {
-    fontSize: "11px",
-    fontWeight: 700,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase" as const,
-    color: "#2c6ecb",
-    marginBottom: "6px",
-  } as const;
-  const pageHeroTitleStyle = {
-    fontSize: "22px",
-    lineHeight: 1.15,
-    fontWeight: 650,
-    color: "#202223",
-    margin: 0,
-  } as const;
-  const pageHeroTextStyle = {
-    fontSize: "14px",
-    color: "#5c5f62",
-    margin: "8px 0 0",
-  } as const;
-  const contentPanelStyle = {
-    width: "100%",
-    maxWidth: 1200,
-    margin: "0 auto",
-    boxSizing: "border-box",
-  } as const;
-
-  // Auto-refresh effect (30 seconds interval)
-  useEffect(() => {
-    if (selectedTab !== "companies") {
-      return;
-    }
-
-    const AUTO_REFRESH_INTERVAL = 30 * 1000; // 30 seconds
-
-    intervalIdRef.current = setInterval(() => {
-      console.log("🔄 Auto-refreshing companies list");
-      revalidator.revalidate();
-    }, AUTO_REFRESH_INTERVAL);
-
-    return () => {
-      if (intervalIdRef.current) {
-        clearInterval(intervalIdRef.current);
-      }
-    };
-  }, [revalidator, selectedTab]);
-
-  useEffect(() => {
-    if (!registrationsFetcher.data) {
-      return;
-    }
-
-    setRegistrationData(registrationsFetcher.data);
-  }, [registrationsFetcher.data]);
-
-  const loadRegistrations = () => {
-    if (registrationData || registrationsFetcher.state !== "idle") {
-      return;
-    }
-
-    const registrationParams = new URLSearchParams();
-    const shop = searchParams.get("shop");
-
-    if (shop) {
-      registrationParams.set("shop", shop);
-    }
-
-    const queryString = registrationParams.toString();
-    registrationsFetcher.load(
-      queryString ? `/app/registrations?${queryString}` : "/app/registrations",
-    );
-  };
-
-  const updateTabInUrl = (nextTab: RegistrationStatusTab) => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const nextUrl = new URL(window.location.href);
-
-    if (nextTab === "companies") {
-      nextUrl.searchParams.delete("tab");
-    } else {
-      nextUrl.searchParams.set("tab", nextTab);
-    }
-
-    window.history.replaceState(window.history.state, "", nextUrl);
-  };
-
-  const handleTabChange = (nextTab: RegistrationStatusTab) => {
-    setSelectedTab(nextTab);
-    updateTabInUrl(nextTab);
-
-    if (nextTab !== "companies") {
-      loadRegistrations();
-    }
-  };
-
-  const exportCompaniesCsv = () => {
-    downloadCsv("companies.csv", [
-      [
-        "Company",
-        "Shopify Company ID",
-        "Contact Name",
-        "Contact Email",
-        "Users",
-        "Credit Limit",
-        "Used Credit",
-        "Available Credit",
-        "Usage %",
-        "Updated At",
-        "Status",
-      ],
-      ...companies.map((company) => [
-        company.name,
-        company.shopifyCompanyId?.replace("gid://shopify/Company/", "") || "",
-        company.contactName || "",
-        company.contactEmail || "",
-        String(company.userCount),
-        company.creditLimit,
-        company.usedCredit,
-        company.availableCredit,
-        String(company.creditUsagePercentage),
-        formatDisplayDate(company.updatedAt),
-        company.isDisable ? "Inactive" : "Active",
-      ]),
-    ]);
-  };
-
-  const updateFetcher = useFetcher<ActionResponse>();
-  const syncFetcher = useFetcher<ActionResponse>();
-  const shopify = useAppBridge();
-
-  const isUpdating = updateFetcher.state !== "idle";
-  const isSyncing = syncFetcher.state !== "idle";
-  const isLoadingRegistrationTab =
-    selectedTab !== "companies" &&
-    !registrationData &&
-    registrationsFetcher.state !== "idle";
-
-  // derive searching state from router navigation
-  const navigation = useNavigation();
-  const isSearching =
-    navigation.state !== "idle" &&
-    (navigation.location?.search?.includes("search=") ||
-      Boolean(searchParams.get("search")));
-
-  useEffect(() => {
-    if (navigation.state === "idle") {
-      setPendingCompanyId(null);
-    }
-  }, [navigation.state]);
-
-  // Handle sync companies response
-  useEffect(() => {
-    if (syncFetcher.state !== "idle" || !syncFetcher.data) return;
-
-    const data = syncFetcher.data as ActionResponse & { syncedCount?: number };
-
-    if (data.success) {
-      const syncedCount = data.syncedCount ?? 0;
-      const message =
-        syncedCount === 0
-          ? "✓ Companies up to date"
-          : `✓ ${syncedCount} company(ies) synced successfully`;
-      shopify.toast.show?.(message);
-      revalidator.revalidate();
-    } else if (data.errors?.length) {
-      shopify.toast.show?.(data.errors[0], { isError: true });
-    }
-  }, [syncFetcher.data, syncFetcher.state, shopify, revalidator]);
-
-  if (storeMissing) {
-    return (
-      <div style={pageShellStyle}>
-      <div style={pageHeroStyle}>
-        <div style={pageEyebrowStyle}>B2B Directory</div>
-        <h1 style={pageHeroTitleStyle}>Companies</h1>
-          <p style={pageHeroTextStyle}>
-            Manage company accounts, registrations, and credit visibility from one place.
-          </p>
-        </div>
-        <div
-          style={{
-            ...contentPanelStyle,
-            background: "#ffffff",
-            border: "1px solid #dfe3e8",
-            borderRadius: 16,
-            boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-            padding: "16px",
-          }}
-        >
-          <s-banner tone="critical">
-            <s-heading>Store not found</s-heading>
-            <s-paragraph>
-              The current shop does not exist in the database. Please reinstall
-              the app.
-            </s-paragraph>
-          </s-banner>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={pageShellStyle}>
-      <div style={pageHeroStyle}>
-        <h3 style={pageHeroTitleStyle}>Companies</h3>
-      </div>
-      <div style={contentPanelStyle}>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              marginBottom: 16,
-              borderBottom: "1px solid #e3e3e3",
-            }}
-          >
-            {[
-              { key: "companies", label: "Company List", count: null },
-              { key: "pending", label: "Pending", count: displayedPendingCount },
-              { key: "rejected", label: "Rejected", count: displayedRejectedCount },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => handleTabChange(tab.key as RegistrationStatusTab)}
-                style={{
-                  appearance: "none",
-                  background: "transparent",
-                  borderLeft: "none",
-                  borderRight: "none",
-                  borderTop: "none",
-                  cursor: "pointer",
-                  padding: "8px 16px",
-                  borderBottom:
-                    selectedTab === tab.key
-                      ? "2px solid #2c6ecb"
-                      : "2px solid transparent",
-                  color: selectedTab === tab.key ? "#2c6ecb" : "#5c5f62",
-                  fontWeight: selectedTab === tab.key ? 600 : 400,
-                  marginBottom: -1,
-                  fontSize: 14,
-                }}
-              >
-                {tab.label}
-                {typeof tab.count === "number" ? ` (${tab.count})` : ""}
-              </button>
-            ))}
-          </div>
-
-          {selectedTab === "companies" ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-                marginBottom: 16,
-                padding: 14,
-                border: "1px solid #dde3ea",
-                borderRadius: 14,
-                background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
-              }}
-            >
-              <div style={{
-                position: "relative",
-                flex: "1 1 280px",
-                display: "flex",
-                alignItems: "center"
-              }}>
-                <input
-                  type="text"
-                  placeholder="Search by company name, email."
-                  value={query}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setQuery(value);
-                    setSearchParams((prev) => {
-                      const newParams = new URLSearchParams(prev);
-                      newParams.set("page", "1");
-                      if (value) {
-                        newParams.set("search", value);
-                      } else {
-                        newParams.delete("search");
-                      }
-                      return newParams;
-                    });
-                  }}
-                  style={{
-                    width: "100%",
-                    minHeight: 36,
-                    padding: "6px 36px 6px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #c9ccd0",
-                    fontSize: 13,
-                    outline: "none",
-                  }}
-                />
-                {query && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQuery("");
-                      setSearchParams((prev) => {
-                        const newParams = new URLSearchParams(prev);
-                        newParams.set("page", "1");
-                        newParams.delete("search");
-                        return newParams;
-                      });
-                    }}
-                    style={{
-                      position: "absolute",
-                      right: 8,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: "4px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: "50%",
-                      width: 24,
-                      height: 24,
-                      fontSize: 16,
-                      color: "#5c5f62",
-                      lineHeight: 1,
-                    }}
-                    title="Clear search"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <s-button type="button" variant="secondary" onClick={exportCompaniesCsv}>
-                  Export CSV
-                </s-button>
-
-                <syncFetcher.Form method="post">
-                  <input name="intent" value="syncCompanies" hidden readOnly />
-                  <s-button
-                    type="submit"
-                    variant="secondary"
-                    loading={isSyncing}
-                    style={{ width: actionButtonWidth, display: "inline-block" }}
-                  >
-                    Company Sync
-                  </s-button>
-                </syncFetcher.Form>
-              </div>
-            </div>
-          ) : null}
-
-          {selectedTab === "companies" ? (
-            companies.length === 0 ? (
-              <>
-                {searchQuery ? (
-                  <div style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "40px 20px",
-                    minHeight: "200px",
-                    textAlign: "center",
-                    border: "1px solid #e3e7ec",
-                    borderRadius: 12,
-                    background: "#ffffff"
-                  }}>
-                    <div style={{ fontSize: "16px", fontWeight: 600, color: "#202223", marginBottom: "8px" }}>
-                      No result found
-                    </div>
-                    <div style={{ fontSize: "14px", color: "#5c5f62" }}>
-                      No companies matching "{searchQuery}" were found. Try adjusting your search terms.
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "40px 20px",
-                    minHeight: "200px",
-                    textAlign: "center",
-                    border: "1px solid #e3e7ec",
-                    borderRadius: 12,
-                    background: "#ffffff"
-                  }}>
-                    <div style={{ fontSize: "16px", fontWeight: 600, color: "#202223" }}>
-                      No companies yet
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div
-                style={{
-                  position: "relative",
-                  overflow: "hidden",
-                  border: "1px solid #e3e7ec",
-                  borderRadius: 12,
-                  background: "#ffffff",
-                }}
-              >
-                {isSearching && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      backgroundColor: "rgba(255, 255, 255, 0.7)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      zIndex: 10,
-                      borderRadius: 8,
-                    }}
-                  >
-                    <div style={{ textAlign: "center" }}>
-                      <div
-                        style={{
-                          display: "inline-block",
-                          width: 24,
-                          height: 24,
-                          border: "3px solid #e0e0e0",
-                          borderTop: "3px solid #1a1b1d",
-                          borderRadius: "50%",
-                          animation: "spin 0.8s linear infinite",
-                        }}
-                      />
-                      <p style={{ marginTop: 8, color: "#5c5f62", fontSize: 13 }}>
-                        Searching…
-                      </p>
-                    </div>
-                    <style>{`
-                  @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                  }
-                `}</style>
-                  </div>
-                )}
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    tableLayout: "fixed",
-                    fontSize: 13,
-                    opacity: isSearching ? 0.5 : 1,
-                    pointerEvents: isSearching ? "none" : "auto",
-                  }}
-                >
-                  <thead>
-                    <tr>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "21%" }}
-                      >
-                        Company
-                      </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "23%" }}
-                      >
-                        Contact
-                      </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "5%" }}
-                      >
-                        Users
-                      </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "10%" }}
-                      >
-                        Credit Limit
-                      </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "10%" }}
-                      >
-                        Used Credit
-                      </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "12%" }}
-                      >
-                        Available Credit
-                      </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "7%" }}
-                      >
-                        Usage %
-                      </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "12%" }}
-                      >
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {companies.map((company: LoaderCompany) => (
-                      (() => {
-                        const companyPath = `/app/companies/${company.id}`;
-                        const isNavigatingToCompany =
-                          navigation.location?.pathname === companyPath;
-                        const isCompanyLoading =
-                          pendingCompanyId === company.id || isNavigatingToCompany;
-
-                        return (
-                          <tr
-                            key={company.id}
-                            style={{
-                              borderTop: "1px solid #e3e3e3",
-                              backgroundColor: company.isDisable
-                                ? "#ffebee"
-                                : "transparent",
-                            }}
-                          >
-                            <td
-                              style={{
-                                padding: "10px 8px",
-                                lineHeight: 1.45,
-                                overflowWrap: "anywhere",
-                                verticalAlign: "top",
-                              }}
-                            >
-                              {company.name}
-                              <br />
-                              {company.shopifyCompanyId
-                                ? company.shopifyCompanyId.replace(
-                                  "gid://shopify/Company/",
-                                  "",
-                                )
-                                : "–"}
-                            </td>
-
-                            <td
-                              style={{
-                                padding: "10px 8px",
-                                lineHeight: 1.45,
-                                overflowWrap: "anywhere",
-                                verticalAlign: "top",
-                              }}
-                            >
-                              {company.contactName || company.contactEmail ? (
-                                <span>
-                                  {company.contactName ? (
-                                    <>
-                                      {company.contactName}
-                                      <br />
-                                      {company.contactEmail
-                                        ? company.contactEmail
-                                        : "-"}
-                                    </>
-                                  ) : (
-                                    <>{company.contactEmail}</>
-                                  )}
-                                </span>
-                              ) : (
-                                <span style={{ color: "#5c5f62" }}>Not set</span>
-                              )}
-                            </td>
-                            <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
-                              {company.userCount}
-                            </td>
-                            <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
-                              {formatCredit(company.creditLimit, currencyCode)}
-                            </td>
-                            <td
-                              style={{
-                                padding: "10px 8px",
-                                color: "#d72c0d",
-                                fontWeight: 500,
-                                verticalAlign: "top",
-                              }}
-                            >
-                              {formatCredit(company.usedCredit, currencyCode)}
-                            </td>
-                            <td
-                              style={{
-                                padding: "10px 8px",
-                                color:
-                                  parseFloat(company.availableCredit) >= 0
-                                    ? "#008060"
-                                    : "#d72c0d",
-                                fontWeight:
-                                  parseFloat(company.availableCredit) < 0
-                                    ? 600
-                                    : 500,
-                                verticalAlign: "top",
-                              }}
-                            >
-                              {formatCredit(company.availableCredit, currencyCode)}
-                            </td>
-                            <td
-                              style={{
-                                padding: "10px 8px",
-                                color:
-                                  company.creditUsagePercentage >= 90
-                                    ? "#d72c0d"
-                                    : company.creditUsagePercentage >= 70
-                                      ? "#b98900"
-                                      : "#008060",
-                                fontWeight: 500,
-                                verticalAlign: "top",
-                              }}
-                            >
-                              {company.creditUsagePercentage}%
-                            </td>
-                            <td
-                              style={{
-                                padding: "10px 8px",
-                                width: "12%",
-                                verticalAlign: "middle",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  width: actionButtonWidth,
-                                  maxWidth: "100%",
-                                }}
-                              >
-                                <s-button
-                                  type="button"
-                                  variant="secondary"
-                                  loading={isCompanyLoading}
-                                  disabled={isCompanyLoading || isUpdating}
-                                  onClick={() => {
-                                    setPendingCompanyId(company.id);
-                                    navigate(companyPath);
-                                  }}
-                                  style={{ width: "100%", display: "block" }}
-                                >
-                                  View
-                                </s-button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })()
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          ) : isLoadingRegistrationTab ? (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                minHeight: 220,
-                border: "1px solid #e3e7ec",
-                borderRadius: 12,
-                background: "#ffffff",
-              }}
-            >
-              <div style={{ textAlign: "center" }}>
-                <div
-                  style={{
-                    display: "inline-block",
-                    width: 24,
-                    height: 24,
-                    border: "3px solid #e0e0e0",
-                    borderTop: "3px solid #1a1b1d",
-                    borderRadius: "50%",
-                    animation: "spin 0.8s linear infinite",
-                  }}
-                />
-                <p style={{ marginTop: 8, color: "#5c5f62", fontSize: 13 }}>
-                  Loading registrations...
-                </p>
-              </div>
-            </div>
-          ) : registrationData ? (
-            <RegistrationApprovalsPanel
-              submissions={registrationData.submissions}
-              storeMissing={registrationData.storeMissing}
-              formConfig={registrationData.formConfig}
-              shippingCountryOptions={registrationData.shippingCountryOptions}
-              shippingProvincesByCountry={registrationData.shippingProvincesByCountry}
-              paymentTermsTemplates={registrationData.paymentTermsTemplates}
-              allCatalogs={registrationData.allCatalogs}
-              priceLists={registrationData.priceLists}
-              forcedStatusFilter={selectedTab.toUpperCase() as "PENDING" | "APPROVED" | "REJECTED"}
-              hideStatusTabs
-              embedded
-              heading="Registrations"
-            />
-          ) : (
-            <s-empty-state heading="No registration data available" />
-          )}
-
-          {/* Pagination */}
-          {selectedTab === "companies" && totalPages > 1 && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
-                marginTop: 24,
-                paddingTop: 24,
-                borderTop: "1px solid #e3e3e3",
-              }}
-            >
-              <Link
-                to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(currentPage - 1) })}`}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 8,
-                  border: "1px solid #c9ccd0",
-                  textDecoration: "none",
-                  color: currentPage === 1 ? "#999" : "#202223",
-                  pointerEvents: currentPage === 1 ? "none" : "auto",
-                  opacity: currentPage === 1 ? 0.5 : 1,
-                }}
-              >
-                Previous
-              </Link>
-
-              <div style={{ display: "flex", gap: 8 }}>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                  (pageNum) => {
-                    const showPage =
-                      pageNum === 1 ||
-                      pageNum === totalPages ||
-                      Math.abs(pageNum - currentPage) <= 1;
-
-                    const showEllipsis =
-                      (pageNum === 2 && currentPage > 3) ||
-                      (pageNum === totalPages - 1 &&
-                        currentPage < totalPages - 2);
-
-                    if (showEllipsis) {
-                      return (
-                        <span
-                          key={pageNum}
-                          style={{
-                            padding: "8px 12px",
-                            color: "#999",
-                          }}
-                        >
-                          ...
-                        </span>
-                      );
-                    }
-
-                    if (!showPage) return null;
-
-                    return (
-                      <Link
-                        key={pageNum}
-                        to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(pageNum) })}`}
-                        style={{
-                          padding: "8px 12px",
-                          borderRadius: 8,
-                          border: "1px solid #c9ccd0",
-                          textDecoration: "none",
-                          color: pageNum === currentPage ? "white" : "#202223",
-                          background:
-                            pageNum === currentPage ? "#005bd3" : "white",
-                          fontWeight: pageNum === currentPage ? 600 : 400,
-                        }}
-                      >
-                        {pageNum}
-                      </Link>
-                    );
-                  },
-                )}
-              </div>
-
-              <Link
-                to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(currentPage + 1) })}`}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 8,
-                  border: "1px solid #c9ccd0",
-                  textDecoration: "none",
-                  color: currentPage === totalPages ? "#999" : "#202223",
-                  pointerEvents: currentPage === totalPages ? "none" : "auto",
-                  opacity: currentPage === totalPages ? 0.5 : 1,
-                }}
-              >
-                Next
-              </Link>
-
-              <span style={{ marginLeft: 16, color: "#5c5f62", fontSize: 14 }}>
-                Page {currentPage} of {totalPages} ({totalCount} companies)
-              </span>
-            </div>
-          )}
-      </div>
-    </div>
-  );
-}
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
+
+export { default } from "./app.companies.page";

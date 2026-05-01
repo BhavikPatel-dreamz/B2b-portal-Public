@@ -21,6 +21,7 @@ import {
 } from "../services/creditRecalculation.server";
 
 type LoaderData = {
+  isFreePlan: boolean;
   company: {
     paymentTermsTemplateId: string;
     id: string;
@@ -189,9 +190,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const form = await parseForm(request);
   const intent = (form.intent as string) || "";
+  const isFreePlan = store.plan === "free";
 
   switch (intent) {
     case "updateCredit": {
+      if (isFreePlan) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit limit is not available on the free plan"],
+        });
+      }
+
       const formData = new FormData();
       formData.append("id", (form.id as string) || "");
       formData.append("creditLimit", (form.creditLimit as string) || "0");
@@ -200,6 +210,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return Response.json(result);
     }
     case "updatepaymentTerm": {
+      if (isFreePlan) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Payment terms are not available on the free plan"],
+        });
+      }
+
       const companyId = (form.id as string)?.trim();
       const paymentTermsTemplateId = (form.paymentTerm as string)?.trim();
 
@@ -558,6 +576,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     case "recalculateCredit": {
+      if (isFreePlan) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit recalculation is not available on the free plan"],
+        });
+      }
+
       const companyId = (form.companyId as string)?.trim();
 
       if (!companyId) {
@@ -607,6 +633,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     case "previewRecalculation": {
+      if (isFreePlan) {
+        return Response.json({
+          intent,
+          success: false,
+          errors: ["Credit recalculation is not available on the free plan"],
+        });
+      }
+
       const companyId = (form.companyId as string)?.trim();
 
       if (!companyId) {
@@ -737,6 +771,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     0,
     creditSummary.creditLimit.toNumber() - creditSummary.usedCredit.toNumber(),
   );
+  const isFreePlan = store.plan === "free";
   const RegistrationData =await prisma.registrationSubmission.findFirst({
     where:{
       email:dashboardData.company.contactEmail
@@ -744,6 +779,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   })
 
   return Response.json({
+    isFreePlan,
     company: {
       id: dashboardData.company.id,
       name: dashboardData.company.name,
@@ -753,11 +789,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       paymentTermsTemplateId: dashboardData.company.paymentTerm || "",
       isDisable: dashboardData.company.isDisable ?? false,
     },
-    creditLimit: creditSummary.creditLimit.toNumber(),
-    availableCredit: availableCredit,
-    usedCredit: creditSummary.usedCredit.toNumber(),
-    pendingCredit: creditSummary.pendingCredit.toNumber(),
-    creditPercentageUsed,
+    creditLimit: isFreePlan ? 0 : creditSummary.creditLimit.toNumber(),
+    availableCredit: isFreePlan ? 0 : availableCredit,
+    usedCredit: isFreePlan ? 0 : creditSummary.usedCredit.toNumber(),
+    pendingCredit: isFreePlan ? 0 : creditSummary.pendingCredit.toNumber(),
+    creditPercentageUsed: isFreePlan ? 0 : creditPercentageUsed,
     recentOrders: dashboardData.recentOrders.map((order) => ({
       id: order.id,
       shopifyOrderId: order.shopifyOrderId,
@@ -826,6 +862,7 @@ interface ActionResponse {
 
 export default function CompanyDashboard() {
   const data = useLoaderData<LoaderData>();
+  const isFreePlan = data.isFreePlan;
   const creditFetcher = useFetcher<ActionResponse>();
   const paymentTermsFetcher = useFetcher<ActionResponse>();
   const syncUsersFetcher = useFetcher<ActionResponse>();
@@ -1084,7 +1121,7 @@ export default function CompanyDashboard() {
       </div>
 
       {/* Payment Terms Edit Modal */}
-      {isEditingPaymentTerms && (
+      {!isFreePlan && isEditingPaymentTerms && (
         <div
           style={{
             position: "fixed",
@@ -1227,7 +1264,9 @@ export default function CompanyDashboard() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2fr 1.5fr 2fr 1.5fr 1.5fr auto",
+              gridTemplateColumns: isFreePlan
+                ? "2fr 1.5fr 2fr 1.5fr auto"
+                : "2fr 1.5fr 2fr 1.5fr 1.5fr auto",
               gap: 24,
               alignItems: "center",
             }}
@@ -1302,61 +1341,62 @@ export default function CompanyDashboard() {
               </div>
             </div>
 
-            <div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "#5c5f62",
-                  marginBottom: 6,
-                  fontWeight: 500,
-                }}
-              >
-                Payment Terms
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!isFreePlan && (
+              <div>
                 <div
                   style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#202223",
-                  }}
-                >
-                  {getPaymentTermsLabel(data.company.paymentTermsTemplateId)}
-                </div>
-                <button
-                  onClick={() => setIsEditingPaymentTerms(true)}
-                  style={{
-                    padding: "4px 6px",
-                    border: "none",
-                    background: "none",
-                    cursor: "pointer",
+                    fontSize: 12,
                     color: "#5c5f62",
-                    display: "flex",
-                    alignItems: "center",
+                    marginBottom: 6,
+                    fontWeight: 500,
                   }}
-                  title="Edit payment terms"
                 >
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
+                  Payment Terms
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#202223",
+                    }}
                   >
-                    <path
-                      d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
+                    {getPaymentTermsLabel(data.company.paymentTermsTemplateId)}
+                  </div>
+                  <button
+                    onClick={() => setIsEditingPaymentTerms(true)}
+                    style={{
+                      padding: "4px 6px",
+                      border: "none",
+                      background: "none",
+                      cursor: "pointer",
+                      color: "#5c5f62",
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                    title="Edit payment terms"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        d="M11.3333 2.00004C11.5084 1.82494 11.7163 1.68605 11.9451 1.59129C12.1739 1.49653 12.4192 1.44775 12.6667 1.44775C12.9141 1.44775 13.1594 1.49653 13.3882 1.59129C13.617 1.68605 13.8249 1.82494 14 2.00004C14.1751 2.17513 14.314 2.383 14.4088 2.61178C14.5036 2.84055 14.5523 3.08584 14.5523 3.33337C14.5523 3.58091 14.5036 3.8262 14.4088 4.05497C14.314 4.28375 14.1751 4.49162 14 4.66671L5.00001 13.6667L1.33334 14.6667L2.33334 11L11.3333 2.00004Z"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Credit Limit - Editable */}
-            <div>
+            {!isFreePlan && <div>
               <div
                 style={{
                   fontSize: 12,
@@ -1467,7 +1507,7 @@ export default function CompanyDashboard() {
                   </button>
                 </div>
               )}
-            </div>
+            </div>}
             {/* Deactivate / Reactivate Button */}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <updateFetcher.Form
@@ -1545,13 +1585,12 @@ export default function CompanyDashboard() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(2, 1fr)",
+          gridTemplateColumns: isFreePlan ? "1fr" : "repeat(2, 1fr)",
           gap: 10,
           marginBottom: 10,
         }}
       >
-        {/* Credit Overview */}
-        <s-section heading="Credit Status">
+        {!isFreePlan && <s-section heading="Credit Status">
           <div
             style={{
               display: "grid",
@@ -1669,7 +1708,7 @@ export default function CompanyDashboard() {
                   Loading...
                 </>
               ) : (
-                <>🔄 Recalculate Credit</>
+                <>Recalculate Credit</>
               )}
             </button>
             <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 8 }}>
@@ -1677,7 +1716,7 @@ export default function CompanyDashboard() {
               transaction history
             </div>
           </div>
-        </s-section>
+        </s-section>}
 
         {/* Order Statistics */}
         <s-section heading="Order Summary">
@@ -1996,7 +2035,7 @@ export default function CompanyDashboard() {
       </s-section>
 
       {/* Recalculate Credit Confirmation Modal */}
-      {showRecalculateConfirm && (
+      {!isFreePlan && showRecalculateConfirm && (
         <button
           style={{
             position: "fixed",

@@ -9,6 +9,8 @@ import {
   syncStoreSubscriptionState,
 } from "app/services/store.server";
 import prisma from "app/db.server";
+import { clearAdminCompaniesCache } from "./app.companies";
+import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
 
 const PLAN_EXEMPT_PATHS = new Set([
   "/app/select-plan",
@@ -40,8 +42,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         session.shop,
         billingState.appSubscriptions || [],
       );
+      clearAdminCompaniesCache(session.shop);
+      clearDashboardStatsCache(session.shop);
     } else if (store?.plan === "approved payment") {
       await clearStorePlan(session.shop);
+      clearAdminCompaniesCache(session.shop);
+      clearDashboardStatsCache(session.shop);
     }
 
     const hasPlanAccess = billingState.hasActivePayment || store?.plan === "free";

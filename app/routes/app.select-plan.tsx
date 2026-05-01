@@ -16,6 +16,8 @@ import {
 } from "app/services/store.server";
 import prisma from "app/db.server";
 import { LoaderFunctionArgs } from "react-router";
+import { clearAdminCompaniesCache } from "./app.companies";
+import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
 
 function getBillingErrorMessage(error) {
   const defaultMessage = "Billing action failed";
@@ -60,6 +62,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (hasActivePayment) {
     await syncStoreSubscriptionState(session.shop, appSubscriptions || []);
+    clearAdminCompaniesCache(session.shop);
+    clearDashboardStatsCache(session.shop);
   }
 
   return {
@@ -106,6 +110,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (plan === FREE_PLAN) {
       await setStoreFreePlan(session.shop);
+      clearAdminCompaniesCache(session.shop);
+      clearDashboardStatsCache(session.shop);
       return {
         ok: true,
         message: "Free plan activated successfully.",

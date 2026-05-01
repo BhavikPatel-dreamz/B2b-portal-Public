@@ -23,6 +23,7 @@ interface LoaderData {
   storeMissing: boolean;
   store?: {
     shopDomain: string;
+    plan: string;
     shopName: string;
     logo: string;
     submissionEmail: string;
@@ -81,6 +82,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       storeMissing: false,
       store: {
         shopDomain: store.shopDomain,
+        plan: store.plan || "",
         shopName: store.shopName || "",
         logo: store.logo || "",
         submissionEmail: store.submissionEmail || "",
@@ -117,6 +119,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
+  const isFreePlan = store.plan === "free";
 
   if (intent === "delete") {
     try {
@@ -302,8 +305,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     (formData.get("themeColor") as string | null)?.trim() || "";
   const autoApproveB2BOnboarding =
     (formData.get("autoApproveB2BOnboarding") as string | null) === "true";
-  const defaultCompanyCreditLimitRaw =
-    (formData.get("defaultCompanyCreditLimit") as string | null)?.trim() || "";
+  const defaultCompanyCreditLimitRaw = isFreePlan
+    ? store.defaultCompanyCreditLimit?.toString() || ""
+    : ((formData.get("defaultCompanyCreditLimit") as string | null)?.trim() ||
+      "");
   const orderConfirmationToMainAccount =
     (formData.get("orderConfirmationToMainAccount") as string | null) ===
     "true";
@@ -815,6 +820,7 @@ export default function SettingsPage() {
   }
 
   const { store } = loaderData;
+  const isFreePlan = store.plan === "free";
 
   return (
     <div style={pageShellStyle}>
@@ -1022,52 +1028,54 @@ export default function SettingsPage() {
                 gap: 16,
               }}
             >
-              <div style={{ display: "grid", gap: 6 }}>
-                <label
-                  htmlFor="defaultCompanyCreditLimit"
-                  style={{ fontWeight: 600, fontSize: 14 }}
-                >
-                  Default credit limit
-                </label>
-                <style>{`
-                /* Remove spinners for number input */
-                input[type="number"]::-webkit-inner-spin-button,
-                input[type="number"]::-webkit-outer-spin-button {
-                  -webkit-appearance: none;
-                  margin: 0;
-                }
-                input[type="number"] {
-                  -moz-appearance: textfield;
-                }
-              `}</style>
-                <input
-                  id="defaultCompanyCreditLimit"
-                  name="defaultCompanyCreditLimit"
-                  type="number"
-                  min="0"
-                  defaultValue={store?.defaultCompanyCreditLimit || ""}
-                  placeholder="1000"
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #c9cccf",
-                    fontSize: 14,
-                    outline: "none",
-                    width: "100%",
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = "#005bd3";
-                    e.target.style.boxShadow = "0 0 0 1px #005bd3";
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = "#c9cccf";
-                    e.target.style.boxShadow = "none";
-                  }}
-                />
-                <s-text tone="neutral">
-                  Credit limit prefilled for new companies. Default is 1000.
-                </s-text>
-              </div>
+              {!isFreePlan && (
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label
+                    htmlFor="defaultCompanyCreditLimit"
+                    style={{ fontWeight: 600, fontSize: 14 }}
+                  >
+                    Default credit limit
+                  </label>
+                  <style>{`
+                  /* Remove spinners for number input */
+                  input[type="number"]::-webkit-inner-spin-button,
+                  input[type="number"]::-webkit-outer-spin-button {
+                    -webkit-appearance: none;
+                    margin: 0;
+                  }
+                  input[type="number"] {
+                    -moz-appearance: textfield;
+                  }
+                `}</style>
+                  <input
+                    id="defaultCompanyCreditLimit"
+                    name="defaultCompanyCreditLimit"
+                    type="number"
+                    min="0"
+                    defaultValue={store.defaultCompanyCreditLimit || ""}
+                    placeholder="1000"
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #c9cccf",
+                      fontSize: 14,
+                      outline: "none",
+                      width: "100%",
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#005bd3";
+                      e.target.style.boxShadow = "0 0 0 1px #005bd3";
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#c9cccf";
+                      e.target.style.boxShadow = "none";
+                    }}
+                  />
+                  <s-text tone="neutral">
+                    Credit limit prefilled for new companies. Default is 1000.
+                  </s-text>
+                </div>
+              )}
 
               <div style={{ display: "grid" }}>
                 <ToggleRow
