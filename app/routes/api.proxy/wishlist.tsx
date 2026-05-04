@@ -221,7 +221,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                       featuredImage { url }
                       variants(first: 10) {
                         edges {
-                          node { id title price }
+                          node { id title price availableForSale }
                         }
                       }
                     }
@@ -238,6 +238,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             (v: { node: { id: string } }) => v.node.id === item.variantId,
           )?.node;
 
+          const soldOut = variant ? !variant.availableForSale : false;
+
           const existingItem = await prisma.wishlistItem.findFirst({
             where: { wishlistId, variantId: item.variantId },
           });
@@ -245,7 +247,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           if (existingItem) {
             const updated = await prisma.wishlistItem.update({
               where: { id: existingItem.id },
-              data: { quantity: existingItem.quantity + item.quantity, price: item.price },
+              data: { quantity: existingItem.quantity + item.quantity, price: item.price, soldOut },
             });
             results.push(updated);
           } else {
@@ -259,6 +261,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 image:        product?.featuredImage?.url || item.image,
                 price:        variant?.price ? parseFloat(variant.price) : item.price,
                 quantity:     item.quantity,
+                soldOut:      soldOut,
               },
             });
             results.push(newItem);
@@ -278,6 +281,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const variantTitle = formData.get("variantTitle") as string;
         const image        = formData.get("image") as string;
         const price        = parseFloat(formData.get("price") as string) || 0;
+        const soldOut      = formData.get("soldOut") === "true";
 
         if (!wishlistId || !productId || !variantId) {
           return { error: "Missing required fields" };
@@ -295,13 +299,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (existingItem) {
           const updatedItem = await prisma.wishlistItem.update({
             where: { id: existingItem.id },
-            data: { quantity: existingItem.quantity + quantity, price },
+            data: { quantity: existingItem.quantity + quantity, price, soldOut },
           });
           return respondAndClear({ item: updatedItem });
         }
 
         const newItem = await prisma.wishlistItem.create({
-          data: { wishlistId, productId, variantId, quantity, productTitle, variantTitle, image, price },
+          data: { wishlistId, productId, variantId, quantity, productTitle, variantTitle, image, price, soldOut },
         });
 
         return respondAndClear({ item: newItem });

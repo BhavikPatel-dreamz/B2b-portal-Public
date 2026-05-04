@@ -21,6 +21,7 @@ export interface CreateWishlistItemInput {
   image?: string | null;
   price?: number;
   quantity?: number;
+  soldOut?: boolean;
 }
 
 export interface UpdateWishlistItemInput {
@@ -29,6 +30,7 @@ export interface UpdateWishlistItemInput {
   image?: string | null;
   price?: number;
   quantity?: number;
+  soldOut?: boolean;
 }
 
 /**
@@ -125,6 +127,7 @@ export async function createWishlistItem(data: CreateWishlistItemInput) {
       image: data.image,
       price: data.price || 0,
       quantity: data.quantity || 1,
+      soldOut: data.soldOut || false,
     },
   });
 }
@@ -208,6 +211,7 @@ export async function addOrUpdateWishlistItem(
       productTitle: data.productTitle,
       variantTitle: data.variantTitle,
       image: data.image,
+      soldOut: data.soldOut,
     });
   }
 
