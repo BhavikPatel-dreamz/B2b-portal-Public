@@ -3084,9 +3084,7 @@ export async function getCompanyLocations(
             id
             name
             phone
-            externalId
-            buyerExperienceConfiguration {
-              checkoutToDraft
+            buyerExperienceConfiguration {              checkoutToDraft
               payNowOnly
               editableShippingAddress
               paymentTermsTemplate {
@@ -3248,7 +3246,6 @@ export async function getCompanyLocations(
           id: string;
           name: string;
           phone: string;
-          externalId: string;
           buyerExperienceConfiguration: {
             checkoutToDraft: boolean;
             payNowOnly: boolean;
@@ -3323,7 +3320,6 @@ export async function getCompanyLocations(
         return {
           id: location.id,
           name: location.name,
-          externalId: location.externalId,
           isDefault,
           buyerExperienceConfiguration:
             location.buyerExperienceConfiguration ?? null,
@@ -3387,7 +3383,6 @@ export async function getCompanyLocationById(
           name
           locale
           phone
-          externalId
           note
           createdAt
           updatedAt
@@ -4829,7 +4824,6 @@ export async function createCompanyLocation(
     zip?: string;
     country?: string;
     phone?: string;
-    externalId?: string;
     note?: string;
     firstName?: string;
     lastName?: string;
@@ -4846,7 +4840,6 @@ export async function createCompanyLocation(
             name
             phone
             locale
-            externalId
             note
             shippingAddress {
               address1
@@ -4880,7 +4873,6 @@ export async function createCompanyLocation(
     const input: {
       name: string;
       phone?: string;
-      externalId?: string;
       note?: string;
       billingAddress?: {
         address1: string;
@@ -4906,9 +4898,6 @@ export async function createCompanyLocation(
       name: locationData.name,
     };
 
-    if (locationData.externalId) {
-      input.externalId = locationData.externalId;
-    }
     if (locationData.note) {
       input.note = locationData.note;
     }
@@ -5466,7 +5455,6 @@ export async function createLocationAndAssignToContact(
   accessToken: string,
   locationData: {
     name: string;
-    externalId?: string;
     firstName?: string;
     lastName?: string;
     address1?: string;
@@ -5581,7 +5569,6 @@ export async function updateCompanyLocation(
   accessToken: string,
   locationData: {
     name?: string;
-    externalId?: string | null;
     firstName?: string;
     lastName?: string;
     address1?: string;
@@ -5601,11 +5588,10 @@ export async function updateCompanyLocation(
     let hasErrors = false;
     const errors: string[] = [];
 
-    // Step 1: Update basic fields (name, phone, externalId, note)
+    // Step 1: Update basic fields (name, phone, note)
     const hasBasicUpdate =
       locationData.name !== undefined ||
       locationData.phone !== undefined ||
-      locationData.externalId !== undefined ||
       locationData.note !== undefined;
 
     if (hasBasicUpdate) {
@@ -5617,7 +5603,6 @@ export async function updateCompanyLocation(
               name
               phone
               locale
-              externalId
               note
             }
             userErrors {
@@ -5631,7 +5616,6 @@ export async function updateCompanyLocation(
       const input: {
         name?: string;
         phone?: string | null;
-        externalId?: string | null;
         note?: string;
       } = {};
 
@@ -5641,11 +5625,6 @@ export async function updateCompanyLocation(
 
       if (locationData.phone !== undefined) {
         input.phone = locationData.phone === "" ? null : locationData.phone;
-      }
-
-      if (locationData.externalId !== undefined) {
-        input.externalId =
-          locationData.externalId === "" ? null : locationData.externalId;
       }
 
       if (locationData.note !== undefined) {

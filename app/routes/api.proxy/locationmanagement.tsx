@@ -280,7 +280,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // ── CREATE ──────────────────────────────────────────────
       case "create": {
         const {
-          name, externalId, country, firstName, lastName,
+          name, country, firstName, lastName,
           address1, address2, city, province, zip, phone,
           recipient, billingSameAsShipping,
         } = body;
@@ -322,7 +322,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           store.accessToken,
           {
             name: name || "",
-            externalId: externalId || "",
             country: country || "IN",
             firstName: firstName?.trim() || "",
             lastName: lastName?.trim() || "",
@@ -353,7 +352,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // ── EDIT ────────────────────────────────────────────────
       case "edit": {
   const {
-    locationId, name, externalId, country, firstName, lastName,
+    locationId, name, country, firstName, lastName,
     address1, address2, city, province, zip, phone,
     recipient, billingSameAsShipping, isDefault, // ✅ Added
   } = body;
@@ -368,8 +367,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Treat empty string as null (clear the field), undefined as "don't update"
   const phoneValue =
     phone === undefined ? undefined : phone === "" ? null : phone;
-  const externalIdValue =
-    externalId === undefined ? undefined : externalId === "" ? null : externalId;
   const recipientValue =
     recipient === undefined ? undefined : recipient === "" ? null : recipient;
 
@@ -404,7 +401,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     locationId, shop, store.accessToken,
     {
       name:                  name || undefined,
-      externalId:            externalIdValue,
       country:               country || undefined,
       firstName:             firstName?.trim() || undefined,
       lastName:              lastName?.trim() || undefined,
