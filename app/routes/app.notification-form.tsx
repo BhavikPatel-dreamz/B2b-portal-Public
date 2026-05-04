@@ -1171,31 +1171,23 @@ export default function NotificationForm() {
     width: "100%",
     maxWidth: 1200,
     margin: "0 auto 18px",
-    padding: "16px 22px",
+    padding: "0px 5px 16px 0px",  
     borderRadius: 14,
     border: "1px solid #dfe3e8",
-    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
+    background: "linear-gradient(135deg, #ffffff 0%)",
     boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-  } as const;
-  const pageEyebrowStyle = {
-    fontSize: "11px",
-    fontWeight: 700,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase" as const,
-    color: "#2c6ecb",
-    marginBottom: "6px",
   } as const;
   const pageHeroTitleStyle = {
     fontSize: "22px",
     lineHeight: 1.15,
     fontWeight: 650,
     color: "#202223",
-    margin: 0,
+    margin: "15px",
   } as const;
   const pageHeroTextStyle = {
     fontSize: "14px",
     color: "#5c5f62",
-    margin: "8px 0 0",
+    margin: "0 15px 0",
   } as const;
   const pageContentStyle = {
     width: "100%",

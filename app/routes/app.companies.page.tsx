@@ -35,6 +35,8 @@ type LoaderCompany = {
 };
 
 type RegistrationStatusTab = "companies" | "pending" | "rejected";
+type CompanySortField = "updatedAt" | "name" | "contact" | "users";
+type CompanySortDirection = "asc" | "desc";
 
 interface ActionResponse {
   intent: string;
@@ -118,8 +120,15 @@ export default function CompaniesPage() {
     currentPage,
     totalPages,
     searchQuery,
-    sortOrder,
+    sortField,
+    sortDirection,
     isFreePlan,
+    freePlanCompanyCount,
+    freePlanRegistrationCount,
+    freePlanCompanyLimit,
+    freePlanRegistrationLimit,
+    freePlanCompanyLimitReached,
+    freePlanRegistrationLimitReached,
   } = useLoaderData<typeof import("./app.companies").loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const revalidator = useRevalidator();
@@ -175,10 +184,10 @@ export default function CompaniesPage() {
     width: "100%",
     maxWidth: 1200,
     margin: "0 auto 18px",
-    padding: "16px 22px",
+    padding: "0px 0px 16px 0px",  
     borderRadius: 14,
     border: "1px solid #dfe3e8",
-    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
+    background: "linear-gradient(135deg, #ffffff 0%)",
     boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
   } as const;
   const pageEyebrowStyle = {
@@ -194,12 +203,69 @@ export default function CompaniesPage() {
     lineHeight: 1.15,
     fontWeight: 650,
     color: "#202223",
-    margin: 0,
+    margin: "15px",
   } as const;
   const pageHeroTextStyle = {
     fontSize: "14px",
     color: "#5c5f62",
-    margin: "8px 0 0",
+    margin: "0 15px 0",
+  } as const;
+  const tabsRowStyle = {
+    display: "flex",
+    gap: 12,
+    marginBottom: 16,
+    paddingBottom: 2,
+    borderBottom: "1px solid #e3e3e3",
+    flexWrap: "wrap" as const,
+  } as const;
+  const toolbarStyle = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap" as const,
+    marginBottom: 16,
+    padding: 14,
+    border: "1px solid #dde3ea",
+    borderRadius: 14,
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+  } as const;
+  const tableCardStyle = {
+    position: "relative" as const,
+    overflowX: "auto" as const,
+    overflowY: "hidden" as const,
+    border: "1px solid #e3e7ec",
+    borderRadius: 12,
+    background: "#ffffff",
+  } as const;
+  const tableHeaderCellStyle = {
+    textAlign: "left" as const,
+    padding: "14px 16px",
+    fontSize: 13,
+    fontWeight: 650,
+    color: "#202223",
+    background: "#fbfbfc",
+    borderBottom: "1px solid #e3e7ec",
+    whiteSpace: "nowrap" as const,
+  } as const;
+  const sortableHeaderButtonStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    font: "inherit",
+    fontWeight: 650,
+    color: "#202223",
+    cursor: "pointer",
+  } as const;
+  const tableCellStyle = {
+    padding: "14px 16px",
+    verticalAlign: "top" as const,
+    lineHeight: 1.45,
+    color: "#202223",
+    borderTop: "1px solid #eef1f4",
   } as const;
   const contentPanelStyle = {
     width: "100%",
@@ -277,6 +343,48 @@ export default function CompaniesPage() {
     if (nextTab !== "companies") {
       loadRegistrations();
     }
+  };
+
+  const buildCompaniesQueryString = (
+    overrides: Record<string, string | null | undefined>,
+  ) => {
+    const nextParams = new URLSearchParams(searchParams);
+
+    Object.entries(overrides).forEach(([key, value]) => {
+      if (!value) {
+        nextParams.delete(key);
+      } else {
+        nextParams.set(key, value);
+      }
+    });
+
+    return `?${nextParams.toString()}`;
+  };
+
+  const toggleSort = (field: CompanySortField) => {
+    const nextDirection: CompanySortDirection =
+      sortField === field && sortDirection === "asc" ? "desc" : "asc";
+
+    setSearchParams((prev) => {
+      const nextParams = new URLSearchParams(prev);
+      nextParams.set("page", "1");
+      nextParams.set("sortField", field);
+      nextParams.set("sortDirection", nextDirection);
+      nextParams.delete("sort");
+      return nextParams;
+    });
+  };
+
+  const renderSortArrow = (field: CompanySortField) => {
+    if (sortField !== field) {
+      return <span style={{ color: "#8c9196", fontSize: 12 }}>↕</span>;
+    }
+
+    return (
+      <span style={{ color: "#2c6ecb", fontSize: 12 }}>
+        {sortDirection === "asc" ? "↑" : "↓"}
+      </span>
+    );
   };
 
   const exportCompaniesCsv = () => {
@@ -397,16 +505,62 @@ export default function CompaniesPage() {
     <div style={pageShellStyle}>
       <div style={pageHeroStyle}>
         <h3 style={pageHeroTitleStyle}>Companies</h3>
+        <p style={pageHeroTextStyle}>
+          Manage company profiles, contacts, credit limits, and your B2B customer accounts in one place.
+        </p>
       </div>
       <div style={contentPanelStyle}>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              marginBottom: 16,
-              borderBottom: "1px solid #e3e3e3",
-            }}
-          >
+          {isFreePlan &&
+          (freePlanCompanyLimitReached || freePlanRegistrationLimitReached) ? (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: 14,
+                borderRadius: 14,
+                border: "1px solid #f1c40f",
+                background: "linear-gradient(180deg, #fffdf2 0%, #fff7db 100%)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 650, color: "#202223" }}>
+                    Free plan limit reached
+                  </div>
+                  <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
+                    Companies: {freePlanCompanyCount}/{freePlanCompanyLimit} · Registrations: {freePlanRegistrationCount}/{freePlanRegistrationLimit}
+                  </div>
+                </div>
+                <Link
+                  to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
+                  style={{ textDecoration: "none" }}
+                >
+                  <button
+                    type="button"
+                    style={{
+                      padding: "10px 16px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "#202223",
+                      color: "white",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Upgrade Plan
+                  </button>
+                </Link>
+              </div>
+            </div>
+          ) : null}
+          <div style={tabsRowStyle}>
             {[
               { key: "companies", label: "Company List", count: null },
               { key: "pending", label: "Pending", count: displayedPendingCount },
@@ -423,7 +577,7 @@ export default function CompaniesPage() {
                   borderRight: "none",
                   borderTop: "none",
                   cursor: "pointer",
-                  padding: "8px 16px",
+                  padding: "10px 18px",
                   borderBottom:
                     selectedTab === tab.key
                       ? "2px solid #2c6ecb"
@@ -441,23 +595,11 @@ export default function CompaniesPage() {
           </div>
 
           {selectedTab === "companies" ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-                marginBottom: 16,
-                padding: 14,
-                border: "1px solid #dde3ea",
-                borderRadius: 14,
-                background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
-              }}
-            >
+            <div style={toolbarStyle}>
               <div style={{
                 position: "relative",
-                flex: "1 1 280px",
+                flex: "1 1 420px",
+                minWidth: 260,
                 display: "flex",
                 alignItems: "center"
               }}>
@@ -481,11 +623,11 @@ export default function CompaniesPage() {
                   }}
                   style={{
                     width: "100%",
-                    minHeight: 36,
-                    padding: "6px 36px 6px 12px",
+                    minHeight: 40,
+                    padding: "8px 36px 8px 12px",
                     borderRadius: 10,
                     border: "1px solid #c9ccd0",
-                    fontSize: 13,
+                    fontSize: 14,
                     outline: "none",
                   }}
                 />
@@ -527,8 +669,13 @@ export default function CompaniesPage() {
                 )}
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <s-button type="button" variant="secondary" onClick={exportCompaniesCsv}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginLeft: "auto" }}>
+                <s-button
+                  type="button"
+                  variant="secondary"
+                  onClick={exportCompaniesCsv}
+                  style={{ minWidth: actionButtonWidth, display: "inline-block" }}
+                >
                   Export CSV
                 </s-button>
 
@@ -590,15 +737,7 @@ export default function CompaniesPage() {
                 )}
               </>
             ) : (
-              <div
-                style={{
-                  position: "relative",
-                  overflow: "hidden",
-                  border: "1px solid #e3e7ec",
-                  borderRadius: 12,
-                  background: "#ffffff",
-                }}
-              >
+              <div style={tableCardStyle}>
                 {isSearching && (
                   <div
                     style={{
@@ -643,7 +782,7 @@ export default function CompaniesPage() {
                   style={{
                     width: "100%",
                     borderCollapse: "collapse",
-                    tableLayout: "fixed",
+                    minWidth: isFreePlan ? 760 : 1180,
                     fontSize: 13,
                     opacity: isSearching ? 0.5 : 1,
                     pointerEvents: isSearching ? "none" : "auto",
@@ -651,59 +790,58 @@ export default function CompaniesPage() {
                 >
                   <thead>
                     <tr>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "21%" }}
-                      >
-                        Company
+                      <th style={{ ...tableHeaderCellStyle, minWidth: 220 }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSort("name")}
+                          style={sortableHeaderButtonStyle}
+                        >
+                          <span>Company</span>
+                          {renderSortArrow("name")}
+                        </button>
                       </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "23%" }}
-                      >
-                        Contact
+                      <th style={{ ...tableHeaderCellStyle, minWidth: 240 }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSort("contact")}
+                          style={sortableHeaderButtonStyle}
+                        >
+                          <span>Contact</span>
+                          {renderSortArrow("contact")}
+                        </button>
                       </th>
-                      <th
-                        style={{ textAlign: "left", padding: "10px 8px", width: "5%" }}
-                      >
-                        Users
+                      <th style={{ ...tableHeaderCellStyle, minWidth: 90 }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSort("users")}
+                          style={sortableHeaderButtonStyle}
+                        >
+                          <span>Users</span>
+                          {renderSortArrow("users")}
+                        </button>
                       </th>
                       {!isFreePlan && (
-                        <th
-                          style={{ textAlign: "left", padding: "10px 8px", width: "13%" }}
-                        >
+                        <th style={{ ...tableHeaderCellStyle, minWidth: 140 }}>
                           Payment Terms
                         </th>
                       )}
                       {!isFreePlan && (
                         <>
-                          <th
-                            style={{ textAlign: "left", padding: "10px 8px", width: "10%" }}
-                          >
+                          <th style={{ ...tableHeaderCellStyle, minWidth: 120 }}>
                             Credit Limit
                           </th>
-                          <th
-                            style={{ textAlign: "left", padding: "10px 8px", width: "10%" }}
-                          >
+                          <th style={{ ...tableHeaderCellStyle, minWidth: 120 }}>
                             Used Credit
                           </th>
-                          <th
-                            style={{ textAlign: "left", padding: "10px 8px", width: "12%" }}
-                          >
+                          <th style={{ ...tableHeaderCellStyle, minWidth: 140 }}>
                             Available Credit
                           </th>
-                          <th
-                            style={{ textAlign: "left", padding: "10px 8px", width: "7%" }}
-                          >
+                          <th style={{ ...tableHeaderCellStyle, minWidth: 90 }}>
                             Usage %
                           </th>
                         </>
                       )}
-                      <th
-                        style={{
-                          textAlign: "left",
-                          padding: "10px 8px",
-                          width: isFreePlan ? "17%" : "12%",
-                        }}
-                      >
+                      <th style={{ ...tableHeaderCellStyle, minWidth: 130 }}>
                         Actions
                       </th>
                     </tr>
@@ -729,10 +867,8 @@ export default function CompaniesPage() {
                           >
                             <td
                               style={{
-                                padding: "10px 8px",
-                                lineHeight: 1.45,
+                                ...tableCellStyle,
                                 overflowWrap: "anywhere",
-                                verticalAlign: "top",
                               }}
                             >
                               {company.name}
@@ -747,10 +883,8 @@ export default function CompaniesPage() {
 
                             <td
                               style={{
-                                padding: "10px 8px",
-                                lineHeight: 1.45,
+                                ...tableCellStyle,
                                 overflowWrap: "anywhere",
-                                verticalAlign: "top",
                               }}
                             >
                               {company.contactName || company.contactEmail ? (
@@ -771,32 +905,31 @@ export default function CompaniesPage() {
                                 <span style={{ color: "#5c5f62" }}>Not set</span>
                               )}
                             </td>
-                            <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
+                            <td style={tableCellStyle}>
                               {company.userCount}
                             </td>
                             {!isFreePlan && (
-                              <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
+                              <td style={tableCellStyle}>
                                 {company.paymentTerm || "No payment terms"}
                               </td>
                             )}
                             {!isFreePlan && (
                               <>
-                                <td style={{ padding: "10px 8px", verticalAlign: "top" }}>
+                                <td style={tableCellStyle}>
                                   {formatCredit(company.creditLimit, currencyCode)}
                                 </td>
                                 <td
                                   style={{
-                                    padding: "10px 8px",
+                                    ...tableCellStyle,
                                     color: "#d72c0d",
                                     fontWeight: 500,
-                                    verticalAlign: "top",
                                   }}
                                 >
                                   {formatCredit(company.usedCredit, currencyCode)}
                                 </td>
                                 <td
                                   style={{
-                                    padding: "10px 8px",
+                                    ...tableCellStyle,
                                     color:
                                       parseFloat(company.availableCredit) >= 0
                                         ? "#008060"
@@ -805,22 +938,20 @@ export default function CompaniesPage() {
                                       parseFloat(company.availableCredit) < 0
                                         ? 600
                                         : 500,
-                                    verticalAlign: "top",
                                   }}
                                 >
                                   {formatCredit(company.availableCredit, currencyCode)}
                                 </td>
                                 <td
                                   style={{
-                                    padding: "10px 8px",
+                                    ...tableCellStyle,
                                     color:
                                       company.creditUsagePercentage >= 90
                                         ? "#d72c0d"
                                         : company.creditUsagePercentage >= 70
-                                          ? "#b98900"
-                                          : "#008060",
+                                        ? "#b98900"
+                                        : "#008060",
                                     fontWeight: 500,
-                                    verticalAlign: "top",
                                   }}
                                 >
                                   {company.creditUsagePercentage}%
@@ -829,8 +960,7 @@ export default function CompaniesPage() {
                             )}
                             <td
                               style={{
-                                padding: "10px 8px",
-                                width: isFreePlan ? "17%" : "12%",
+                                ...tableCellStyle,
                                 verticalAlign: "middle",
                               }}
                             >
@@ -927,7 +1057,7 @@ export default function CompaniesPage() {
               }}
             >
               <Link
-                to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(currentPage - 1) })}`}
+                to={buildCompaniesQueryString({ page: String(currentPage - 1) })}
                 style={{
                   padding: "8px 16px",
                   borderRadius: 8,
@@ -973,7 +1103,7 @@ export default function CompaniesPage() {
                     return (
                       <Link
                         key={pageNum}
-                        to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(pageNum) })}`}
+                        to={buildCompaniesQueryString({ page: String(pageNum) })}
                         style={{
                           padding: "8px 12px",
                           borderRadius: 8,
@@ -993,7 +1123,7 @@ export default function CompaniesPage() {
               </div>
 
               <Link
-                to={`?${new URLSearchParams({ ...(searchQuery && { search: searchQuery }), page: String(currentPage + 1) })}`}
+                to={buildCompaniesQueryString({ page: String(currentPage + 1) })}
                 style={{
                   padding: "8px 16px",
                   borderRadius: 8,

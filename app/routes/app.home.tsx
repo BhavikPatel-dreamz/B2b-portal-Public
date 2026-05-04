@@ -190,10 +190,10 @@ export default function Home() {
     width: "100%",
     maxWidth: 1200,
     margin: "0 auto 18px",
-    padding: "18px 22px",
+    padding: "0px 0px 16px 0px",
     borderRadius: 14,
     border: "1px solid #dfe3e8",
-    background: "linear-gradient(135deg, #ffffff 0%, #f4f8ff 55%, #eef6f3 100%)",
+    background: "linear-gradient(135deg, #ffffff 0%)",
     boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
   } as const;
   const pageEyebrowStyle = {
@@ -205,16 +205,16 @@ export default function Home() {
     marginBottom: "6px",
   } as const;
   const pageHeroTitleStyle = {
-    fontSize: "28px",
+    fontSize: "22px",
     lineHeight: 1.15,
     fontWeight: 700,
     color: "#202223",
-    margin: 0,
+    margin: "15px",
   } as const;
   const pageHeroTextStyle = {
     fontSize: "14px",
     color: "#5c5f62",
-    margin: "8px 0 0",
+    margin: "0 15px 0",
   } as const;
 
   return (
@@ -222,6 +222,9 @@ export default function Home() {
          <div style={pageShellStyle}>
     <div style={pageHeroStyle}>
       <h1 style={pageHeroTitleStyle}>Dashboard Report</h1>
+      <p style={pageHeroTextStyle}>
+          Manage company profiles, contacts, credit limits, and your B2B customer accounts in one place.
+        </p>
     </div>
     <div className="dashboard-container" style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}>
       <style>{`

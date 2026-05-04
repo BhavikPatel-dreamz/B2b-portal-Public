@@ -5,6 +5,10 @@ import { getStoreByDomain } from "../services/store.server";
 import { createOrder } from "../services/order.server";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { Prisma } from "@prisma/client";
+import {
+  getFreePlanOrdersLimitMessage,
+  getFreePlanUsage,
+} from "app/utils/free-plan-limits.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("orders/create webhook received");
@@ -33,6 +37,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           `Store not found for domain ${shop} — skipping B2B order log`,
         );
         return new Response();
+      }
+
+      if (store.plan === "free") {
+        const usage = await getFreePlanUsage(store.id);
+
+        if (usage.orderLimitReached) {
+          console.warn(
+            `${getFreePlanOrdersLimitMessage()} Skipping B2B order sync for ${shop}.`,
+          );
+          return new Response();
+        }
       }
 
       // Extract customer from webhook payload (REST orders payload)

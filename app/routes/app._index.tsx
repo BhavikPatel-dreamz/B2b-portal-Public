@@ -343,6 +343,28 @@ export default function Welcome() {
     }
   }, [navigate, syncFetcher.data, syncFetcher.state]);
 
+  const pageHeroStyle = {
+    width: "100%",
+    maxWidth: 1200,
+    margin: "0 auto 18px",
+    padding: "0px 0px 16px 0px",
+    borderRadius: 14,
+    border: "1px solid #dfe3e8",
+    background: "linear-gradient(135deg, #ffffff 0%)",
+    boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+  } as const;
+  const pageHeroTitleStyle = {
+    fontSize: "22px",
+    lineHeight: 1.15,
+    fontWeight: 650,
+    color: "#202223",
+    margin: "15px",
+  } as const;
+  const pageHeroTextStyle = {
+    fontSize: "14px",
+    color: "#5c5f62",
+    margin: "0 15px 0",
+  } as const;
 
   return (
     <div
@@ -1578,8 +1600,11 @@ export default function Welcome() {
 
       <div className="setup-container">
         {/* Header */}
-        <div className="setup-header" style={{marginBottom: '24px', display: 'flex'}}>
-          <h1>Welcome to SmartB2B portal,</h1>
+        <div style={pageHeroStyle}>
+          <h3 style={pageHeroTitleStyle}>Welcome to SmartB2B portal</h3>
+          <p style={pageHeroTextStyle}>
+            Welcome to SmartB2B portal, where you can set up your B2B experience, manage company accounts, and streamline customer onboarding in one place.
+          </p>
         </div>
 
        

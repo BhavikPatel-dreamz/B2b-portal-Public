@@ -34,6 +34,11 @@ import EditDetailsModal, {
   type DisplayBlock,
 } from "app/components/registrations/EditDetailsModal";
 import {
+  getFreePlanCompaniesLimitMessage,
+  getSelectPlanPath,
+  getFreePlanUsage,
+} from "app/utils/free-plan-limits.server";
+import {
   DEFAULT_CONFIG,
   SECTION_LABELS,
   deserializeConfig,
@@ -75,6 +80,7 @@ export interface ActionJson {
   success: boolean;
   message?: string;
   errors?: string[];
+  redirectTo?: string;
   submission?: any;
   customer?: {
     id: string;
@@ -2289,6 +2295,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const existingShopifyCompany =
           existingShopifyPayload?.data?.companies?.nodes?.[0] || null;
 
+        if (isFreePlan && !existingShopifyCompany) {
+          const usage = await getFreePlanUsage(store.id);
+
+          if (usage.companyLimitReached) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: [getFreePlanCompaniesLimitMessage()],
+              redirectTo: getSelectPlanPath("/app/companies"),
+            });
+          }
+        }
+
         let companyId: string;
         let locationId: string;
         let locationName: string;
@@ -2613,6 +2632,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             success: false,
             errors: ["Registration and customer are required"],
           });
+        }
+
+        if (isFreePlan && !companyId && companyName) {
+          const usage = await getFreePlanUsage(store.id);
+
+          if (usage.companyLimitReached) {
+            return Response.json({
+              intent,
+              success: false,
+              errors: [getFreePlanCompaniesLimitMessage()],
+              redirectTo: getSelectPlanPath("/app/companies"),
+            });
+          }
         }
 
         await prisma.registrationSubmission.update({
@@ -5600,6 +5632,11 @@ export function RegistrationApprovalsPanel({
       setPipelineStep("error");
       setPipelineError(msg);
     };
+
+    if (data.redirectTo) {
+      window.location.href = data.redirectTo;
+      return;
+    }
 
     // ── 1. checkCustomer → approveRegistration ───────────────────────────
     if (data.intent === "checkCustomer") {

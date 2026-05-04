@@ -7,6 +7,10 @@ import {
 } from "app/utils/email";
 import { getStoreByDomain } from "app/services/store.server";
 import prisma from "app/db.server";
+import {
+  getFreePlanRegistrationsLimitMessage,
+  getFreePlanUsage,
+} from "app/utils/free-plan-limits.server";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -1116,6 +1120,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       lastName,
       phone,
     });
+
+    if (store.plan === "free") {
+      const usage = await getFreePlanUsage(store.id);
+
+      if (usage.registrationLimitReached) {
+        return json(
+          {
+            success: false,
+            error: getFreePlanRegistrationsLimitMessage(),
+          },
+          { status: 403 },
+        );
+      }
+    }
 
     const { company } = await createOrFindCompany(admin, companyName);
     const location = await getOrCreateCompanyLocation(

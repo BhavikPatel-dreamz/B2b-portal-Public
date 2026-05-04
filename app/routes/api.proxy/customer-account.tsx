@@ -4,6 +4,10 @@ import {
   deserializeConfig,
   type StoredConfig,
 } from "../../utils/form-config.shared";
+import {
+  getFreePlanRegistrationsLimitMessage,
+  getFreePlanUsage,
+} from "app/utils/free-plan-limits.server";
 
 
 const CORS_HEADERS = {
@@ -47,7 +51,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
  
     const store = await prisma.store.findUnique({
       where: { shopDomain: shop },
-      select: { id: true, shopDomain: true },
+      select: { id: true, shopDomain: true, plan: true },
     });
  
     // ❌ Store doesn't exist — return blank response (with CORS)
@@ -123,6 +127,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           message: "Your company account has been deactivated. Please contact the support team.",
         },
       )}
+
+    if (store.plan === "free" && !customer && !userData) {
+      const usage = await getFreePlanUsage(store.id);
+
+      if (usage.registrationLimitReached) {
+        return json({
+          message: getFreePlanRegistrationsLimitMessage(),
+          reviewNotes:
+            "The merchant has reached the free plan registration limit.",
+        });
+      }
+    }
  
  
     const formFieldConfig = await prisma.formFieldConfig.findUnique({

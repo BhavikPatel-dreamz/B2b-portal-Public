@@ -30,6 +30,12 @@ import { updateCredit } from "../services/company.server";
 import { formatCredit } from "../utils/company.utils";
 import type { FormConfig } from "../utils/form-config.shared";
 import type { CountryOption } from "app/components/registrations/EditDetailsModal";
+import {
+  FREE_PLAN_MAX_COMPANIES,
+  FREE_PLAN_MAX_REGISTRATIONS,
+  getFreePlanCompaniesLimitMessage,
+  getSelectPlanPath,
+} from "app/utils/free-plan-limits.server";
 
 type LoaderCompany = {
   id: string;
@@ -55,6 +61,7 @@ interface ActionResponse {
   success: boolean;
   message?: string;
   errors?: string[];
+  redirectTo?: string;
 }
 
 interface RegistrationsLoaderData {
@@ -75,10 +82,35 @@ interface RegistrationsLoaderData {
   currencyCode: string;
 }
 
-type SortOrder = "newest" | "oldest";
+type SortField = "updatedAt" | "name" | "contact" | "users";
+type SortDirection = "asc" | "desc";
 
-function normalizeSort(value: string | null): SortOrder {
-  return value === "oldest" ? "oldest" : "newest";
+function normalizeSortField(value: string | null): SortField {
+  switch (value) {
+    case "name":
+      return "name";
+    case "contact":
+      return "contact";
+    case "users":
+      return "users";
+    default:
+      return "updatedAt";
+  }
+}
+
+function normalizeSortDirection(
+  value: string | null,
+  legacySort: string | null,
+): SortDirection {
+  if (value === "asc" || value === "desc") {
+    return value;
+  }
+
+  if (legacySort === "oldest") {
+    return "asc";
+  }
+
+  return "desc";
 }
 
 function formatDisplayDate(value: string) {
@@ -227,13 +259,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const activeTab = normalizeTab(url.searchParams.get("tab"));
     const page = parseInt(url.searchParams.get("page") || "1", 10);
     const searchQuery = url.searchParams.get("search") || "";
-    const sortOrder = normalizeSort(url.searchParams.get("sort"));
+    const legacySort = url.searchParams.get("sort");
+    const sortField = normalizeSortField(url.searchParams.get("sortField"));
+    const sortDirection = normalizeSortDirection(
+      url.searchParams.get("sortDirection"),
+      legacySort,
+    );
     const limit = 10;
     const skip = (page - 1) * limit;
     const shopFromUrl = url.searchParams.get("shop") || "";
 
     if (shopFromUrl) {
-      const cacheKey = `admin-companies-${shopFromUrl}-${activeTab}-${page}-${searchQuery}-${sortOrder}`;
+      const cacheKey = `admin-companies-${shopFromUrl}-${activeTab}-${page}-${searchQuery}-${sortField}-${sortDirection}`;
       const cached = cache.get(cacheKey);
 
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -249,7 +286,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { admin, session } = await authenticate.admin(request);
     const shop = session.shop; // authoritative shop from session
 
-    const cacheKey = `admin-companies-${shop}-${activeTab}-${page}-${searchQuery}-${sortOrder}`;
+    const cacheKey = `admin-companies-${shop}-${activeTab}-${page}-${searchQuery}-${sortField}-${sortDirection}`;
 
     const store = await getStoreForShop(shop);
 
@@ -278,6 +315,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           currentPage: 1,
           totalPages: 0,
           searchQuery: "",
+          sortField,
+          sortDirection,
           isFreePlan: false,
         },
         { status: 404 },
@@ -374,6 +413,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           };
         })();
 
+    const companyOrderBy =
+      sortField === "name"
+        ? { name: sortDirection }
+        : sortField === "contact"
+          ? [{ contactName: sortDirection }, { contactEmail: sortDirection }]
+          : sortField === "users"
+            ? { users: { _count: sortDirection } }
+            : { updatedAt: sortDirection };
+
     const [
       totalCount,
       companies,
@@ -386,7 +434,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       prisma.companyAccount.count({ where: whereClause }),
       prisma.companyAccount.findMany({
         where: whereClause,
-        orderBy: { updatedAt: sortOrder === "oldest" ? "asc" : "desc" },
+        orderBy: companyOrderBy,
         skip,
         take: limit,
         include: { _count: { select: { users: true } } },
@@ -484,8 +532,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       currentPage: page,
       totalPages,
       searchQuery,
-      sortOrder,
+      sortField,
+      sortDirection,
       isFreePlan,
+      freePlanCompanyCount: totalCount,
+      freePlanRegistrationCount: pendingCount + approvedCount,
+      freePlanCompanyLimit: FREE_PLAN_MAX_COMPANIES,
+      freePlanRegistrationLimit: FREE_PLAN_MAX_REGISTRATIONS,
+      freePlanCompanyLimitReached:
+        isFreePlan && totalCount >= FREE_PLAN_MAX_COMPANIES,
+      freePlanRegistrationLimitReached:
+        isFreePlan &&
+        pendingCount + approvedCount >= FREE_PLAN_MAX_REGISTRATIONS,
     };
 
     // ✅ Store in cache
@@ -516,8 +574,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         currentPage: 1,
         totalPages: 0,
         searchQuery: "",
-        sortOrder: "newest",
+        sortField: "updatedAt",
+        sortDirection: "desc",
         isFreePlan: false,
+        freePlanCompanyCount: 0,
+        freePlanRegistrationCount: 0,
+        freePlanCompanyLimit: FREE_PLAN_MAX_COMPANIES,
+        freePlanRegistrationLimit: FREE_PLAN_MAX_REGISTRATIONS,
+        freePlanCompanyLimitReached: false,
+        freePlanRegistrationLimitReached: false,
         },
         { status: 500 },
         );
@@ -600,6 +665,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ── CREATE COMPANY
     case "createCompany": {
+      if (isFreePlan) {
+        const existingCount = await prisma.companyAccount.count({
+          where: { shopId: store.id },
+        });
+
+        if (existingCount >= FREE_PLAN_MAX_COMPANIES) {
+          return Response.json({
+            intent,
+            success: false,
+            errors: [getFreePlanCompaniesLimitMessage()],
+            redirectTo: getSelectPlanPath("/app/companies"),
+          });
+        }
+      }
+
       const name = (form.name as string)?.trim();
       const shopifyCompanyId = (form.shopifyCompanyId as string)?.trim() || null;
       const contactName = (form.contactName as string)?.trim() || null;

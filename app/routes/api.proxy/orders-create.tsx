@@ -11,6 +11,10 @@ import prisma from "../../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
 import { Prisma } from "@prisma/client";
 import { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+import {
+  getFreePlanOrdersLimitMessage,
+  getFreePlanUsage,
+} from "app/utils/free-plan-limits.server";
 
 interface OrderItem {
   variantId: string;
@@ -153,6 +157,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const store = await getStoreByDomain(shop);
     if (!store || !store.accessToken) {
       return Response.json({ error: "Store not found" }, { status: 404 });
+    }
+
+    if (store.plan === "free") {
+      const usage = await getFreePlanUsage(store.id);
+
+      if (usage.orderLimitReached) {
+        return Response.json(
+          { error: getFreePlanOrdersLimitMessage() },
+          { status: 403 },
+        );
+      }
     }
 
     // Get company
