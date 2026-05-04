@@ -16,27 +16,27 @@ type StoreRef = {
   id: string;
 };
 
-type ShopifyCompanyNode = {
-  id: string;
-  name: string;
-  externalId?: string | null;
-  mainContact?: {
-    id: string;
-    customer?: {
-      id: string;
-      email?: string | null;
-      firstName?: string | null;
-      lastName?: string | null;
-      phone?: string | null;
-    } | null;
-  } | null;
-  locations?: {
-    nodes: Array<{
-      id: string;
-      name: string;
-    }>;
-  } | null;
-};
+// type ShopifyCompanyNode = {
+//   id: string;
+//   name: string;
+//   externalId?: string | null;
+//   mainContact?: {
+//     id: string;
+//     customer?: {
+//       id: string;
+//       email?: string | null;
+//       firstName?: string | null;
+//       lastName?: string | null;
+//       phone?: string | null;
+//     } | null;
+//   } | null;
+//   locations?: {
+//     nodes: Array<{
+//       id: string;
+//       name: string;
+//     }>;
+//   } | null;
+// };
 
 type ShopifyCustomerNode = {
   id: string;
@@ -70,6 +70,38 @@ const EMPTY_ADDRESS_JSON: Prisma.JsonObject = {};
  * Fetches all companies from Shopify, imports contact data, and sends notifications
  * SERVER ONLY - Uses Prisma and admin context
  */
+
+type ShopifyCompanyNode = {
+  id: string;
+  name: string;
+  externalId?: string;
+  mainContact?: {
+    id: string;
+    customer?: {
+      id: string;
+      email?: string;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+    };
+  };
+  contacts?: {
+    nodes: Array<{
+      id: string;
+      customer?: {
+        id: string;
+        email?: string;
+        firstName?: string;
+        lastName?: string;
+        phone?: string;
+      };
+    }>;
+  };
+  locations?: {
+    nodes: Array<{ id: string; name: string }>;
+  };
+};
+
 export const syncShopifyCompanies = async (
   admin: ShopifyAdminClient,
   store: StoreRef,
@@ -106,6 +138,18 @@ export const syncShopifyCompanies = async (
                   phone
                 }
               }
+              contacts(first: 10) {
+                nodes {
+                  id
+                  customer {
+                    id
+                    email
+                    firstName
+                    lastName
+                    phone
+                  }
+                }
+              }
               locations(first: 1) {
                 nodes {
                   id
@@ -137,24 +181,74 @@ export const syncShopifyCompanies = async (
 
     let syncedCount = 0;
     const errors: string[] = [];
-    // Collect all Shopify company IDs
     const shopifyCompanyIds = allCompanies.map((company) => company.id);
 
     // Step 2-5: Process each company
     for (const company of allCompanies) {
       try {
         const companyName = company.name;
-        const mainContact = company.mainContact?.customer;
 
-        // Check if user exists
-        if (mainContact?.email) {
-          const shopifyCustomerId = mainContact.id;
+        // Resolve effective contact:
+        // 1. Use mainContact if it has an email
+        // 2. Fall back to first contact with a valid email
+        // 3. null if no contacts have email
+        const effectiveContact = (() => {
+          if (company.mainContact?.customer?.email) {
+            return company.mainContact.customer;
+          }
+          const fallback = company.contacts?.nodes?.find(
+            (c) => c.customer?.email,
+          );
+          if (fallback?.customer) {
+            console.log(
+              `Company "${companyName}" has no mainContact email — using fallback contact: ${fallback.customer.email}`,
+            );
+            return fallback.customer;
+          }
+          return null;
+        })();
+
+        // Always upsert the company regardless of whether we have a contact
+        const upsertedCompany = await prisma.companyAccount.upsert({
+          where: {
+            shopId_shopifyCompanyId: {
+              shopId: store.id,
+              shopifyCompanyId: company.id,
+            },
+          },
+          update: {
+            name: companyName,
+            ...(effectiveContact && {
+              contactName: effectiveContact.firstName
+                ? `${effectiveContact.firstName} ${effectiveContact.lastName || ""}`.trim()
+                : null,
+              contactEmail: effectiveContact.email || null,
+            }),
+          },
+          create: {
+            shopId: store.id,
+            shopifyCompanyId: company.id,
+            name: companyName,
+            contactName: effectiveContact?.firstName
+              ? `${effectiveContact.firstName} ${effectiveContact.lastName || ""}`.trim()
+              : null,
+            contactEmail: effectiveContact?.email || null,
+            creditLimit: new Prisma.Decimal(
+              defaultCompanyCreditLimit.toString(),
+            ),
+          },
+        });
+
+        // User + registration sync only if we have an email
+        if (effectiveContact?.email) {
+          const shopifyCustomerId = effectiveContact.id;
+
           const existingRegistration =
             await prisma.registrationSubmission.findFirst({
               where: {
                 shopId: store.id,
                 OR: [
-                  { email: mainContact.email },
+                  { email: effectiveContact.email },
                   { shopifyCustomerId },
                 ],
               },
@@ -165,24 +259,28 @@ export const syncShopifyCompanies = async (
             existingRegistration &&
             existingRegistration.status !== UserStatus.APPROVED
           ) {
-            const existingLocalCompany = await prisma.companyAccount.findUnique({
-              where: {
-                shopId_shopifyCompanyId: {
-                  shopId: store.id,
-                  shopifyCompanyId: company.id,
-                },
-              },
-              select: {
-                id: true,
-                _count: {
-                  select: {
-                    orders: true,
+            const existingLocalCompany =
+              await prisma.companyAccount.findUnique({
+                where: {
+                  shopId_shopifyCompanyId: {
+                    shopId: store.id,
+                    shopifyCompanyId: company.id,
                   },
                 },
-              },
-            });
+                select: {
+                  id: true,
+                  _count: {
+                    select: {
+                      orders: true,
+                    },
+                  },
+                },
+              });
 
-            if (existingLocalCompany && existingLocalCompany._count.orders === 0) {
+            if (
+              existingLocalCompany &&
+              existingLocalCompany._count.orders === 0
+            ) {
               await prisma.companyAccount.delete({
                 where: { id: existingLocalCompany.id },
               });
@@ -191,43 +289,16 @@ export const syncShopifyCompanies = async (
             continue;
           }
 
-          // Upsert company data to Prisma
-          const upsertedCompany = await prisma.companyAccount.upsert({
+          await prisma.user.upsert({
             where: {
-              shopId_shopifyCompanyId: {
+              shopId_email: {
                 shopId: store.id,
-                shopifyCompanyId: company.id,
+                email: effectiveContact.email,
               },
             },
             update: {
-              name: companyName,
-              contactName: mainContact.firstName
-                ? `${mainContact.firstName} ${mainContact.lastName || ""}`.trim()
-                : null,
-              contactEmail: mainContact.email,
-            },
-            create: {
-              shopId: store.id,
-              shopifyCompanyId: company.id,
-              name: companyName,
-              contactName: mainContact.firstName
-                ? `${mainContact.firstName} ${mainContact.lastName || ""}`.trim()
-                : null,
-              contactEmail: mainContact.email,
-              creditLimit: new Prisma.Decimal(
-                defaultCompanyCreditLimit.toString(),
-              ),
-            },
-          });
-
-          // Ensure the company's main contact exists as a store admin user
-          await prisma.user.upsert({
-            where: {
-              shopId_email: { shopId: store.id, email: mainContact.email },
-            },
-            update: {
-              firstName: mainContact.firstName || null,
-              lastName: mainContact.lastName || null,
+              firstName: effectiveContact.firstName || null,
+              lastName: effectiveContact.lastName || null,
               shopifyCustomerId,
               shopId: store.id,
               companyId: upsertedCompany.id,
@@ -236,10 +307,10 @@ export const syncShopifyCompanies = async (
               isActive: true,
             },
             create: {
-              email: mainContact.email,
-              firstName: mainContact.firstName || null,
-              lastName: mainContact.lastName || null,
-              password: "", // Placeholder password; Shopify-auth users don't log in directly
+              email: effectiveContact.email,
+              firstName: effectiveContact.firstName || null,
+              lastName: effectiveContact.lastName || null,
+              password: "",
               shopifyCustomerId,
               shopId: store.id,
               companyId: upsertedCompany.id,
@@ -255,10 +326,10 @@ export const syncShopifyCompanies = async (
               await prisma.registrationSubmission.update({
                 where: { id: existingRegistration.id },
                 data: {
-                  email: mainContact.email,
+                  email: effectiveContact.email,
                   companyName: upsertedCompany.name,
-                  firstName: mainContact.firstName || "",
-                  lastName: mainContact.lastName || "",
+                  firstName: effectiveContact.firstName || "",
+                  lastName: effectiveContact.lastName || "",
                   shopifyCustomerId,
                   shopId: store.id,
                 },
@@ -267,10 +338,10 @@ export const syncShopifyCompanies = async (
           } else {
             await prisma.registrationSubmission.create({
               data: {
-                email: mainContact.email,
+                email: effectiveContact.email,
                 companyName: upsertedCompany.name,
-                firstName: mainContact.firstName || "",
-                lastName: mainContact.lastName || "",
+                firstName: effectiveContact.firstName || "",
+                lastName: effectiveContact.lastName || "",
                 shopifyCustomerId,
                 status: UserStatus.APPROVED,
                 shopId: store.id,
@@ -284,7 +355,7 @@ export const syncShopifyCompanies = async (
 
           await syncShopifyUsers(admin, store, upsertedCompany.id);
           await syncShopifyOrders(admin, store, upsertedCompany.id);
-          // Send welcome email if email is configured
+
           if (
             submissionEmail &&
             /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submissionEmail)
@@ -293,15 +364,21 @@ export const syncShopifyCompanies = async (
               await sendCompanyWelcomeEmail(
                 submissionEmail,
                 companyName,
-                mainContact.firstName || "Customer",
+                effectiveContact.firstName || "Customer",
               );
             } catch (emailError) {
               console.error("Failed to send email:", emailError);
             }
           }
-
-          syncedCount++;
+        } else {
+          // No contact email found — still sync orders, skip user sync
+          await syncShopifyOrders(admin, store, upsertedCompany.id);
+          console.warn(
+            `Company "${companyName}" has no contacts with email — skipping user sync`,
+          );
         }
+
+        syncedCount++;
       } catch (companyError) {
         console.error(`Error syncing company:`, companyError);
         errors.push(
@@ -368,6 +445,304 @@ export const syncShopifyCompanies = async (
     };
   }
 };
+// export const syncShopifyCompanies = async (
+//   admin: ShopifyAdminClient,
+//   store: StoreRef,
+//   submissionEmail: string | null,
+// ) => {
+//   try {
+//     const storeSettings = await prisma.store.findUnique({
+//       where: { id: store.id },
+//       select: { defaultCompanyCreditLimit: true },
+//     });
+//     const defaultCompanyCreditLimit =
+//       storeSettings?.defaultCompanyCreditLimit ?? new Prisma.Decimal(0);
+
+//     // Step 1: Fetch all Shopify B2B companies with pagination
+//     let allCompanies: ShopifyCompanyNode[] = [];
+//     let hasNextPage = true;
+//     let cursor: string | null = null;
+
+//     while (hasNextPage) {
+//       const companiesQuery = `
+//         query GetAllCompanies($cursor: String) {
+//           companies(first: 100, after: $cursor) {
+//             nodes {
+//               id
+//               name
+//               externalId
+//               mainContact {
+//                 id
+//                 customer {
+//                   id
+//                   email
+//                   firstName
+//                   lastName
+//                   phone
+//                 }
+//               }
+//               locations(first: 1) {
+//                 nodes {
+//                   id
+//                   name
+//                 }
+//               }
+//             }
+//             pageInfo {
+//               hasNextPage
+//               endCursor
+//             }
+//           }
+//         }
+//       `;
+
+//       const response = await admin.graphql(companiesQuery, {
+//         variables: { cursor },
+//       });
+//       const result = await response.json();
+//       const data = result?.data?.companies;
+
+//       if (data?.nodes) {
+//         allCompanies = [...allCompanies, ...data.nodes];
+//       }
+
+//       hasNextPage = data?.pageInfo?.hasNextPage || false;
+//       cursor = data?.pageInfo?.endCursor || null;
+//     }
+
+//     let syncedCount = 0;
+//     const errors: string[] = [];
+//     // Collect all Shopify company IDs
+//     const shopifyCompanyIds = allCompanies.map((company) => company.id);
+
+//     // Step 2-5: Process each company
+//     for (const company of allCompanies) {
+//       try {
+//         const companyName = company.name;
+//         const mainContact = company.mainContact?.customer;
+
+//         // Check if user exists
+//         if (mainContact?.email) {
+//           const shopifyCustomerId = mainContact.id;
+//           const existingRegistration =
+//             await prisma.registrationSubmission.findFirst({
+//               where: {
+//                 shopId: store.id,
+//                 OR: [
+//                   { email: mainContact.email },
+//                   { shopifyCustomerId },
+//                 ],
+//               },
+//               select: { id: true, status: true },
+//             });
+
+//           if (
+//             existingRegistration &&
+//             existingRegistration.status !== UserStatus.APPROVED
+//           ) {
+//             const existingLocalCompany = await prisma.companyAccount.findUnique({
+//               where: {
+//                 shopId_shopifyCompanyId: {
+//                   shopId: store.id,
+//                   shopifyCompanyId: company.id,
+//                 },
+//               },
+//               select: {
+//                 id: true,
+//                 _count: {
+//                   select: {
+//                     orders: true,
+//                   },
+//                 },
+//               },
+//             });
+
+//             if (existingLocalCompany && existingLocalCompany._count.orders === 0) {
+//               await prisma.companyAccount.delete({
+//                 where: { id: existingLocalCompany.id },
+//               });
+//             }
+
+//             continue;
+//           }
+
+//           // Upsert company data to Prisma
+//           const upsertedCompany = await prisma.companyAccount.upsert({
+//             where: {
+//               shopId_shopifyCompanyId: {
+//                 shopId: store.id,
+//                 shopifyCompanyId: company.id,
+//               },
+//             },
+//             update: {
+//               name: companyName,
+//               contactName: mainContact.firstName
+//                 ? `${mainContact.firstName} ${mainContact.lastName || ""}`.trim()
+//                 : null,
+//               contactEmail: mainContact.email,
+//             },
+//             create: {
+//               shopId: store.id,
+//               shopifyCompanyId: company.id,
+//               name: companyName,
+//               contactName: mainContact.firstName
+//                 ? `${mainContact.firstName} ${mainContact.lastName || ""}`.trim()
+//                 : null,
+//               contactEmail: mainContact.email,
+//               creditLimit: new Prisma.Decimal(
+//                 defaultCompanyCreditLimit.toString(),
+//               ),
+//             },
+//           });
+
+//           // Ensure the company's main contact exists as a store admin user
+//           await prisma.user.upsert({
+//             where: {
+//               shopId_email: { shopId: store.id, email: mainContact.email },
+//             },
+//             update: {
+//               firstName: mainContact.firstName || null,
+//               lastName: mainContact.lastName || null,
+//               shopifyCustomerId,
+//               shopId: store.id,
+//               companyId: upsertedCompany.id,
+//               companyRole: "admin",
+//               role: UserRole.STORE_ADMIN,
+//               isActive: true,
+//             },
+//             create: {
+//               email: mainContact.email,
+//               firstName: mainContact.firstName || null,
+//               lastName: mainContact.lastName || null,
+//               password: "", // Placeholder password; Shopify-auth users don't log in directly
+//               shopifyCustomerId,
+//               shopId: store.id,
+//               companyId: upsertedCompany.id,
+//               companyRole: "admin",
+//               role: UserRole.STORE_ADMIN,
+//               status: UserStatus.APPROVED,
+//               isActive: true,
+//             },
+//           });
+
+//           if (existingRegistration) {
+//             if (existingRegistration.status !== UserStatus.REJECTED) {
+//               await prisma.registrationSubmission.update({
+//                 where: { id: existingRegistration.id },
+//                 data: {
+//                   email: mainContact.email,
+//                   companyName: upsertedCompany.name,
+//                   firstName: mainContact.firstName || "",
+//                   lastName: mainContact.lastName || "",
+//                   shopifyCustomerId,
+//                   shopId: store.id,
+//                 },
+//               });
+//             }
+//           } else {
+//             await prisma.registrationSubmission.create({
+//               data: {
+//                 email: mainContact.email,
+//                 companyName: upsertedCompany.name,
+//                 firstName: mainContact.firstName || "",
+//                 lastName: mainContact.lastName || "",
+//                 shopifyCustomerId,
+//                 status: UserStatus.APPROVED,
+//                 shopId: store.id,
+//                 contactTitle: "",
+//                 shipping: EMPTY_ADDRESS_JSON,
+//                 billing: EMPTY_ADDRESS_JSON,
+//                 workflowCompleted: true,
+//               },
+//             });
+//           }
+
+//           await syncShopifyUsers(admin, store, upsertedCompany.id);
+//           await syncShopifyOrders(admin, store, upsertedCompany.id);
+//           // Send welcome email if email is configured
+//           if (
+//             submissionEmail &&
+//             /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submissionEmail)
+//           ) {
+//             try {
+//               await sendCompanyWelcomeEmail(
+//                 submissionEmail,
+//                 companyName,
+//                 mainContact.firstName || "Customer",
+//               );
+//             } catch (emailError) {
+//               console.error("Failed to send email:", emailError);
+//             }
+//           }
+
+//           syncedCount++;
+//         }
+//       } catch (companyError) {
+//         console.error(`Error syncing company:`, companyError);
+//         errors.push(
+//           `Failed to sync ${company.name}: ${companyError instanceof Error ? companyError.message : "Unknown error"}`,
+//         );
+//       }
+//     }
+
+//     // Step 6: Delete companies that don't exist in Shopify anymore
+//     try {
+//       const deleteResult = await prisma.companyAccount.deleteMany({
+//         where: {
+//           shopId: store.id,
+//           shopifyCompanyId: {
+//             not: null,
+//             notIn: shopifyCompanyIds,
+//           },
+//         },
+//       });
+
+//       console.log(
+//         `Deleted ${deleteResult.count} companies that no longer exist in Shopify`,
+//       );
+
+//       if (deleteResult.count > 0) {
+//         return {
+//           success: true,
+//           syncedCount,
+//           deletedCount: deleteResult.count,
+//           errors,
+//           message:
+//             errors.length > 0
+//               ? `Synced ${syncedCount} companies, deleted ${deleteResult.count} companies with ${errors.length} errors`
+//               : `Successfully synced ${syncedCount} companies and deleted ${deleteResult.count} obsolete companies`,
+//         };
+//       }
+//     } catch (deleteError) {
+//       console.error("Error deleting obsolete companies:", deleteError);
+//       errors.push(
+//         `Failed to delete obsolete companies: ${deleteError instanceof Error ? deleteError.message : "Unknown error"}`,
+//       );
+//     }
+
+//     return {
+//       success: true,
+//       syncedCount,
+//       deletedCount: 0,
+//       errors,
+//       message:
+//         errors.length > 0
+//           ? `Synced ${syncedCount} companies with ${errors.length} errors`
+//           : `Successfully synced ${syncedCount} companies`,
+//     };
+//   } catch (error) {
+//     console.error("Sync error:", error);
+//     return {
+//       success: false,
+//       syncedCount: 0,
+//       deletedCount: 0,
+//       errors: [
+//         error instanceof Error ? error.message : "Unknown sync error occurred",
+//       ],
+//       message: "Sync failed",
+//     };
+//   }
+// };
 
 /**
  * Parse form data from request
