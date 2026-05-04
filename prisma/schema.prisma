@@ -247,6 +247,7 @@ model WishlistItem {
   image       String?  // URL of the product image
   price       Float    @default(0) // Unit price
   quantity    Int      @default(1)
+  soldOut     Boolean  @default(false)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
