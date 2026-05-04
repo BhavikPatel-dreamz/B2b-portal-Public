@@ -89,24 +89,12 @@ function downloadCsv(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
-function normalizeTab(value: string | null): RegistrationStatusTab {
-  switch (value?.toLowerCase()) {
-    case "pending":
-      return "pending";
-    case "rejected":
-      return "rejected";
-    default:
-      return "companies";
-  }
-}
-
 export default function CompaniesPage() {
   const {
     companies,
     submissions,
     activeTab,
     pendingCount,
-    approvedCount,
     rejectedCount,
     formConfig,
     shippingCountryOptions,

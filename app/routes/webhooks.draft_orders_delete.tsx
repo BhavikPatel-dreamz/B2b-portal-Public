@@ -11,7 +11,7 @@ interface ShopifyDraftOrder {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { topic, shop, session, payload } = await authenticate.webhook(request);
+  const { shop, payload } = await authenticate.webhook(request);
   console.log(`📝 Draft Order Deleted webhook received for shop: ${shop}`);
 
   try {

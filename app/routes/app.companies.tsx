@@ -3,31 +3,16 @@ import type {
   LoaderFunctionArgs,
   HeadersFunction,
 } from "react-router";
-import {
-  useFetcher,
-  useLoaderData,
-  Link,
-  useSearchParams,
-  useNavigation,
-  useRevalidator,
-  useNavigate,
-} from "react-router";
-import { useEffect, useState, useRef } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useAppBridge } from "@shopify/app-bridge-react";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import {
-  RegistrationApprovalsPanel,
-  type RegistrationSubmission,
-} from "./app.registrations";
+import { type RegistrationSubmission } from "./app.registrations";
 import {
   syncShopifyCompanies,
   parseForm,
   parseCredit,
 } from "../utils/company.server";
 import { updateCredit } from "../services/company.server";
-import { formatCredit } from "../utils/company.utils";
 import type { FormConfig } from "../utils/form-config.shared";
 import type { CountryOption } from "app/components/registrations/EditDetailsModal";
 import {
@@ -55,32 +40,6 @@ type LoaderCompany = {
 };
 
 type RegistrationStatusTab = "companies" | "pending" | "rejected";
-
-interface ActionResponse {
-  intent: string;
-  success: boolean;
-  message?: string;
-  errors?: string[];
-  redirectTo?: string;
-}
-
-interface RegistrationsLoaderData {
-  submissions: RegistrationSubmission[];
-  formConfig: FormConfig;
-  shippingCountryOptions: CountryOption[];
-  shippingProvincesByCountry: Record<string, CountryOption[]>;
-  paymentTermsTemplates: Array<{
-    id: string;
-    name: string;
-    paymentTermsType: string;
-    dueInDays: number | null;
-  }>;
-  allCatalogs: any[];
-  priceLists: any[];
-  storeMissing: boolean;
-  isFreePlan: boolean;
-  currencyCode: string;
-}
 
 type SortField = "updatedAt" | "name" | "contact" | "users";
 type SortDirection = "asc" | "desc";
@@ -112,33 +71,6 @@ function normalizeSortDirection(
 
   return "desc";
 }
-
-function formatDisplayDate(value: string) {
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
-}
-
-function downloadCsv(filename: string, rows: string[][]) {
-  const csv = rows
-    .map((row) =>
-      row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","),
-    )
-    .join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
 
 // ============================================================
 // 🗂️  CACHE SETUP 

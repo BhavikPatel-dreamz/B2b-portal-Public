@@ -7,6 +7,7 @@ import { validateTieredCreditForOrder, restoreTieredCredit } from "../services/t
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { calculateAvailableCredit } from "../services/creditService";
 import { Prisma } from "@prisma/client";
+import prisma from "app/db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("orders/updated webhook received");
@@ -284,6 +285,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             companyRemainingBalance: companyRemainingBalance.toString(),
             currency: currency
           });
+         const exist = await prisma.creditTransaction.findFirst({
+            where: {
+              companyId: user.companyId,
+              orderId: existingOrder.id,
+              transactionType: "order_paid"
+            }
+          })
+          if(!exist){
+            await prisma.creditTransaction.create({
+            data: {
+              companyId: user.companyId,
+              orderId: existingOrder.id,
+              creditAmount: new Prisma.Decimal(creditToUse), // positive because we're deducting
+              transactionType: "order_paid",
+              previousBalance: companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0),
+              newBalance: companyRemainingBalance,
+              notes: `Credit ${paymentStatus === "paid" ? 'deducted' : 'adjusted'} for order update`,
+              createdBy: user.id,
+              createdAt: new Date(),
+            },
+            });
+          }
         }
 
       } catch (error) {
@@ -335,6 +358,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         creditUsed: unpaidAmount.toString(),
         companyRemainingBalance: companyRemainingBalance.toString()
       });
+           const exist = await prisma.creditTransaction.findFirst({
+            where: {
+              companyId: user.companyId,
+              orderId: existingOrder.id,
+              transactionType: "order_paid"
+            }
+          })
+          if(!exist){
+            await prisma.creditTransaction.create({
+            data: {
+              companyId: user.companyId,
+              orderId: existingOrder.id,
+              creditAmount: new Prisma.Decimal(unpaidAmount.toString()), // positive because we're deducting
+              transactionType: "order_paid",
+              previousBalance: companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0),
+              newBalance: companyRemainingBalance,
+              notes: `Credit ${paymentStatus === "paid" ? 'deducted' : 'adjusted'} for order update`,
+              createdBy: user.id,
+              createdAt: new Date(),
+            },
+            });
+          }
+      
     }
 
     return new Response(null, { status: 200 });

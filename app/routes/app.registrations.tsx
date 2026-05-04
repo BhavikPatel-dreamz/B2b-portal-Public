@@ -169,14 +169,14 @@ export function buildUserErrorList(payload: any) {
   return errors;
 }
 
-const US_COUNTRY_ALIASES = new Set([
-  "US",
-  "USA",
-  "UNITED STATES",
-  "UNITED STATES OF AMERICA",
-]);
+// const US_COUNTRY_ALIASES = new Set([
+//   "US",
+//   "USA",
+//   "UNITED STATES",
+//   "UNITED STATES OF AMERICA",
+// ]);
 
-const TEXAS_STATE_ALIASES = new Set(["TX", "TEXAS"]);
+// const TEXAS_STATE_ALIASES = new Set(["TX", "TEXAS"]);
 
 function getSubmissionTaxId(submission: any): string {
   return (
@@ -186,18 +186,18 @@ function getSubmissionTaxId(submission: any): string {
   );
 }
 
-function isTexasAddress(address?: Record<string, any> | null) {
-  if (!address) return false;
+// function isTexasAddress(address?: Record<string, any> | null) {
+//   if (!address) return false;
 
-  const state = String(address.State ?? address.state ?? "")
-    .trim()
-    .toUpperCase();
-  const country = String(address.Country ?? address.country ?? "")
-    .trim()
-    .toUpperCase();
+//   const state = String(address.State ?? address.state ?? "")
+//     .trim()
+//     .toUpperCase();
+//   const country = String(address.Country ?? address.country ?? "")
+//     .trim()
+//     .toUpperCase();
 
-  return TEXAS_STATE_ALIASES.has(state) && US_COUNTRY_ALIASES.has(country);
-}
+//   return TEXAS_STATE_ALIASES.has(state) && US_COUNTRY_ALIASES.has(country);
+// }
 
 
 async function updateCompanyLocationSettings(

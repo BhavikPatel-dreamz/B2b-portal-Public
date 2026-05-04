@@ -5,6 +5,9 @@ import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 
 import { Prisma } from "@prisma/client";
+import prisma from "app/db.server";
+import { getUserByShopifyCustomerId } from "app/services/user.server";
+import { calculateAvailableCredit } from "app/services/tieredCreditService";
 
 
 /**
@@ -106,12 +109,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
 
       // Update order status to reflect successful validation and payment
+      // **NEW: Create credit restoration transaction for order_paid (BEFORE updating order)**
+
+      
+      const customerGid = `gid://shopify/Customer/${customerId}`;
+      const orderUser = await getUserByShopifyCustomerId(store.id, customerGid);
+      const createdBy = orderUser?.id || "system";
+      
+      const creditInfo = await calculateAvailableCredit(order.companyId!);
+      if (creditInfo) {
+        const restoreAmount = order.creditUsed || new Prisma.Decimal(totalAmount);
+        const previousBalance = creditInfo.availableCredit;
+        const newBalance = previousBalance.plus(restoreAmount);
+        
+        await prisma.creditTransaction.create({
+          data: {
+            companyId: order.companyId!,
+            orderId: order.id,
+            transactionType: "order_paid",
+            creditAmount: restoreAmount,
+            previousBalance,
+            newBalance,
+            notes: `Credit restored for paid order #${order.id}`,
+            createdBy,
+          },
+        });
+        console.log(`✅ Created order_paid credit transaction: +${restoreAmount} | ${previousBalance} → ${newBalance}`);
+      }
+      
       await updateOrder(order.id, {
         paymentStatus: "paid",
         paidAmount: new Prisma.Decimal(totalAmount),
         remainingBalance: new Prisma.Decimal(0),
         paidAt: new Date(),
       });
+  
+
+  // Removed broken transaction code
+
 
     } else {
       // ❌ Credit validation failed - order will be refunded/cancelled
@@ -128,6 +163,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         remainingBalance: new Prisma.Decimal(totalAmount),
         notes: `Post-payment validation failed: ${validationResult.error}`,
       });
+
     }
 
     return new Response();

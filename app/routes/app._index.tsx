@@ -15,12 +15,6 @@ import { syncShopifyCompanies } from "app/utils/company.server";
 import { countRegistrations } from "../services/registration.server";
 
 
-type CompletedStepsState = {
-  step1: boolean;
-  step2: boolean;
-  step3: boolean;
-};
- 
 type Tutorial = {
   id: number;
   tag: string;
@@ -215,22 +209,7 @@ export default function Welcome() {
   const syncFetcher = useFetcher<ActionResponse>();
   const setupFetcher = useFetcher();
   const navigate = useNavigate();
-  const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
   const [showSetupEssentials, setShowSetupEssentials] = useState(!setupFinished);
-
-
-  const [completedSteps, setCompletedSteps] = useState({
-    step1: false,
-    step2: false,
-    step3: false
-  });
-
-  const toggleStep = (step: keyof CompletedStepsState) => {
-    setCompletedSteps(prev => ({
-      ...prev,
-      [step]: !prev[step]
-    }));
-  };
 
    const getStoreName = () => {
     if (!store?.shopDomain) return '';
