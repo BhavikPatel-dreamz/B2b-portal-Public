@@ -1,6 +1,7 @@
 import {
   ActionFunctionArgs,
   Form,
+  redirect,
   useActionData,
   useFetcher,
   useLoaderData,
@@ -75,7 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       url.searchParams.get("returnTo") &&
       url.searchParams.get("returnTo")?.startsWith("/app/")
         ? url.searchParams.get("returnTo")
-        : "/app/billing-example",
+        : "/app/home",
     activePlans: (appSubscriptions || []).map((s) => ({
       id: s.id,
       name: s.name,
@@ -112,11 +113,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await setStoreFreePlan(session.shop);
       clearAdminCompaniesCache(session.shop);
       clearDashboardStatsCache(session.shop);
-      return {
-        ok: true,
-        message: "Free plan activated successfully.",
-        redirectTo: returnTo,
-      };
+      return redirect(returnTo);
     }
 
     const appUrl = new URL(request.url).origin;
@@ -200,16 +197,11 @@ export default function SelectPlan() {
   const cancelResult = cancelFetcher.data;
 
   useEffect(() => {
-    if (cancelFetcher.state === "idle" && cancelResult?.ok) {
+    if (cancelFetcher.state === "idle" && cancelFetcher.data) {
       revalidator.revalidate();
     }
-  }, [cancelFetcher.state, cancelResult, revalidator]);
+  }, [cancelFetcher.state, cancelFetcher.data, revalidator]);
 
-  useEffect(() => {
-    if (actionData?.ok && actionData?.redirectTo) {
-      window.location.href = actionData.redirectTo;
-    }
-  }, [actionData]);
   const pageShellStyle = {
     background: "#f1f2f4",
     minHeight: "100vh",

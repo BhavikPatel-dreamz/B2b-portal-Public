@@ -1,5 +1,5 @@
 import { PAID_PLAN } from "app/billing-plans.shared";
-import { ActionFunctionArgs } from "react-router";
+import { ActionFunctionArgs,redirect } from "react-router";
 import { clearStorePlan } from "app/services/store.server";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
@@ -45,5 +45,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   clearAdminCompaniesCache(session.shop);
   clearDashboardStatsCache(session.shop);
 
-  return { ok: true, cancelledSubscription };
+  return redirect("/app/select-plan");
 };
