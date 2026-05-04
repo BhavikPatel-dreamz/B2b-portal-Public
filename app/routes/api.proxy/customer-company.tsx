@@ -52,6 +52,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       customerId: companyInfo.customerId,
       customerName: companyInfo.customerName,
       customerEmail: companyInfo.customerEmail,
+      companyName: companyInfo.companies?.[0]?.companyName || "",
 
       // Credit
       CreditLimit: companyInfo.CreditLimit,
