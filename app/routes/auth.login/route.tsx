@@ -1,55 +1,49 @@
-import { useEffect } from "react";
-import { redirect, useLoaderData } from "react-router";
+import { AppProvider } from "@shopify/shopify-app-react-router/react";
+import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { authenticate, login } from "../../shopify.server";
+import { Form, useActionData, useLoaderData } from "react-router";
+
+import { login } from "../../shopify.server";
+import { loginErrorMessage } from "./error.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  const shop = url.searchParams.get("shop");
+  const errors = loginErrorMessage(await login(request));
 
-  try {
-    const { session } = await authenticate.admin(request);
-    const storeName = session.shop.split(".")[0];
-    const redirectUrl = `https://admin.shopify.com/store/${storeName}/apps/b2b-portal-public-3/app/home`;
-    
-    if (shop) {
-      return redirect(redirectUrl);
-    }
-    
-    return { redirectUrl };
-  } catch (error) {
-    // If not authenticated, we just show the login form or handle the shop param
-    if (shop) {
-       return await login(request);
-    }
-    return { redirectUrl: null };
-  }
+  return { errors };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const url = new URL(request.url);
-  const shop = url.searchParams.get("shop");
+  const errors = loginErrorMessage(await login(request));
 
-  try {
-    const { session } = await authenticate.admin(request);
-    const storeName = session.shop.split(".")[0];
-    return redirect(
-      `https://admin.shopify.com/store/${storeName}/apps/b2b-portal-public-3/app/home`
-    );
-  } catch (error) {
-    return await login(request);
-  }
+  return {
+    errors,
+  };
 };
 
 export default function Auth() {
-  const data = useLoaderData<typeof loader>();
-  const redirectUrl = data && "redirectUrl" in data ? data.redirectUrl : null;
+  const loaderData = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const [shop, setShop] = useState("");
+  const { errors } = actionData || loaderData;
 
-  useEffect(() => {
-    if (redirectUrl) {
-      window.location.href = redirectUrl;
-    }
-  }, [redirectUrl]);
-
-  return null;
+  return (
+    <AppProvider embedded={false}>
+      <s-page>
+        <Form method="post">
+        <s-section heading="Log in">
+          <s-text-field
+            name="shop"
+            label="Shop domain"
+            details="example.myshopify.com"
+            value={shop}
+            onChange={(e) => setShop(e.currentTarget.value)}
+            autocomplete="on"
+            error={errors.shop}
+          ></s-text-field>
+          <s-button type="submit">Log in</s-button>
+        </s-section>
+        </Form>
+      </s-page>
+    </AppProvider>
+  );
 }
