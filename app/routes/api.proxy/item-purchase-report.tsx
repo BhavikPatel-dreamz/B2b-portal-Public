@@ -62,24 +62,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const productId = item.product?.id || "Unknown Product";
         const key = `${productId}-${sku}`;
-        const quantity = Number(item.quantity || 0);
-        // Use discountedUnitPriceSet if available, otherwise fallback to originalUnitPriceSet
-        const price = Number(item.discountedUnitPriceSet?.shopMoney?.amount || item.originalUnitPriceSet?.shopMoney?.amount || 0);
-        const totalValue = quantity * price;
+        
+        const originalQuantity = Number(item.quantity || 0);
+        const currentQuantity = Number(item.currentQuantity ?? item.quantity ?? 0);
+        
+        // Skip items that were fully refunded
+        if (currentQuantity <= 0 || originalQuantity <= 0) continue;
+
+        // Calculate the true net unit price: (Original Total - Total Discounts) / Original Quantity
+        const originalUnitPrice = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
+        const totalDiscounts = Number(item.totalAllocatedDiscountSet?.shopMoney?.amount || 0);
+        
+        const netLineTotal = (originalUnitPrice * originalQuantity) - totalDiscounts;
+        const netUnitPrice = netLineTotal / originalQuantity;
+        
+        // Total value is net unit price * what the customer actually kept
+        const totalValue = netUnitPrice * currentQuantity;
+        const quantityPurchased = currentQuantity;
 
         if (reportMap.has(key)) {
           const existing = reportMap.get(key);
-          existing.quantityPurchased += quantity;
+          existing.quantityPurchased += quantityPurchased;
           existing.totalValue += totalValue;
         } else {
           reportMap.set(key, {
             product: fullProductName,
             sku: sku,
-            quantityPurchased: quantity,
+            quantityPurchased: quantityPurchased,
             totalValue: totalValue,
-            currencyCode: item.discountedUnitPriceSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
+            currencyCode: item.totalAllocatedDiscountSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
           });
         }
+
       }
     }
 

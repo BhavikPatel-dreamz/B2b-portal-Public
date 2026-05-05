@@ -6266,56 +6266,96 @@ export async function getAdvancedCompanyOrders(
     if (filters.dateRange) {
       const { preset, start, end } = filters.dateRange;
       const now = new Date();
-      let dateQuery = "";
 
-      // Helper to get start of day in ISO format
-      const getStartOfDay = (d: Date) => {
-        const date = new Date(d);
-        date.setHours(0, 0, 0, 0);
-        return date.toISOString();
+      const isValidDate = (d: Date) => !Number.isNaN(d.getTime());
+
+      // Shopify search syntax expects date values to be quoted. Also strip
+      // milliseconds for consistent ISO formatting.
+      const toShopifyQuotedDate = (d: Date) => {
+        const iso = d.toISOString().replace(/\.\d{3}Z$/, "Z");
+        return `'${iso}'`;
       };
 
-      // Helper to get end of day in ISO format
-      const getEndOfDay = (d: Date) => {
+      const startOfDay = (d: Date) => {
+        const date = new Date(d);
+        date.setHours(0, 0, 0, 0);
+        return date;
+      };
+
+      const endOfDay = (d: Date) => {
         const date = new Date(d);
         date.setHours(23, 59, 59, 999);
-        return date.toISOString();
+        return date;
+      };
+
+      const addCreatedAtTerm = (comparator: ">=" | "<=", date: Date) => {
+        if (!isValidDate(date)) return;
+        queryParts.push(`created_at:${comparator}${toShopifyQuotedDate(date)}`);
+      };
+
+      const addCreatedAtRange = (startDate: Date, endDate?: Date) => {
+        addCreatedAtTerm(">=", startDate);
+        if (endDate) addCreatedAtTerm("<=", endDate);
+      };
+
+      const startOfWeekMonday = (d: Date) => {
+        const date = startOfDay(d);
+        const day = date.getDay(); // Sunday = 0
+        const diffToMonday = (day + 6) % 7; // Monday => 0, Sunday => 6
+        date.setDate(date.getDate() - diffToMonday);
+        return date;
       };
 
       if (preset === "today") {
-        dateQuery = `created_at:>=${getStartOfDay(now)}`;
+        addCreatedAtRange(startOfDay(now), endOfDay(now));
       } else if (preset === "yesterday") {
         const yesterday = new Date(now);
-        yesterday.setDate(now.getDate() - 1);
-        dateQuery = `created_at:>=${getStartOfDay(yesterday)} AND created_at:<=${getEndOfDay(yesterday)}`;
-      } else if (preset === "last_7_days" || preset === "last_week") {
-        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        dateQuery = `created_at:>=${sevenDaysAgo.toISOString()}`;
+        yesterday.setDate(yesterday.getDate() - 1);
+        addCreatedAtRange(startOfDay(yesterday), endOfDay(yesterday));
+      } else if (preset === "last_7_days") {
+        const startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - 6);
+        addCreatedAtRange(startOfDay(startDate), endOfDay(now));
       } else if (preset === "last_30_days") {
-        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        dateQuery = `created_at:>=${thirtyDaysAgo.toISOString()}`;
+        const startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - 29);
+        addCreatedAtRange(startOfDay(startDate), endOfDay(now));
+      } else if (preset === "last_week") {
+        const startThisWeek = startOfWeekMonday(now);
+        const startLastWeek = new Date(startThisWeek);
+        startLastWeek.setDate(startLastWeek.getDate() - 7);
+        const endLastWeek = new Date(startThisWeek);
+        endLastWeek.setDate(endLastWeek.getDate() - 1);
+        endLastWeek.setHours(23, 59, 59, 999);
+        addCreatedAtRange(startLastWeek, endLastWeek);
       } else if (preset === "this_month" || preset === "current_month") {
-        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-        dateQuery = `created_at:>=${firstDay.toISOString()}`;
+        const firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        addCreatedAtRange(startOfDay(firstDayThisMonth), endOfDay(now));
       } else if (preset === "last_month") {
         const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-        dateQuery = `created_at:>=${firstDayLastMonth.toISOString()} AND created_at:<=${lastDayLastMonth.toISOString()}`;
+        const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+        addCreatedAtRange(startOfDay(firstDayLastMonth), endOfDay(lastDayLastMonth));
       } else if (preset === "last_3_months") {
-        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-        dateQuery = `created_at:>=${threeMonthsAgo.toISOString()}`;
+        // Previous 3 full calendar months (excluding the current month)
+        const firstDayThreeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+        const lastDayPreviousMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+        addCreatedAtRange(startOfDay(firstDayThreeMonthsAgo), endOfDay(lastDayPreviousMonth));
       } else if (preset === "last_year") {
-        const lastYear = new Date(now.getFullYear() - 1, 0, 1);
-        const endLastYear = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-        dateQuery = `created_at:>=${lastYear.toISOString()} AND created_at:<=${endLastYear.toISOString()}`;
-      } else if (preset === "all_time" || preset === "all") {
-        // No dateQuery filter needed for all_time
+        const firstDayLastYear = new Date(now.getFullYear() - 1, 0, 1);
+        const lastDayLastYear = new Date(now.getFullYear() - 1, 11, 31);
+        addCreatedAtRange(startOfDay(firstDayLastYear), endOfDay(lastDayLastYear));
       } else if (preset === "custom" && start && end) {
-        dateQuery = `created_at:>=${start} AND created_at:<=${end}`;
-      }
-
-      if (dateQuery) {
-        queryParts.push(dateQuery);
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        if (isValidDate(startDate) && isValidDate(endDate)) {
+          const isDateOnly = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+          addCreatedAtRange(
+            isDateOnly(start) ? startOfDay(startDate) : startDate,
+            isDateOnly(end) ? endOfDay(endDate) : endDate,
+          );
+        }
+      } else if (preset === "all_time" || preset === "all") {
+        // No created_at filter
       }
     }
 
@@ -6399,6 +6439,7 @@ export async function getAdvancedCompanyOrders(
                     id
                     name
                     quantity
+                    currentQuantity
                     originalUnitPriceSet {
                       shopMoney {
                         amount
@@ -6406,6 +6447,12 @@ export async function getAdvancedCompanyOrders(
                       }
                     }
                     discountedUnitPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    totalAllocatedDiscountSet {
                       shopMoney {
                         amount
                         currencyCode
