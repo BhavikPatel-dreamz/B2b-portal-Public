@@ -1,4 +1,4 @@
-
+import { redirect } from "react-router";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, registerWebhooks } from "../shopify.server";
@@ -21,7 +21,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.error("Failed to register webhooks", err);
   }
 
-  return null;
+  const storeName = session.shop.split(".")[0];
+  return redirect(
+    `https://admin.shopify.com/store/${storeName}/apps/b2b-portal-public-3/app/home`
+  );
 };
 
 export const headers: HeadersFunction = (headersArgs) => {
