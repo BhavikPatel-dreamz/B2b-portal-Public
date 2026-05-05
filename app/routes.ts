@@ -58,6 +58,7 @@ export default [
     route("customer-detail", "routes/api.proxy/customer-detail.tsx"),
     route("shipping-zones", "routes/api.proxy/shipping-zones.tsx"),
     route("item-purchase-report", "routes/api.proxy/item-purchase-report.tsx"),
+    route("spend-report", "routes/api.proxy/spend-report.tsx"),
   ]),
 
   // App routes
