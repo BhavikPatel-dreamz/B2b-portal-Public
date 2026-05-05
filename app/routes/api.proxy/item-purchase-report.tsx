@@ -69,28 +69,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Skip items that were fully refunded
         if (currentQuantity <= 0 || originalQuantity <= 0) continue;
 
-        // Calculate the true net unit price: (Original Total - Total Discounts + Total Taxes) / Original Quantity
+        // Calculate the true net unit price: (Original Total - Total Discounts) / Original Quantity
         const originalUnitPrice = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
         const totalDiscounts = Number(item.totalAllocatedDiscountSet?.shopMoney?.amount || 0);
-        const totalTaxes = (item.taxLines || []).reduce((sum: number, tax: any) => sum + Number(tax.priceSet?.shopMoney?.amount || 0), 0);
         
-        const grossLineTotal = (originalUnitPrice * originalQuantity) - totalDiscounts + totalTaxes;
-        const grossUnitPrice = grossLineTotal / originalQuantity;
+        const netLineTotal = (originalUnitPrice * originalQuantity) - totalDiscounts;
+        const netUnitPrice = netLineTotal / originalQuantity;
         
-        // Total value is gross unit price * what the customer actually kept
-        const totalValue = grossUnitPrice * currentQuantity;
+        // Total value is net unit price * what the customer actually kept
+        const totalValue = netUnitPrice * currentQuantity;
         const quantityPurchased = currentQuantity;
+
+        // Calculate taxes for this line item
+        const lineTax = (item.taxLines || []).reduce((sum: number, taxLine: any) => {
+          return sum + Number(taxLine.priceSet?.shopMoney?.amount || 0);
+        }, 0);
+        
+        // Adjust tax for current quantity
+        const currentTax = (lineTax / originalQuantity) * currentQuantity;
 
         if (reportMap.has(key)) {
           const existing = reportMap.get(key);
           existing.quantityPurchased += quantityPurchased;
           existing.totalValue += totalValue;
+          existing.totalTax += currentTax;
+          existing.totalIncludingTax += (totalValue + currentTax);
         } else {
           reportMap.set(key, {
             product: fullProductName,
             sku: sku,
             quantityPurchased: quantityPurchased,
+            unitPrice: netUnitPrice,
             totalValue: totalValue,
+            totalTax: currentTax,
+            totalIncludingTax: totalValue + currentTax,
             currencyCode: item.totalAllocatedDiscountSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
           });
         }
@@ -98,7 +110,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    const allReportData = Array.from(reportMap.values());
+    const allReportData = Array.from(reportMap.values()).map((item: any) => ({
+      ...item,
+      // Calculate average unit price across all purchases of this item
+      unitPrice: item.quantityPurchased > 0 ? item.totalValue / item.quantityPurchased : item.unitPrice
+    }));
     
     // Sort by quantity purchased (descending) by default
     allReportData.sort((a, b) => b.quantityPurchased - a.quantityPurchased);
