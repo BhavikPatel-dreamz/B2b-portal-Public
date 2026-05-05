@@ -36,8 +36,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Determine aggregation type (daily or monthly)
     // We'll calculate the duration in days
     let isMonthlyAggregation = false;
+    const monthlyPresets = ["all", "all_time", "last_year"];
     
-    if (dateRange.preset === "all") {
+    if (monthlyPresets.includes(dateRange.preset)) {
       isMonthlyAggregation = true;
     } else if (dateRange.preset === "custom" && dateRange.start && dateRange.end) {
       const start = new Date(dateRange.start);
@@ -47,9 +48,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (diffDays > 90) { // Approx 3 months
         isMonthlyAggregation = true;
       }
-    } else if (dateRange.preset === "last_3_months") {
-      // User says "more than 3 months" for monthly. last_3_months is exactly 3.
-      isMonthlyAggregation = false; 
+    } else {
+      // Default to daily for other presets (today, yesterday, last_7_days, last_30_days, last_3_months, last_month, this_month)
+      isMonthlyAggregation = false;
     }
 
     const aggregationMap = new Map();

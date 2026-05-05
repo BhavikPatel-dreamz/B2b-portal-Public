@@ -6187,12 +6187,19 @@ export async function getAdvancedCompanyOrders(
       customerId?: string | string[];
       dateRange?: {
         preset?:
+          | "today"
+          | "yesterday"
+          | "last_7_days"
+          | "last_30_days"
           | "last_week"
           | "current_month"
+          | "this_month"
           | "last_month"
           | "last_3_months"
+          | "last_year"
           | "custom"
-          | "all";
+          | "all"
+          | "all_time";
         start?: string;
         end?: string;
       };
@@ -6261,35 +6268,48 @@ export async function getAdvancedCompanyOrders(
       const now = new Date();
       let dateQuery = "";
 
-      if (preset === "last_week") {
-        const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        dateQuery = `created_at:>=${lastWeek.toISOString()}`;
-      } else if (preset === "current_month") {
+      // Helper to get start of day in ISO format
+      const getStartOfDay = (d: Date) => {
+        const date = new Date(d);
+        date.setHours(0, 0, 0, 0);
+        return date.toISOString();
+      };
+
+      // Helper to get end of day in ISO format
+      const getEndOfDay = (d: Date) => {
+        const date = new Date(d);
+        date.setHours(23, 59, 59, 999);
+        return date.toISOString();
+      };
+
+      if (preset === "today") {
+        dateQuery = `created_at:>=${getStartOfDay(now)}`;
+      } else if (preset === "yesterday") {
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        dateQuery = `created_at:>=${getStartOfDay(yesterday)} AND created_at:<=${getEndOfDay(yesterday)}`;
+      } else if (preset === "last_7_days" || preset === "last_week") {
+        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        dateQuery = `created_at:>=${sevenDaysAgo.toISOString()}`;
+      } else if (preset === "last_30_days") {
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        dateQuery = `created_at:>=${thirtyDaysAgo.toISOString()}`;
+      } else if (preset === "this_month" || preset === "current_month") {
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
         dateQuery = `created_at:>=${firstDay.toISOString()}`;
       } else if (preset === "last_month") {
-        const firstDayLastMonth = new Date(
-          now.getFullYear(),
-          now.getMonth() - 1,
-          1,
-        );
-        const lastDayLastMonth = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          0,
-          23,
-          59,
-          59,
-          999,
-        );
+        const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
         dateQuery = `created_at:>=${firstDayLastMonth.toISOString()} AND created_at:<=${lastDayLastMonth.toISOString()}`;
       } else if (preset === "last_3_months") {
-        const threeMonthsAgo = new Date(
-          now.getFullYear(),
-          now.getMonth() - 3,
-          1,
-        );
+        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
         dateQuery = `created_at:>=${threeMonthsAgo.toISOString()}`;
+      } else if (preset === "last_year") {
+        const lastYear = new Date(now.getFullYear() - 1, 0, 1);
+        const endLastYear = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+        dateQuery = `created_at:>=${lastYear.toISOString()} AND created_at:<=${endLastYear.toISOString()}`;
+      } else if (preset === "all_time" || preset === "all") {
+        // No dateQuery filter needed for all_time
       } else if (preset === "custom" && start && end) {
         dateQuery = `created_at:>=${start} AND created_at:<=${end}`;
       }
