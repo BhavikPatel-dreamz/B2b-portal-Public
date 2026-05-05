@@ -6351,6 +6351,7 @@ export async function getAdvancedCompanyOrders(
               createdAt
               updatedAt
               processedAt
+              cancelledAt
               displayFinancialStatus
               displayFulfillmentStatus
               totalPriceSet {
@@ -6392,13 +6393,19 @@ export async function getAdvancedCompanyOrders(
               }
               note
               tags
-              lineItems(first: 20) {
+              lineItems(first: 250) {
                 edges {
                   node {
                     id
                     name
                     quantity
                     originalUnitPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    discountedUnitPriceSet {
                       shopMoney {
                         amount
                         currencyCode

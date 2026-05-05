@@ -40,6 +40,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const reportMap = new Map();
 
     for (const order of orders) {
+      // Skip cancelled orders for report accuracy
+      if (order.cancelledAt) continue;
+
       const lineItems = order.lineItems?.edges || [];
       for (const edge of lineItems) {
         const item = edge.node;
@@ -60,7 +63,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const productId = item.product?.id || "Unknown Product";
         const key = `${productId}-${sku}`;
         const quantity = Number(item.quantity || 0);
-        const price = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
+        // Use discountedUnitPriceSet if available, otherwise fallback to originalUnitPriceSet
+        const price = Number(item.discountedUnitPriceSet?.shopMoney?.amount || item.originalUnitPriceSet?.shopMoney?.amount || 0);
         const totalValue = quantity * price;
 
         if (reportMap.has(key)) {
@@ -73,7 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             sku: sku,
             quantityPurchased: quantity,
             totalValue: totalValue,
-            currencyCode: item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
+            currencyCode: item.discountedUnitPriceSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
           });
         }
       }

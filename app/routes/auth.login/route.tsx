@@ -6,7 +6,7 @@ import { authenticate } from "../../shopify.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const storeName = session.shop.split(".")[0];
-  const redirectUrl = `https://admin.shopify.com/store/${storeName}/apps/b2b-portal-public-dev/app/home`;
+  const redirectUrl = `https://admin.shopify.com/store/${storeName}/apps/b2b-portal-public-dev/app`;
   
   if (new URL(request.url).searchParams.get("shop")) {
     return redirect(redirectUrl);
@@ -19,7 +19,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const storeName = session.shop.split(".")[0];
   return redirect(
-    `https://admin.shopify.com/store/${storeName}/apps/b2b-portal-public-dev/app/home`
+    `https://admin.shopify.com/store/${storeName}/apps/b2b-portal-public-dev/app`
   );
 };
 

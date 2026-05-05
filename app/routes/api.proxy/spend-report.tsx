@@ -56,6 +56,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const aggregationMap = new Map();
 
     for (const order of orders) {
+      // Skip cancelled orders for report accuracy
+      if (order.cancelledAt) continue;
+
       const date = new Date(order.createdAt);
       let key = "";
       

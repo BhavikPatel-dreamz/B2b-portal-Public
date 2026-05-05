@@ -76,7 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       url.searchParams.get("returnTo") &&
       url.searchParams.get("returnTo")?.startsWith("/app/")
         ? url.searchParams.get("returnTo")
-        : "/app/home",
+        : "/app",
     activePlans: (appSubscriptions || []).map((s) => ({
       id: s.id,
       name: s.name,
@@ -91,9 +91,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   console.log("FormData:", formData);
   const plan = formData.get("plan");
-  const returnToRaw = String(formData.get("returnTo") || "/app/home");
+  const returnToRaw = String(formData.get("returnTo") || "/app");
   console.log("Return to raw:", returnToRaw);
-  const returnTo = returnToRaw.startsWith("/app/") ? returnToRaw : "/app/home";
+  const returnTo = returnToRaw.startsWith("/app/") ? returnToRaw : "/app";
   const requestUrl = new URL(request.url);
   console.log("Running action for select-plan route111",requestUrl);
 
