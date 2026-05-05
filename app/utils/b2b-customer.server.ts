@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
 import { createUser } from "../services/user.server";
 import { calculateAvailableCredit } from "app/services/creditService";
+import { log } from "node:console";
 
 // Type for GraphQL response
 type GraphQLResponse<T = unknown> = {
@@ -6360,6 +6361,18 @@ export async function getAdvancedCompanyOrders(
                   currencyCode
                 }
               }
+              currentTotalPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              totalRefundedSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
               subtotalPriceSet {
                 shopMoney {
                   amount
@@ -6370,6 +6383,34 @@ export async function getAdvancedCompanyOrders(
                 shopMoney {
                   amount
                   currencyCode
+                }
+              }
+              totalShippingPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              shippingLines(first: 10) {
+                edges {
+                  node {
+                    id
+                    title
+                    discountedPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    taxLines {
+                      priceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                    }
+                  }
                 }
               }
               customer {
@@ -6399,6 +6440,7 @@ export async function getAdvancedCompanyOrders(
                     id
                     name
                     quantity
+                    currentQuantity
                     originalUnitPriceSet {
                       shopMoney {
                         amount
@@ -6409,6 +6451,20 @@ export async function getAdvancedCompanyOrders(
                       shopMoney {
                         amount
                         currencyCode
+                      }
+                    }
+                    totalDiscountSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    taxLines {
+                      priceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
                       }
                     }
                     product {
@@ -6470,7 +6526,7 @@ export async function getAdvancedCompanyOrders(
         }),
       },
     );
-
+console.log("Fetched orders data", { queryString });
     const data = await response.json();
 
     if (data.errors) {

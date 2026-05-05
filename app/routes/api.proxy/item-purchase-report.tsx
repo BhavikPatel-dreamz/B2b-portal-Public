@@ -31,10 +31,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (result.error) {
+      console.error("getAdvancedCompanyOrders error:", result.error);
       return Response.json({ error: result.error }, { status: 500 });
     }
 
     const orders = result.orders || [];
+    console.log(`Processing ${orders.length} orders for item report`);
 
     // Aggregate purchase data by Product/SKU
     const reportMap = new Map();
@@ -44,8 +46,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (order.cancelledAt) continue;
 
       const lineItems = order.lineItems?.edges || [];
+      const shippingLines = order.shippingLines?.edges || [];
+
+      // Calculate order totals for proportional distribution
+      const orderProductSubtotal = lineItems.reduce((sum: number, edge: any) => {
+        const item = edge.node;
+        const price = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
+        const qty = Number(item.quantity || 0);
+        const discount = Number(item.totalDiscountSet?.shopMoney?.amount || 0);
+        return sum + (price * qty - discount);
+      }, 0);
+
+      const totalOrderShipping = shippingLines.reduce((sum: number, edge: any) => {
+        return sum + Number(edge.node.discountedPriceSet?.shopMoney?.amount || 0);
+      }, 0);
+
+      const totalOrderShippingTax = shippingLines.reduce((sum: number, edge: any) => {
+        const taxLines = edge.node.taxLines || [];
+        return sum + taxLines.reduce((s: number, t: any) => s + Number(t.priceSet?.shopMoney?.amount || 0), 0);
+      }, 0);
+
       for (const edge of lineItems) {
         const item = edge.node;
+        if (!item) continue;
+
         const sku = item.variant?.sku || "No SKU";
         const productName = item.product?.title || item.name;
         const variantName = item.variant?.title && item.variant.title !== "Default Title" 
@@ -64,49 +88,46 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const key = `${productId}-${sku}`;
         
         const originalQuantity = Number(item.quantity || 0);
-        const currentQuantity = Number(item.currentQuantity ?? item.quantity ?? 0);
-        
-        // Skip items that were fully refunded
-        if (currentQuantity <= 0 || originalQuantity <= 0) continue;
+        if (originalQuantity <= 0) continue;
 
-        // Calculate the true net unit price: (Original Total - Total Discounts) / Original Quantity
         const originalUnitPrice = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
-        const totalDiscounts = Number(item.totalAllocatedDiscountSet?.shopMoney?.amount || 0);
+        const totalDiscounts = Number(item.totalDiscountSet?.shopMoney?.amount || 0);
         
         const netLineTotal = (originalUnitPrice * originalQuantity) - totalDiscounts;
-        const netUnitPrice = netLineTotal / originalQuantity;
         
-        // Total value is net unit price * what the customer actually kept
-        const totalValue = netUnitPrice * currentQuantity;
-        const quantityPurchased = currentQuantity;
+        // Proportional shipping distribution
+        const ratio = orderProductSubtotal > 0 ? netLineTotal / orderProductSubtotal : 0;
+        const distributedShipping = ratio * totalOrderShipping;
+        const distributedShippingTax = ratio * totalOrderShippingTax;
 
-        // Calculate taxes for this line item
         const lineTax = (item.taxLines || []).reduce((sum: number, taxLine: any) => {
           return sum + Number(taxLine.priceSet?.shopMoney?.amount || 0);
         }, 0);
         
-        // Adjust tax for current quantity
-        const currentTax = (lineTax / originalQuantity) * currentQuantity;
+        // Landed Values (Item + Distributed Shipping)
+        const totalValue = netLineTotal + distributedShipping;
+        const totalTax = lineTax + distributedShippingTax;
+        const quantityPurchased = originalQuantity;
+        const landedUnitPrice = totalValue / quantityPurchased;
 
         if (reportMap.has(key)) {
           const existing = reportMap.get(key);
           existing.quantityPurchased += quantityPurchased;
           existing.totalValue += totalValue;
-          existing.totalTax += currentTax;
-          existing.totalIncludingTax += (totalValue + currentTax);
+          existing.totalTax += totalTax;
+          existing.totalIncludingTax += (totalValue + totalTax);
         } else {
           reportMap.set(key, {
             product: fullProductName,
             sku: sku,
             quantityPurchased: quantityPurchased,
-            unitPrice: netUnitPrice,
+            unitPrice: landedUnitPrice,
             totalValue: totalValue,
-            totalTax: currentTax,
-            totalIncludingTax: totalValue + currentTax,
-            currencyCode: item.totalAllocatedDiscountSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
+            totalTax: totalTax,
+            totalIncludingTax: totalValue + totalTax,
+            currencyCode: item.totalDiscountSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
           });
         }
-
       }
     }
 
