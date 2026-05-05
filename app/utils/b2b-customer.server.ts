@@ -6458,6 +6458,16 @@ export async function getAdvancedCompanyOrders(
                         currencyCode
                       }
                     }
+                    taxLines {
+                      priceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      rate
+                      title
+                    }
                     product {
                       id
                       title

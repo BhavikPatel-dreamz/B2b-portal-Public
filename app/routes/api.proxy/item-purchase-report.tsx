@@ -69,15 +69,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Skip items that were fully refunded
         if (currentQuantity <= 0 || originalQuantity <= 0) continue;
 
-        // Calculate the true net unit price: (Original Total - Total Discounts) / Original Quantity
+        // Calculate the true net unit price: (Original Total - Total Discounts + Total Taxes) / Original Quantity
         const originalUnitPrice = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
         const totalDiscounts = Number(item.totalAllocatedDiscountSet?.shopMoney?.amount || 0);
+        const totalTaxes = (item.taxLines || []).reduce((sum: number, tax: any) => sum + Number(tax.priceSet?.shopMoney?.amount || 0), 0);
         
-        const netLineTotal = (originalUnitPrice * originalQuantity) - totalDiscounts;
-        const netUnitPrice = netLineTotal / originalQuantity;
+        const grossLineTotal = (originalUnitPrice * originalQuantity) - totalDiscounts + totalTaxes;
+        const grossUnitPrice = grossLineTotal / originalQuantity;
         
-        // Total value is net unit price * what the customer actually kept
-        const totalValue = netUnitPrice * currentQuantity;
+        // Total value is gross unit price * what the customer actually kept
+        const totalValue = grossUnitPrice * currentQuantity;
         const quantityPurchased = currentQuantity;
 
         if (reportMap.has(key)) {
