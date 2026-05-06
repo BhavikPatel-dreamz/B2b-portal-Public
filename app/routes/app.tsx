@@ -5,7 +5,6 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 import { APP_BILLING_PLANS, getIsTestBilling } from "app/utils/billing.server";
 import {
-  clearStorePlan,
   syncStoreSubscriptionState,
 } from "app/services/store.server";
 import prisma from "app/db.server";

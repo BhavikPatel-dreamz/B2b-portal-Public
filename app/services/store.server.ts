@@ -189,6 +189,75 @@ export async function setShopValidationMetafield(admin: AdminApiContext, enabled
   }
 }
 
+/**
+ * Sync payment terms for all companies in a store based on the plan
+ * If plan is paid, restore terms from DB to Shopify
+ * If plan is free, nullify terms in Shopify but keep them in DB
+ */
+export async function syncStorePaymentTerms(storeId: string, admin: AdminApiContext, isPaid: boolean) {
+  const companies = await prisma.companyAccount.findMany({
+    where: { shopId: storeId },
+    select: { shopifyCompanyId: true, paymentTerm: true },
+  });
+
+  for (const company of companies) {
+    if (!company.shopifyCompanyId) continue;
+
+    try {
+      // Fetch locations for each company
+      const locationRes = await admin.graphql(
+        `#graphql
+        query getCompanyLocations($companyId: ID!) {
+          company(id: $companyId) {
+            locations(first: 50) {
+              edges {
+                node {
+                  id
+                }
+              }
+            }
+          }
+        }`,
+        { variables: { companyId: company.shopifyCompanyId } },
+      );
+
+      const locationJson = await locationRes.json();
+      const locations = locationJson.data?.company?.locations?.edges || [];
+
+      // Determine what to set in Shopify
+      // If paid, use the stored paymentTerm from DB. If free, use null.
+      const targetPaymentTerm = isPaid ? (company.paymentTerm || null) : null;
+
+      for (const edge of locations) {
+        const locationId = edge.node.id;
+        await admin.graphql(
+          `#graphql
+          mutation UpdateCompanyLocation($companyLocationId: ID!, $paymentTermsTemplateId: ID) {
+            companyLocationUpdate(
+              companyLocationId: $companyLocationId
+              input: {
+                buyerExperienceConfiguration: {
+                  paymentTermsTemplateId: $paymentTermsTemplateId
+                }
+              }
+            ) {
+              userErrors { field message }
+            }
+          }`,
+          { 
+            variables: { 
+              companyLocationId: locationId,
+              paymentTermsTemplateId: targetPaymentTerm
+            } 
+          },
+        );
+      }
+    } catch (error) {
+      console.error(`Error syncing Shopify payment terms for company ${company.shopifyCompanyId}:`, error);
+    }
+  }
+}
+
 export async function syncStoreSubscriptionState(
   shopDomain: string,
   appSubscriptions: AppSubscriptionSummary[] = [],
@@ -199,6 +268,12 @@ export async function syncStoreSubscriptionState(
     null;
 
   const plan = getStorePlanValue(activeSubscription?.name);
+  const isPaid = plan === "approved payment";
+
+  const store = await prisma.store.findUnique({
+    where: { shopDomain },
+    select: { id: true },
+  });
 
   const updatedStore = await prisma.store.updateMany({
     where: { shopDomain },
@@ -209,16 +284,15 @@ export async function syncStoreSubscriptionState(
     },
   });
 
-  // If upgraded to paid plan, automatically register cart validation
-  if (plan === "approved payment" && admin) {
-    console.log(`🚀 Store ${shopDomain} upgraded to paid plan, registering cart validation...`);
+  // Always ensure cart validation is registered and set the metafield based on the plan
+  if (admin && store) {
+    console.log(`🔄 Syncing store plan (${plan}) and updating cart validation...`);
     await registerCartValidationFunction(admin);
-    await setShopValidationMetafield(admin, true);
-  } else if (admin) {
-    // If not on paid plan, ensure cart validation is unregistered
-    console.log(`🧹 Store ${shopDomain} not on paid plan, ensuring cart validation is unregistered...`);
-    await unregisterAllCartValidations(admin);
-    await setShopValidationMetafield(admin, false);
+    await setShopValidationMetafield(admin, isPaid);
+    
+    // Sync payment terms visibility in Shopify
+    console.log(`🔄 Syncing payment terms visibility for ${shopDomain} (isPaid: ${isPaid})...`);
+    await syncStorePaymentTerms(store.id, admin, isPaid);
   }
 
   return updatedStore;
@@ -231,73 +305,16 @@ export async function setStoreFreePlan(shopDomain: string, admin?: AdminApiConte
   });
 
   if (store) {
-    // 1. Update local database
-    await prisma.companyAccount.updateMany({
-      where: { shopId: store.id },
-      data: {
-        paymentTerm: null,
-      },
-    });
-
-    // 2. Update Shopify if admin client is provided
+    // Update Shopify if admin client is provided
     if (admin) {
-      // Unregister cart validation on downgrade to free plan
-      console.log(`🧹 Store ${shopDomain} downgraded to free plan, unregistering cart validation...`);
-      await unregisterAllCartValidations(admin);
+      // Ensure cart validation is registered but disabled on free plan
+      console.log(`🧹 Store ${shopDomain} set to free plan, ensuring cart validation is registered but disabled...`);
+      await registerCartValidationFunction(admin);
       await setShopValidationMetafield(admin, false);
 
-      const companies = await prisma.companyAccount.findMany({
-        where: { shopId: store.id },
-        select: { shopifyCompanyId: true },
-      });
-
-      for (const company of companies) {
-        if (!company.shopifyCompanyId) continue;
-
-        try {
-          // Fetch locations for each company
-          const locationRes = await admin.graphql(
-            `#graphql
-            query getCompanyLocations($companyId: ID!) {
-              company(id: $companyId) {
-                locations(first: 50) {
-                  edges {
-                    node {
-                      id
-                    }
-                  }
-                }
-              }
-            }`,
-            { variables: { companyId: company.shopifyCompanyId } },
-          );
-
-          const locationJson = await locationRes.json();
-          const locations = locationJson.data?.company?.locations?.edges || [];
-
-          for (const edge of locations) {
-            const locationId = edge.node.id;
-            await admin.graphql(
-              `#graphql
-              mutation UpdateCompanyLocation($companyLocationId: ID!) {
-                companyLocationUpdate(
-                  companyLocationId: $companyLocationId
-                  input: {
-                    buyerExperienceConfiguration: {
-                      paymentTermsTemplateId: null
-                    }
-                  }
-                ) {
-                  userErrors { field message }
-                }
-              }`,
-              { variables: { companyLocationId: locationId } },
-            );
-          }
-        } catch (error) {
-          console.error(`Error updating Shopify payment terms for company ${company.shopifyCompanyId}:`, error);
-        }
-      }
+      // Hide payment terms in Shopify but keep in DB
+      console.log(`🧹 Hiding payment terms in Shopify for store ${shopDomain}...`);
+      await syncStorePaymentTerms(store.id, admin, false);
     }
   }
 
