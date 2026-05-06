@@ -164,7 +164,7 @@ const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVari
       ctaLabel: "View B2B Page",
       ctaUrl: `https://admin.shopify.com/store/${
         (storeData?.shopDomain || "store.com").split(".")[0]
-      }/apps/b2b-portal-public-1/app/registrations`,
+      }/apps/b2b-portal-public-3/app/registrations`,
       footerText:
         "This email was sent to notify you about a B2B registration request.",
     },

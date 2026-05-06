@@ -76,7 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       url.searchParams.get("returnTo") &&
       url.searchParams.get("returnTo")?.startsWith("/app/")
         ? url.searchParams.get("returnTo")
-        : "/app/home",
+        : "/app",
     activePlans: (appSubscriptions || []).map((s) => ({
       id: s.id,
       name: s.name,
@@ -91,9 +91,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   console.log("FormData:", formData);
   const plan = formData.get("plan");
-  const returnToRaw = String(formData.get("returnTo") || "/app/home");
+  const returnToRaw = String(formData.get("returnTo") || "/app");
   console.log("Return to raw:", returnToRaw);
-  const returnTo = returnToRaw.startsWith("/app/") ? returnToRaw : "/app/home";
+  const returnTo = returnToRaw.startsWith("/app/") ? returnToRaw : "/app";
   const requestUrl = new URL(request.url);
   console.log("Running action for select-plan route111",requestUrl);
 
@@ -116,25 +116,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return redirect(returnTo);
     }
 
-    const appUrl = new URL(request.url).origin;
-    const returnUrl = new URL(returnTo, appUrl);
-    returnUrl.searchParams.set("shop", session.shop);
+    const shopName = session.shop.split(".")[0];
+    const appHandle = "b2b-portal-public-dev";
+    const returnUrl = `https://admin.shopify.com/store/${shopName}/apps/${appHandle}${returnTo}`;
 
-    const host = requestUrl.searchParams.get("host");
-    if (host) {
-      returnUrl.searchParams.set("host", host);
-    }
-
-    const embedded = requestUrl.searchParams.get("embedded");
-    if (embedded) {
-      returnUrl.searchParams.set("embedded", embedded);
-    }
-
-    console.log("Requesting billing for plan", appUrl, "isTest:", isTest);
+    console.log("Requesting billing for plan", returnUrl, "isTest:", isTest);
     await billing.request({
       plan,
       isTest,
-      returnUrl: returnUrl.toString(),
+      returnUrl: returnUrl,
     });
     console.log("Billing request sent");
   } catch (err) {
