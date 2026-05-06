@@ -30,6 +30,35 @@ export async function registerCartValidationFunction(
   try {
     console.log("🔄 Checking Cart Validation function registration...");
 
+    // Step 0: Check if already registered to avoid duplicates - using 'validations' query
+    const existingValidationsQuery = `
+      query {
+        validations(first: 50) {
+          nodes {
+            id
+            title
+          }
+        }
+      }
+    `;
+
+    const existingResponse = await admin.graphql(existingValidationsQuery);
+    const existingData = await existingResponse.json();
+
+    if (existingData.data?.validations?.nodes) {
+      const existing = existingData.data.validations.nodes.find(
+        (v: any) => v.title === validationTitle
+      );
+      if (existing) {
+        console.log(`✅ Cart validation already registered: ${existing.title} (${existing.id})`);
+        return {
+          success: true,
+          message: "Cart validation already registered",
+          validationId: existing.id
+        };
+      }
+    }
+
     // Step 1: Find our cart validation function - EXACT query as user provided
     const functionsQuery = `
       query MyQuery {
@@ -169,6 +198,71 @@ export async function unregisterCartValidationFunction(admin: AdminApiContext, v
 
   } catch (error) {
     console.error("❌ Error unregistering cart validation function:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
+ * Unregister ALL Cart Validation functions for this store
+ */
+export async function unregisterAllCartValidations(admin: AdminApiContext) {
+  try {
+    console.log("🧹 Unregistering all cart validations...");
+
+    // Find all validations using the correct query field 'validations'
+    const validationsQuery = `
+      query {
+        validations(first: 50) {
+          nodes {
+            id
+            title
+            function {
+              id
+              handle
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await admin.graphql(validationsQuery);
+    const data = await response.json();
+
+    if (data.errors) {
+      throw new Error(`Failed to query validations: ${data.errors[0]?.message}`);
+    }
+
+    const allValidations = data.data?.validations?.nodes || [];
+    
+    // Filter for validations related to our app/extension
+    // We target those with our specific function handle or those containing our title patterns
+    const validationsToRemove = allValidations.filter((v: any) => 
+      v.function?.handle === "cart-checkout-validation" ||
+      v.title?.toLowerCase().includes("b2b") ||
+      v.title?.toLowerCase().includes("cart validation") ||
+      v.title?.toLowerCase().includes("centralcleaning") // Catch the alternative example title
+    );
+
+    console.log(`🗑️ Found ${validationsToRemove.length} relevant validations to remove (out of ${allValidations.length} total)`);
+
+    const results = [];
+    for (const validation of validationsToRemove) {
+      const result = await unregisterCartValidationFunction(admin, validation.id);
+      results.push({ id: validation.id, title: validation.title, ...result });
+    }
+
+    return {
+      success: true,
+      count: validationsToRemove.length,
+      totalFound: allValidations.length,
+      results
+    };
+
+  } catch (error) {
+    console.error("❌ Error unregistering all cart validations:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

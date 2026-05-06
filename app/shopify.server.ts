@@ -15,7 +15,7 @@ import {
   USAGE_PLAN,
 } from "./billing-plans.shared";
 import { upsertStore } from "./services/store.server";
-import { registerCartValidationFunction, debugListAllShopifyFunctions } from "./services/cartValidationRegistration.server";
+import { registerCartValidationFunction, debugListAllShopifyFunctions, unregisterAllCartValidations } from "./services/cartValidationRegistration.server";
 import {
   DEFAULT_CONFIG,
   serializeConfig,
@@ -90,11 +90,12 @@ const shopify = shopifyApp({
       let store;
 
       try {
-        // Fetch shop details including currency
+        // Fetch shop details including currency and ID
         const response = await admin.graphql(
           `#graphql
           query {
             shop {
+              id
               name
               currencyCode
             }
@@ -123,6 +124,42 @@ const shopify = shopifyApp({
           },
         });
 
+        // Set validation state metafield
+        const storeRecord = await prisma.store.findUnique({
+          where: { shopDomain: session.shop },
+          select: { plan: true }
+        });
+        const isPaidPlan = storeRecord?.plan === "approved payment";
+
+        console.log(`🏷️ Setting validation state metafield for ${session.shop} (isPaid: ${isPaidPlan})`);
+        await admin.graphql(`
+          mutation SetMetafield($metafields: [MetafieldsSetInput!]!) {
+            metafieldsSet(metafields: $metafields) {
+              metafields {
+                id
+                key
+                value
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `, {
+          variables: {
+            metafields: [
+              {
+                namespace: "smartb2b",
+                key: "validation_enabled",
+                type: "single_line_text_field",
+                value: isPaidPlan ? "true" : "false",
+                ownerId: shop.id
+              }
+            ]
+          }
+        });
+
         console.log(`✅ Store bootstrap completed for ${session.shop}`);
       } catch (error) {
         console.error("❌ Error during store bootstrap:", error);
@@ -149,16 +186,28 @@ const shopify = shopifyApp({
         console.error("❌ Error in debug function listing:", error);
       }
 
-      // Register cart validation function
+      // Register or unregister cart validation function based on plan
       try {
-        const result = await registerCartValidationFunction(admin);
-        if (result.success) {
-          console.log(`✅ Post-install setup completed: ${result.message}`);
-        } else {
-          console.warn(`⚠️ Post-install setup warning: ${result.message || result.error}`);
-          if (result.debug) {
-            console.log("🐛 Debug info:", JSON.stringify(result.debug, null, 2));
+        const storeRecord = await prisma.store.findUnique({
+          where: { shopDomain: session.shop },
+          select: { plan: true }
+        });
+
+        if (storeRecord?.plan === "approved payment") {
+          console.log(`🚀 Registering cart validation for paid store ${session.shop}...`);
+          const result = await registerCartValidationFunction(admin);
+          console.log("Cart validation registration result:", result);
+          if (result.success) {
+            console.log(`✅ Post-install setup completed: ${result.message}`);
+          } else {
+            console.warn(`⚠️ Post-install setup warning: ${result.message || result.error}`);
+            if (result.debug) {
+              console.log("🐛 Debug info:", JSON.stringify(result.debug, null, 2));
+            }
           }
+        } else {
+          console.log(`ℹ️ Ensuring cart validation is unregistered for ${storeRecord?.plan || "free"} store ${session.shop}...`);
+          await unregisterAllCartValidations(admin);
         }
       } catch (error) {
         console.error("❌ Error in post-install setup:", error);

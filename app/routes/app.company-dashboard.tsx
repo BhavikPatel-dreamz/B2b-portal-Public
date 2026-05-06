@@ -209,36 +209,140 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const result = await updateCredit(formData, admin);
       return Response.json(result);
     }
+
+    // case "updatepaymentTerm": {
+    //   if (isFreePlan) {
+    //     return Response.json({
+    //       intent,
+    //       success: false,
+    //       errors: ["Payment terms are not available on the free plan"],
+    //     });
+    //   }
+
+    //   const companyId = (form.id as string)?.trim();
+    //   const paymentTermsTemplateId = (form.paymentTerm as string)?.trim()||null;
+
+    //   if (!companyId) {
+    //     return Response.json({
+    //       intent,
+    //       success: false,
+    //       errors: ["Company id is required"],
+    //     });
+    //   }
+  
+
+    //   /* 1️⃣ Fetch ALL company locations from Shopify */
+    //   const locationsResponse = await admin.graphql(
+    //     `#graphql
+    // query GetCompanyLocations($companyId: ID!) {
+    //   company(id: $companyId) {
+    //     locations(first: 50) {
+    //       nodes {
+    //         id
+    //         name
+    //       }
+    //     }
+    //   }
+    // }`,
+    //     {
+    //       variables: { companyId },
+    //     },
+    //   );
+
+    //   const locationsPayload = await locationsResponse.json();
+    //   const locations = locationsPayload?.data?.company?.locations?.nodes || [];
+
+    //   if (!locations.length) {
+    //     return Response.json({
+    //       intent,
+    //       success: false,
+    //       errors: ["No company locations found"],
+    //     });
+    //   }
+
+    //   /* 2️⃣ Assign payment terms to EACH location */
+    //   for (const location of locations) {
+    //     const updateLocationResponse = await admin.graphql(
+    //       `#graphql
+    //   mutation UpdateCompanyLocation(
+    //     $companyLocationId: ID!
+    //     $paymentTermsTemplateId: ID!
+    //   ) {
+    //     companyLocationUpdate(
+    //       companyLocationId: $companyLocationId
+    //       input: {
+    //         buyerExperienceConfiguration: {
+    //           paymentTermsTemplateId: $paymentTermsTemplateId
+    //         }
+    //       }
+    //     ) {
+    //       companyLocation { id }
+    //       userErrors { field message }
+    //     }
+    //   }`,
+    //       {
+    //         variables: {
+    //           companyLocationId: location.id,
+    //           paymentTermsTemplateId,
+    //         },
+    //       },
+    //     );
+
+    //     const updatePayload = await updateLocationResponse.json();
+    //     const errors = buildUserErrorList(updatePayload);
+
+    //     if (errors.length) {
+    //       return Response.json({
+    //         intent,
+    //         success: false,
+    //         errors,
+    //       });
+    //     }
+    //   }
+
+    //   /* 3️⃣ Sync payment terms in Prisma */
+    //   const companyData = await prisma.companyAccount.findFirst({
+    //     where: { shopifyCompanyId: companyId },
+    //   });
+    //   if (companyData) {
+    //   await prisma.companyAccount.update({
+    //     where: { id: companyData.id },
+    //     data: { paymentTerm: paymentTermsTemplateId || "" },
+    //   });
+    // }
+
+    //   /* 4️⃣ Success response */
+    //   return Response.json({
+    //     intent,
+    //     success: true,
+    //     message: "Payment terms updated for all company locations",
+    //   });
+    // }
+
     case "updatepaymentTerm": {
-      if (isFreePlan) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["Payment terms are not available on the free plan"],
-        });
-      }
+  if (isFreePlan) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Payment terms are not available on the free plan"],
+    });
+  }
 
-      const companyId = (form.id as string)?.trim();
-      const paymentTermsTemplateId = (form.paymentTerm as string)?.trim();
+  const companyId = (form.id as string)?.trim();
+  // Keep null to represent "remove payment terms"
+  const paymentTermsTemplateId = (form.paymentTerm as string)?.trim() || null;
 
-      if (!companyId) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["Company id is required"],
-        });
-      }
-      if (!paymentTermsTemplateId) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["Payment terms is required"],
-        });
-      }
+  if (!companyId) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["Company id is required"],
+    });
+  }
 
-      /* 1️⃣ Fetch ALL company locations from Shopify */
-      const locationsResponse = await admin.graphql(
-        `#graphql
+  /* 1️⃣ Fetch ALL company locations from Shopify */
+  const locationsResponse = await admin.graphql(
+    `#graphql
     query GetCompanyLocations($companyId: ID!) {
       company(id: $companyId) {
         locations(first: 50) {
@@ -249,29 +353,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
     }`,
-        {
-          variables: { companyId },
-        },
-      );
+    { variables: { companyId } },
+  );
 
-      const locationsPayload = await locationsResponse.json();
-      const locations = locationsPayload?.data?.company?.locations?.nodes || [];
+  const locationsPayload = await locationsResponse.json();
+  const locations = locationsPayload?.data?.company?.locations?.nodes || [];
 
-      if (!locations.length) {
-        return Response.json({
-          intent,
-          success: false,
-          errors: ["No company locations found"],
-        });
-      }
+  if (!locations.length) {
+    return Response.json({
+      intent,
+      success: false,
+      errors: ["No company locations found"],
+    });
+  }
 
-      /* 2️⃣ Assign payment terms to EACH location */
-      for (const location of locations) {
-        const updateLocationResponse = await admin.graphql(
-          `#graphql
+  /* 2️⃣ Assign payment terms to EACH location */
+  for (const location of locations) {
+    const updateLocationResponse = await admin.graphql(
+      `#graphql
       mutation UpdateCompanyLocation(
         $companyLocationId: ID!
-        $paymentTermsTemplateId: ID!
+        $paymentTermsTemplateId: ID        # ✅ removed "!" — now nullable
       ) {
         companyLocationUpdate(
           companyLocationId: $companyLocationId
@@ -285,44 +387,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           userErrors { field message }
         }
       }`,
-          {
-            variables: {
-              companyLocationId: location.id,
-              paymentTermsTemplateId,
-            },
-          },
-        );
+      {
+        variables: {
+          companyLocationId: location.id,
+          paymentTermsTemplateId,  // null is now valid
+        },
+      },
+    );
 
-        const updatePayload = await updateLocationResponse.json();
-        const errors = buildUserErrorList(updatePayload);
+    const updatePayload = await updateLocationResponse.json();
+    const errors = buildUserErrorList(updatePayload);
 
-        if (errors.length) {
-          return Response.json({
-            intent,
-            success: false,
-            errors,
-          });
-        }
-      }
-
-      /* 3️⃣ Sync payment terms in Prisma */
-      const companyData = await prisma.companyAccount.findFirst({
-        where: { shopifyCompanyId: companyId },
-      });
-      if (companyData) {
-      await prisma.companyAccount.update({
-        where: { id: companyData.id },
-        data: { paymentTerm: paymentTermsTemplateId },
-      });
+    if (errors.length) {
+      return Response.json({ intent, success: false, errors });
     }
+  }
 
-      /* 4️⃣ Success response */
-      return Response.json({
-        intent,
-        success: true,
-        message: "Payment terms updated for all company locations",
-      });
-    }
+  /* 3️⃣ Sync payment terms in Prisma */
+  const companyData = await prisma.companyAccount.findFirst({
+    where: { shopifyCompanyId: companyId },
+  });
+  if (companyData) {
+    await prisma.companyAccount.update({
+      where: { id: companyData.id },
+      data: { paymentTerm: paymentTermsTemplateId ?? "" },
+    });
+  }
+
+  /* 4️⃣ Success response */
+  return Response.json({
+    intent,
+    success: true,
+    message: "Payment terms updated for all company locations",
+  });
+}
 
     case "createCompany": {
       const name = (form.name as string)?.trim();

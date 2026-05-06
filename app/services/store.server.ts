@@ -1,5 +1,7 @@
 import prisma from "../db.server";
 import { FREE_PLAN, PAID_PLAN } from "../billing-plans.shared";
+import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+import { registerCartValidationFunction, unregisterAllCartValidations } from "./cartValidationRegistration.server";
 
 export interface CreateStoreInput {
   shopDomain: string;
@@ -125,25 +127,180 @@ type AppSubscriptionSummary = {
   status?: string | null;
 };
 
+/**
+ * Update the smartb2b.validation_enabled shop metafield
+ */
+export async function setShopValidationMetafield(admin: AdminApiContext, enabled: boolean) {
+  try {
+    // 1. Get Shop ID
+    const shopRes = await admin.graphql(`
+      query {
+        shop {
+          id
+        }
+      }
+    `);
+    const shopData = await shopRes.json();
+    const shopId = shopData.data?.shop?.id;
+
+    if (!shopId) {
+      console.error("❌ Could not fetch Shop ID to set metafield");
+      return;
+    }
+
+    // 2. Set Metafield
+    console.log(`🏷️ Setting validation state metafield (enabled: ${enabled}) for ${shopId}`);
+    const metafieldRes = await admin.graphql(`
+      mutation SetMetafield($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            key
+            value
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `, {
+      variables: {
+        metafields: [
+          {
+            namespace: "smartb2b",
+            key: "validation_enabled",
+            type: "single_line_text_field",
+            value: enabled ? "true" : "false",
+            ownerId: shopId
+          }
+        ]
+      }
+    });
+
+    const metafieldData = await metafieldRes.json();
+    if (metafieldData.data?.metafieldsSet?.userErrors?.length > 0) {
+      console.error("❌ Error setting shop metafield:", metafieldData.data.metafieldsSet.userErrors[0].message);
+    } else {
+      console.log(`✅ Shop metafield updated: ${enabled}`);
+    }
+  } catch (error) {
+    console.error("❌ Exception setting shop metafield:", error);
+  }
+}
+
 export async function syncStoreSubscriptionState(
   shopDomain: string,
   appSubscriptions: AppSubscriptionSummary[] = [],
+  admin?: AdminApiContext,
 ) {
   const activeSubscription =
     appSubscriptions.find((subscription) => subscription.status === "ACTIVE") ||
     null;
 
-  return await prisma.store.updateMany({
+  const plan = getStorePlanValue(activeSubscription?.name);
+
+  const updatedStore = await prisma.store.updateMany({
     where: { shopDomain },
     data: {
-      plan: getStorePlanValue(activeSubscription?.name),
+      plan: plan,
       planKey: activeSubscription?.id ?? null,
       updatedAt: new Date(),
     },
   });
+
+  // If upgraded to paid plan, automatically register cart validation
+  if (plan === "approved payment" && admin) {
+    console.log(`🚀 Store ${shopDomain} upgraded to paid plan, registering cart validation...`);
+    await registerCartValidationFunction(admin);
+    await setShopValidationMetafield(admin, true);
+  } else if (admin) {
+    // If not on paid plan, ensure cart validation is unregistered
+    console.log(`🧹 Store ${shopDomain} not on paid plan, ensuring cart validation is unregistered...`);
+    await unregisterAllCartValidations(admin);
+    await setShopValidationMetafield(admin, false);
+  }
+
+  return updatedStore;
 }
 
-export async function setStoreFreePlan(shopDomain: string) {
+export async function setStoreFreePlan(shopDomain: string, admin?: AdminApiContext) {
+  const store = await prisma.store.findUnique({
+    where: { shopDomain },
+    select: { id: true },
+  });
+
+  if (store) {
+    // 1. Update local database
+    await prisma.companyAccount.updateMany({
+      where: { shopId: store.id },
+      data: {
+        paymentTerm: null,
+      },
+    });
+
+    // 2. Update Shopify if admin client is provided
+    if (admin) {
+      // Unregister cart validation on downgrade to free plan
+      console.log(`🧹 Store ${shopDomain} downgraded to free plan, unregistering cart validation...`);
+      await unregisterAllCartValidations(admin);
+      await setShopValidationMetafield(admin, false);
+
+      const companies = await prisma.companyAccount.findMany({
+        where: { shopId: store.id },
+        select: { shopifyCompanyId: true },
+      });
+
+      for (const company of companies) {
+        if (!company.shopifyCompanyId) continue;
+
+        try {
+          // Fetch locations for each company
+          const locationRes = await admin.graphql(
+            `#graphql
+            query getCompanyLocations($companyId: ID!) {
+              company(id: $companyId) {
+                locations(first: 50) {
+                  edges {
+                    node {
+                      id
+                    }
+                  }
+                }
+              }
+            }`,
+            { variables: { companyId: company.shopifyCompanyId } },
+          );
+
+          const locationJson = await locationRes.json();
+          const locations = locationJson.data?.company?.locations?.edges || [];
+
+          for (const edge of locations) {
+            const locationId = edge.node.id;
+            await admin.graphql(
+              `#graphql
+              mutation UpdateCompanyLocation($companyLocationId: ID!) {
+                companyLocationUpdate(
+                  companyLocationId: $companyLocationId
+                  input: {
+                    buyerExperienceConfiguration: {
+                      paymentTermsTemplateId: null
+                    }
+                  }
+                ) {
+                  userErrors { field message }
+                }
+              }`,
+              { variables: { companyLocationId: locationId } },
+            );
+          }
+        } catch (error) {
+          console.error(`Error updating Shopify payment terms for company ${company.shopifyCompanyId}:`, error);
+        }
+      }
+    }
+  }
+
   return await prisma.store.updateMany({
     where: { shopDomain },
     data: {
@@ -193,7 +350,7 @@ export async function deleteStore(shopDomain: string) {
       autoApproveB2BOnboarding: false,
       orderConfirmationToMainAccount: false,
       allowQuickOrderForUser: false,
-      contactEmail:null,
+      contactEmail: null,
       submissionEmail: null,
       companyWelcomeEmailTemplate: null,
       companyWelcomeEmailEnabled: false,

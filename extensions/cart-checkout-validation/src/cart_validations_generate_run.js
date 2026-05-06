@@ -14,89 +14,160 @@ export function cartValidationsGenerateRun(input) {
    * @type {{ message: string; target: string; }[]}
    */
   const errors = [];
+
+  // -----------------------------------
+  // VALIDATION ENABLE / DISABLE
+  // -----------------------------------
+
+  // Shop metafield value
+  // smartb2b.validation_enabled
+  const validationEnabled =
+    input.shop?.validationEnabled?.value === "true";
+
+  // Disable validation for FREE plan
+  if (!validationEnabled) {
+    return {
+      operations: [],
+    };
+  }
+
+  // -----------------------------------
+  // CHECKOUT STEP VALIDATION
+  // -----------------------------------
+
   const buyerJourneyStep = input.buyerJourney?.step;
+
   const shouldValidateCredit =
     buyerJourneyStep === "CHECKOUT_INTERACTION" ||
     buyerJourneyStep === "CHECKOUT_COMPLETION";
 
-  const parseDecimal = (value) => {
-    if (value == null || value === "") return null;
-    const parsed = Number.parseFloat(String(value));
-    return Number.isFinite(parsed) ? parsed : null;
-  };
-
   if (!shouldValidateCredit) {
     return {
-      operations: [
-        {
-          validationAdd: {
-            errors,
-          },
-        },
-      ],
+      operations: [],
     };
   }
 
-  // Check company credit validation
-  const buyerIdentity = input.cart.buyerIdentity;
-  const cartTotal = parseDecimal(input.cart.cost?.totalAmount?.amount) ?? 0;
+  // -----------------------------------
+  // HELPER FUNCTION
+  // -----------------------------------
+
+  const parseDecimal = (value) => {
+    if (value == null || value === "") {
+      return null;
+    }
+
+    const parsed = Number.parseFloat(String(value));
+
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  // -----------------------------------
+  // CART DATA
+  // -----------------------------------
+
+  const buyerIdentity = input.cart?.buyerIdentity;
+
+  const cartTotal =
+    parseDecimal(input.cart?.cost?.totalAmount?.amount) ?? 0;
+
+  // -----------------------------------
+  // COMPANY VALIDATION
+  // -----------------------------------
 
   if (buyerIdentity?.purchasingCompany?.company) {
     const company = buyerIdentity.purchasingCompany.company;
-    const companyCreditLimit = parseDecimal(company.creditLimit?.value);
-    const companyCreditUsed = parseDecimal(company.creditUsed?.value) ?? 0;
 
-    if (companyCreditLimit == null || companyCreditLimit <= 0) {
+    const companyCreditLimit =
+      parseDecimal(company.creditLimit?.value);
+
+    const companyCreditUsed =
+      parseDecimal(company.creditUsed?.value) ?? 0;
+
+    // Company credit not configured
+    if (
+      companyCreditLimit == null ||
+      companyCreditLimit <= 0
+    ) {
       errors.push({
         message:
           "Unable to validate company credit at checkout. Please contact support.",
         target: "$.cart",
       });
     } else {
-      const companyAvailableCredit = companyCreditLimit - companyCreditUsed;
+      const companyAvailableCredit =
+        companyCreditLimit - companyCreditUsed;
 
+      // Company limit exceeded
       if (companyCreditUsed >= companyCreditLimit) {
         errors.push({
-          message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
+          message:
+            "Company credit limit has been reached. Please contact support to increase your credit limit.",
           target: "$.cart",
         });
       }
+
+      // Cart exceeds company available credit
       else if (cartTotal > companyAvailableCredit) {
         errors.push({
-          message: `Insufficient company credit. Available credit: $${companyAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
+          message: `Insufficient company credit. Available credit: $${companyAvailableCredit.toFixed(
+            2
+          )}, Cart total: $${cartTotal.toFixed(2)}`,
           target: "$.cart",
         });
       }
     }
 
+    // -----------------------------------
+    // USER VALIDATION
+    // -----------------------------------
+
     const customer = buyerIdentity.customer;
-    const userCreditLimit = parseDecimal(customer?.userCreditLimit?.value);
-    const userCreditUsed = parseDecimal(customer?.userCreditUsed?.value) ?? 0;
 
-    if (userCreditLimit != null && userCreditLimit > 0) {
-      const userAvailableCredit = userCreditLimit - userCreditUsed;
+    const userCreditLimit =
+      parseDecimal(customer?.userCreditLimit?.value);
 
+    const userCreditUsed =
+      parseDecimal(customer?.userCreditUsed?.value) ?? 0;
+
+    if (
+      userCreditLimit != null &&
+      userCreditLimit > 0
+    ) {
+      const userAvailableCredit =
+        userCreditLimit - userCreditUsed;
+
+      // User limit exceeded
       if (userCreditUsed >= userCreditLimit) {
         errors.push({
-          message: "Your user credit limit has been reached. Please contact your company administrator.",
+          message:
+            "Your user credit limit has been reached. Please contact your company administrator.",
           target: "$.cart",
         });
-      } else if (cartTotal > userAvailableCredit) {
+      }
+
+      // Cart exceeds user available credit
+      else if (cartTotal > userAvailableCredit) {
         errors.push({
-          message: `Insufficient user credit. Available credit: $${userAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
+          message: `Insufficient user credit. Available credit: $${userAvailableCredit.toFixed(
+            2
+          )}, Cart total: $${cartTotal.toFixed(2)}`,
           target: "$.cart",
         });
       }
     }
   }
 
-  const operations = [
-    {
-      validationAdd: {
-        errors
-      },
-    },
-  ];
+  // -----------------------------------
+  // RETURN OPERATIONS
+  // -----------------------------------
 
-  return { operations };
-};
+  return {
+    operations: [
+      {
+        validationAdd: {
+          errors,
+        },
+      },
+    ],
+  };
+}

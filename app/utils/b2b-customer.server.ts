@@ -3,7 +3,7 @@ import prisma from "../db.server";
 import { getStoreByDomain } from "../services/store.server";
 import { createUser } from "../services/user.server";
 import { calculateAvailableCredit } from "app/services/creditService";
-import { log } from "node:console";
+
 
 // Type for GraphQL response
 type GraphQLResponse<T = unknown> = {
@@ -6451,20 +6451,6 @@ export async function getAdvancedCompanyOrders(
                       shopMoney {
                         amount
                         currencyCode
-                      }
-                    }
-                    totalDiscountSet {
-                      shopMoney {
-                        amount
-                        currencyCode
-                      }
-                    }
-                    taxLines {
-                      priceSet {
-                        shopMoney {
-                          amount
-                          currencyCode
-                        }
                       }
                     }
                     product {

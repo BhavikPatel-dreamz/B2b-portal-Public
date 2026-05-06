@@ -19,6 +19,7 @@ import {
 } from "@shopify/polaris";
 import { registerCartValidationFunction, unregisterCartValidationFunction } from "app/services/cartValidationRegistration.server";
 import { authenticate } from "app/shopify.server";
+import prisma from "app/db.server";
 
 
 interface ShopifyFunction {
@@ -107,13 +108,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
   const action = formData.get("action");
 
   try {
     switch (action) {
       case "register":
+        // Check plan before registration
+        const store = await prisma.store.findUnique({
+          where: { shopDomain: session.shop },
+          select: { plan: true }
+        });
+
+        if (store?.plan !== "approved payment") {
+          return json({
+            success: false,
+            message: "Cart validation is only available on the Paid Plan. Please upgrade your plan to enable this feature.",
+          });
+        }
+
         const result = await registerCartValidationFunction(admin);
         return json({
           success: result.success,
@@ -122,7 +136,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
 
       case "unregister":
-        const validationId = formData.get("validationId") as string;
+        const validationId = formData.get("action") === "unregister" ? formData.get("validationId") as string : null;
         if (!validationId) {
           return json({
             success: false,
@@ -186,7 +200,12 @@ export default function DebugFunctions() {
           variant="primary"
           tone="critical"
           size="micro"
-          onClick={() => submit(new FormData(document.forms[0] as HTMLFormElement))}
+          onClick={() => {
+             const form = new FormData();
+             form.append("action", "unregister");
+             form.append("validationId", validation.id);
+             submit(form, { method: "post" });
+          }}
         >
           Unregister
         </Button>

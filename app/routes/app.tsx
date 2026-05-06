@@ -23,7 +23,7 @@ function requiresPlan(pathname: string) {
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing, redirect, session } = await authenticate.admin(request);
+  const { billing, redirect, session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
 
   if (requiresPlan(url.pathname)) {
@@ -41,11 +41,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       await syncStoreSubscriptionState(
         session.shop,
         billingState.appSubscriptions || [],
+        admin,
       );
       clearAdminCompaniesCache(session.shop);
       clearDashboardStatsCache(session.shop);
     } else if (store?.plan === "approved payment") {
-      await clearStorePlan(session.shop);
+      // If we thought they were on a paid plan but they don't have active payment anymore
+      await syncStoreSubscriptionState(
+        session.shop,
+        [],
+        admin,
+      );
       clearAdminCompaniesCache(session.shop);
       clearDashboardStatsCache(session.shop);
     }

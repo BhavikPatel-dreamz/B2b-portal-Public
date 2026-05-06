@@ -41,7 +41,7 @@ function getBillingErrorMessage(error) {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { authenticate } = await import("../shopify.server");
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
   console.log("Running loader for select-plan route", billing);
 
@@ -62,7 +62,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (hasActivePayment) {
-    await syncStoreSubscriptionState(session.shop, appSubscriptions || []);
+    await syncStoreSubscriptionState(session.shop, appSubscriptions || [], admin);
     clearAdminCompaniesCache(session.shop);
     clearDashboardStatsCache(session.shop);
   }
@@ -87,7 +87,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { authenticate } = await import("../shopify.server");
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, session, admin } = await authenticate.admin(request);
   const formData = await request.formData();
   console.log("FormData:", formData);
   const plan = formData.get("plan");
@@ -110,7 +110,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (plan === FREE_PLAN) {
-      await setStoreFreePlan(session.shop);
+      await setStoreFreePlan(session.shop, admin);
       clearAdminCompaniesCache(session.shop);
       clearDashboardStatsCache(session.shop);
       return redirect(returnTo);

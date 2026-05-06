@@ -355,3 +355,83 @@ export async function autoSyncCreditMetafields(
     };
   }
 }
+
+/**
+ * Sync the store's plan to the Shop metafields
+ */
+export async function syncStorePlanToShopMetafields(admin: any, shopDomain: string) {
+  try {
+    const store = await prisma.store.findUnique({
+      where: { shopDomain },
+      select: { plan: true },
+    });
+
+    // Map internal plan names to extension-expected values
+    let planValue = "free";
+    if (store?.plan === "approved payment" || store?.plan === "Paid subscription") {
+      planValue = "approved payment";
+    } else if (store?.plan === "usage subscription" || store?.plan === "Usage subscription") {
+      planValue = "usage subscription";
+    }
+
+    const mutation = `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            namespace
+            key
+            value
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    // Fetch Shop ID
+    const shopQuery = `
+      query {
+        shop {
+          id
+        }
+      }
+    `;
+    const shopResponse = await admin.graphql(shopQuery);
+    const shopData = await shopResponse.json();
+    const shopId = shopData.data?.shop?.id;
+
+    if (!shopId) {
+      throw new Error("Could not fetch Shop ID");
+    }
+
+    const response = await admin.graphql(mutation, {
+      variables: {
+        metafields: [
+          {
+            ownerId: shopId,
+            namespace: "custom",
+            key: "store_plan",
+            value: planValue,
+            type: "single_line_text_field",
+          },
+        ],
+      },
+    });
+
+    const data = await response.json();
+    console.log("Shop plan metafield sync response:", data.data?.metafieldsSet?.metafields);
+
+    if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
+      const error = data.errors?.[0]?.message || data.data?.metafieldsSet?.userErrors?.[0]?.message;
+      throw new Error(`Failed to update shop plan metafield: ${error}`);
+    }
+
+    return { success: true, plan: planValue };
+  } catch (error: any) {
+    console.error("Error syncing shop plan metafield:", error);
+    return { success: false, error: error.message };
+  }
+}
