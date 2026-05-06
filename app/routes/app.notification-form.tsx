@@ -5,7 +5,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData, useSearchParams } from "react-router";
+import { Link, useFetcher, useLoaderData, useSearchParams } from "react-router";
 
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
@@ -2461,15 +2461,43 @@ export default function NotificationForm() {
   }
 
   // ── Main notifications list view ─────────────────────────────────────────────
-return (
-    <div style={pageShellStyle}>
-      <div style={pageHeroStyle}>
-        <h1 style={pageHeroTitleStyle}>Notifications</h1>
-        <p style={pageHeroTextStyle}>
-          Manage customer and admin email templates, delivery options, and branding.
-        </p>
-      </div>
-      <div style={pageContentStyle}>
+  return (
+    <>
+      <div style={pageShellStyle}>
+        <div style={pageHeroStyle}>
+          <Link
+            to="/app"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              color: "#2c6ecb",
+              textDecoration: "none",
+              fontSize: "14px",
+              fontWeight: 600,
+              margin: "15px 15px 5px",
+            }}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              style={{ width: "16px", height: "16px" }}
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            Back to Dashboard
+          </Link>
+          <h1 style={pageHeroTitleStyle}>Notifications</h1>
+          <p style={pageHeroTextStyle}>
+            Manage customer and admin email templates, delivery options, and
+            branding.
+          </p>
+        </div>
+        <div style={pageContentStyle}>
           <h1
             style={{
               margin: "0 0 24px",
@@ -2563,7 +2591,9 @@ return (
                         height: 20,
                         padding: "0 10px",
                         borderRadius: 999,
-                        background: adminNotificationsEnabled ? "#a7f3b7" : "#f1f2f4",
+                        background: adminNotificationsEnabled
+                          ? "#a7f3b7"
+                          : "#f1f2f4",
                         color: adminNotificationsEnabled ? "#166534" : "#6d7175",
                         fontSize: 11,
                         fontWeight: 600,
@@ -2572,7 +2602,13 @@ return (
                       {adminNotificationsEnabled ? "On" : "Off"}
                     </span>
                     {adminToggleFetcher.data?.message ? (
-                      <span style={{ fontSize: 12, color: "#008060", fontWeight: 600 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#008060",
+                          fontWeight: 600,
+                        }}
+                      >
                         Success
                       </span>
                     ) : null}
@@ -2594,7 +2630,8 @@ return (
                     fontWeight: 600,
                   }}
                 >
-                  Admins can receive notifications when a new company registration is submitted.
+                  Admins can receive notifications when a new company
+                  registration is submitted.
                 </p>
               </section>
 
@@ -2644,8 +2681,12 @@ return (
                         height: 20,
                         padding: "0 10px",
                         borderRadius: 999,
-                        background: customerNotificationsEnabled ? "#a7f3b7" : "#f1f2f4",
-                        color: customerNotificationsEnabled ? "#166534" : "#6d7175",
+                        background: customerNotificationsEnabled
+                          ? "#a7f3b7"
+                          : "#f1f2f4",
+                        color: customerNotificationsEnabled
+                          ? "#166534"
+                          : "#6d7175",
                         fontSize: 11,
                         fontWeight: 600,
                       }}
@@ -2653,7 +2694,13 @@ return (
                       {customerNotificationsEnabled ? "On" : "Off"}
                     </span>
                     {toggleFetcher.data?.message ? (
-                      <span style={{ fontSize: 12, color: "#008060", fontWeight: 600 }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#008060",
+                          fontWeight: 600,
+                        }}
+                      >
                         Success
                       </span>
                     ) : null}
@@ -2790,7 +2837,9 @@ return (
                           <ToggleSwitch
                             enabled={templateValues[item.id].enabled}
                             name="enabled"
-                            value={templateValues[item.id].enabled ? "false" : "true"}
+                            value={
+                              templateValues[item.id].enabled ? "false" : "true"
+                            }
                             fetcher={fetcher}
                             intent="toggleTemplateEnabled"
                             templateId={item.id}
@@ -2864,7 +2913,7 @@ return (
                   style={{
                     border: "1px solid #eceef1",
                     borderRadius: 12,
-                     overflow: "hidden",
+                    overflow: "hidden",
                     background: "#ffffff",
                   }}
                 >
@@ -2923,7 +2972,6 @@ return (
                               {item.description}
                             </p>
                           </div>
-                       
                         </button>
                         <div
                           style={{
@@ -2936,7 +2984,9 @@ return (
                           <ToggleSwitch
                             enabled={templateValues[item.id].enabled}
                             name="enabled"
-                            value={templateValues[item.id].enabled ? "false" : "true"}
+                            value={
+                              templateValues[item.id].enabled ? "false" : "true"
+                            }
                             fetcher={fetcher}
                             intent="toggleTemplateEnabled"
                             templateId={item.id}
@@ -2951,6 +3001,8 @@ return (
           </div>
         </div>
       </div>
+      {emailModal}
+    </>
   );
 }
 

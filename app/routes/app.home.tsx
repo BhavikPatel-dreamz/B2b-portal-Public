@@ -221,6 +221,32 @@ export default function Home() {
     //  <s-page heading="Dashboard Report">
          <div style={pageShellStyle}>
     <div style={pageHeroStyle}>
+      <Link
+        to="/app"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "8px",
+          color: "#2c6ecb",
+          textDecoration: "none",
+          fontSize: "14px",
+          fontWeight: 600,
+          margin: "15px 15px 5px",
+        }}
+      >
+        <svg
+          viewBox="0 0 20 20"
+          style={{ width: "16px", height: "16px" }}
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+            clipRule="evenodd"
+          />
+        </svg>
+        Back to Dashboard
+      </Link>
       <h1 style={pageHeroTitleStyle}>Dashboard Report</h1>
       <p style={pageHeroTextStyle}>
           Manage company profiles, contacts, credit limits, and your B2B customer accounts in one place.

@@ -4,7 +4,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, Link } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { APP_ADMIN_CONTENT_STYLE } from "../utils/app-layout.shared";
@@ -756,6 +756,32 @@ export default function SettingsPage() {
     return (
       <div style={pageShellStyle}>
         <div style={pageHeroStyle}>
+          <Link
+            to="/app"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              color: "#2c6ecb",
+              textDecoration: "none",
+              fontSize: "14px",
+              fontWeight: 600,
+              margin: "15px 15px 5px",
+            }}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              style={{ width: "16px", height: "16px" }}
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            Back to Dashboard
+          </Link>
           <h1 style={pageHeroTitleStyle}>Settings</h1>
           <p style={pageHeroTextStyle}>
             Maintain branding, emails, defaults, and store-wide B2B preferences.
@@ -795,6 +821,32 @@ export default function SettingsPage() {
     return (
       <div style={pageShellStyle}>
         <div style={pageHeroStyle}>
+          <Link
+            to="/app"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              color: "#2c6ecb",
+              textDecoration: "none",
+              fontSize: "14px",
+              fontWeight: 600,
+              margin: "15px 15px 5px",
+            }}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              style={{ width: "16px", height: "16px" }}
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            Back to Dashboard
+          </Link>
           <h1 style={pageHeroTitleStyle}>Settings</h1>
           <p style={pageHeroTextStyle}>
             Maintain branding, emails, defaults, and store-wide B2B preferences.
@@ -818,6 +870,32 @@ export default function SettingsPage() {
   return (
     <div style={pageShellStyle}>
       <div style={pageHeroStyle}>
+        <Link
+          to="/app"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            color: "#2c6ecb",
+            textDecoration: "none",
+            fontSize: "14px",
+            fontWeight: 600,
+            margin: "15px 15px 5px",
+          }}
+        >
+          <svg
+            viewBox="0 0 20 20"
+            style={{ width: "16px", height: "16px" }}
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Back to Dashboard
+        </Link>
         <h1 style={pageHeroTitleStyle}>Settings</h1>
         <p style={pageHeroTextStyle}>
           Maintain branding, emails, defaults, and store-wide B2B preferences.

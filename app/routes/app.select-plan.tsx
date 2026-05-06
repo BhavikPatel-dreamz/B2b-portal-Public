@@ -7,6 +7,7 @@ import {
   useLoaderData,
   useNavigation,
   useRevalidator,
+  Link,
 } from "react-router";
 import { useEffect, useMemo } from "react";
 import { FREE_PLAN, PAID_PLAN } from "app/billing-plans.shared";
@@ -95,7 +96,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("Return to raw:", returnToRaw);
   const returnTo = returnToRaw.startsWith("/app/") ? returnToRaw : "/app";
   const requestUrl = new URL(request.url);
-  console.log("Running action for select-plan route111",requestUrl);
+  console.log("Running action for select-plan route111", requestUrl);
 
   // eslint-disable-next-line no-undef
   const isTest =
@@ -178,6 +179,7 @@ export default function SelectPlan() {
 
     return null;
   }, [activePlanName, freePrice.label, paidPrice.label]);
+
   const hasShopifySubscription = activePlans.some(
     (plan) => plan.status === "ACTIVE",
   );
@@ -203,7 +205,7 @@ export default function SelectPlan() {
     width: "100%",
     maxWidth: 1200,
     margin: "0 auto 18px",
-    padding: "0px 0px 16px 0px",   
+    padding: "0px 0px 16px 0px",
     borderRadius: 14,
     border: "1px solid #dfe3e8",
     background: "linear-gradient(135deg, #ffffff 0%)",
@@ -231,137 +233,165 @@ export default function SelectPlan() {
   return (
     <div style={pageShellStyle}>
       <div style={pageHeroStyle}>
+        <Link
+          to="/app"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            color: "#2c6ecb",
+            textDecoration: "none",
+            fontSize: "14px",
+            fontWeight: 600,
+            margin: "15px 15px 5px",
+          }}
+        >
+          <svg
+            viewBox="0 0 20 20"
+            style={{ width: "16px", height: "16px" }}
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Back to Dashboard
+        </Link>
         <h1 style={pageHeroTitleStyle}>Plan Selection</h1>
         <p style={pageHeroTextStyle}>
           Compare available plans, subscribe, and manage your current billing status.
         </p>
       </div>
       <div style={contentPanelStyle}>
-      <div
-        style={{
-          background: "#ffffff",
-          border: "1px solid #dfe3e8",
-          borderRadius: 16,
-          boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-          padding: "18px",
-        }}
-      >
-      <s-section heading="Plans">
-        <s-stack direction="inline" gap="base">
-          <s-box padding="base" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="base">
-              <s-heading>Free</s-heading>
-              <s-paragraph>
-                <s-text emphasis="bold" size="large">
-                  {freePrice.label}
-                </s-text>
-              </s-paragraph>
-              <s-unordered-list>
-                <s-list-item>Recurring Shopify subscription</s-list-item>
-                <s-list-item>
-                  Entry-level plan billed at $0 per month
-                </s-list-item>
-                <s-list-item>
-                  Merchant approval happens in Shopify admin
-                </s-list-item>
-              </s-unordered-list>
-              <Form method="post">
-                <input type="hidden" name="returnTo" value={returnTo} />
-                <input type="hidden" name="plan" value={FREE_PLAN} />
-                <s-button
-                  type="submit"
-                  variant="secondary"
-                  {...(isSubmitting && submittingPlan === FREE_PLAN
-                    ? { loading: true }
-                    : {})}
-                  {...(activePlanName === FREE_PLAN || isSubmitting
-                    ? { disabled: true }
-                    : {})}
-                >
-                  {activePlanName === FREE_PLAN ? "Current plan" : "Subscribe"}
-                </s-button>
-              </Form>
-            </s-stack>
-          </s-box>
-
-          <s-box padding="base" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="base">
-              <s-stack direction="inline" gap="base" align="space-between">
-                <s-heading>Paid</s-heading>
-                <s-badge tone="success">Recommended</s-badge>
-              </s-stack>
-              <s-paragraph>
-                <s-text emphasis="bold" size="large">
-                  {paidPrice.label}
-                </s-text>
-              </s-paragraph>
-              <s-unordered-list>
-                <s-list-item>Recurring Shopify subscription</s-list-item>
-                <s-list-item>Use this as your premium paid plan</s-list-item>
-                <s-list-item>Approval happens inside Shopify admin</s-list-item>
-              </s-unordered-list>
-
-              <Form method="post">
-                <input type="hidden" name="returnTo" value={returnTo} />
-                <input type="hidden" name="plan" value={PAID_PLAN} />
-                <s-button
-                  type="submit"
-                  variant="primary"
-                  {...(isSubmitting && submittingPlan === PAID_PLAN
-                    ? { loading: true }
-                    : {})}
-                  {...(activePlanName === PAID_PLAN || isSubmitting
-                    ? { disabled: true }
-                    : {})}
-                >
-                  {activePlanName === PAID_PLAN ? "Current plan" : "Subscribe"}
-                </s-button>
-              </Form>
-            </s-stack>
-          </s-box>
-        </s-stack>
-      </s-section>
-      <s-section heading="Selected plan">
-        <s-box
-          padding="base"
-          borderWidth="base"
-          borderRadius="base"
-          background="subdued"
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #dfe3e8",
+            borderRadius: 16,
+            boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+            padding: "18px",
+          }}
         >
-          <s-stack direction="inline" gap="base" align="space-between">
-            <s-stack direction="block" gap="none">
-              <s-paragraph>
-                <s-text emphasis="bold">
-                  {activePlanName || "No plan selected"}
-                </s-text>
-              </s-paragraph>
-              {selectedPriceLabel && <s-paragraph>{selectedPriceLabel}</s-paragraph>}
+          <s-section heading="Plans">
+            <s-stack direction="inline" gap="base">
+              <s-box padding="base" borderWidth="base" borderRadius="base">
+                <s-stack direction="block" gap="base">
+                  <s-heading>Free</s-heading>
+                  <s-paragraph>
+                    <s-text emphasis="bold" size="large">
+                      {freePrice.label}
+                    </s-text>
+                  </s-paragraph>
+                  <s-unordered-list>
+                    <s-list-item>Recurring Shopify subscription</s-list-item>
+                    <s-list-item>
+                      Entry-level plan billed at $0 per month
+                    </s-list-item>
+                    <s-list-item>
+                      Merchant approval happens in Shopify admin
+                    </s-list-item>
+                  </s-unordered-list>
+                  <Form method="post">
+                    <input type="hidden" name="returnTo" value={returnTo} />
+                    <input type="hidden" name="plan" value={FREE_PLAN} />
+                    <s-button
+                      type="submit"
+                      variant="secondary"
+                      {...(isSubmitting && submittingPlan === FREE_PLAN
+                        ? { loading: true }
+                        : {})}
+                      {...(activePlanName === FREE_PLAN || isSubmitting
+                        ? { disabled: true }
+                        : {})}
+                    >
+                      {activePlanName === FREE_PLAN ? "Current plan" : "Subscribe"}
+                    </s-button>
+                  </Form>
+                </s-stack>
+              </s-box>
+
+              <s-box padding="base" borderWidth="base" borderRadius="base">
+                <s-stack direction="block" gap="base">
+                  <s-stack direction="inline" gap="base" align="space-between">
+                    <s-heading>Paid</s-heading>
+                    <s-badge tone="success">Recommended</s-badge>
+                  </s-stack>
+                  <s-paragraph>
+                    <s-text emphasis="bold" size="large">
+                      {paidPrice.label}
+                    </s-text>
+                  </s-paragraph>
+                  <s-unordered-list>
+                    <s-list-item>Recurring Shopify subscription</s-list-item>
+                    <s-list-item>Use this as your premium paid plan</s-list-item>
+                    <s-list-item>Approval happens inside Shopify admin</s-list-item>
+                  </s-unordered-list>
+                  <Form method="post">
+                    <input type="hidden" name="returnTo" value={returnTo} />
+                    <input type="hidden" name="plan" value={PAID_PLAN} />
+                    <s-button
+                      type="submit"
+                      variant="primary"
+                      {...(isSubmitting && submittingPlan === PAID_PLAN
+                        ? { loading: true }
+                        : {})}
+                      {...(activePlanName === PAID_PLAN || isSubmitting
+                        ? { disabled: true }
+                        : {})}
+                    >
+                      {activePlanName === PAID_PLAN ? "Current plan" : "Subscribe"}
+                    </s-button>
+                  </Form>
+                </s-stack>
+              </s-box>
             </s-stack>
-            {hasShopifySubscription && activePlanName && (
-              <cancelFetcher.Form
-                method="post"
-                action="/app/cancel-subscription"
-              >
-                <s-button
-                  type="submit"
-                  variant="secondary"
-                  tone="critical"
-                  {...(isCancelling ? { loading: true } : {})}
-                  {...(isSubmitting ? { disabled: true } : {})}
-                >
-                  Cancel subscription
-                </s-button>
-              </cancelFetcher.Form>
-            )}
-            {!hasShopifySubscription && (
-              <s-paragraph>
-                <s-text>No cancellation available</s-text>
-              </s-paragraph>
-            )}
-          </s-stack>
-        </s-box>
-      </s-section>
-      </div>
+          </s-section>
+
+          <s-section heading="Selected plan">
+            <s-box
+              padding="base"
+              borderWidth="base"
+              borderRadius="base"
+              background="subdued"
+            >
+              <s-stack direction="inline" gap="base" align="space-between">
+                <s-stack direction="block" gap="none">
+                  <s-paragraph>
+                    <s-text emphasis="bold">
+                      {activePlanName || "No plan selected"}
+                    </s-text>
+                  </s-paragraph>
+                  {selectedPriceLabel && (
+                    <s-paragraph>{selectedPriceLabel}</s-paragraph>
+                  )}
+                </s-stack>
+                {hasShopifySubscription && activePlanName && (
+                  <cancelFetcher.Form
+                    method="post"
+                    action="/app/cancel-subscription"
+                  >
+                    <s-button
+                      type="submit"
+                      variant="secondary"
+                      tone="critical"
+                      {...(isCancelling ? { loading: true } : {})}
+                      {...(isSubmitting ? { disabled: true } : {})}
+                    >
+                      Cancel subscription
+                    </s-button>
+                  </cancelFetcher.Form>
+                )}
+                {!hasShopifySubscription && (
+                  <s-paragraph>
+                    <s-text>No cancellation available</s-text>
+                  </s-paragraph>
+                )}
+              </s-stack>
+            </s-box>
+          </s-section>
+        </div>
       </div>
     </div>
   );
