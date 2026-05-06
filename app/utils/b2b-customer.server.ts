@@ -1410,6 +1410,13 @@ export async function getCustomerCompanyInfo(
     const isPrimaryMainContact =
       primaryProfile?.company?.mainContact?.customer?.id ===
       `gid://shopify/Customer/${customerId}`;
+
+    // Check if user is Ordering Only (restrictive role)
+    const isOrderingOnly = primaryRoles.includes("ordering only") &&
+                          !hasPrimaryCompanyAdminRole &&
+                          !isPrimaryMainContact &&
+                          !primaryRoles.includes("location admin");
+
     const hasPrimaryUnrestrictedLocationAccess =
       (isPrimaryMainContact || hasPrimaryCompanyAdminRole) &&
       primaryAssignedLocationIds.length === 0;
@@ -1494,7 +1501,7 @@ export async function getCustomerCompanyInfo(
       query {
         orders(
           first: 250
-          query: "company_id:${primaryCompanyNumericId} created_at:>=${startStr} created_at:<=${endStr}"
+          query: "company_id:${primaryCompanyNumericId} ${isOrderingOnly ? `customer_id:${customerId}` : ""} created_at:>=${startStr} created_at:<=${endStr}"
         ) {
           edges {
             node {
@@ -1526,6 +1533,7 @@ export async function getCustomerCompanyInfo(
               where: {
                 companyId: companyAccount.id,
                 orderStatus: "draft",
+                ...(isOrderingOnly ? { createdByUser: { shopifyCustomerId: `gid://shopify/Customer/${customerId}` } } : {})
               },
             })
           : Promise.resolve([]),
