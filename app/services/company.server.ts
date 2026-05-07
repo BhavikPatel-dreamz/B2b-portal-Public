@@ -780,18 +780,11 @@ export async function updateCredit(
 
     // 5. Sync to Shopify metadata if admin context is available and company has Shopify ID
     if (admin && updatedCompany.shopifyCompanyId) {
-      try {
-        await syncCompanyCreditMetafields(admin, updatedCompany.id);
-        console.log(
-          `✅ Successfully synced all credit metafields for company ${updatedCompany.id}`,
-        );
-      } catch (shopifyError) {
-        console.error(
-          "Failed to sync credit metafields to Shopify:",
-          shopifyError,
-        );
-        // Continue execution - local update succeeded
-      }
+      // Run sync in background
+      syncCompanyCreditMetafields(admin, updatedCompany.id).catch((shopifyError) => {
+        console.error("Failed to sync credit metafields to Shopify in background:", shopifyError);
+      });
+      console.log(`⏳ Started background sync for company ${updatedCompany.id} after manual update`);
     }
 
     return {

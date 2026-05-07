@@ -91,13 +91,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Reserve credit for the draft order (pending review)
     try {
-      console.log(`🏦 Attempting to deduct ${totalAmount} credit for company ${b2bUser.company.id}`);
-
-
-      console.log(`💳 Credit reserved successfully for draft order ${draftOrder.name || `#${draftOrder.id}`}`);
-
-
-      console.log(`📝 Upserting draft order ${JSON.stringify(draftOrder)}`);
+      console.log(`📝 Syncing draft order ${draftOrder.id} to B2B system`);
 
       // Create or update order using upsert function
       const draftOrderData = await upsertOrder({
@@ -106,38 +100,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         createdByUserId: b2bUser.id,
         shopId: store.id,
         orderTotal: totalAmount,
-        creditUsed: totalAmount, // Use total amount since we deducted credit
-        userCreditUsed: 0, // Add required field - no user-specific credit used for draft orders
+        creditUsed: totalAmount, // This will be set in the DB
+        userCreditUsed: 0, 
         paymentStatus: "pending",
-        orderStatus: "draft", // Draft order status
+        orderStatus: "draft", 
         remainingBalance: totalAmount,
       });
 
-      console.log(`📊 Upserted draft order in B2B system:`, {
-        id: draftOrderData.id,
-        shopifyOrderId: draftOrderData.shopifyOrderId,
-        orderTotal: draftOrderData.orderTotal,
-        creditUsed: draftOrderData.creditUsed,
-        userCreditUsed: draftOrderData.userCreditUsed,
-      });
+      console.log(`📊 Order record synced (ID: ${draftOrderData.id}). Processing credit deduction...`);
 
-     const creditDeductionResult = await deductCredit(
+      // Single path for credit deduction
+      const creditDeductionResult = await deductCredit(
         b2bUser.company.id,
-        draftOrderData.id, // Use the actual order ID from database instead of shopify order ID
+        draftOrderData.id, 
         totalAmount,
         b2bUser.id,
-        admin // Pass admin context for metafield sync
+        admin 
       );
-      console.log(`✅ Credit deduction result:`, creditDeductionResult);
-
-
-      console.log(`📊 Draft order stored in B2B system:`, {
-        id: draftOrderData.id,
-        shopifyOrderId: draftOrderData.shopifyOrderId,
-        orderTotal: draftOrderData.orderTotal,
-        creditUsed: draftOrderData.creditUsed,
-        userCreditUsed: draftOrderData.userCreditUsed,
-      });
+      console.log(`✅ Credit deduction successful:`, creditDeductionResult);
 
     } catch (creditError: unknown) {
       console.error(`❌ Credit reservation failed:`, {

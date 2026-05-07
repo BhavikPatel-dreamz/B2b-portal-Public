@@ -9,18 +9,50 @@ export interface CreateNotificationInput {
   activityType?: string | null;
   activeAction?: string | null;
   shopId: string;
+  title?: string | null;
+  shopifyOrderId?: string | null;
 }
 
 export interface UpdateNotificationInput {
   isRead?: boolean;
   message?: string;
+  activityType?: string | null;
+  activeAction?: string | null;
+  title?: string | null;
 }
+
+// ============================================================
+// 🗂️  CACHE SETUP 
+// ============================================================
+
+declare global {
+  var __notificationsCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+}
+
+export const notificationCache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__notificationsCache ??
+  (globalThis.__notificationsCache = new Map());
+
+/**
+ * Clear notification cache for a specific shop and customer
+ */
+export const clearNotificationsCache = (shop: string, customerId?: string) => {
+  const prefix = customerId ? `notifications-${shop}-${customerId}` : `notifications-${shop}`;
+  for (const key of notificationCache.keys()) {
+    if (key.startsWith(prefix)) {
+      notificationCache.delete(key);
+    }
+  }
+  console.log("🧹 Notifications cache cleared for:", prefix);
+};
 
 /**
  * Create a new notification
  */
 export async function createNotification(data: CreateNotificationInput) {
-  return await prisma.notification.create({
+  const notification = await prisma.notification.create({
     data: {
       receiverId: data.receiverId,
       adminReceiverId: data.adminReceiverId,
@@ -29,9 +61,15 @@ export async function createNotification(data: CreateNotificationInput) {
       activityType: data.activityType,
       activeAction: data.activeAction,
       shopId: data.shopId,
+      title: data.title,
+      shopifyOrderId: data.shopifyOrderId,
       isRead: false,
     },
   });
+
+  // Try to clear cache if shopId is known
+  // Note: We might need the shop domain here, but for now we'll rely on the caller to clear cache or we'll need to fetch shop domain
+  return notification;
 }
 
 /**
@@ -104,13 +142,33 @@ export async function updateNotification(
   id: string,
   data: UpdateNotificationInput,
 ) {
-  return await prisma.notification.update({
+  const notification = await prisma.notification.update({
     where: { id },
     data: {
       ...data,
       updatedAt: new Date(),
     },
   });
+
+  // Fetch shop domain to clear cache
+  const store = await prisma.store.findUnique({
+    where: { id: notification.shopId },
+    select: { shopDomain: true },
+  });
+
+  if (store?.shopDomain) {
+    if (notification.receiverId) {
+      const user = await prisma.user.findUnique({ where: { id: notification.receiverId }, select: { shopifyCustomerId: true } });
+      if (user?.shopifyCustomerId) {
+        clearNotificationsCache(store.shopDomain, user.shopifyCustomerId.replace("gid://shopify/Customer/", ""));
+      }
+    }
+    // Also clear for admin if needed, but it's harder to clear for multiple admins without knowing who they are
+    // For now, clearing by shop prefix might be safer
+    clearNotificationsCache(store.shopDomain);
+  }
+
+  return notification;
 }
 
 /**
@@ -127,7 +185,7 @@ export async function markAllAsReadForReceiver(
   receiverId: string,
   shopId: string,
 ) {
-  return await prisma.notification.updateMany({
+  const result = await prisma.notification.updateMany({
     where: {
       receiverId,
       shopId,
@@ -138,15 +196,49 @@ export async function markAllAsReadForReceiver(
       updatedAt: new Date(),
     },
   });
+
+  const store = await prisma.store.findUnique({
+    where: { id: shopId },
+    select: { shopDomain: true },
+  });
+
+  if (store?.shopDomain) {
+      const user = await prisma.user.findUnique({ where: { id: receiverId }, select: { shopifyCustomerId: true } });
+      if (user?.shopifyCustomerId) {
+        clearNotificationsCache(store.shopDomain, user.shopifyCustomerId.replace("gid://shopify/Customer/", ""));
+      }
+  }
+
+  return result;
 }
 
 /**
  * Delete a notification
  */
 export async function deleteNotification(id: string) {
-  return await prisma.notification.delete({
+  const notification = await prisma.notification.findUnique({ where: { id } });
+  if (!notification) return null;
+
+  await prisma.notification.delete({
     where: { id },
   });
+
+  const store = await prisma.store.findUnique({
+    where: { id: notification.shopId },
+    select: { shopDomain: true },
+  });
+
+  if (store?.shopDomain) {
+    if (notification.receiverId) {
+       const user = await prisma.user.findUnique({ where: { id: notification.receiverId }, select: { shopifyCustomerId: true } });
+       if (user?.shopifyCustomerId) {
+         clearNotificationsCache(store.shopDomain, user.shopifyCustomerId.replace("gid://shopify/Customer/", ""));
+       }
+    }
+    clearNotificationsCache(store.shopDomain);
+  }
+  
+  return true;
 }
 
 /**

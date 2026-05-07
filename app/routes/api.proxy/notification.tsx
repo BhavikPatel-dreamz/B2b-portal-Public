@@ -1,9 +1,10 @@
 import { type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import prisma from "../../db.server";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { getStoreByDomain } from "../../services/store.server";
 import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
 import { getProxyParams, validateB2BCustomerAccess } from "../../utils/proxy.server";
+import { clearNotificationsCache, notificationCache as cache } from "../../services/notification.server";
 
 interface ShopifyCustomer {
   id: string;
@@ -15,36 +16,7 @@ interface ShopifyCustomer {
   };
 }
 
-// ============================================================
-// 🗂️  CACHE SETUP 
-// ============================================================
-
-declare global {
-  var __notificationsCache:
-    | Map<string, { data: any; timestamp: number }>
-    | undefined;
-}
-
-const cache: Map<string, { data: any; timestamp: number }> =
-  globalThis.__notificationsCache ??
-  (globalThis.__notificationsCache = new Map());
-
 const CACHE_TTL = 1 * 60 * 1000; // 1 min — notifications are time-sensitive
-
-// ============================================================
-// 🧹 CACHE HELPERS
-// ============================================================
-
-// Call this whenever a notification is created, read, or deleted
-export const clearNotificationsCache = (shop: string, customerId: string) => {
-  const prefix = `notifications-${shop}-${customerId}`;
-  for (const key of cache.keys()) {
-    if (key.startsWith(prefix)) {
-      cache.delete(key);
-    }
-  }
-  console.log("🧹 Notifications cache cleared for:", prefix);
-};
 
 // ============================================================
 // 📦 LOADER — GET request
@@ -84,10 +56,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shopifyCustomerId: `gid://shopify/Customer/${customerId}` },
     });
 
+    if (!user) {
+      console.log("⚠️ User not found in local DB for customerId:", customerId);
+      return {
+        NotificationsData: [],
+        unreadCount: 0,
+        readCount: 0,
+        totalCount: 0,
+        pagination: { total: 0, page: 1, pageSize: 10, totalPages: 0 },
+        filters: { activityType, receiverId: customerId, senderId, search, isRead },
+      };
+    }
+
     // Build where clause
     const where: Prisma.NotificationWhereInput = {
       shopId: store?.id,
-      receiverId: user?.id,
+      OR: [
+        { receiverId: user.id },
+        { adminReceiverId: { contains: `gid://shopify/Customer/${customerId}` } }
+      ]
     };
     if (activityType) where.activityType = activityType;
     if (senderId)     where.senderId = senderId;
@@ -100,28 +87,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const skip        = (currentPage - 1) * pageSize;
 
     // All DB queries in parallel
-    const [notifications, totalGroups, unreadCount, readCount] =
+    const [notifications, totalCount, unreadCount, readCount] =
       await Promise.all([
         prisma.notification.findMany({
           where,
           orderBy: { createdAt: "desc" },
           take: pageSize,
           skip,
-          distinct: ["shopifyOrderId"],
         }),
-        prisma.notification.groupBy({
-          by: ["shopifyOrderId"],
-          where,
-        }),
-        prisma.notification
-          .groupBy({ by: ["shopifyOrderId"], where: { ...where, isRead: false } })
-          .then((r) => r.length),
-        prisma.notification
-          .groupBy({ by: ["shopifyOrderId"], where: { ...where, isRead: true } })
-          .then((r) => r.length),
+        prisma.notification.count({ where }),
+        prisma.notification.count({ where: { ...where, isRead: false } }),
+        prisma.notification.count({ where: { ...where, isRead: true } }),
       ]);
-
-    const totalCount = totalGroups.length;
 
     // Fetch sender/receiver names in one query
     const userIds = [
@@ -187,7 +164,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
        }
     // Step 3: Get customer company info
     const companyInfo = await getCustomerCompanyInfo(customerId, shop, store.accessToken);
-      const adminReceiverId = companyInfo?.companies.map((company: ShopifyCustomer) => company.mainContact.id) || [];
+      const adminReceiverIds = companyInfo?.companies.map((company: ShopifyCustomer) => company.mainContact.id) || [];
 
     try {
         switch (actionType) {
@@ -206,7 +183,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     message,
                     shopId: store?.id,
                     activityType: 'pending',
-                    adminReceiverId,
+                    adminReceiverId: adminReceiverIds.join(','),
                     isRead: false,
                     activeAction,
                     title
@@ -219,6 +196,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 const notification = await prisma.notification.create({
                     data: notificationData,
                 });
+                
+                clearNotificationsCache(shop, customerId);
                 return { notification };
             }
 
@@ -245,6 +224,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
                 });
 
+                clearNotificationsCache(shop, customerId);
                 return { notification: updated };
             }
 
@@ -264,6 +244,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 await prisma.notification.delete({
                     where: { id: notificationId },
                 });
+
+                clearNotificationsCache(shop, customerId);
                 return { success: true };
             }
             default:
@@ -274,3 +256,4 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return { error: "An error occurred" };
     }
 };
+

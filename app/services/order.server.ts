@@ -109,44 +109,84 @@ export async function createOrder(data: CreateOrderInput) {
       payments: true,
     },
   });
-  const storeAdmin = await prisma.user.findFirst({
+
+  // Identify all admins and the main contact to notify
+  const companyAdmins = await prisma.user.findMany({
     where: {
-      companyId: order?.companyId,
+      companyId: order.companyId,
       role: "STORE_ADMIN",
     },
+    select: { id: true, shopifyCustomerId: true },
   });
 
+  // Get the main contact ID from Shopify (stored in our company profile if needed, but we can also use the one from companyAccount if we store it)
+  // For now, we'll notify all local users with STORE_ADMIN role for this company.
   
-    const notificationData = {
-      message: `New B2B order created with ID: ${order.shopifyOrderId}`,
-      title: "New Order Created",
-      shopId: order?.shopId,
-      activityType: "pending",
-      senderId: order?.createdByUserId,
-      shopifyOrderId:order.shopifyOrderId,
-      receiverId: storeAdmin?.id,
-      isRead: false,
-      activeAction: order?.orderStatus,
-    };
-   const notifidationRecode= await prisma.notification.findFirst({
-      where:{
-        shopifyOrderId:order.shopifyOrderId
-      }
-    })
-    
-    if(notifidationRecode){
-    
+  const adminIds = companyAdmins.map(a => a.id);
+  const adminCustomerIds = companyAdmins
+    .map(a => a.shopifyCustomerId)
+    .filter((id): id is string => !!id)
+    .map(id => id.replace("gid://shopify/Customer/", ""));
+
+  const notificationData = {
+    message: `New B2B order created with ID: ${order.shopifyOrderId}`,
+    title: "New Order Created",
+    shopId: order.shopId,
+    activityType: "pending",
+    senderId: order.createdByUserId,
+    shopifyOrderId: order.shopifyOrderId,
+    adminReceiverId: adminIds.join(','),
+    isRead: false,
+    activeAction: order.orderStatus,
+  };
+
+  if (order.shopifyOrderId) {
+    const existingNotification = await prisma.notification.findFirst({
+      where: {
+        shopifyOrderId: order.shopifyOrderId,
+      },
+    });
+
+    if (existingNotification) {
       await prisma.notification.update({
-        where:{
-          id:notifidationRecode.id
-        },
-      data: notificationData,
-    }); 
+        where: { id: existingNotification.id },
+        data: notificationData,
+      });
+    } else {
+      await prisma.notification.create({
+        data: notificationData,
+      });
     }
+  } else {
     await prisma.notification.create({
       data: notificationData,
     });
-  
+  }
+
+  // Clear cache for the store admins and the user who created the order
+  const store = await prisma.store.findUnique({
+    where: { id: order.shopId },
+    select: { shopDomain: true },
+  });
+
+  if (store?.shopDomain) {
+    const { clearNotificationsCache } = await import("./notification.server");
+    
+    // Clear cache for all identified admins
+    for (const adminCustId of adminCustomerIds) {
+        clearNotificationsCache(store.shopDomain, adminCustId);
+    }
+    
+    // Clear cache for the creator
+    const creator = await prisma.user.findUnique({ 
+        where: { id: order.createdByUserId }, 
+        select: { shopifyCustomerId: true } 
+    });
+    if (creator?.shopifyCustomerId) {
+        const creatorCustomerId = creator.shopifyCustomerId.replace("gid://shopify/Customer/", "");
+        clearNotificationsCache(store.shopDomain, creatorCustomerId);
+    }
+  }
 
   return order;
 }

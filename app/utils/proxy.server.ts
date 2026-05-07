@@ -268,6 +268,7 @@ export async function authenticateApiProxyRequest(request: Request) {
       store,
       companyInfo,
       companyId: companyInfo.companies[0].companyId,
+      companyAccountId: companyInfo.companyAccountId as string,
     };
   } catch (error) {
     // If error is already a Response, re-throw it

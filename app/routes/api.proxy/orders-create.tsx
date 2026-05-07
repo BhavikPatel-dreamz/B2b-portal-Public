@@ -274,8 +274,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           createdByUserId: user.id,
           shopId: store.id,
           orderTotal: new Decimal(totalAmount),
-          creditUsed: new Decimal(0), // Will be set by deductCredit
-          userCreditUsed: new Decimal(0), // Add required field
+          creditUsed: new Decimal(0), // Will be set by the webhook via deductCredit
+          userCreditUsed: new Decimal(0),
           paymentStatus: "pending",
           orderStatus: "draft",
           shopifyOrderId:"",
@@ -283,9 +283,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           paidAmount: new Decimal(0),
         },
       });
-
-      // Deduct credit and create transaction log
-      await deductTieredCredit(companyId, user.id, b2bOrder.id, totalAmount, "order_created");
 
       // Create draft order in Shopify
       const shopifyResult = await createShopifyDraftOrder(admin, {
@@ -295,30 +292,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           quantity: item.quantity,
         })),
         shippingAddress,
-        note: notes
-          ? `B2B Order #${b2bOrder.id}\n${notes}`
-          : `B2B Order #${b2bOrder.id}`,
+        note: `B2B Order Reference: ${b2bOrder.id}\n${notes || ""}`,
       });
 
       if (!shopifyResult.success) {
-        // Rollback: Delete the B2B order and restore credit
+        // Rollback: Delete the B2B order if Shopify creation fails
         await prisma.b2BOrder.delete({ where: { id: b2bOrder.id } });
-
-        // Restore credit by creating a reversal transaction
-        await prisma.creditTransaction.create({
-          data: {
-            companyId,
-            orderId: b2bOrder.id,
-            transactionType: "order_cancelled",
-            creditAmount: new Decimal(totalAmount),
-            previousBalance: new Decimal(0), // Will be recalculated
-            newBalance: new Decimal(0), // Will be recalculated
-            notes: `Order creation failed - Shopify sync error. Credit restored.`,
-            createdBy: "system",
-            createdAt: new Date(),
-            
-          },
-        });
 
         return Response.json(
           {
@@ -368,24 +347,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } catch (error: unknown) {
       console.error("Error creating B2B order:", error);
 
-      // Rollback if we created a B2B order
-      if (b2bOrder) {
+      // Rollback if we created a B2B order locally but subsequent steps failed
+      if (b2bOrder && !shopifyDraftOrder) {
         try {
           await prisma.b2BOrder.delete({ where: { id: b2bOrder.id } });
-
-          // Restore credit
-          await prisma.creditTransaction.create({
-            data: {
-              companyId,
-              orderId: b2bOrder.id,
-              transactionType: "order_cancelled",
-              creditAmount: new Decimal(totalAmount),
-              previousBalance: new Decimal(0),
-              newBalance: new Decimal(0),
-              notes: `Order creation failed - Database error. Credit restored.`,
-              createdBy: "system",
-            },
-          });
         } catch (rollbackError) {
           console.error("Error during rollback:", rollbackError);
         }

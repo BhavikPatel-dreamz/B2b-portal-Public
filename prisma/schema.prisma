@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,266 +7,212 @@ datasource db {
   url      = env("DBURL")
 }
 
-// Enums
-enum UserRole {
-  SUPER_ADMIN  // App owner, full access to everything
-  STORE_ADMIN  // Store owner/admin, manages their store
-  STORE_USER   // Regular user within a store
-}
-
-enum UserStatus {
-  PENDING   // Awaiting approval
-  APPROVED  // Approved and can login
-  REJECTED  // Rejected
-}
-
-// Shopify OAuth Session (for app installation)
-// These fields are required by @shopify/shopify-app-session-storage-prisma package
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean   @default(false)
-  emailVerified Boolean   @default(false)
-  refreshToken  String?
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean   @default(false)
+  emailVerified       Boolean   @default(false)
+  refreshToken        String?
   refreshTokenExpires DateTime?
 
   @@index([shop])
 }
 
-// Store/Shop data
 model Store {
-  id            String    @id @default(cuid())
-  shopDomain    String    @unique
-  shopName      String?
-  plan          String?
-  planKey       String?
-  storeOwnerName   String?
-  contactEmail  String?
-  themeColor    String?
-  autoApproveB2BOnboarding Boolean @default(false)
-  defaultCompanyCreditLimit Decimal?  @db.Decimal(14, 2)
-  orderConfirmationToMainAccount Boolean @default(false)
-  allowQuickOrderForUser Boolean @default(false)
-  accessToken   String?
-  scope         String?
-  logo          String?
-  currencyCode  String?   @default("USD")
-  submissionEmail String?
-  privacyPolicylink String?
-  privacyPolicyContent String?
-  companyWelcomeEmailTemplate String?  // Custom template for company sync emails
-  companyWelcomeEmailEnabled Boolean   @default(true)  // Enable/disable company sync notifications
-  completedSetupSteps   Json?     // Array of strings for completed step labels
-  setupFinished         Boolean   @default(false)
-  isActive      Boolean   @default(true)
-  installedAt   DateTime  @default(now())
-  uninstalledAt DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+  id                             String                   @id @default(cuid())
+  shopDomain                     String                   @unique
+  shopName                       String?
+  contactEmail                   String?
+  themeColor                     String?
+  accessToken                    String?
+  scope                          String?
+  logo                           String?
+  isActive                       Boolean                  @default(true)
+  installedAt                    DateTime                 @default(now())
+  uninstalledAt                  DateTime?
+  createdAt                      DateTime                 @default(now())
+  updatedAt                      DateTime                 @updatedAt
+  submissionEmail                String?
+  companyWelcomeEmailEnabled     Boolean                  @default(true)
+  companyWelcomeEmailTemplate    String?
+  storeOwnerName                 String?
+  privacyPolicyContent           String?
+  privacyPolicylink              String?
+  deletedAt                      DateTime?
+  autoApproveB2BOnboarding       Boolean                  @default(false)
+  defaultCompanyCreditLimit      Decimal?                 @db.Decimal(14, 2)
+  orderConfirmationToMainAccount Boolean                  @default(false)
+  allowQuickOrderForUser         Boolean                  @default(false)
+  completedSetupSteps            Json?
+  setupFinished                  Boolean                  @default(false)
+  plan                           String?
+  planKey                        String?
+  currencyCode                   String?                  @default("USD")
+  b2bOrders                      B2BOrder[]               @relation("StoreOrders")
+  companyAccounts                CompanyAccount[]
+  emailTemplates                 EmailTemplates[]         @relation("StoreEmailTemplates")
+  formFieldConfigs               FormFieldConfig?
+  registrationSubmissions        RegistrationSubmission[]
+  users                          User[]
 
-  // Relations
-  users                  User[]
-  registrationSubmissions RegistrationSubmission[]
-  companyAccounts        CompanyAccount[]
-  b2bOrders              B2BOrder[]    @relation("StoreOrders")
-  formFieldConfigs        FormFieldConfig[]
-  emailTemplates          EmailTemplates[] @relation("StoreEmailTemplates")
   @@index([shopDomain])
 }
 
-// User accounts (for your B2B portal)
 model User {
-  id           String        @id @default(cuid())
-  email        String
-  firstName    String?
-  lastName     String?
-  password     String        // Password hash
-  role         UserRole      @default(STORE_USER)
-  status       UserStatus    @default(PENDING)
-  isActive     Boolean       @default(true)
+  id                String          @id @default(cuid())
+  email             String
+  firstName         String?
+  lastName          String?
+  password          String
+  role              UserRole        @default(STORE_USER)
+  status            UserStatus      @default(PENDING)
+  isActive          Boolean         @default(true)
+  shopId            String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  companyId         String?
+  companyRole       String?
+  shopifyCustomerId String?
+  userCreditLimit   Decimal?        @db.Decimal(14, 2)
+  userCreditUsed    Decimal         @default(0) @db.Decimal(14, 2)
+  ordersCreated     B2BOrder[]      @relation("UserCreatedOrders")
+  company           CompanyAccount? @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: Cascade)
+  shop              Store?          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  sessions          UserSession[]
 
-  // Shopify customer relationship
-  shopifyCustomerId String?   // Shopify customer GID for linking to Shopify profile
-
-  // Store relationship (null for super admins)
-  shopId       String?
-  shop         Store?        @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  // Company relationship (for B2B users)
-  companyId    String?
-  company      CompanyAccount? @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: Cascade)
-  companyRole  String?       // member, approver, admin
-
-  // User-level credit limits
-  userCreditLimit   Decimal?  @db.Decimal(14, 2)  // Individual user credit limit (null = no limit set)
-  userCreditUsed    Decimal   @default(0) @db.Decimal(14, 2)  // Amount currently used by user
-
-  // Relations
-  sessions     UserSession[]
-  ordersCreated B2BOrder[]   @relation("UserCreatedOrders")
-
-  // Metadata
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-
+  @@unique([shopId, email])
   @@index([email])
   @@index([shopId])
   @@index([role])
   @@index([companyId])
-  @@unique([shopId, email])
 }
 
-// User sessions (for login/logout)
 model UserSession {
   id        String   @id @default(cuid())
   token     String   @unique
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([token])
   @@index([userId])
 }
 
-// B2B Registration Submissions
-  model RegistrationSubmission {
-    id              String    @id @default(cuid())
-    companyName     String
-    email           String         
-    firstName       String
-    lastName        String
-    contactTitle    String
-    shipping        Json 
-    billing         Json
-    customFields    Json? 
-    isPrivacyPolicy Boolean @default(false)
-    isDisable       Boolean @default(false) 
+model RegistrationSubmission {
+  id                String     @id @default(cuid())
+  companyName       String
+  email             String
+  firstName         String
+  lastName          String
+  contactTitle      String
+  shipping          Json
+  billing           Json
+  customFields      Json?
+  isPrivacyPolicy   Boolean    @default(false)
+  isDisable         Boolean    @default(false)
+  shopId            String
+  status            UserStatus @default(PENDING)
+  shopifyCustomerId String?
+  workflowCompleted Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  reviewNotes       String?
+  reviewedAt        DateTime?
+  shop              Store      @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-    // Store relationship
-    shopId          String
-    shop            Store     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-    // Status tracking
-    status          UserStatus @default(PENDING)
-    reviewNotes     String?
-    reviewedAt      DateTime?
-
-    // Shopify workflow tracking
-    shopifyCustomerId  String?  // Shopify customer GID
-    workflowCompleted  Boolean  @default(false)
-
-    createdAt       DateTime  @default(now())
-    updatedAt       DateTime  @updatedAt
-
-    @@index([shopId])
-    @@index([email])
-    @@index([status])
-    @@unique([shopId, email])
-  }
-
-// Store-level company records for credit management
-model CompanyAccount {
-  id               String   @id @default(cuid())
-  shopId           String
-  shop             Store    @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  shopifyCompanyId String?  // Shopify company GID
-  name             String
-  contactName      String?
-  contactEmail     String?
-
-  creditLimit      Decimal  @default(0) @db.Decimal(14, 2)
-  paymentTerm      String?
-  isDisable        Boolean?  @default(false)
-
-  users            User[]               @relation("CompanyUsers")
-  orders           B2BOrder[]           @relation("CompanyAccountOrders")
-  creditTransactions CreditTransaction[]
-
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
+  @@unique([shopId, email])
   @@index([shopId])
+  @@index([email])
+  @@index([status])
+}
+
+model CompanyAccount {
+  id                 String              @id @default(cuid())
+  shopId             String
+  shopifyCompanyId   String?
+  name               String
+  contactName        String?
+  contactEmail       String?
+  creditLimit        Decimal             @default(0) @db.Decimal(14, 2)
+  paymentTerm        String?
+  isDisable          Boolean?            @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  orders             B2BOrder[]          @relation("CompanyAccountOrders")
+  shop               Store               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  creditTransactions CreditTransaction[]
+  users              User[]              @relation("CompanyUsers")
+
   @@unique([shopId, shopifyCompanyId])
+  @@index([shopId])
 }
 
 model FormFieldConfig {
   id        String   @id @default(cuid())
-  shopId    String
-  shop      Store     @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  fields    Json     // array of FieldDef
+  fields    Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  @@unique([shopId])
+  shopId    String   @unique
+  shop      Store    @relation(fields: [shopId], references: [id], onDelete: Cascade)
 }
 
-// Wishlist Models
 model Wishlist {
-  id          String   @id @default(cuid())
-  name        String
-
-  customerId  String   // Shopify Customer ID
-  shop        String   // Shop domain
-
-  // Optional: Link to a specific location if needed.
-  locationId  String?
-
-  items       WishlistItem[]
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String         @id @default(cuid())
+  name       String
+  customerId String
+  shop       String
+  locationId String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  items      WishlistItem[]
 
   @@index([customerId, shop])
 }
 
 model WishlistItem {
-  id          String   @id @default(cuid())
-  wishlistId  String
-  wishlist    Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
-
-  productId   String   // Shopify Product GID
-  variantId   String   // Shopify Variant GID
+  id           String   @id @default(cuid())
+  wishlistId   String
+  productId    String
+  variantId    String
   productTitle String?
   variantTitle String?
-  image       String?  // URL of the product image
-  price       Float    @default(0) // Unit price
-  quantity    Int      @default(1)
-  soldOut     Boolean  @default(false)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  image        String?
+  price        Float    @default(0)
+  quantity     Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  soldOut      Boolean  @default(false)
+  wishlist     Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
 
   @@index([wishlistId])
 }
 
 model Notification {
-  id                 String   @id @default(cuid())
-  receiverId         String?
-  adminReceiverId    String?
-  senderId           String?
-  title              String?
-  message            String
-  activityType       String?
-  activeAction       String?  // URL for the action/product
-  isRead             Boolean  @default(false)
-  shopifyOrderId     String?  
-  // Shop relation
-  shopId        String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default(cuid())
+  receiverId      String?
+  adminReceiverId String?
+  senderId        String?
+  message         String
+  activityType    String?
+  activeAction    String?
+  isRead          Boolean  @default(false)
+  shopId          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  title           String?
+  shopifyOrderId  String?
 
   @@index([receiverId])
   @@index([senderId])
@@ -277,103 +220,96 @@ model Notification {
 }
 
 model OrderPayment {
-  id           String   @id @default(cuid())
-
-  orderId      String
-  order        B2BOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  amount       Decimal  @db.Decimal(14, 2)
-  method       String?  // credit, card, bank_transfer
-  status       String   @default("pending")  // pending, received, failed, refunded
-  receivedAt   DateTime?
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         String    @id @default(cuid())
+  orderId    String
+  amount     Decimal   @db.Decimal(14, 2)
+  method     String?
+  status     String    @default("pending")
+  receivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  order      B2BOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([status])
 }
 
 model B2BOrder {
-  id               String   @id @default(cuid())
-
+  id               String         @id @default(cuid())
   companyId        String
-  company          CompanyAccount @relation("CompanyAccountOrders", fields: [companyId], references: [id], onDelete: Cascade)
-
   createdByUserId  String
-  createdByUser    User @relation("UserCreatedOrders", fields: [createdByUserId], references: [id])
-
   shopId           String
-  shop             Store     @relation("StoreOrders", fields: [shopId], references: [id], onDelete: Cascade)
-
-  shopifyOrderId  String?   @unique   // ← change this to optional
-
-  orderTotal       Decimal   @db.Decimal(14, 2)
-  creditUsed       Decimal   @db.Decimal(14, 2)  // How much credit was used for this order
-  userCreditUsed   Decimal   @db.Decimal(14, 2)  // How much of user's personal credit was used
-
-  // Payment tracking
-  paymentStatus    String    @default("pending")   // pending, partial, paid, cancelled
-  orderStatus      String    @default("draft")     // draft, submitted, processing, shipped, delivered, cancelled
-  paidAmount       Decimal   @default(0) @db.Decimal(14, 2)
-  remainingBalance Decimal   @db.Decimal(14, 2)
-
-  // Optional notes for order tracking
-  notes            String?   // Order notes, credit issues, etc.
-
-  // Relations
+  shopifyOrderId   String?        @unique
+  orderTotal       Decimal        @db.Decimal(14, 2)
+  creditUsed       Decimal        @db.Decimal(14, 2)
+  paymentStatus    String         @default("pending")
+  orderStatus      String         @default("draft")
+  paidAmount       Decimal        @default(0) @db.Decimal(14, 2)
+  remainingBalance Decimal        @db.Decimal(14, 2)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  paidAt           DateTime?
+  userCreditUsed   Decimal        @db.Decimal(14, 2)
+  notes            String?
+  company          CompanyAccount @relation("CompanyAccountOrders", fields: [companyId], references: [id], onDelete: Cascade)
+  createdByUser    User           @relation("UserCreatedOrders", fields: [createdByUserId], references: [id])
+  shop             Store          @relation("StoreOrders", fields: [shopId], references: [id], onDelete: Cascade)
   payments         OrderPayment[]
 
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  paidAt           DateTime?
-
+  @@index([companyId, paymentStatus, orderStatus])
   @@index([companyId])
   @@index([shopId])
   @@index([paymentStatus])
   @@index([createdByUserId])
 }
 
-
 model CreditTransaction {
-  id               String   @id @default(cuid())
+  id              String         @id @default(cuid())
+  companyId       String
+  orderId         String?
+  transactionType String
+  creditAmount    Decimal        @db.Decimal(14, 2)
+  previousBalance Decimal        @db.Decimal(14, 2)
+  newBalance      Decimal        @db.Decimal(14, 2)
+  notes           String?
+  createdBy       String
+  createdAt       DateTime       @default(now())
+  userId          String?
+  company         CompanyAccount @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  companyId        String
-  company          CompanyAccount @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  userId           String?     // Track which user initiated the transaction
-  orderId          String?     // Nullable if not order-related
-
-  transactionType  String      // order_created, order_paid, order_cancelled, credit_adjustment, payment_received
-  creditAmount     Decimal   @db.Decimal(14, 2)  // Amount changed (can be negative)
-  previousBalance  Decimal   @db.Decimal(14, 2)
-  newBalance       Decimal   @db.Decimal(14, 2)
-
-  notes            String?
-  createdBy        String      // User ID or "system"
-
-  createdAt        DateTime  @default(now())
-
+  @@index([companyId, createdAt(sort: Desc)])
   @@index([companyId])
   @@index([transactionType])
 }
 
 model EmailTemplates {
-  id                                    String   @id @default(cuid())
-  shopId                                String
-  shop                                  Store    @relation("StoreEmailTemplates", fields: [shopId], references: [id], onDelete: Cascade)
-  customerRegistration                  Boolean?  @default(false)
-  customerRegistrationSubject           String?
-  customerRegistrationTemplate          String?
-  customerRegistrationApproved          Boolean?  @default(false)
-  customerRegistrationApprovedSubject   String?
-  customerRegistrationApprovedTemplate  String?
-  customerRegistrationRejected          Boolean?  @default(false)
-  customerRegistrationRejectedSubject   String?
-  customerRegistrationRejectedTemplate  String?
-  adminRequest                          Boolean?  @default(false)
-  adminRequestSubject                   String?
-  adminRequestTemplate                  String?
-  createdAt                             DateTime  @default(now())
-  updatedAt                             DateTime @updatedAt
+  id                                   String   @id @default(cuid())
+  shopId                               String
+  customerRegistration                 Boolean? @default(false)
+  customerRegistrationSubject          String?
+  customerRegistrationTemplate         String?
+  customerRegistrationApproved         Boolean? @default(false)
+  customerRegistrationApprovedSubject  String?
+  customerRegistrationApprovedTemplate String?
+  customerRegistrationRejected         Boolean? @default(false)
+  customerRegistrationRejectedSubject  String?
+  customerRegistrationRejectedTemplate String?
+  adminRequest                         Boolean? @default(false)
+  adminRequestSubject                  String?
+  adminRequestTemplate                 String?
+  createdAt                            DateTime @default(now())
+  updatedAt                            DateTime @updatedAt
+  shop                                 Store    @relation("StoreEmailTemplates", fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  STORE_ADMIN
+  STORE_USER
+}
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }

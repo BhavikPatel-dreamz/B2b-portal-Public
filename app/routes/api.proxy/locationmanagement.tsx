@@ -10,6 +10,7 @@ import {
   checkLocationHasOrders,
   checkLocationHasUsers,
 } from "../../utils/b2b-customer.server";
+import { isValidZipCode } from "../../utils/validation";
 
 
 // ============================================================
@@ -304,6 +305,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
+        // Proper Zip Code Validation
+        if (!isValidZipCode(zip, country)) {
+          return Response.json(
+            { error: `Invalid Zip/Postal code format for ${country}.` },
+            { status: 400 }
+          );
+        }
+
         const alreadyExists = await checkLocationExists(
           companyId, shop, store.accessToken, name,
         );
@@ -361,6 +370,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json(
       { error: "Location ID is required for editing" },
       { status: 400 },
+    );
+  }
+
+  // Proper Zip Code Validation (if both are provided in the update)
+  if (zip && country && !isValidZipCode(zip, country)) {
+    return Response.json(
+      { error: `Invalid Zip/Postal code format for ${country}.` },
+      { status: 400 }
     );
   }
 
