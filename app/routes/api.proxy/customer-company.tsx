@@ -68,7 +68,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       currentMonthOrderCount: companyInfo.currentMonthOrderCount,
       pendingDraftOrderCount: companyInfo.pendingDraftOrderCount,
       currentMonthUsedCredit: companyInfo.currentMonthUsedCredit,
-      companyCurrentMonthUsedCredit: (companyInfo as any).companyCurrentMonthUsedCredit,
       totalLocationCount: companyInfo.totalLocationCount,
       userCount: companyInfo.userCount,
       currencyCode: companyInfo.companies?.[0]?.totalSpent?.currencyCode || "USD",

@@ -141,25 +141,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         remainingBalance: remainingBalance.toString(),
       });
 
-      // ─── 1. Create B2B order entry FIRST ───────────────────────────────
-      // We create the order record first so that the credit service can find it and update it
-      const order = await createOrder({
-        companyId: user.companyId,
-        createdByUserId: user.id,
-        shopId: store.id,
-        shopifyOrderId: orderGid,
-        orderTotal,
-        creditUsed: paymentStatus === "pending" ? orderTotal : new Prisma.Decimal(0),
-        userCreditUsed: new Prisma.Decimal(0), // Will be updated by credit service if applicable
-        remainingBalance,
-        paymentStatus,
-        orderStatus,
-        userId: user.id,
-      });
-
-      // ─── 2. Process credit if payment is pending ────────────────────────
+      // For B2B orders with pending payment, we still need to reserve the credit
+      // and validate against company limits
       if (paymentStatus === "pending") {
-        console.log(`🔄 B2B Order with pending payment - processing credit for order: ${orderGid}`);
+        console.log(`🔄 B2B Order with pending payment - reserving credit`);
 
         // Import credit validation service
         const { validateTieredCreditForOrder, deductTieredCredit } =
@@ -180,35 +165,63 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               reason: validation.message,
             });
 
-            // Update order with warning notes
-            const { updateOrder } = await import("../services/order.server");
-            await updateOrder(order.id, {
-                notes: `Credit validation failed: ${validation.message}. Order requires manual review.`,
+            // Still create the order but mark it as requiring attention
+            await createOrder({
+              companyId: user.companyId,
+              createdByUserId: user.id,
+              shopId: store.id,
+              shopifyOrderId: orderGid,
+              orderTotal,
+              creditUsed: new Prisma.Decimal(0), // No credit used yet since payment is pending
+              userCreditUsed: new Prisma.Decimal(0), // No user credit used yet
+              remainingBalance,
+              paymentStatus: "pending",
+              orderStatus: "submitted",
+              notes: `Credit validation failed: ${validation.message}. Order requires manual review.`,
+              userId: user.id,
             });
 
+            console.log(`⚠️ B2B order created with credit validation warning`);
             return new Response();
           }
 
-          // Validation passed - deduct credit
+          // Validation passed - reserve credit for pending payment
           await deductTieredCredit(
             user.companyId,
             user.id,
-            orderGid || order.id,
+            orderGid || `temp-${orderIdNum}`,
             orderTotal.toNumber(),
-            `Credit deducted for order ${orderIdNum}`,
+            `Credit reserved for pending order ${orderIdNum}`,
           );
 
-          console.log(`✅ Credit deducted for pending B2B order:`, {
+          console.log(`✅ Credit reserved for pending B2B order:`, {
             orderId: orderIdNum,
-            creditDeducted: orderTotal.toString(),
+            creditReserved: orderTotal.toString(),
           });
         } catch (creditError) {
           console.error(
             `Failed to process credit for pending B2B order:`,
             creditError,
           );
+          // Continue with order creation but log the error
         }
       }
+
+      // Create B2B order entry via service
+     await createOrder({
+        companyId: user.companyId,
+        createdByUserId: user.id,
+        shopId: store.id,
+        shopifyOrderId: orderGid,
+        orderTotal,
+        creditUsed:
+          paymentStatus === "pending" ? orderTotal : new Prisma.Decimal(0), // Credit is reserved for pending orders
+        userCreditUsed: new Prisma.Decimal(0), // No user credit used for orders
+        remainingBalance,
+        paymentStatus,
+        orderStatus,
+        userId: user.id,
+      });
 
       return new Response();
     } catch (err) {

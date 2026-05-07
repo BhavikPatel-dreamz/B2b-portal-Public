@@ -1456,7 +1456,13 @@ export async function getCustomerCompanyInfo(
     const startStr = startOfMonth.toISOString().split("T")[0];
     const endStr = endOfMonth.toISOString().split("T")[0];
 
-    // ─── 4. Parallel: DB lookups ──────────────────────────────────────────────
+    // ─── 4. Parallel: DB lookups + Shopify order/draft queries ───────────────
+    const shopifyHeaders = {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": accessToken,
+    };
+    const shopifyUrl = `https://${shopName}/admin/api/2025-01/graphql.json`;
+
     // Fetch store first to get shopId for robust lookups
     const storeRecord = await prisma.store.findUnique({
       where: { shopDomain: shopName },
@@ -1474,7 +1480,7 @@ export async function getCustomerCompanyInfo(
       },
     });
 
-    const [registrationData, dbCurrentMonthStats, pendingDraftOrdersData, companyWideMonthStats] =
+    const [registrationData, currentMonthOrdersRes, pendingDraftOrdersRes] =
       await Promise.all([
         // DB: registration info - scoped by shopId
         prisma.registrationSubmission.findUnique({
@@ -1486,30 +1492,40 @@ export async function getCustomerCompanyInfo(
           },
         }),
 
-        // DB: all current month orders for this company (potentially filtered for user)
-        companyAccount
-          ? prisma.b2BOrder.aggregate({
-              where: {
-                companyId: companyAccount.id,
-                orderStatus: { not: "cancelled" },
-                createdAt: {
-                  gte: startOfMonth,
-                  lte: endOfMonth,
-                },
-                ...(isOrderingOnly
-                  ? {
-                      createdByUser: {
-                        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
-                      },
-                    }
-                  : {}),
-              },
-              _sum: {
-                orderTotal: true,
-              },
-              _count: true,
-            })
-          : Promise.resolve({ _sum: { orderTotal: null }, _count: 0 }),
+        // Shopify: all current month orders for this company
+        fetch(shopifyUrl, {
+          method: "POST",
+          headers: shopifyHeaders,
+          body: JSON.stringify({
+            query: `
+      query {
+        orders(
+          first: 250
+          query: "company_id:${primaryCompanyNumericId} ${isOrderingOnly ? `customer_id:${customerId}` : ""} created_at:>=${startStr} created_at:<=${endStr}"
+        ) {
+          edges {
+            node {
+              id
+              cancelledAt
+              totalPriceSet {
+                shopMoney {
+                  amount
+                }
+              }
+              purchasingEntity {
+                ... on PurchasingCompany {
+                  location {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+          }),
+        }),
 
         // Only fetch draft orders if we have a valid company account
         companyAccount
@@ -1517,42 +1533,45 @@ export async function getCustomerCompanyInfo(
               where: {
                 companyId: companyAccount.id,
                 orderStatus: "draft",
-                ...(isOrderingOnly
-                  ? {
-                      createdByUser: {
-                        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
-                      },
-                    }
-                  : {}),
+                ...(isOrderingOnly ? { createdByUser: { shopifyCustomerId: `gid://shopify/Customer/${customerId}` } } : {})
               },
             })
           : Promise.resolve([]),
-
-        // NEW: Always fetch company-wide stats for the current month
-        companyAccount
-        ? prisma.b2BOrder.aggregate({
-            where: {
-              companyId: companyAccount.id,
-              orderStatus: { not: "cancelled" },
-              createdAt: {
-                gte: startOfMonth,
-                lte: endOfMonth,
-              },
-            },
-            _sum: {
-              orderTotal: true,
-            },
-          })
-        : Promise.resolve({ _sum: { orderTotal: null } }),
       ]);
 
-    // ─── 5. Process order / draft data ───────────────────────────────────────
-    const currentMonthOrderCount = dbCurrentMonthStats._count || 0;
-    const pendingDraftOrderCount = pendingDraftOrdersData.length;
-    const currentMonthUsedCredit =
-      parseFloat(dbCurrentMonthStats._sum.orderTotal?.toString() || "0");
-    const companyCurrentMonthUsedCredit =
-      parseFloat(companyWideMonthStats._sum.orderTotal?.toString() || "0");
+    // ─── 5. Parse order / draft responses ────────────────────────────────────
+    const [currentMonthOrdersData, pendingDraftOrdersData] = await Promise.all([
+      currentMonthOrdersRes.json(),
+      pendingDraftOrdersRes,
+    ]);
+
+    const allCurrentMonthOrders =
+      currentMonthOrdersData?.data?.orders?.edges || [];
+
+    // Filter out cancelled orders and apply location permissions
+    const validCurrentMonthOrders = allCurrentMonthOrders.filter(
+      (edge: any) => !edge.node.cancelledAt,
+    );
+
+    const filteredCurrentMonthOrders = filterOrderEdgesByLocation(
+      validCurrentMonthOrders,
+    );
+
+    const currentMonthOrderCount: number = filteredCurrentMonthOrders.length;
+
+    const pendingDraftOrderCount: number = pendingDraftOrdersData.length;
+
+    const currentMonthUsedCredit: number = filteredCurrentMonthOrders.reduce(
+      (
+        sum: number,
+        edge: { node: { totalPriceSet: { shopMoney: { amount: string } } } },
+      ) => {
+        return (
+          sum + parseFloat(edge.node.totalPriceSet?.shopMoney?.amount ?? "0")
+        );
+      },
+      0,
+    );
 
     // ─── 6. Process company profiles ─────────────────────────────────────────
     const companies = companyProfiles.map(
@@ -1711,13 +1730,11 @@ export async function getCustomerCompanyInfo(
       currentMonthOrderCount,
       pendingDraftOrderCount,
       currentMonthUsedCredit,
-      companyCurrentMonthUsedCredit,
       totalLocationCount: companies[0]?.locationsCount ?? 0,
       userCount: companies[0]?.userCount ?? 0,
 
       // Company + access flags
       companies,
-      companyAccountId: companyAccount?.id,
       isAdmin: companies[0]?.hasAllLocationAccess ?? false,
       isMainContact:
         companies[0]?.mainContact?.id ===

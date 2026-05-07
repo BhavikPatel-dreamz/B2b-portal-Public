@@ -37,7 +37,7 @@ export async function calculateAvailableCredit(
     company.creditLimit = new Decimal(0);
   }
 
-  // Calculate used credit: sum of remainingBalance from all unpaid orders (pending/partial orders)
+  // Calculate used credit: sum of creditUsed from all unpaid orders (pending/partial orders)
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {
       companyId,
@@ -47,12 +47,12 @@ export async function calculateAvailableCredit(
       shopifyOrderId: excludeOrderId ? { not: excludeOrderId } : undefined,
     },
     _sum: {
-      remainingBalance: true, // Sum of what's actually left to pay
+      creditUsed: true, // Sum of credit used
     },
   });
 
-  const usedCredit = ordersWithBalance._sum.remainingBalance
-    ? new Decimal(ordersWithBalance._sum.remainingBalance)
+  const usedCredit = ordersWithBalance._sum.creditUsed
+    ? new Decimal(ordersWithBalance._sum.creditUsed)
     : new Decimal(0);
 
   // Pending credit is separate - these would be orders in draft state that haven't been confirmed yet
@@ -200,11 +200,15 @@ export async function deductCredit(
 
   // Sync updated credit information to Shopify metafields for cart validation
   if (admin) {
-    // Run sync in background to avoid blocking the response
-    syncCompanyCreditMetafields(admin, companyId).catch((syncError) => {
+    try {
+      await syncCompanyCreditMetafields(admin, companyId);
+      console.log(
+        `✅ Synced credit data to Shopify metafields for company ${companyId}`,
+      );
+    } catch (syncError) {
       console.error(`❌ Failed to sync credit metafields:`, syncError);
-    });
-    console.log(`⏳ Started background sync of credit data to Shopify for company ${companyId}`);
+      // Don't throw error - credit deduction was successful, just metafield sync failed
+    }
   } else {
     console.log(`⚠️ No admin context provided - skipping metafield sync`);
   }
@@ -257,11 +261,18 @@ export async function restoreCredit(
 
   // Sync updated credit information to Shopify metafields for cart validation
   if (admin) {
-    // Run sync in background
-    syncCompanyCreditMetafields(admin, companyId).catch((syncError) => {
-      console.error(`❌ Failed to sync credit metafields after restore:`, syncError);
-    });
-    console.log(`⏳ Started background sync after restore for company ${companyId}`);
+    try {
+      await syncCompanyCreditMetafields(admin, companyId);
+      console.log(
+        `✅ Synced credit data to Shopify metafields after restore for company ${companyId}`,
+      );
+    } catch (syncError) {
+      console.error(
+        `❌ Failed to sync credit metafields after restore:`,
+        syncError,
+      );
+      // Don't throw error - credit restoration was successful, just metafield sync failed
+    }
   } else {
     console.log(
       `⚠️ No admin context provided for restore - skipping metafield sync`,

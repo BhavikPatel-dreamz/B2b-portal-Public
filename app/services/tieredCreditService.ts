@@ -266,27 +266,30 @@ export async function deductTieredCredit(
   }
  
 
-  // Update user credit usage (always track usage even if no limit is set)
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      userCreditUsed: {
-        increment: amountDecimal,
+  // Update user credit usage if they have a limit
+  if (creditInfo.user.hasUserLimit) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        userCreditUsed: {
+          increment: amountDecimal,
+        },
       },
-    },
-  });
+    });
+  }
 
   // Update order with credit tracking
   const order = await prisma.b2BOrder.findFirst({
     where: { shopifyOrderId: orderId },
   });
-  
   if (order) {
     await prisma.b2BOrder.update({
       where: { id: order.id },
       data: {
         creditUsed: amountDecimal,
-        userCreditUsed: amountDecimal,
+        userCreditUsed: creditInfo.user.hasUserLimit
+          ? amountDecimal
+          : new Decimal(0),
         remainingBalance: amountDecimal,
       },
     });
@@ -294,14 +297,10 @@ export async function deductTieredCredit(
 
   // **Auto-sync metafields for checkout extension**
   try {
-    // Run auto-sync in background to avoid blocking the response
-    autoSyncCreditMetafields(companyId, userId).catch((syncError) => {
-      console.warn("Failed to sync credit metafields in background:", syncError);
-    });
-    console.log(`⏳ Started background auto-sync of credit data for company ${companyId}`);
+    await autoSyncCreditMetafields(companyId, userId);
   } catch (syncError) {
     console.warn(
-      "Failed to initiate background sync:",
+      "Failed to sync credit metafields after deduction:",
       syncError,
     );
     // Don't fail the transaction if metafield sync fails
