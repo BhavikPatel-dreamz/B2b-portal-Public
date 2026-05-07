@@ -199,16 +199,17 @@ export async function deductCredit(
   }
 
   // Sync updated credit information to Shopify metafields for cart validation
+  // Run in background to avoid blocking the main transaction
   if (admin) {
-    try {
-      await syncCompanyCreditMetafields(admin, companyId);
-      console.log(
-        `✅ Synced credit data to Shopify metafields for company ${companyId}`,
-      );
-    } catch (syncError) {
-      console.error(`❌ Failed to sync credit metafields:`, syncError);
-      // Don't throw error - credit deduction was successful, just metafield sync failed
-    }
+    syncCompanyCreditMetafields(admin, companyId)
+      .then(() => {
+        console.log(
+          `✅ Synced credit data to Shopify metafields for company ${companyId}`,
+        );
+      })
+      .catch((syncError) => {
+        console.error(`❌ Failed to sync credit metafields:`, syncError);
+      });
   } else {
     console.log(`⚠️ No admin context provided - skipping metafield sync`);
   }
@@ -260,19 +261,20 @@ export async function restoreCredit(
   });
 
   // Sync updated credit information to Shopify metafields for cart validation
+  // Run in background
   if (admin) {
-    try {
-      await syncCompanyCreditMetafields(admin, companyId);
-      console.log(
-        `✅ Synced credit data to Shopify metafields after restore for company ${companyId}`,
-      );
-    } catch (syncError) {
-      console.error(
-        `❌ Failed to sync credit metafields after restore:`,
-        syncError,
-      );
-      // Don't throw error - credit restoration was successful, just metafield sync failed
-    }
+    syncCompanyCreditMetafields(admin, companyId)
+      .then(() => {
+        console.log(
+          `✅ Synced credit data to Shopify metafields after restore for company ${companyId}`,
+        );
+      })
+      .catch((syncError) => {
+        console.error(
+          `❌ Failed to sync credit metafields after restore:`,
+          syncError,
+        );
+      });
   } else {
     console.log(
       `⚠️ No admin context provided for restore - skipping metafield sync`,

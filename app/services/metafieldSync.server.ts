@@ -227,15 +227,15 @@ export async function syncAllCreditMetafields(
   shop: string,
   customerId: string,
   userId: string,
+  admin?: AdminApiContext,
 ) {
   try {
     if (!shop) {
-      return Response.json({
-        success: false,
-        error: "Invalid shop domain",
-      });
+      throw new Error("Invalid shop domain");
     }
-    const { admin } = await authenticate.admin(shop);
+
+    // Use provided admin context or authenticate
+    const shopifyAdmin = admin || (await authenticate.admin(shop)).admin;
 
     // Get user to find company
     const user = await prisma.user.findUnique({
@@ -249,7 +249,7 @@ export async function syncAllCreditMetafields(
 
     // Sync customer metafields
     const customerResult = await syncCustomerCreditMetafields(
-      admin,
+      shopifyAdmin as any,
       customerId,
       userId,
     );
@@ -265,7 +265,10 @@ export async function syncAllCreditMetafields(
     // Sync company metafields
     let companyResult;
     if (user.companyId) {
-      companyResult = await syncCompanyCreditMetafields(admin, user.companyId);
+      companyResult = await syncCompanyCreditMetafields(
+        shopifyAdmin as any,
+        user.companyId,
+      );
     } else {
       companyResult = {
         success: true,
@@ -299,19 +302,23 @@ export async function autoSyncCreditMetafields(
 ) {
   try {
     // Get all users in the company if specific user not provided
-    const users = userId
-      ? [{ id: userId, shopifyCustomerId: null }]
-      : await prisma.user.findMany({
-          where: {
-            companyId,
-            isActive: true,
-            shopifyCustomerId: { not: null },
-          },
-          select: {
-            id: true,
-            shopifyCustomerId: true,
-          },
-        });
+    // If specific user is provided, fetch their shopifyCustomerId
+    const users = await prisma.user.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        id: userId || undefined,
+        shopifyCustomerId: { not: null },
+      },
+      select: {
+        id: true,
+        shopifyCustomerId: true,
+      },
+    });
+
+    if (users.length === 0) {
+      return { success: true, syncedUsers: 0, results: [] };
+    }
 
     // Get company info
     const company = await prisma.companyAccount.findUnique({
@@ -322,34 +329,37 @@ export async function autoSyncCreditMetafields(
         },
       },
     });
+
     if (!company?.shop?.shopDomain) {
       throw new Error("Company shop not found");
     }
 
-    const results = [];
+    // Authenticate once for all users
+    const { admin } = await authenticate.admin(company.shop.shopDomain);
 
-    // Sync metafields for each user
-    for (const user of users) {
-      if (user.shopifyCustomerId) {
-        const result = await syncAllCreditMetafields(
-          company.shop.shopDomain,
-          user.shopifyCustomerId,
-          user.id,
-        );
-        results.push({ userId: user.id, result });
-      }
-    }
+    // Sync metafields for each user in parallel
+    const syncPromises = users.map(async (user) => {
+      const result = await syncAllCreditMetafields(
+        company.shop.shopDomain,
+        user.shopifyCustomerId!,
+        user.id,
+        admin as any,
+      );
+      return { userId: user.id, result };
+    });
+
+    const results = await Promise.all(syncPromises);
 
     return {
-      success: true,
+      success: results.every((r) => r.result.success),
       syncedUsers: results.length,
       results,
     };
-  } catch (error: { message: string }) {
+  } catch (error: any) {
     console.error("Error in auto-sync credit metafields:", error);
     return {
       success: false,
-      error: error.message,
+      error: error.message || "Unknown error",
       syncedUsers: 0,
       results: [],
     };

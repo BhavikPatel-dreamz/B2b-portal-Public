@@ -28,16 +28,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const companyAccountId = companydata?.id!;
 
-    // ── Total count for pagination meta ─────────────────────
-    const total = await prisma.creditTransaction.count({
-      where: { companyId: companyAccountId },
-    });
-
-    // ── Paginated enriched transactions ──────────────────────
-    const creditTransactions = await getCreditTransactionsByCompany(companyAccountId, {
-      take: limit,
-      skip,
-    });
+    // ── Fetch total count and paginated transactions in parallel ─────────────────────
+    const [total, creditTransactions] = await Promise.all([
+      prisma.creditTransaction.count({
+        where: { companyId: companyAccountId },
+      }),
+      getCreditTransactionsByCompany(companyAccountId, {
+        take: limit,
+        skip,
+      }),
+    ]);
 
     return Response.json({
       success: true,

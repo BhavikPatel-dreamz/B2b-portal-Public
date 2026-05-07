@@ -296,15 +296,13 @@ export async function deductTieredCredit(
   }
 
   // **Auto-sync metafields for checkout extension**
-  try {
-    await autoSyncCreditMetafields(companyId, userId);
-  } catch (syncError) {
+  // Run in background to avoid blocking the main transaction
+  autoSyncCreditMetafields(companyId, userId).catch((syncError) => {
     console.warn(
-      "Failed to sync credit metafields after deduction:",
+      "Failed to sync credit metafields after deduction (background):",
       syncError,
     );
-    // Don't fail the transaction if metafield sync fails
-  }
+  });
 }
 
 /**
