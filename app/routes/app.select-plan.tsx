@@ -229,6 +229,48 @@ export default function SelectPlan() {
     margin: "0 auto",
     boxSizing: "border-box",
   } as const;
+  const pricingGridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+    gap: "20px",
+    alignItems: "stretch",
+  } as const;
+  const pricingCardStyle = {
+    background: "#ffffff",
+    border: "1px solid #dfe3e8",
+    borderRadius: "18px",
+    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+    minHeight: "420px",
+    display: "flex",
+    flexDirection: "column" as const,
+    overflow: "hidden",
+  };
+  const pricingCardBodyStyle = {
+    padding: "28px 32px 20px",
+    display: "flex",
+    flexDirection: "column" as const,
+    flex: 1,
+  };
+  const pricingCardFooterStyle = {
+    borderTop: "1px solid #eef1f4",
+    background: "#f7f7f8",
+    padding: "14px 32px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    flexWrap: "wrap" as const,
+  };
+  const subscriptionButtonStyle = {
+    minWidth: "132px",
+    height: "40px",
+    borderRadius: "9px",
+    border: "none",
+    fontSize: "14px",
+    fontWeight: 600,
+    cursor: "pointer",
+    padding: "0 16px",
+  } as const;
 
   return (
     <div style={pageShellStyle}>
@@ -265,132 +307,315 @@ export default function SelectPlan() {
         </p>
       </div>
       <div style={contentPanelStyle}>
+        <div style={{ marginBottom: "22px" }}>
+          <h2
+            style={{
+              fontSize: "18px",
+              fontWeight: 700,
+              color: "#202223",
+              margin: "0 0 18px",
+            }}
+          >
+            Pricing
+          </h2>
+
+          <div style={pricingGridStyle}>
+            <div style={pricingCardStyle}>
+              <div style={pricingCardBodyStyle}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "15px",
+                    fontWeight: 600,
+                    color: "#5c5f62",
+                  }}
+                >
+                  Free To Install
+                </p>
+                <div style={{ marginTop: "12px" }}>
+                  <span
+                    style={{
+                      fontSize: "38px",
+                      lineHeight: 1,
+                      fontWeight: 700,
+                      color: "#111827",
+                    }}
+                  >
+                    Free
+                  </span>
+                </div>
+
+                <div style={{ marginTop: "56px" }}>
+                  <h3
+                    style={{
+                      margin: "0 0 12px",
+                      fontSize: "16px",
+                      fontWeight: 700,
+                      color: "#111827",
+                    }}
+                  >
+                    Features
+                  </h3>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: "22px",
+                      color: "#5c5f62",
+                      fontSize: "14px",
+                      lineHeight: 1.65,
+                    }}
+                  >
+                    <li>Custom Registration Form</li>
+                    <li>One-Click Approval</li>
+                    <li>Self-Service Portal</li>
+                    <li>Quick Order</li>
+                    <li>10 companies and 100 orders</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div style={pricingCardFooterStyle}>
+                <span
+                  style={{
+                    fontSize: "13px",
+                    color: "#5c5f62",
+                    fontWeight: 500,
+                  }}
+                >
+                  {activePlanName === FREE_PLAN ? "Current plan selected" : "Start with free access"}
+                </span>
+                <Form method="post">
+                  <input type="hidden" name="returnTo" value={returnTo} />
+                  <input type="hidden" name="plan" value={FREE_PLAN} />
+                  <button
+                    type="submit"
+                    disabled={activePlanName === FREE_PLAN || isSubmitting}
+                    style={{
+                      ...subscriptionButtonStyle,
+                      background:
+                        activePlanName === FREE_PLAN || isSubmitting
+                          ? "#d1d5db"
+                          : "#111827",
+                      color: "#ffffff",
+                      fontSize: "14px",
+                    }}
+                  >
+                    {isSubmitting && submittingPlan === FREE_PLAN
+                      ? "Loading..."
+                      : activePlanName === FREE_PLAN
+                        ? "Current plan"
+                        : "Subscribe"}
+                  </button>
+                </Form>
+              </div>
+            </div>
+
+            <div style={pricingCardStyle}>
+              <div style={pricingCardBodyStyle}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                  }}
+                >
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: "15px",
+                      fontWeight: 600,
+                      color: "#5c5f62",
+                    }}
+                  >
+                    Plus Plan
+                  </p>
+                  <span
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      background: "#e7f7ed",
+                      color: "#157347",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Recommended
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "12px",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "40px",
+                      lineHeight: 0.95,
+                      fontWeight: 700,
+                      color: "#111827",
+                    }}
+                  >
+                    $49
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "16px",
+                      color: "#6b7280",
+                      marginBottom: "5px",
+                    }}
+                  >
+                    / month
+                  </span>
+                </div>
+                <div style={{ marginTop: "42px" }}>
+                  <h3
+                    style={{
+                      margin: "0 0 12px",
+                      fontSize: "16px",
+                      fontWeight: 700,
+                      color: "#111827",
+                    }}
+                  >
+                    Features
+                  </h3>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: "22px",
+                      color: "#5c5f62",
+                      fontSize: "14px",
+                      lineHeight: 1.65,
+                    }}
+                  >
+                    <li>All app feature</li>
+                    <li>Credit Management</li>
+                    <li>Unlimited Orders</li>
+                    <li>Unlimited Companies</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div style={pricingCardFooterStyle}>
+                <span
+                  style={{
+                    fontSize: "13px",
+                    color: activePlanName === PAID_PLAN ? "#157347" : "#5c5f62",
+                    fontWeight: 600,
+                  }}
+                >
+                  14-day free trial
+                </span>
+                <Form method="post">
+                  <input type="hidden" name="returnTo" value={returnTo} />
+                  <input type="hidden" name="plan" value={PAID_PLAN} />
+                  <button
+                    type="submit"
+                    disabled={activePlanName === PAID_PLAN || isSubmitting}
+                    style={{
+                      ...subscriptionButtonStyle,
+                      background:
+                        activePlanName === PAID_PLAN || isSubmitting
+                          ? "#d1d5db"
+                          : "#111827",
+                      color: "#ffffff",
+                      fontSize: "14px",
+                    }}
+                  >
+                    {isSubmitting && submittingPlan === PAID_PLAN
+                      ? "Loading..."
+                      : activePlanName === PAID_PLAN
+                        ? "Current plan"
+                        : "Subscribe"}
+                  </button>
+                </Form>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div
           style={{
             background: "#ffffff",
             border: "1px solid #dfe3e8",
             borderRadius: 16,
             boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-            padding: "18px",
+            padding: "18px 20px",
           }}
         >
-          <s-section heading="Plans">
-            <s-stack direction="inline" gap="base">
-              <s-box padding="base" borderWidth="base" borderRadius="base">
-                <s-stack direction="block" gap="base">
-                  <s-heading>Free</s-heading>
-                  <s-paragraph>
-                    <s-text emphasis="bold" size="large">
-                      {freePrice.label}
-                    </s-text>
-                  </s-paragraph>
-                  <s-unordered-list>
-                    <s-list-item>Recurring Shopify subscription</s-list-item>
-                    <s-list-item>
-                      Entry-level plan billed at $0 per month
-                    </s-list-item>
-                    <s-list-item>
-                      Merchant approval happens in Shopify admin
-                    </s-list-item>
-                  </s-unordered-list>
-                  <Form method="post">
-                    <input type="hidden" name="returnTo" value={returnTo} />
-                    <input type="hidden" name="plan" value={FREE_PLAN} />
-                    <s-button
-                      type="submit"
-                      variant="secondary"
-                      {...(isSubmitting && submittingPlan === FREE_PLAN
-                        ? { loading: true }
-                        : {})}
-                      {...(activePlanName === FREE_PLAN || isSubmitting
-                        ? { disabled: true }
-                        : {})}
-                    >
-                      {activePlanName === FREE_PLAN ? "Current plan" : "Subscribe"}
-                    </s-button>
-                  </Form>
-                </s-stack>
-              </s-box>
-
-              <s-box padding="base" borderWidth="base" borderRadius="base">
-                <s-stack direction="block" gap="base">
-                  <s-stack direction="inline" gap="base" align="space-between">
-                    <s-heading>Paid</s-heading>
-                    <s-badge tone="success">Recommended</s-badge>
-                  </s-stack>
-                  <s-paragraph>
-                    <s-text emphasis="bold" size="large">
-                      {paidPrice.label}
-                    </s-text>
-                  </s-paragraph>
-                  <s-unordered-list>
-                    <s-list-item>Recurring Shopify subscription</s-list-item>
-                    <s-list-item>Use this as your premium paid plan</s-list-item>
-                    <s-list-item>Approval happens inside Shopify admin</s-list-item>
-                  </s-unordered-list>
-                  <Form method="post">
-                    <input type="hidden" name="returnTo" value={returnTo} />
-                    <input type="hidden" name="plan" value={PAID_PLAN} />
-                    <s-button
-                      type="submit"
-                      variant="primary"
-                      {...(isSubmitting && submittingPlan === PAID_PLAN
-                        ? { loading: true }
-                        : {})}
-                      {...(activePlanName === PAID_PLAN || isSubmitting
-                        ? { disabled: true }
-                        : {})}
-                    >
-                      {activePlanName === PAID_PLAN ? "Current plan" : "Subscribe"}
-                    </s-button>
-                  </Form>
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-section>
-
-          <s-section heading="Selected plan">
-            <s-box
-              padding="base"
-              borderWidth="base"
-              borderRadius="base"
-              background="subdued"
-            >
-              <s-stack direction="inline" gap="base" align="space-between">
-                <s-stack direction="block" gap="none">
-                  <s-paragraph>
-                    <s-text emphasis="bold">
-                      {activePlanName || "No plan selected"}
-                    </s-text>
-                  </s-paragraph>
-                  {selectedPriceLabel && (
-                    <s-paragraph>{selectedPriceLabel}</s-paragraph>
-                  )}
-                </s-stack>
-                {hasShopifySubscription && activePlanName && (
-                  <cancelFetcher.Form
-                    method="post"
-                    action="/app/cancel-subscription"
-                  >
-                    <s-button
-                      type="submit"
-                      variant="secondary"
-                      tone="critical"
-                      {...(isCancelling ? { loading: true } : {})}
-                      {...(isSubmitting ? { disabled: true } : {})}
-                    >
-                      Cancel subscription
-                    </s-button>
-                  </cancelFetcher.Form>
-                )}
-                {!hasShopifySubscription && (
-                  <s-paragraph>
-                    <s-text>No cancellation available</s-text>
-                  </s-paragraph>
-                )}
-              </s-stack>
-            </s-box>
-          </s-section>
+          <h2
+            style={{
+              margin: "0 0 14px",
+              fontSize: "18px",
+              fontWeight: 700,
+              color: "#202223",
+            }}
+          >
+            Selected plan
+          </h2>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              flexWrap: "wrap",
+              background: "#f6f6f7",
+              borderRadius: 12,
+              padding: "16px 18px",
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            <div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {activePlanName || "No plan selected"}
+              </p>
+              {selectedPriceLabel && (
+                <p style={{ margin: "6px 0 0", fontSize: "14px", color: "#5c5f62" }}>
+                  {selectedPriceLabel}
+                </p>
+              )}
+            </div>
+            {hasShopifySubscription && activePlanName && (
+              <cancelFetcher.Form method="post" action="/app/cancel-subscription">
+                <button
+                  type="submit"
+                  disabled={isSubmitting || isCancelling}
+                  style={{
+                    minWidth: "160px",
+                    height: "42px",
+                    borderRadius: "10px",
+                    border: "1px solid #dc2626",
+                    background: isSubmitting || isCancelling ? "#fecaca" : "#ffffff",
+                    color: "#dc2626",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: "0 18px",
+                  }}
+                >
+                  {isCancelling ? "Cancelling..." : "Cancel subscription"}
+                </button>
+              </cancelFetcher.Form>
+            )}
+            {!hasShopifySubscription && (
+              <p style={{ margin: 0, fontSize: "14px", color: "#5c5f62" }}>
+                No cancellation available
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

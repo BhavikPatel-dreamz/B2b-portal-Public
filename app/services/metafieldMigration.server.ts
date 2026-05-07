@@ -23,14 +23,16 @@ export async function migrateCompanyMetafieldKeys(
     // Step 1: Query existing metafields with old keys
     const queryOldMetafields = `
       query getCompanyMetafields($ownerId: ID!) {
-        metafields(ownerResource: COMPANY, first: 10, namespace: "custom", ownerId: $ownerId) {
-          edges {
-            node {
-              id
-              namespace
-              key
-              value
-              type
+        company(id: $ownerId) {
+          metafields(first: 10, namespace: "custom") {
+            edges {
+              node {
+                id
+                namespace
+                key
+                value
+                type
+              }
             }
           }
         }
@@ -49,7 +51,7 @@ export async function migrateCompanyMetafieldKeys(
       );
     }
 
-    const existingMetafields = queryData.data?.metafields?.edges || [];
+    const existingMetafields = queryData.data?.company?.metafields?.edges || [];
     console.log(`Found ${existingMetafields.length} existing metafields`);
 
     // Step 2: Find old metafields and prepare new ones

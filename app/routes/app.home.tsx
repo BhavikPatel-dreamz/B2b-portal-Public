@@ -58,7 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Calculate current month start
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    
+
     const [
       totalOrders,
       totalCompanies,
@@ -115,7 +115,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ]);
 
     const totalCreditAllowed = Number(creditStats._sum.creditLimit || 0);
-    const totalCreditUsed    = Number(usedCreditStats._sum.remainingBalance || 0);
+    const totalCreditUsed = Number(usedCreditStats._sum.remainingBalance || 0);
 
     const result = {
       totalCompanies,
@@ -123,10 +123,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       approvedRegistrations,
       rejectedRegistrations,
       totalUsers,
-      totalOrders:       totalOrders.length,
+      totalOrders: totalOrders.length,
       totalCreditAllowed,
       totalCreditUsed,
-      availableCredit:   totalCreditAllowed - totalCreditUsed,
+      availableCredit: totalCreditAllowed - totalCreditUsed,
       pendingCreditAmount: 0,
       currentMonthB2BOrders: currentMonthB2BOrdersCount,
       currentMonthRevenue: Number(currentMonthRevenueSum._sum.orderTotal || 0),
@@ -140,7 +140,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
 
     return Response.json(result);
-
   } catch (error) {
     console.error("Authentication error:", error);
     return Response.json({ message: "Authentication failed" });
@@ -219,41 +218,45 @@ export default function Home() {
 
   return (
     //  <s-page heading="Dashboard Report">
-         <div style={pageShellStyle}>
-    <div style={pageHeroStyle}>
-      <Link
-        to="/app"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "8px",
-          color: "#2c6ecb",
-          textDecoration: "none",
-          fontSize: "14px",
-          fontWeight: 600,
-          margin: "15px 15px 5px",
-        }}
-      >
-        <svg
-          viewBox="0 0 20 20"
-          style={{ width: "16px", height: "16px" }}
-          fill="currentColor"
+    <div style={pageShellStyle}>
+      <div style={pageHeroStyle}>
+        <Link
+          to="/app"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            color: "#2c6ecb",
+            textDecoration: "none",
+            fontSize: "14px",
+            fontWeight: 600,
+            margin: "15px 15px 5px",
+          }}
         >
-          <path
-            fillRule="evenodd"
-            d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
-            clipRule="evenodd"
-          />
-        </svg>
-        Back to Dashboard
-      </Link>
-      <h1 style={pageHeroTitleStyle}>Dashboard Report</h1>
-      <p style={pageHeroTextStyle}>
-          Manage company profiles, contacts, credit limits, and your B2B customer accounts in one place.
+          <svg
+            viewBox="0 0 20 20"
+            style={{ width: "16px", height: "16px" }}
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Back to Dashboard
+        </Link>
+        <h1 style={pageHeroTitleStyle}>Dashboard Report</h1>
+        <p style={pageHeroTextStyle}>
+          Manage company profiles, contacts, credit limits, and your B2B
+          customer accounts in one place.
         </p>
-    </div>
-    <div className="dashboard-container" style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}>
-      <style>{`
+      </div>
+      <div
+        className="dashboard-container"
+        style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}
+      >
+        <style>{`
         * {
           box-sizing: border-box;
         }
@@ -900,6 +903,78 @@ export default function Home() {
   color: #92400e;
 }
 
+.support-card {
+  margin-top: 16px;
+  padding: 22px 24px;
+  border-radius: 16px;
+  border: 1px solid #e4e5e7;
+  background: linear-gradient(135deg, #ffffff 0%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.support-content {
+  max-width: 680px;
+}
+
+.support-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(44, 110, 203, 0.12);
+  color: #1f5fbf;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.support-title {
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #172554;
+  margin: 0 0 8px;
+}
+
+.support-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #475569;
+  margin: 0 0 18px;
+}
+
+.support-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e3a8a;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(59, 130, 246, 0.12);
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+}
+
+.support-button:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.18);
+}
+
+.support-mascot {
+  width: 96px;
+  flex-shrink: 0;
+}
+
         @media (max-width: 1200px) {
           .main-grid {
             grid-template-columns: 1fr;
@@ -912,445 +987,337 @@ export default function Home() {
           .feature-grid {
             grid-template-columns: 1fr;
           }
+
+          .support-card {
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 20px;
+          }
+
+          .support-title {
+            font-size: 20px;
+          }
+
+          .support-mascot {
+            align-self: flex-end;
+            width: 82px;
+          }
         }
       `}</style>
 
-      <div className="dashboard-container">
-        {/* Company Registration Overview */}
-        <div className="company-card">
-          <h2 className="card-title" style={{ marginBottom: "14px" }}>
-            Company Registration Overview
-          </h2>
+        <div className="dashboard-container">
+          {/* Company Registration Overview */}
+          <div className="company-card">
+            <h2 className="card-title" style={{ marginBottom: "14px" }}>
+              Company Registration Overview
+            </h2>
 
-          <div className="company-content-wrapper">
-            <div className="company-stats-grid">
-
-               {/* Approved - WITH LINK */}
-              <Link to="/app/registrations?status=approved" style={{ textDecoration: "none" }}>
-                <div className="company-stat" style={{ background: "#e8f5e9" }}>
-                  <div className="company-value">
-                    {data.approvedRegistrations}
-                  </div>
-                  <div className="company-label">Approved</div>
-                  <div className="company-badge green">Successfully approved</div>
-                </div>
-              </Link>
-              
-
-              {/* Pending Registrations */}
-              <Link to="/app/registrations" style={{ textDecoration: "none" }}>
-                <div className="company-stat" style={{ background: "#fef9e6" }}>
-                  <div className="company-value">
-                    {data.pendingRegistrations}
-                  </div>
-                  <div className="company-label">Pending</div>
-                  <div className="company-badge yellow">Awaiting approval</div>
-                </div>
-              </Link>
-              
-                {/* Rejected - WITH LINK */}
-              <Link to="/app/registrations?status=rejected" style={{ textDecoration: "none" }}>
-                <div className="company-stat" style={{ background: "#ffebee" }}>
-                  <div className="company-value">
-                    {data.rejectedRegistrations}
-                  </div>
-                  <div className="company-label">Rejected</div>
-                  <div className="company-badge red">Declined requests</div>
-                </div>
-              </Link>
-
-             {/* Total Companies */}
-              <Link to="/app/companies" style={{ textDecoration: "none" }}>
-                <div className="company-stat" style={{ background: "#e0f0ff" }}>
-                  <div className="company-value">{data.totalCompanies}</div>
-                  <div className="company-label">Total Companies</div>
-                  <div className="company-badge blue">Active in portal</div>
-                </div>
-              </Link>
-
-              {/* Total Users */}
-              <div className="company-stat" style={{ background: "#f3e5f5" }}>
-                <div className="company-value">{data.totalUsers}</div>
-                <div className="company-label">Total B2B Users</div>
-                <div className="company-badge blue">Active users</div>
-              </div>
-
-            
-
-              {/* Approval Rate */}
-              <div className="company-stat" style={{ background: "#e1f5fe" }}>
-                <div className="company-value">{approvedPercentage}%</div>
-                <div className="company-label">Approval Rate</div>
-                <div className="company-badge blue">Success rate</div>
-              </div>
-            </div>
-
-            {/* Donut Chart */}
-            <div className="chart-container">
-              <div className="donut-chart">
-                <svg width="130" height="130" viewBox="0 0 130 130">
-                  {/* Background circle */}
-                  <circle
-                    cx="65"
-                    cy="65"
-                    r="55"
-                    fill="none"
-                    stroke="#f0f0f0"
-                    strokeWidth="16"
-                  />
-                  {/* Approved segment */}
-                  <circle
-                    cx="65"
-                    cy="65"
-                    r="55"
-                    fill="none"
-                    stroke="#008060"
-                    strokeWidth="16"
-                    strokeDasharray={`${approvedPercentage * 3.45} 345`}
-                    strokeDashoffset="0"
-                  />
-                  {/* Pending segment */}
-                  <circle
-                    cx="65"
-                    cy="65"
-                    r="55"
-                    fill="none"
-                    stroke="#f1c40f"
-                    strokeWidth="16"
-                    strokeDasharray={`${pendingPercentage * 3.45} 345`}
-                    strokeDashoffset={`-${approvedPercentage * 3.45}`}
-                  />
-                  {/* Rejected segment */}
-                  <circle
-                    cx="65"
-                    cy="65"
-                    r="55"
-                    fill="none"
-                    stroke="#d73e3e"
-                    strokeWidth="16"
-                    strokeDasharray={`${rejectedPercentage * 3.45} 345`}
-                    strokeDashoffset={`-${(approvedPercentage + pendingPercentage) * 3.45}`}
-                  />
-                </svg>
-                <div className="chart-center">
-                  <div className="chart-center-value">
-                    {data.totalCompanies}
-                  </div>
-                  <div className="chart-center-label">Total</div>
-                </div>
-              </div>
-
-              <div className="chart-legend">
-                <div className="legend-item">
-                  <div className="legend-left">
-                    <div
-                      className="legend-color"
-                      style={{ background: "#008060" }}
-                    ></div>
-                    <span>Approved</span>
-                  </div>
-                  <span className="legend-value">{approvedPercentage}%</span>
-                </div>
-                <div className="legend-item">
-                  <div className="legend-left">
-                    <div
-                      className="legend-color"
-                      style={{ background: "#f1c40f" }}
-                    ></div>
-                    <span>Pending</span>
-                  </div>
-                  <span className="legend-value">{pendingPercentage}%</span>
-                </div>
-                <div className="legend-item">
-                  <div className="legend-left">
-                    <div
-                      className="legend-color"
-                      style={{ background: "#d73e3e" }}
-                    ></div>
-                    <span>Rejected</span>
-                  </div>
-                  <span className="legend-value">{rejectedPercentage}%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Content Grid */}
-        <div className={`main-grid${isFreePlan ? " free-plan-layout" : ""}`}>
-          {/* Left Column */}
-          <div>
-            {/* Credit Management Overview */}
-            {!isFreePlan && (
-              <div className="credit-card">
-                <div className="card-header">
-                  <h2 className="card-title">Credit Management Overview</h2>
-                  <a href="#" className="manage-link">
-                    ⚙️ Manage credit
-                  </a>
-                </div>
-
-                <div className="credit-stats-grid">
-                  {/* Total Credit Allowed */}
-                  <div className="credit-stat">
-                    <div className="credit-label">
-                      Total Credit Allowed • <a href="#">Learn more →</a>
-                    </div>
-                    <div className="credit-value">
-                      {formatCredit(data.totalCreditAllowed.toString(), data.currencyCode)}
-                    </div>
-                    <div className="credit-badge success">
-                      ✓ Healthy credit balance
-                    </div>
-                  </div>
-
-                  {/* Credit Used */}
-                  <div className="credit-stat">
-                    <div className="credit-label">Credit Used</div>
-                    <div className="credit-value">
-                      {formatCredit(data.totalCreditUsed.toString(), data.currencyCode)}
-                    </div>
-                    <div className="credit-badge info">
-                      {creditUsagePercentage}% Almost used
-                    </div>
-                  </div>
-
-                  {/* Available Credit */}
-                  <div className="credit-stat">
-                    <div className="credit-label">Available Credit</div>
-                    <div className="credit-value">
-                      {formatCredit(data.availableCredit.toString(), data.currencyCode)}
-                    </div>
-                    <div className="credit-badge success">✓ No risk detected</div>
-                  </div>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="main-progress-bar">
+            <div className="company-content-wrapper">
+              <div className="company-stats-grid">
+                {/* Approved - WITH LINK */}
+                <Link
+                  to="/app/registrations?status=approved"
+                  style={{ textDecoration: "none" }}
+                >
                   <div
-                    className="main-progress-fill"
-                    style={{ width: "100%" }}
-                  ></div>
-                </div>
-                <div className="progress-percentage">100%</div>
-              </div>
-            )}
-
-            {/* Order Overview */}
-            <div
-              className={`order-card${isFreePlan ? " order-card--standalone" : ""}`}
-            >
-              <h2 className="card-title" style={{ marginBottom: "14px" }}>
-                Order Overview
-              </h2>
-
-              <div className="order-stats-grid">
-                {/* Total Orders */}
-                <div className="order-stat" style={{ background: "#f0f9ff" }}>
-                  <div className="order-value">{data.totalOrders}</div>
-                  <div className="order-label">Total Orders</div>
-                  <div className="order-badge blue">All B2B orders</div>
-                </div>
-
-                {/* Rejected Registrations */}
-                <div className="order-stat" style={{ background: "#fef9e6" }}>
-                  <div className="order-value">
-                    {data.rejectedRegistrations}
+                    className="company-stat"
+                    style={{ background: "#e8f5e9" }}
+                  >
+                    <div className="company-value">
+                      {data.approvedRegistrations}
+                    </div>
+                    <div className="company-label">Approved</div>
+                    <div className="company-badge green">
+                      Successfully approved
+                    </div>
                   </div>
-                  <div className="order-label">Rejected Applications</div>
-                  <div className="order-badge yellow">Declined requests</div>
+                </Link>
+
+                {/* Pending Registrations */}
+                <Link
+                  to="/app/registrations"
+                  style={{ textDecoration: "none" }}
+                >
+                  <div
+                    className="company-stat"
+                    style={{ background: "#fef9e6" }}
+                  >
+                    <div className="company-value">
+                      {data.pendingRegistrations}
+                    </div>
+                    <div className="company-label">Pending</div>
+                    <div className="company-badge yellow">
+                      Awaiting approval
+                    </div>
+                  </div>
+                </Link>
+
+                {/* Rejected - WITH LINK */}
+                <Link
+                  to="/app/registrations?status=rejected"
+                  style={{ textDecoration: "none" }}
+                >
+                  <div
+                    className="company-stat"
+                    style={{ background: "#ffebee" }}
+                  >
+                    <div className="company-value">
+                      {data.rejectedRegistrations}
+                    </div>
+                    <div className="company-label">Rejected</div>
+                    <div className="company-badge red">Declined requests</div>
+                  </div>
+                </Link>
+
+                {/* Total Companies */}
+                <Link to="/app/companies" style={{ textDecoration: "none" }}>
+                  <div
+                    className="company-stat"
+                    style={{ background: "#e0f0ff" }}
+                  >
+                    <div className="company-value">{data.totalCompanies}</div>
+                    <div className="company-label">Total Companies</div>
+                    <div className="company-badge blue">Active in portal</div>
+                  </div>
+                </Link>
+
+                {/* Total Users */}
+                <div className="company-stat" style={{ background: "#f3e5f5" }}>
+                  <div className="company-value">{data.totalUsers}</div>
+                  <div className="company-label">Total B2B Users</div>
+                  <div className="company-badge blue">Active users</div>
+                </div>
+
+                {/* Approval Rate */}
+                <div className="company-stat" style={{ background: "#e1f5fe" }}>
+                  <div className="company-value">{approvedPercentage}%</div>
+                  <div className="company-label">Approval Rate</div>
+                  <div className="company-badge blue">Success rate</div>
+                </div>
+              </div>
+
+              {/* Donut Chart */}
+              <div className="chart-container">
+                <div className="donut-chart">
+                  <svg width="130" height="130" viewBox="0 0 130 130">
+                    {/* Background circle */}
+                    <circle
+                      cx="65"
+                      cy="65"
+                      r="55"
+                      fill="none"
+                      stroke="#f0f0f0"
+                      strokeWidth="16"
+                    />
+                    {/* Approved segment */}
+                    <circle
+                      cx="65"
+                      cy="65"
+                      r="55"
+                      fill="none"
+                      stroke="#008060"
+                      strokeWidth="16"
+                      strokeDasharray={`${approvedPercentage * 3.45} 345`}
+                      strokeDashoffset="0"
+                    />
+                    {/* Pending segment */}
+                    <circle
+                      cx="65"
+                      cy="65"
+                      r="55"
+                      fill="none"
+                      stroke="#f1c40f"
+                      strokeWidth="16"
+                      strokeDasharray={`${pendingPercentage * 3.45} 345`}
+                      strokeDashoffset={`-${approvedPercentage * 3.45}`}
+                    />
+                    {/* Rejected segment */}
+                    <circle
+                      cx="65"
+                      cy="65"
+                      r="55"
+                      fill="none"
+                      stroke="#d73e3e"
+                      strokeWidth="16"
+                      strokeDasharray={`${rejectedPercentage * 3.45} 345`}
+                      strokeDashoffset={`-${(approvedPercentage + pendingPercentage) * 3.45}`}
+                    />
+                  </svg>
+                  <div className="chart-center">
+                    <div className="chart-center-value">
+                      {data.totalCompanies}
+                    </div>
+                    <div className="chart-center-label">Total</div>
+                  </div>
+                </div>
+
+                <div className="chart-legend">
+                  <div className="legend-item">
+                    <div className="legend-left">
+                      <div
+                        className="legend-color"
+                        style={{ background: "#008060" }}
+                      ></div>
+                      <span>Approved</span>
+                    </div>
+                    <span className="legend-value">{approvedPercentage}%</span>
+                  </div>
+                  <div className="legend-item">
+                    <div className="legend-left">
+                      <div
+                        className="legend-color"
+                        style={{ background: "#f1c40f" }}
+                      ></div>
+                      <span>Pending</span>
+                    </div>
+                    <span className="legend-value">{pendingPercentage}%</span>
+                  </div>
+                  <div className="legend-item">
+                    <div className="legend-left">
+                      <div
+                        className="legend-color"
+                        style={{ background: "#d73e3e" }}
+                      ></div>
+                      <span>Rejected</span>
+                    </div>
+                    <span className="legend-value">{rejectedPercentage}%</span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Right Column - About B2B Portal */}
-          <div>
-            <div className="about-card">
-              <div className="about-header">
-                <span className="about-icon">🛒</span>
-                <h2 className="about-title">About the B2B Portal</h2>
-              </div>
+          {/* Main Content Grid */}
+          <div className={`main-grid${isFreePlan ? " free-plan-layout" : ""}`}>
+            {/* Left Column */}
+            <div>
+              {/* Credit Management Overview */}
+              {!isFreePlan && (
+                <div className="credit-card">
+                  <div className="card-header">
+                    <h2 className="card-title">Credit Management Overview</h2>
+                    <a href="#" className="manage-link">
+                      ⚙️ Manage credit
+                    </a>
+                  </div>
 
-              <div className="about-subtitle">
-                <span>🔧</span>
-                <span>
-                  <strong>Built by Dynamic Dreamz</strong>
-                </span>
-              </div>
+                  <div className="credit-stats-grid">
+                    {/* Total Credit Allowed */}
+                    <div className="credit-stat">
+                      <div className="credit-label">
+                        Total Credit Allowed • <a href="#">Learn more →</a>
+                      </div>
+                      <div className="credit-value">
+                        {formatCredit(
+                          data.totalCreditAllowed.toString(),
+                          data.currencyCode,
+                        )}
+                      </div>
+                      <div className="credit-badge success">
+                        ✓ Healthy credit balance
+                      </div>
+                    </div>
 
-              <div className="about-description">
-                This B2B Portal is built to help <strong>merchants</strong>{" "}
-                manage wholesale customers, companies, locations, and credit
-                workflows efficiently inside Shopify.
-                <br />
-                <br />
-                It is developed and maintained by{" "}
-                <strong>Dynamic Dreamz</strong>, a team specializing in custom
-                Shopify and B2B solutions.
-              </div>
+                    {/* Credit Used */}
+                    <div className="credit-stat">
+                      <div className="credit-label">Credit Used</div>
+                      <div className="credit-value">
+                        {formatCredit(
+                          data.totalCreditUsed.toString(),
+                          data.currencyCode,
+                        )}
+                      </div>
+                      <div className="credit-badge info">
+                        {creditUsagePercentage}% Almost used
+                      </div>
+                    </div>
 
-              <div className="feature-grid">
-                <div className="feature-item">
-                  <span className="feature-icon">👥</span>
-                  <span>Company Management</span>
+                    {/* Available Credit */}
+                    <div className="credit-stat">
+                      <div className="credit-label">Available Credit</div>
+                      <div className="credit-value">
+                        {formatCredit(
+                          data.availableCredit.toString(),
+                          data.currencyCode,
+                        )}
+                      </div>
+                      <div className="credit-badge success">
+                        ✓ No risk detected
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="main-progress-bar">
+                    <div
+                      className="main-progress-fill"
+                      style={{ width: "100%" }}
+                    ></div>
+                  </div>
+                  <div className="progress-percentage">100%</div>
                 </div>
-                <div className="feature-item">
-                  <span className="feature-icon">💳</span>
-                  <span>Credit Control</span>
-                </div>
-                <div className="feature-item">
-                  <span className="feature-icon">📦</span>
-                  <span>Order Tracking</span>
-                </div>
-                <div className="feature-item">
-                  <span className="feature-icon">📊</span>
-                  <span>Analytics & Reports</span>
+              )}
+
+              {/* Order Overview */}
+              <div
+                className={`order-card${isFreePlan ? " order-card--standalone" : ""}`}
+              >
+                <h2 className="card-title" style={{ marginBottom: "14px" }}>
+                  Order Overview
+                </h2>
+
+                <div className="order-stats-grid">
+                  {/* Current Month Orders */}
+                  <div className="order-stat" style={{ background: "#f0f9ff" }}>
+                    <div className="order-value">
+                      {data.currentMonthB2BOrders || 0}
+                    </div>
+                    <div className="order-label">Total Orders</div>
+                    <div className="order-badge blue">Current month orders</div>
+                  </div>
+
+                  {/* Current Month Revenue */}
+                  <div className="order-stat" style={{ background: "#fef9e6" }}>
+                    <div className="order-value">
+                      {formatCredit(
+                        (data.currentMonthRevenue || 0).toString(),
+                        data.currencyCode,
+                      )}
+                    </div>
+                    <div className="order-label">Current Month Revenue</div>
+                    <div className="order-badge yellow">B2B order revenue</div>
+                  </div>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <div className="about-buttons">
-                <button className="contact-button">Contact us</button>
-                <button className="book-button">
-                  Book a free consultation
-                </button>
-              </div>
-
-              <p className="about-note">
-                💡 No obligation. We will help you evaluate your requirements.
+          <div className="support-card">
+            <div className="support-content">
+              <div className="support-eyebrow">Setup Help</div>
+              <h3 className="support-title">Need help with your B2B setup?</h3>
+              <p className="support-text">
+                First time setting up and finding it a bit challenging? We can
+                walk you through the app, show a live demo, and clear up any
+                doubts you have.
               </p>
-
-              <div className="about-footer">
-                © 2024 Dynamic Dreamz — Shopify & B2B Solutions
-              </div>
-
-              <a href="#" className="help-link">
-                <span>❓ Help center & Documentation</span>
-                <span>→</span>
+              <a
+                className="support-button"
+                href="https://calendly.com/spatel-dynamicdreamz"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Book a 30-min session
               </a>
             </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="quick-actions-card" style={{ marginTop: "12px" }}>
-          <div className="quick-actions-header">
-            <span style={{ fontSize: "18px" }}>📋</span>
-            <h2 className="quick-actions-title">Quick Actions</h2>
-          </div>
-
-          {/* Flex container to display actions in a row */}
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            {/* Action 1 */}
-            <Link
-              to="/app/registrations"
-              style={{
-                textDecoration: "none",
-                color: "inherit",
-                flex: "1",
-                minWidth: "280px",
-              }}
-            >
-              <div className="action-item">
-                <div className="action-header">
-                  <div className="action-icon">📄</div>
-                  <div className="action-content">
-                    <h3 className="action-title">
-                      Review {data.pendingRegistrations} pending registrations
-                    </h3>
-                    <p className="action-description">
-                      {data.pendingRegistrations} companies awaiting approval
-                    </p>
-                  </div>
-                </div>
-                <div className="action-footer">
-                  <span className="action-meta-text">23 & tasks cast</span>
-                  <button className="action-button">Review →</button>
-                </div>
-              </div>
-            </Link>
-
-            {/* Action 2 */}
-            <div style={{ flex: "1", minWidth: "280px" }}>
-              <div className="action-item">
-                <div className="action-header">
-                  <div className="action-icon">🛡️</div>
-                  <div className="action-content">
-                    <h3 className="action-title">Approve top new companies</h3>
-                    <p className="action-description">
-                      Fast-track the most promising businesses
-                    </p>
-                  </div>
-                </div>
-                <div className="action-footer">
-                  <div className="action-button-group">
-                    <div className="toggle-wrapper">
-                      <div className="toggle">
-                        <div className="toggle-handle"></div>
-                      </div>
-                      <span className="toggle-label">Start approving</span>
-                    </div>
-                  </div>
-                  <Link to="/app/companies">
-                    <button className="action-button secondary">Start →</button>
-                  </Link>
-                </div>
-              </div>
-            </div>
-
-            {/* New Action 3: B2B Order (Current Month Data) */}
-            <Link
-              to="/app/companies"
-              style={{
-                textDecoration: "none",
-                color: "inherit",
-                flex: "1",
-                minWidth: "280px",
-              }}
-            >
-              <div className="action-item">
-                <div className="action-header">
-                  <div className="action-icon">📦</div>
-                  <div className="action-content">
-                    <h3 className="action-title">B2B Order (Current Month Data)</h3>
-                    <p className="action-description">{data.currentMonthB2BOrders || 0} orders this month</p>
-                  </div>
-                </div>
-                <div className="action-footer">
-                  <span className="action-meta-text">Current month orders</span>
-                  <button className="action-button">View Orders →</button>
-                </div>
-              </div>
-            </Link>
-
-            {/* New Action 4: Revenue from B2B companies (current month) */}
-            <Link
-              to="/app/companies"
-              style={{
-                textDecoration: "none",
-                color: "inherit",
-                flex: "1",
-                minWidth: "280px",
-              }}
-            >
-              <div className="action-item">
-                <div className="action-header">
-                  <div className="action-icon">💰</div>
-                  <div className="action-content">
-                    <h3 className="action-title">Revenue from B2B companies (current month)</h3>
-                    <p className="action-description">{formatCredit((data.currentMonthRevenue || 0).toString(), data.currencyCode)} revenue</p>
-                  </div>
-                </div>
-                <div className="action-footer">
-                  <span className="action-meta-text">B2B revenue summary</span>
-                  <button className="action-button">View Revenue →</button>
-                </div>
-              </div>
-            </Link>
+            <img
+              src="https://cdn.shopify.com/s/files/1/0938/7068/6498/files/Mascot_BSS_2-04_1.png?v=1766374740"
+              alt="mascot"
+              className="support-mascot"
+            />
           </div>
         </div>
       </div>
-    </div>
     </div>
   );
 }

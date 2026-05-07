@@ -6,6 +6,7 @@ import {
   type ActionFunctionArgs,
   type HeadersFunction
 } from "react-router";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import  { useEffect, useState } from "react";
 import prisma from "app/db.server";
@@ -13,6 +14,7 @@ import { authenticate } from "app/shopify.server";
 import { LoaderFunctionArgs } from "react-router";
 import { syncShopifyCompanies } from "app/utils/company.server";
 import { countRegistrations } from "../services/registration.server";
+import { clearAdminCompaniesCache } from "./app.companies";
 
 
 type Tutorial = {
@@ -30,6 +32,7 @@ type ActionResponse = {
   intent: string;
   success: boolean;
   message?: string;
+  syncedCount?: number;
   errors?: string[];
 };
 
@@ -190,10 +193,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     store.contactEmail || store.submissionEmail,
   );
 
+  if (result.success) {
+    clearAdminCompaniesCache(session.shop);
+  }
+
   return Response.json({
     intent,
     success: result.success,
     message: result.message,
+    syncedCount: result.syncedCount,
     errors: result.errors,
   });
 };
@@ -209,6 +217,7 @@ export default function Welcome() {
   const syncFetcher = useFetcher<ActionResponse>();
   const setupFetcher = useFetcher();
   const navigate = useNavigate();
+  const shopify = useAppBridge();
   const [showSetupEssentials, setShowSetupEssentials] = useState(!setupFinished);
 
    const getStoreName = () => {
@@ -248,16 +257,6 @@ export default function Welcome() {
     },
   ];
   const tutorials = [
-    {
-      id: 1,
-      tag: "Storefront",
-      tagClass: "tag-storefront",
-      title: "Enable B2B Registration on Storefront",
-      description: "Learn how to enable the app embed and display the B2B company registration form on your storefront so wholesale customers can apply.",
-      videoUrl: "https://www.youtube.com/embed/d56mG7DezGs",
-      duration: "4:55",
-      thumbnailTitle: "How To Set Up\nRequest For Quote?"
-    },
     {
       id: 2,
       tag: "Store setup",
@@ -317,10 +316,23 @@ export default function Welcome() {
   };
 
   useEffect(() => {
-    if (syncFetcher.state === "idle" && syncFetcher.data?.success) {
+    if (syncFetcher.state !== "idle" || !syncFetcher.data) return;
+
+    if (syncFetcher.data.success) {
+      const syncedCount = syncFetcher.data.syncedCount ?? 0;
+      const message =
+        syncedCount === 0
+          ? "Companies up to date"
+          : `${syncedCount} company(ies) synced successfully`;
+      shopify.toast.show?.(message);
       navigate("/app/companies");
+      return;
     }
-  }, [navigate, syncFetcher.data, syncFetcher.state]);
+
+    if (syncFetcher.data.errors?.length) {
+      shopify.toast.show?.(syncFetcher.data.errors[0], { isError: true });
+    }
+  }, [navigate, shopify, syncFetcher.data, syncFetcher.state]);
 
   const pageHeroStyle = {
     width: "100%",
@@ -1036,6 +1048,10 @@ export default function Welcome() {
           gap: 12px;
         }
 
+        .tutorials-grid.tutorials-grid--two {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .tutorial-card {
           border: 1px solid #d8dadd;
           border-radius: 12px;
@@ -1657,11 +1673,7 @@ export default function Welcome() {
          <div className="overview-card">
           <div className="overview-header">
             <div className="overview-title">Welcome, Dynamic!</div>
-            <div className="overview-news">
-              <span style={{ fontSize: "16px", lineHeight: 1 }}>🔔</span>
-              <span>App news and updates</span>
-              <span className="overview-news-dot"></span>
-            </div>
+            
           </div>
 
 <div className="overview-grid">
@@ -1685,11 +1697,10 @@ export default function Welcome() {
               <div>
                 <div className="overview-item-header">
                   <span className="overview-icon" style={{ fontSize: "20px" }}>⇩</span>
-                  <span>Company import</span>
+                  <span>Company Sync</span>
                 </div>
                 <p className="overview-description">
-                  Use the app to bulk create or update companies, locations, and
-                  contacts.
+                  Synchronize your existing B2B companies and customers.
                 </p>
               </div>
               <syncFetcher.Form method="post">
@@ -1699,7 +1710,7 @@ export default function Welcome() {
                   className="overview-button"
                   disabled={syncFetcher.state !== "idle"}
                 >
-                  {syncFetcher.state !== "idle" ? "Syncing..." : "View import tool"}
+                  {syncFetcher.state !== "idle" ? "Syncing..." : "Sync B2B Customers"}
                 </button>
               </syncFetcher.Form>
             </div>
@@ -1715,11 +1726,13 @@ export default function Welcome() {
                 Step-by-step instruction videos, just a few minutes to know the app!
               </p>
             </div>
-            <button className="tutorials-menu" type="button" aria-label="Tutorial options">
-              ...
-            </button>
+        
           </div>
-          <div className="tutorials-grid">
+          <div
+            className={`tutorials-grid${
+              tutorials.length === 2 ? " tutorials-grid--two" : ""
+            }`}
+          >
             {tutorials.map((tutorial) => (
               <div 
                 key={tutorial.id} 
@@ -1747,38 +1760,6 @@ export default function Welcome() {
               </div>
             ))}
           </div>
-          {/* Need Help Section */}
-<div style={{ marginTop: "16px", borderTop: "1px solid #eceef1", paddingTop: "16px" }}>
-  <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#303030", marginBottom: "12px" }}>
-    Need help with your B2B setup?
-  </h3>
-  <div style={{
-    background: "#f0f4ff",
-    borderRadius: "12px",
-    padding: "18px 20px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "16px",
-  }}>
-    <div>
-      <p style={{ fontSize: "14px", fontWeight: 700, color: "#1a2366", marginBottom: "6px" }}>
-        First time setting up and finding it a bit challenging?
-      </p>
-      <p style={{ fontSize: "13px", color: "#4a5580", marginBottom: "14px", lineHeight: 1.5 }}>
-        Don't worry! We're here to walk you through the app, show you a live demo, and clear up any doubts you have.
-      </p>
-      <button style={{
-        background: "white", border: "1px solid #c9cccf", borderRadius: "8px",
-        padding: "8px 16px", fontSize: "13px", fontWeight: 500, color: "#303030", cursor: "pointer"
-      }}>
-        Book a 30-min session
-      </button>
-    </div>
-    <img src="https://cdn.shopify.com/s/files/1/0938/7068/6498/files/Mascot_BSS_2-04_1.png?v=1766374740" alt="mascot" style={{ width: "80px", flexShrink: 0 }} />
-  </div>
- 
-</div>
         </div>
 
 
