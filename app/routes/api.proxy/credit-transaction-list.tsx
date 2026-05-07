@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticateApiProxyWithPermissions } from "../../utils/proxy.server";
 import prisma from "app/db.server";
 import { getCreditTransactionsByCompany } from "app/services/company.server";
+import { calculateAvailableCredit } from "app/services/creditService";
 
 // ============================================================
 // 📦 LOADER — GET request
@@ -23,13 +24,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const companydata = await prisma.companyAccount.findFirst({
       where: { shopifyCompanyId: companyId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, creditLimit: true },
     });
 
-    const companyAccountId = companydata?.id!;
+    if (!companydata) {
+      return Response.json({ error: "Company not found" }, { status: 404 });
+    }
 
-    // ── Fetch total count and paginated transactions in parallel ─────────────────────
-    const [total, creditTransactions] = await Promise.all([
+    const companyAccountId = companydata.id;
+
+    const firstDayOfMonth = new Date();
+    firstDayOfMonth.setDate(1);
+    firstDayOfMonth.setHours(0, 0, 0, 0);
+
+    // ── Fetch total count, transactions, credit info, and current month balance in parallel ──
+    const [total, creditTransactions, creditInfo, currentMonthAggregation] = await Promise.all([
       prisma.creditTransaction.count({
         where: { companyId: companyAccountId },
       }),
@@ -37,11 +46,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         take: limit,
         skip,
       }),
+      calculateAvailableCredit(companyAccountId),
+      prisma.creditTransaction.aggregate({
+        where: {
+          companyId: companyAccountId,
+          createdAt: { gte: firstDayOfMonth },
+        },
+        _sum: {
+          creditAmount: true,
+        },
+      }),
     ]);
+
+    const summary = {
+      totalAssignCredit: companydata.creditLimit.toNumber(),
+      usedCredit: creditInfo?.usedCredit.toNumber() ?? 0,
+      availableCredit: creditInfo?.availableCredit.toNumber() ?? 0,
+      currentMonthBalance: currentMonthAggregation._sum.creditAmount?.toNumber() ?? 0,
+    };
 
     return Response.json({
       success: true,
       data: creditTransactions,
+      summary,
       pagination: {
         page,
         limit,
