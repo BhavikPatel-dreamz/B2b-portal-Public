@@ -157,6 +157,7 @@ model CompanyAccount {
 
   @@unique([shopId, shopifyCompanyId])
   @@index([shopId])
+  @@index([shopifyCompanyId])
 }
 
 model FormFieldConfig {
