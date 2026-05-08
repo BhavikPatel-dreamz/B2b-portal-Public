@@ -132,6 +132,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { admin } = await authenticate.public.appProxy(request);
 
+    if (!admin) {
+      return Response.json(
+        { error: "Admin context not available" },
+        { status: 500 },
+      );
+    }
+
     const requestData: CreateOrderRequest = await request.json();
     const { companyId, customerId, shop, orderItems, totalAmount, shippingAddress, notes } =
       requestData;
@@ -158,6 +165,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!store || !store.accessToken) {
       return Response.json({ error: "Store not found" }, { status: 404 });
     }
+
+    const shouldBlockOrders = store.blockOrderWhenCreditUnavailable ?? false;
 
     if (store.plan === "free") {
       const usage = await getFreePlanUsage(store.id);
@@ -218,21 +227,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Check if company is active (has credit limit > 0)
-    if (company.creditLimit.lessThanOrEqualTo(0)) {
+    if (shouldBlockOrders && company.creditLimit.lessThanOrEqualTo(0)) {
       return Response.json(
         { error: "Company account is suspended or has no credit limit" },
         { status: 403 }
       );
     }
 
-    // Use tiered credit validation (checks both company and user limits)
-    const creditValidation = await validateTieredCreditForOrder(
-      company.id,
-      user.id,
-      totalAmount
-    );
+    const creditValidation = shouldBlockOrders
+      ? await validateTieredCreditForOrder(
+          companyId,
+          user.id,
+          totalAmount
+        )
+      : null;
 
-    if (!creditValidation.canCreate) {
+    if (creditValidation && !creditValidation.canCreate) {
       const shortfallAmount = creditValidation.creditInfo
         ? new Decimal(totalAmount).minus(
             creditValidation.limitingFactor === "company"

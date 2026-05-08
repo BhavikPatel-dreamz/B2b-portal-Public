@@ -4,6 +4,7 @@ import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { createOrder } from "../services/order.server";
 import { getUserByShopifyCustomerId } from "../services/user.server";
+import { syncCompanyCreditMetafields } from "../services/metafieldSync.server";
 import { Prisma } from "@prisma/client";
 import {
   getFreePlanOrdersLimitMessage,
@@ -181,6 +182,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               userId: user.id,
             });
 
+            // Sync metafields even when validation fails
+            try {
+              const { admin } = await authenticate.admin(request);
+              await syncCompanyCreditMetafields(admin, user.companyId);
+            } catch (syncError) {
+              console.error(`⚠️ Failed to sync metafields after order creation:`, syncError);
+            }
+
             console.log(`⚠️ B2B order created with credit validation warning`);
             return new Response();
           }
@@ -222,6 +231,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         orderStatus,
         userId: user.id,
       });
+
+      // Sync metafields after order creation to update creditUsed
+      try {
+        const { admin } = await authenticate.admin(request);
+        await syncCompanyCreditMetafields(admin, user.companyId);
+        console.log(`✅ Metafields synced for company ${user.companyId} after order creation`);
+      } catch (syncError) {
+        console.error(`⚠️ Failed to sync metafields after order creation:`, syncError);
+        // Don't fail the webhook if sync fails
+      }
 
       return new Response();
     } catch (err) {

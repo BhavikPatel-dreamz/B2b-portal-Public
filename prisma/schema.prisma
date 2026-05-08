@@ -54,6 +54,7 @@ model Store {
   defaultCompanyCreditLimit      Decimal?                 @db.Decimal(14, 2)
   orderConfirmationToMainAccount Boolean                  @default(false)
   allowQuickOrderForUser         Boolean                  @default(false)
+  blockOrderWhenCreditUnavailable Boolean                 @default(false)
   completedSetupSteps            Json?
   setupFinished                  Boolean                  @default(false)
   plan                           String?

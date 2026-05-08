@@ -29,6 +29,7 @@ export interface UpdateStoreInput {
   defaultCompanyCreditLimit?: number | string | null;
   orderConfirmationToMainAccount?: boolean;
   allowQuickOrderForUser?: boolean;
+  blockOrderWhenCreditUnavailable?: boolean;
   privacyPolicylink?: string | null;
   privacyPolicyContent?: string | null;
 }
@@ -128,9 +129,18 @@ type AppSubscriptionSummary = {
 };
 
 /**
- * Update the smartb2b.validation_enabled shop metafield
+ * Update smartb2b shop metafields used by checkout validation
  */
-export async function setShopValidationMetafield(admin: AdminApiContext, enabled: boolean) {
+export async function setShopValidationMetafields(
+  admin: AdminApiContext,
+  {
+    enabled,
+    blockOrderWhenCreditUnavailable = false,
+  }: {
+    enabled: boolean;
+    blockOrderWhenCreditUnavailable?: boolean;
+  },
+) {
   try {
     // 1. Get Shop ID
     const shopRes = await admin.graphql(`
@@ -149,7 +159,9 @@ export async function setShopValidationMetafield(admin: AdminApiContext, enabled
     }
 
     // 2. Set Metafield
-    console.log(`🏷️ Setting validation state metafield (enabled: ${enabled}) for ${shopId}`);
+    console.log(
+      `🏷️ Setting validation metafields (enabled: ${enabled}, blockOrderWhenCreditUnavailable: ${blockOrderWhenCreditUnavailable}) for ${shopId}`,
+    );
     const metafieldRes = await admin.graphql(`
       mutation SetMetafield($metafields: [MetafieldsSetInput!]!) {
         metafieldsSet(metafields: $metafields) {
@@ -173,6 +185,13 @@ export async function setShopValidationMetafield(admin: AdminApiContext, enabled
             type: "single_line_text_field",
             value: enabled ? "true" : "false",
             ownerId: shopId
+          },
+          {
+            namespace: "smartb2b",
+            key: "block_orders_when_credit_unavailable",
+            type: "single_line_text_field",
+            value: blockOrderWhenCreditUnavailable ? "true" : "false",
+            ownerId: shopId
           }
         ]
       }
@@ -182,7 +201,7 @@ export async function setShopValidationMetafield(admin: AdminApiContext, enabled
     if (metafieldData.data?.metafieldsSet?.userErrors?.length > 0) {
       console.error("❌ Error setting shop metafield:", metafieldData.data.metafieldsSet.userErrors[0].message);
     } else {
-      console.log(`✅ Shop metafield updated: ${enabled}`);
+      console.log("✅ Shop validation metafields updated");
     }
   } catch (error) {
     console.error("❌ Exception setting shop metafield:", error);
@@ -288,7 +307,15 @@ export async function syncStoreSubscriptionState(
   if (admin && store) {
     console.log(`🔄 Syncing store plan (${plan}) and updating cart validation...`);
     await registerCartValidationFunction(admin);
-    await setShopValidationMetafield(admin, isPaid);
+    const currentStore = await prisma.store.findUnique({
+      where: { shopDomain },
+      select: { blockOrderWhenCreditUnavailable: true },
+    });
+    await setShopValidationMetafields(admin, {
+      enabled: isPaid,
+      blockOrderWhenCreditUnavailable:
+        currentStore?.blockOrderWhenCreditUnavailable ?? false,
+    });
     
     // Sync payment terms visibility in Shopify
     console.log(`🔄 Syncing payment terms visibility for ${shopDomain} (isPaid: ${isPaid})...`);
@@ -310,7 +337,10 @@ export async function setStoreFreePlan(shopDomain: string, admin?: AdminApiConte
       // Ensure cart validation is registered but disabled on free plan
       console.log(`🧹 Store ${shopDomain} set to free plan, ensuring cart validation is registered but disabled...`);
       await registerCartValidationFunction(admin);
-      await setShopValidationMetafield(admin, false);
+      await setShopValidationMetafields(admin, {
+        enabled: false,
+        blockOrderWhenCreditUnavailable: false,
+      });
 
       // Hide payment terms in Shopify but keep in DB
       console.log(`🧹 Hiding payment terms in Shopify for store ${shopDomain}...`);
@@ -367,6 +397,7 @@ export async function deleteStore(shopDomain: string) {
       autoApproveB2BOnboarding: false,
       orderConfirmationToMainAccount: false,
       allowQuickOrderForUser: false,
+      blockOrderWhenCreditUnavailable: false,
       contactEmail: null,
       submissionEmail: null,
       companyWelcomeEmailTemplate: null,

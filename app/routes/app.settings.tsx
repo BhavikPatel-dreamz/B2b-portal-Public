@@ -13,11 +13,17 @@ import { authenticate } from "../shopify.server";
 import {
   deleteStore,
   getStoreByDomain,
+  setShopValidationMetafields,
   updateStore,
 } from "../services/store.server";
 import { createUser, getUserByEmail } from "app/services/user.server";
 import { getCompaniesByShop } from "app/services/company.server";
 import { calculateAvailableCredit } from "../services/creditService";
+import {
+  processCustomersDataRequest,
+  processCustomersRedact,
+  processShopRedact,
+} from "../services/gdpr-webhooks.server";
 
 interface LoaderData {
   storeMissing: boolean;
@@ -33,6 +39,7 @@ interface LoaderData {
     defaultCompanyCreditLimit: string;
     orderConfirmationToMainAccount: boolean;
     allowQuickOrderForUser: boolean;
+    blockOrderWhenCreditUnavailable: boolean;
     companyWelcomeEmailTemplate?: string;
     companyWelcomeEmailEnabled?: boolean;
     privacyPolicylink?: string;
@@ -45,6 +52,12 @@ interface ActionResponse {
   message?: string;
   errors?: string[];
 }
+
+type DeleteIntent =
+  | "delete"
+  | "customers-data-request"
+  | "customers-redact"
+  | "shop-redact";
 
 function clearAdminCompaniesCache(shop: string) {
   const globalCache = globalThis as typeof globalThis & {
@@ -94,6 +107,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         orderConfirmationToMainAccount:
           store.orderConfirmationToMainAccount ?? false,
         allowQuickOrderForUser: store.allowQuickOrderForUser ?? false,
+        blockOrderWhenCreditUnavailable:
+          store.blockOrderWhenCreditUnavailable ?? false,
         companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
         companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
         privacyPolicylink: store.privacyPolicylink || "",
@@ -105,7 +120,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
   });
@@ -185,6 +200,63 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         {
           success: false,
           errors: ["Failed to delete store data. Please try again."],
+        } satisfies ActionResponse,
+        { status: 500 },
+      );
+    }
+  }
+
+  if (intent === "customers-data-request") {
+    try {
+      const result = await processCustomersDataRequest(session.shop);
+      return Response.json(
+        { success: true, message: result.message } satisfies ActionResponse,
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error processing customers/data_request:", error);
+      return Response.json(
+        {
+          success: false,
+          errors: ["Failed to process customer data request."],
+        } satisfies ActionResponse,
+        { status: 500 },
+      );
+    }
+  }
+
+  if (intent === "customers-redact") {
+    try {
+      const result = await processCustomersRedact(session.shop);
+      return Response.json(
+        { success: true, message: result.message } satisfies ActionResponse,
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error processing customers/redact:", error);
+      return Response.json(
+        {
+          success: false,
+          errors: ["Failed to process customer redact request."],
+        } satisfies ActionResponse,
+        { status: 500 },
+      );
+    }
+  }
+
+  if (intent === "shop-redact") {
+    try {
+      const result = await processShopRedact(session.shop);
+      return Response.json(
+        { success: true, message: result.message } satisfies ActionResponse,
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error processing shop/redact:", error);
+      return Response.json(
+        {
+          success: false,
+          errors: ["Failed to process shop redact request."],
         } satisfies ActionResponse,
         { status: 500 },
       );
@@ -314,6 +386,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     "true";
   const allowQuickOrderForUser =
     (formData.get("allowQuickOrderForUser") as string | null) === "true";
+  const blockOrderWhenCreditUnavailable =
+    (formData.get("blockOrderWhenCreditUnavailable") as string | null) ===
+    "true";
   const companyWelcomeEmailTemplate =
     (formData.get("companyWelcomeEmailTemplate") as string | null)?.trim() ||
     "";
@@ -386,10 +461,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       defaultCompanyCreditLimitRaw === "" ? null : defaultCompanyCreditLimitRaw,
     orderConfirmationToMainAccount,
     allowQuickOrderForUser,
+    blockOrderWhenCreditUnavailable,
     companyWelcomeEmailTemplate: companyWelcomeEmailTemplate || null,
     companyWelcomeEmailEnabled,
     privacyPolicylink,
     privacyPolicyContent,
+  });
+
+  await setShopValidationMetafields(admin, {
+    enabled: store.plan === "approved payment",
+    blockOrderWhenCreditUnavailable,
   });
 
   let updatedCompanyCount = 0;
@@ -603,6 +684,8 @@ export default function SettingsPage() {
 
   const [showDropdown, setShowDropdown] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [selectedDeleteIntent, setSelectedDeleteIntent] =
+    useState<DeleteIntent | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTabId>("store");
 
   const loaderData = useLoaderData<LoaderData>();
@@ -656,11 +739,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (deleteFetcher.data?.success) {
       setShowDeleteModal(false);
-
-      // Optional: Reload the page to show fresh state
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
+      setSelectedDeleteIntent(null);
     }
   }, [deleteFetcher.data]);
 
@@ -802,6 +881,50 @@ export default function SettingsPage() {
   const isSaving = fetcher.state !== "idle";
   const isDeleting = deleteFetcher.state !== "idle";
 
+  const deleteActionContent: Record<
+    DeleteIntent,
+    {
+      buttonLabel: string;
+      confirmLabel: string;
+      title: string;
+      description: string;
+      warning: string;
+    }
+  > = {
+    delete: {
+      buttonLabel: "Delete App Data",
+      confirmLabel: "Yes, Delete Everything",
+      title: "Confirm Deletion",
+      description:
+        "This will permanently delete all B2B portal data for this store, including companies, registrations, users, credit information, and app settings.",
+      warning: "This action cannot be undone.",
+    },
+    // "customers-data-request": {
+    //   buttonLabel: "Customers Data Request",
+    //   confirmLabel: "Run Data Request",
+    //   title: "Confirm Customer Data Request",
+    //   description:
+    //     "This will run the customers/data_request handler for the current store and review stored customer-related records.",
+    //   warning: "Use this to manually trigger the customer data request flow.",
+    // },
+    "customers-redact": {
+      buttonLabel: "Customers Redact",
+      confirmLabel: "Delete Customer Data",
+      title: "Confirm Customers Redact",
+      description:
+        "This will delete customer-related B2B data for the current store, including users, registrations, wishlist data, companies, orders, and credit records.",
+      warning: "This action cannot be undone.",
+    },
+    "shop-redact": {
+      buttonLabel: "Shop Redact",
+      confirmLabel: "Delete Shop Data",
+      title: "Confirm Shop Redact",
+      description:
+        "This will delete all B2B portal data for the current store, including customer data, email templates, and stored shop settings.",
+      warning: "This action cannot be undone.",
+    },
+  };
+
   // Variables for email template
   const variables = [
     { var: "{{companyName}}", desc: "Applying company's name" },
@@ -812,7 +935,9 @@ export default function SettingsPage() {
   ];
 
   const handleDelete = () => {
-    deleteFetcher.submit({ intent: "delete" }, { method: "post" });
+    if (!selectedDeleteIntent) return;
+
+    deleteFetcher.submit({ intent: selectedDeleteIntent }, { method: "post" });
   };
 
 
@@ -864,7 +989,7 @@ export default function SettingsPage() {
     );
   }
 
-  const { store } = loaderData;
+  const store = loaderData.store!;
   const isFreePlan = store.plan === "free";
 
   return (
@@ -1123,7 +1248,7 @@ export default function SettingsPage() {
                     name="defaultCompanyCreditLimit"
                     type="number"
                     min="0"
-                    defaultValue={store.defaultCompanyCreditLimit || ""}
+                    defaultValue={store.defaultCompanyCreditLimit || "1000"}
                     placeholder="1000"
                     style={{
                       padding: "10px 12px",
@@ -1161,6 +1286,13 @@ export default function SettingsPage() {
                   title="Allow quick order for user"
                   description="Control whether quick order is available for B2B users."
                   defaultChecked={store?.allowQuickOrderForUser}
+                  borderBottom
+                />
+                <ToggleRow
+                  name="blockOrderWhenCreditUnavailable"
+                  title="Block orders when credit limit is not available"
+                  description="On by default OFF. Enable this to block checkout and order creation when available credit is not enough."
+                  defaultChecked={store?.blockOrderWhenCreditUnavailable}
                 />
               </div>
             </div>
@@ -1257,10 +1389,10 @@ export default function SettingsPage() {
             </div>
           </fetcher.Form>
 
-          {/* Delete App Data Section */}
+          {/* GDPR Actions Section */}
           <div style={{ marginTop: 32 }}>
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>
-              Delete App Data
+              GDPR Delete Actions
             </h2>
 
             <div
@@ -1279,10 +1411,8 @@ export default function SettingsPage() {
                   lineHeight: 1.5,
                 }}
               >
-                This will permanently delete all{" "}
-                <strong style={{ color: "#dc2626" }}>B2B portal data</strong>{" "}
-                for this store, including companies, registrations, users,
-                credit information, and app settings.
+                Manually trigger the three GDPR-related webhook flows for this
+                store from settings.
               </p>
 
               <div
@@ -1304,6 +1434,7 @@ export default function SettingsPage() {
                   <li style={{ marginBottom: 4 }}>Companies & contacts</li>
                   <li style={{ marginBottom: 4 }}>Registrations & approvals</li>
                   <li style={{ marginBottom: 4 }}>Users & permissions</li>
+                  <li style={{ marginBottom: 4 }}>Customer data request flow</li>
                 </ul>
                 <ul
                   style={{
@@ -1350,44 +1481,60 @@ export default function SettingsPage() {
                     fontWeight: 600,
                   }}
                 >
-                  This action cannot be undone.
+                  Customers Redact and Shop Redact are irreversible actions.
                 </p>
               </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  onClick={() => setShowDeleteModal(true)}
-                  disabled={isDeleting}
-                  style={{
-                    padding: "10px 16px",
-                    background: isDeleting ? "#f87171" : "#dc2626",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: isDeleting ? "not-allowed" : "pointer",
-                    opacity: isDeleting ? 0.6 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isDeleting) {
-                      e.currentTarget.style.background = "#b91c1c";
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isDeleting) {
-                      e.currentTarget.style.background = "#dc2626";
-                    }
-                  }}
-                >
-                  {isDeleting ? "Deleting..." : "Delete App Data"}
-                </button>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  flexWrap: "wrap",
+                  gap: 12,
+                }}
+              >
+                {(Object.keys(deleteActionContent) as DeleteIntent[]).map(
+                  (deleteIntent) => (
+                    <button
+                      key={deleteIntent}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDeleteIntent(deleteIntent);
+                        setShowDeleteModal(true);
+                      }}
+                      disabled={isDeleting}
+                      style={{
+                        padding: "10px 16px",
+                        background: isDeleting ? "#f87171" : "#dc2626",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: 8,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: isDeleting ? "not-allowed" : "pointer",
+                        opacity: isDeleting ? 0.6 : 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isDeleting) {
+                          e.currentTarget.style.background = "#b91c1c";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isDeleting) {
+                          e.currentTarget.style.background = "#dc2626";
+                        }
+                      }}
+                    >
+                      {deleteActionContent[deleteIntent].buttonLabel}
+                    </button>
+                  ),
+                )}
               </div>
             </div>
           </div>
 
           {/* Delete Confirmation Modal */}
-          {showDeleteModal && (
+          {showDeleteModal && selectedDeleteIntent && (
             <div
               style={{
                 position: "fixed",
@@ -1596,7 +1743,7 @@ export default function SettingsPage() {
                     color: "#dc2626",
                   }}
                 >
-                  ⚠️ Confirm Deletion
+                  {deleteActionContent[selectedDeleteIntent].title}
                 </h3>
                 <p
                   id="delete-modal-description"
@@ -1607,9 +1754,7 @@ export default function SettingsPage() {
                     lineHeight: 1.6,
                   }}
                 >
-                  You are about to{" "}
-                  <strong>permanently delete all B2B portal data</strong> for
-                  this store. This includes:
+                  {deleteActionContent[selectedDeleteIntent].description}
                 </p>
 
                 <ul
@@ -1621,13 +1766,24 @@ export default function SettingsPage() {
                     lineHeight: 1.8,
                   }}
                 >
-                  <li>All companies and their contacts</li>
-                  <li>All registration submissions</li>
-                  <li>All users and their sessions</li>
-                  <li>All orders and payment records</li>
-                  <li>All credit accounts and transactions</li>
-                  <li>All locations and wishlist items</li>
-                  <li>All store B2B settings</li>
+                  {selectedDeleteIntent === "delete" ? (
+                    <>
+                      <li>All companies and their contacts</li>
+                      <li>All registration submissions</li>
+                      <li>All users and their sessions</li>
+                      <li>All orders and payment records</li>
+                      <li>All credit accounts and transactions</li>
+                      <li>All locations and wishlist items</li>
+                      <li>All store B2B settings</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>Endpoint: `/webhooks/customers/data_request`</li>
+                      <li>Endpoint: `/webhooks/customers/redact`</li>
+                      <li>Endpoint: `/webhooks/shop/redact`</li>
+                    </>
+                  )}
+                  <li>Current selection: {deleteActionContent[selectedDeleteIntent].buttonLabel}</li>
                 </ul>
 
                 <div
@@ -1661,8 +1817,7 @@ export default function SettingsPage() {
                       fontWeight: 600,
                     }}
                   >
-                    This action is <strong>irreversible</strong>. All data will
-                    be permanently lost.
+                    {deleteActionContent[selectedDeleteIntent].warning}
                   </p>
                 </div>
 
@@ -1728,8 +1883,8 @@ export default function SettingsPage() {
                     }}
                   >
                     {isDeleting
-                      ? "Deleting all data..."
-                      : "Yes, Delete Everything"}
+                      ? "Processing..."
+                      : deleteActionContent[selectedDeleteIntent].confirmLabel}
                   </button>
                 </div>
               </div>

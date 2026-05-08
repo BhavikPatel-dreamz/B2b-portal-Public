@@ -6,6 +6,7 @@ import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { validateTieredCreditForOrder, restoreTieredCredit } from "../services/tieredCreditService";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { calculateAvailableCredit } from "../services/creditService";
+import { syncCompanyCreditMetafields } from "../services/metafieldSync.server";
 import { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 
@@ -381,6 +382,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             });
           }
       
+    }
+
+    // Sync metafields after order update to reflect creditUsed changes
+    try {
+      const { admin } = await authenticate.admin(request);
+      await syncCompanyCreditMetafields(admin, user.companyId);
+      console.log(`✅ Metafields synced for company ${user.companyId} after order update`);
+    } catch (syncError) {
+      console.error(`⚠️ Failed to sync metafields after order update:`, syncError);
+      // Don't fail the webhook if sync fails
     }
 
     return new Response(null, { status: 200 });

@@ -1188,7 +1188,7 @@ export default function Home() {
           </div>
 
           {/* Main Content Grid */}
-          <div className={`main-grid${isFreePlan ? " free-plan-layout" : ""}`}>
+          <div className="main-grid free-plan-layout">
             {/* Left Column */}
             <div>
               {/* Credit Management Overview */}
@@ -1196,9 +1196,6 @@ export default function Home() {
                 <div className="credit-card">
                   <div className="card-header">
                     <h2 className="card-title">Credit Management Overview</h2>
-                    <a href="#" className="manage-link">
-                      ⚙️ Manage credit
-                    </a>
                   </div>
 
                   <div className="credit-stats-grid">
@@ -1251,10 +1248,10 @@ export default function Home() {
                   <div className="main-progress-bar">
                     <div
                       className="main-progress-fill"
-                      style={{ width: "100%" }}
+                      style={{ width: `${creditUsagePercentage}%` }}
                     ></div>
                   </div>
-                  <div className="progress-percentage">100%</div>
+                  <div className="progress-percentage">{creditUsagePercentage}%</div>
                 </div>
               )}
 

@@ -7,6 +7,10 @@ describe("Cart Validation Function", () => {
     buyerJourney: {
       step: "CHECKOUT_INTERACTION",
     },
+    shop: {
+      validationEnabled: { value: "true" },
+      blockOrdersWhenCreditUnavailable: { value: "true" },
+    },
   };
 
   describe("Credit validation", () => {
@@ -55,9 +59,9 @@ describe("Cart Validation Function", () => {
       const result = cartValidationsGenerateRun(input);
       const errors = result.operations[0].validationAdd.errors;
       expect(errors).toHaveLength(1);
-      expect(errors[0].message).toContain("Insufficient company credit");
-      expect(errors[0].message).toContain("Available credit: $100.00");
-      expect(errors[0].message).toContain("Cart total: $200.00");
+      expect(errors[0].message).toContain(
+        "This order exceeds your company's available credit",
+      );
     });
 
     it("should block cart when credit limit is reached", () => {
@@ -192,6 +196,33 @@ describe("Cart Validation Function", () => {
   });
 
   describe("Credit limit scenarios", () => {
+    it("should not block when store-level credit blocking is off", () => {
+      const input = {
+        ...atCheckout,
+        shop: {
+          validationEnabled: { value: "true" },
+          blockOrdersWhenCreditUnavailable: { value: "false" },
+        },
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "200.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "900.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      expect(result.operations).toHaveLength(0);
+    });
+
     it("should block orders when credit is insufficient", () => {
       const input = {
         ...atCheckout,
@@ -217,7 +248,13 @@ describe("Cart Validation Function", () => {
       const result = cartValidationsGenerateRun(input);
       const errors = result.operations[0].validationAdd.errors;
       expect(errors).toHaveLength(1);
-      expect(errors.some(e => e.message.includes("Insufficient company credit"))).toBe(true);
+      expect(
+        errors.some((e) =>
+          e.message.includes(
+            "This order exceeds your company's available credit",
+          ),
+        ),
+      ).toBe(true);
     });
 
     it("should not block during cart interaction", () => {
@@ -242,8 +279,7 @@ describe("Cart Validation Function", () => {
       };
 
       const result = cartValidationsGenerateRun(input);
-      const errors = result.operations[0].validationAdd.errors;
-      expect(errors).toHaveLength(0);
+      expect(result.operations).toHaveLength(0);
     });
   });
 });

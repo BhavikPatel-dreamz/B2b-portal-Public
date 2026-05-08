@@ -10,25 +10,22 @@
  * @returns {CartValidationsGenerateRunResult}
  */
 export function cartValidationsGenerateRun(input) {
-  /**
-   * @type {{ message: string; target: string; }[]}
-   */
+  /** @type {{ message: string; target: string; }[]} */
   const errors = [];
 
   // -----------------------------------
   // VALIDATION ENABLE / DISABLE
   // -----------------------------------
 
-  // Shop metafield value
-  // smartb2b.validation_enabled
   const validationEnabled =
     input.shop?.validationEnabled?.value === "true";
 
-  // Disable validation for FREE plan
+  const blockOrdersWhenCreditUnavailable =
+    input.shop?.blockOrdersWhenCreditUnavailable?.value === "true";
+
+  // Disable validation entirely if feature is off
   if (!validationEnabled) {
-    return {
-      operations: [],
-    };
+    return { operations: [] };
   }
 
   // -----------------------------------
@@ -42,22 +39,17 @@ export function cartValidationsGenerateRun(input) {
     buyerJourneyStep === "CHECKOUT_COMPLETION";
 
   if (!shouldValidateCredit) {
-    return {
-      operations: [],
-    };
+    return { operations: [] };
   }
 
   // -----------------------------------
   // HELPER FUNCTION
   // -----------------------------------
 
+  /** @param {string | number | null | undefined} value */
   const parseDecimal = (value) => {
-    if (value == null || value === "") {
-      return null;
-    }
-
+    if (value == null || value === "") return null;
     const parsed = Number.parseFloat(String(value));
-
     return Number.isFinite(parsed) ? parsed : null;
   };
 
@@ -66,9 +58,7 @@ export function cartValidationsGenerateRun(input) {
   // -----------------------------------
 
   const buyerIdentity = input.cart?.buyerIdentity;
-
-  const cartTotal =
-    parseDecimal(input.cart?.cost?.totalAmount?.amount) ?? 0;
+  const cartTotal = parseDecimal(input.cart?.cost?.totalAmount?.amount) ?? 0;
 
   // -----------------------------------
   // COMPANY VALIDATION
@@ -77,43 +67,49 @@ export function cartValidationsGenerateRun(input) {
   if (buyerIdentity?.purchasingCompany?.company) {
     const company = buyerIdentity.purchasingCompany.company;
 
-    const companyCreditLimit =
-      parseDecimal(company.creditLimit?.value);
-
-    const companyCreditUsed =
-      parseDecimal(company.creditUsed?.value) ?? 0;
+    const companyCreditLimit = parseDecimal(company.creditLimit?.value);
+    
+    // Handle inconsistent creditUsed data - sometimes present, sometimes missing
+    const rawCreditUsed = company.creditUsed?.value;
+    const companyCreditUsed = parseDecimal(rawCreditUsed) ?? 0;
+    
+    // Log when creditUsed data is missing for debugging
+    if (rawCreditUsed == null || rawCreditUsed === "") {
+      console.warn("[Cart Validation] Company creditUsed is missing for company:", company);
+    }
 
     // Company credit not configured
-    if (
-      companyCreditLimit == null ||
-      companyCreditLimit <= 0
-    ) {
+    if (companyCreditLimit == null || companyCreditLimit <= 0) {
       errors.push({
-        message:
-          "Unable to validate company credit at checkout. Please contact support.",
+        message: "Unable to validate company credit at checkout. Please contact support.",
         target: "$.cart",
       });
     } else {
-      const companyAvailableCredit =
-        companyCreditLimit - companyCreditUsed;
+      const companyAvailableCredit = companyCreditLimit - companyCreditUsed;
 
-      // Company limit exceeded
+      // Company limit fully exhausted
       if (companyCreditUsed >= companyCreditLimit) {
         errors.push({
-          message:
-            "Company credit limit has been reached. Please contact support to increase your credit limit.",
+          message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
           target: "$.cart",
         });
       }
 
-      // Cart exceeds company available credit
+      // Cart exceeds available company credit
       else if (cartTotal > companyAvailableCredit) {
-        errors.push({
-          message: `Insufficient company credit. Available credit: $${companyAvailableCredit.toFixed(
-            2
-          )}, Cart total: $${cartTotal.toFixed(2)}`,
-          target: "$.cart",
-        });
+        if (blockOrdersWhenCreditUnavailable) {
+          // 🔴 Hard block — order is stopped
+          errors.push({
+            message: `This order exceeds your company's available credit. Available credit: $${companyAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
+            target: "$.cart",
+          });
+        } else {
+          // 🟡 Soft warning — order proceeds but admin is notified
+          errors.push({
+            message: `Insufficient user credit. Available credit: $${companyAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
+            target: "$.cart",
+          });
+        }
       }
     }
 
@@ -122,25 +118,16 @@ export function cartValidationsGenerateRun(input) {
     // -----------------------------------
 
     const customer = buyerIdentity.customer;
+    const userCreditLimit = parseDecimal(customer?.userCreditLimit?.value);
+    const userCreditUsed = parseDecimal(customer?.userCreditUsed?.value) ?? 0;
 
-    const userCreditLimit =
-      parseDecimal(customer?.userCreditLimit?.value);
+    if (userCreditLimit != null && userCreditLimit > 0) {
+      const userAvailableCredit = userCreditLimit - userCreditUsed;
 
-    const userCreditUsed =
-      parseDecimal(customer?.userCreditUsed?.value) ?? 0;
-
-    if (
-      userCreditLimit != null &&
-      userCreditLimit > 0
-    ) {
-      const userAvailableCredit =
-        userCreditLimit - userCreditUsed;
-
-      // User limit exceeded
+      // User limit fully exhausted
       if (userCreditUsed >= userCreditLimit) {
         errors.push({
-          message:
-            "Your user credit limit has been reached. Please contact your company administrator.",
+          message: "Your user credit limit has been reached. Please contact your company administrator.",
           target: "$.cart",
         });
       }
@@ -148,9 +135,7 @@ export function cartValidationsGenerateRun(input) {
       // Cart exceeds user available credit
       else if (cartTotal > userAvailableCredit) {
         errors.push({
-          message: `Insufficient user credit. Available credit: $${userAvailableCredit.toFixed(
-            2
-          )}, Cart total: $${cartTotal.toFixed(2)}`,
+          message: `Insufficient user credit. Available credit: $${userAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
           target: "$.cart",
         });
       }
@@ -164,9 +149,7 @@ export function cartValidationsGenerateRun(input) {
   return {
     operations: [
       {
-        validationAdd: {
-          errors,
-        },
+        validationAdd: { errors },
       },
     ],
   };

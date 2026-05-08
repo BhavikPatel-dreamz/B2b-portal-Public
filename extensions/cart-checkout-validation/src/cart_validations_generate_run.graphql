@@ -10,41 +10,23 @@ query CartValidationsGenerateRunInput {
     ) {
       value
     }
+    blockOrdersWhenCreditUnavailable: metafield(
+      namespace: "smartb2b"
+      key: "block_orders_when_credit_unavailable"
+    ) {
+      value
+    }
   }
 
   cart {
-    lines {
-      quantity
-
-      merchandise {
-        ... on ProductVariant {
-          id
-          title
-        }
-      }
-    }
-
     cost {
       totalAmount {
         amount
-        currencyCode
       }
     }
 
     buyerIdentity {
-      email
-
       customer {
-        id
-        email
-
-        b2bCompanyId: metafield(
-          namespace: "custom"
-          key: "company_id"
-        ) {
-          value
-        }
-
         userCreditLimit: metafield(
           namespace: "custom"
           key: "user_credit_limit"
@@ -62,9 +44,6 @@ query CartValidationsGenerateRunInput {
 
       purchasingCompany {
         company {
-          id
-          name
-
           creditLimit: metafield(
             namespace: "custom"
             key: "company_credit_limit"

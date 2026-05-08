@@ -155,6 +155,13 @@ const shopify = shopifyApp({
                 type: "single_line_text_field",
                 value: isPaidPlan ? "true" : "false",
                 ownerId: shop.id
+              },
+              {
+                namespace: "smartb2b",
+                key: "block_orders_when_credit_unavailable",
+                type: "single_line_text_field",
+                value: "false",
+                ownerId: shop.id
               }
             ]
           }

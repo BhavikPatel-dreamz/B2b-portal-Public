@@ -3,7 +3,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
-
+import { syncCompanyCreditMetafields } from "../services/metafieldSync.server";
 import { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import { getUserByShopifyCustomerId } from "app/services/user.server";
@@ -163,7 +163,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         remainingBalance: new Prisma.Decimal(totalAmount),
         notes: `Post-payment validation failed: ${validationResult.error}`,
       });
+    }
 
+    // Sync metafields after order payment to update creditUsed
+    try {
+      const { admin } = await authenticate.admin(request);
+      await syncCompanyCreditMetafields(admin, order.companyId!);
+      console.log(`✅ Metafields synced for company ${order.companyId} after order payment`);
+    } catch (syncError) {
+      console.error(`⚠️ Failed to sync metafields after order payment:`, syncError);
+      // Don't fail the webhook if sync fails
     }
 
     return new Response();
