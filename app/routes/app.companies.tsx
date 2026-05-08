@@ -401,13 +401,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             paymentStatus: { in: ["pending", "partial"] },
             orderStatus: { notIn: ["cancelled"] },
           },
-          _sum: { creditUsed: true },
+          _sum: { remainingBalance: true },
         });
 
     const creditMap = new Map(
       orderCreditByCompany.map((entry) => [
         entry.companyId,
-        Number(entry._sum.creditUsed ?? 0),
+        Number(entry._sum.remainingBalance ?? 0),
       ]),
     );
     const paymentTermsNameMap = new Map(

@@ -315,6 +315,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Rollback: Delete the B2B order and restore credit
         await prisma.b2BOrder.delete({ where: { id: b2bOrder.id } });
 
+        // Get current credit for accurate transaction log
+        const currentCredit = await calculateAvailableCredit(companyId);
+
         // Restore credit by creating a reversal transaction
         await prisma.creditTransaction.create({
           data: {
@@ -322,8 +325,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             orderId: b2bOrder.id,
             transactionType: "order_cancelled",
             creditAmount: new Decimal(totalAmount),
-            previousBalance: new Decimal(0), // Will be recalculated
-            newBalance: new Decimal(0), // Will be recalculated
+            previousBalance: currentCredit?.availableCredit || new Decimal(0),
+            newBalance: (currentCredit?.availableCredit || new Decimal(0)).plus(new Decimal(totalAmount)),
             notes: `Order creation failed - Shopify sync error. Credit restored.`,
             createdBy: "system",
             createdAt: new Date(),
@@ -384,6 +387,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         try {
           await prisma.b2BOrder.delete({ where: { id: b2bOrder.id } });
 
+          // Get current credit for accurate transaction log
+          const currentCredit = await calculateAvailableCredit(companyId);
+
           // Restore credit
           await prisma.creditTransaction.create({
             data: {
@@ -391,8 +397,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               orderId: b2bOrder.id,
               transactionType: "order_cancelled",
               creditAmount: new Decimal(totalAmount),
-              previousBalance: new Decimal(0),
-              newBalance: new Decimal(0),
+              previousBalance: currentCredit?.availableCredit || new Decimal(0),
+              newBalance: (currentCredit?.availableCredit || new Decimal(0)).plus(new Decimal(totalAmount)),
               notes: `Order creation failed - Database error. Credit restored.`,
               createdBy: "system",
             },

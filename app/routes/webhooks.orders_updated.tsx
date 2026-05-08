@@ -203,6 +203,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             });
           }
 
+          // **CRITICAL: Create CreditTransaction for paid order**
+          const creditChange = (existingOrder.creditUsed ? new Prisma.Decimal(existingOrder.creditUsed) : new Prisma.Decimal(0));
+          if (creditChange.greaterThan(0)) {
+            const companyCredit = await calculateAvailableCredit(user.companyId, existingOrder.id);
+            const companyRemainingBalance = companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0);
+            
+            const exist = await prisma.creditTransaction.findFirst({
+              where: {
+                companyId: user.companyId,
+                orderId: existingOrder.id,
+                transactionType: "order_paid"
+              }
+            });
+
+            if (!exist) {
+              await prisma.creditTransaction.create({
+                data: {
+                  companyId: user.companyId,
+                  orderId: existingOrder.id,
+                  creditAmount: creditChange,
+                  transactionType: "order_paid",
+                  previousBalance: companyCredit ? companyCredit.availableCredit.minus(creditChange) : new Prisma.Decimal(0),
+                  newBalance: companyRemainingBalance,
+                  notes: `Credit restored for paid order ${existingOrder.id}`,
+                  createdBy: user.id,
+                  createdAt: new Date(),
+                },
+              });
+              console.log(`✅ Created order_paid transaction for ${existingOrder.id}: +${creditChange}`);
+            }
+          }
+
         } else if (paymentStatus === "cancelled" || orderStatus === "cancelled") {
           // Order was cancelled - refund reserved credit
           console.log(`❌ Order cancelled - refunding reserved credit`);
@@ -240,8 +272,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           const unpaidAmount = orderTotal.minus(paidAmount);
 
           // Calculate company's remaining credit balance after this order
-          const companyCredit = await calculateAvailableCredit(user.companyId);
-          const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
+          // We exclude the current order to get the balance BEFORE this update, then subtract the new unpaid amount
 
           await updateOrder(existingOrder.id, {
             paymentStatus: "partial",
@@ -249,7 +280,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             orderTotal: new Prisma.Decimal(totalPriceStr),
             paidAmount: paidAmount,
             creditUsed: unpaidAmount, // Credit used is the unpaid portion
-            remainingBalance: companyRemainingBalance, // Company's remaining credit balance
+            remainingBalance: unpaidAmount, // Order's remaining balance is the unpaid portion
             updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
           });
 
@@ -257,12 +288,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         } else {
           // Other status changes - update all relevant order details
 
-          const creditToUse = paymentStatus === "paid" ? orderTotal : paidAmount;
+          const unpaidAmount = orderTotal.minus(paidAmount);
+          const creditToUse = paymentStatus === "paid" ? new Prisma.Decimal(0) : unpaidAmount;
 
           // Calculate company's remaining credit balance after this order
-          const unpaidAmount = orderTotal.minus(paidAmount);
-          const companyCredit = await calculateAvailableCredit(user.companyId);
-          const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
+          const companyCredit = await calculateAvailableCredit(user.companyId, existingOrder.id);
+          const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(creditToUse) : new Prisma.Decimal(0);
 
           await updateOrder(existingOrder.id, {
             paymentStatus,
@@ -270,7 +301,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             orderTotal: orderTotal,
             paidAmount: paidAmount,
             creditUsed: creditToUse, // Credit used based on payment status
-            remainingBalance: companyRemainingBalance, // Company's remaining credit balance
+            remainingBalance: unpaidAmount, // Order's remaining balance
             updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
             notes: paymentTerms ?
               `Payment Terms: ${paymentTerms.payment_terms_name || 'Net'} ${paymentTerms.due_in_days || 0} days` :
@@ -286,27 +317,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             companyRemainingBalance: companyRemainingBalance.toString(),
             currency: currency
           });
-         const exist = await prisma.creditTransaction.findFirst({
-            where: {
-              companyId: user.companyId,
-              orderId: existingOrder.id,
-              transactionType: "order_paid"
+
+          // Calculate how much credit was restored/deducted
+          const creditChange = (existingOrder.creditUsed ? new Prisma.Decimal(existingOrder.creditUsed) : new Prisma.Decimal(0)).minus(creditToUse);
+
+          if (creditChange.abs().greaterThan(0)) {
+            const exist = await prisma.creditTransaction.findFirst({
+              where: {
+                companyId: user.companyId,
+                orderId: existingOrder.id,
+                transactionType: paymentStatus === "paid" ? "order_paid" : "order_updated"
+              }
+            })
+            if (!exist) {
+              await prisma.creditTransaction.create({
+                data: {
+                  companyId: user.companyId,
+                  orderId: existingOrder.id,
+                  creditAmount: creditChange, // Positive if credit restored, Negative if more used
+                  transactionType: paymentStatus === "paid" ? "order_paid" : "order_updated",
+                  previousBalance: companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0),
+                  newBalance: companyRemainingBalance,
+                  notes: `Credit ${creditChange.greaterThan(0) ? 'restored' : 'deducted'} for order update (${paymentStatus})`,
+                  createdBy: user.id,
+                  createdAt: new Date(),
+                },
+              });
             }
-          })
-          if(!exist){
-            await prisma.creditTransaction.create({
-            data: {
-              companyId: user.companyId,
-              orderId: existingOrder.id,
-              creditAmount: new Prisma.Decimal(creditToUse), // positive because we're deducting
-              transactionType: "order_paid",
-              previousBalance: companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0),
-              newBalance: companyRemainingBalance,
-              notes: `Credit ${paymentStatus === "paid" ? 'deducted' : 'adjusted'} for order update`,
-              createdBy: user.id,
-              createdAt: new Date(),
-            },
-            });
           }
         }
 
@@ -318,8 +355,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Calculate company's remaining credit balance after this order
         const unpaidAmount = orderTotal.minus(paidAmount);
-        const companyCredit = await calculateAvailableCredit(user.companyId);
-        const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
 
         await updateOrder(existingOrder.id, {
           paymentStatus,
@@ -327,7 +362,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           orderTotal: new Prisma.Decimal(totalPriceStr),
           paidAmount: paidAmount,
           creditUsed: creditToUse,
-          remainingBalance: companyRemainingBalance, // Company's remaining credit balance
+          remainingBalance: unpaidAmount, // Order's remaining balance
           updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
           notes: `Status update error: ${error instanceof Error ? error.message : 'Unknown error'}`
         });
@@ -338,7 +373,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const unpaidAmount = orderTotal.minus(paidAmount);
 
       // Calculate company's remaining credit balance after this order
-      const companyCredit = await calculateAvailableCredit(user.companyId);
+      const companyCredit = await calculateAvailableCredit(user.companyId, existingOrder.id);
       const companyRemainingBalance = companyCredit ? companyCredit.availableCredit.minus(unpaidAmount) : new Prisma.Decimal(0);
 
       await updateOrder(existingOrder.id, {
@@ -346,7 +381,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         orderTotal: new Prisma.Decimal(totalPriceStr),
         paidAmount: paidAmount,
         creditUsed: unpaidAmount, // Credit used is unpaid amount
-        remainingBalance: companyRemainingBalance, // Company's remaining credit balance
+        remainingBalance: unpaidAmount, // Order's remaining balance
         updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
         notes: paymentTerms ?
           `Payment Terms: ${paymentTerms.payment_terms_name || 'Net'} ${paymentTerms.due_in_days || 0} days` :
@@ -359,28 +394,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         creditUsed: unpaidAmount.toString(),
         companyRemainingBalance: companyRemainingBalance.toString()
       });
-           const exist = await prisma.creditTransaction.findFirst({
-            where: {
-              companyId: user.companyId,
-              orderId: existingOrder.id,
-              transactionType: "order_paid"
-            }
-          })
-          if(!exist){
-            await prisma.creditTransaction.create({
+
+      // Calculate how much credit was restored/deducted
+      const creditChange = (existingOrder.creditUsed ? new Prisma.Decimal(existingOrder.creditUsed) : new Prisma.Decimal(0)).minus(unpaidAmount);
+
+      if (creditChange.abs().greaterThan(0)) {
+        const exist = await prisma.creditTransaction.findFirst({
+          where: {
+            companyId: user.companyId,
+            orderId: existingOrder.id,
+            transactionType: "order_updated"
+          }
+        })
+        if (!exist) {
+          await prisma.creditTransaction.create({
             data: {
               companyId: user.companyId,
               orderId: existingOrder.id,
-              creditAmount: new Prisma.Decimal(unpaidAmount.toString()), // positive because we're deducting
-              transactionType: "order_paid",
+              creditAmount: creditChange,
+              transactionType: "order_updated",
               previousBalance: companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0),
               newBalance: companyRemainingBalance,
-              notes: `Credit ${paymentStatus === "paid" ? 'deducted' : 'adjusted'} for order update`,
+              notes: `Credit ${creditChange.greaterThan(0) ? 'restored' : 'deducted'} for fulfillment update`,
               createdBy: user.id,
               createdAt: new Date(),
             },
-            });
-          }
+          });
+        }
+      }
       
     }
 

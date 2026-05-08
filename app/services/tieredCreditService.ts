@@ -307,10 +307,17 @@ export async function deductTieredCredit(
   }
 
   // Update order with credit tracking
-  // Fixed: Use findUnique by internal id instead of findFirst by shopifyOrderId
-  const order = await prisma.b2BOrder.findUnique({
+  // Fixed: Use findUnique by internal id or findFirst by shopifyOrderId
+  let order = await prisma.b2BOrder.findUnique({
     where: { id: orderId },
   });
+
+  if (!order) {
+    order = await prisma.b2BOrder.findUnique({
+      where: { shopifyOrderId: orderId },
+    });
+  }
+
   if (order) {
     await prisma.b2BOrder.update({
       where: { id: order.id },

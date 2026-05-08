@@ -122,24 +122,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const previousBalance = creditInfo.availableCredit;
         const newBalance = previousBalance.plus(restoreAmount);
         
-        await prisma.creditTransaction.create({
-          data: {
+        const exist = await prisma.creditTransaction.findFirst({
+          where: {
             companyId: order.companyId!,
             orderId: order.id,
-            transactionType: "order_paid",
-            creditAmount: restoreAmount,
-            previousBalance,
-            newBalance,
-            notes: `Credit restored for paid order #${order.id}`,
-            createdBy,
-          },
+            transactionType: "order_paid"
+          }
         });
-        console.log(`✅ Created order_paid credit transaction: +${restoreAmount} | ${previousBalance} → ${newBalance}`);
+
+        if (!exist) {
+          await prisma.creditTransaction.create({
+            data: {
+              companyId: order.companyId!,
+              orderId: order.id,
+              transactionType: "order_paid",
+              creditAmount: restoreAmount,
+              previousBalance,
+              newBalance,
+              notes: `Credit restored for paid order #${order.id}`,
+              createdBy,
+            },
+          });
+          console.log(`✅ Created order_paid credit transaction: +${restoreAmount} | ${previousBalance} → ${newBalance}`);
+        } else {
+          console.log(`ℹ️ order_paid transaction already exists for order ${order.id}, skipping duplicate creation.`);
+        }
       }
       
       await updateOrder(order.id, {
         paymentStatus: "paid",
         paidAmount: new Prisma.Decimal(totalAmount),
+        creditUsed: new Prisma.Decimal(0),
         remainingBalance: new Prisma.Decimal(0),
         paidAt: new Date(),
       });

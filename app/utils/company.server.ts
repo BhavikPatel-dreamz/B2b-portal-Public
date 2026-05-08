@@ -1238,7 +1238,7 @@ export const syncShopifyOrders = async (
                 orderStatus: { notIn: ["cancelled"] },
               },
               _sum: {
-                creditUsed: true,
+                remainingBalance: true,
               },
             }),
             prisma.creditTransaction.findFirst({
@@ -1251,7 +1251,7 @@ export const syncShopifyOrders = async (
           ]);
 
           const previousBalance = new Decimal(company?.creditLimit ?? 0).minus(
-            new Decimal(creditTotals._sum.creditUsed ?? 0),
+            new Decimal(creditTotals._sum.remainingBalance ?? 0),
           );
           const newBalance = previousBalance.minus(creditUsed);
           const transactionData = {

@@ -170,7 +170,7 @@ export async function previewCreditRecalculation(companyId: string) {
         id: true,
         shopifyOrderId: true,
         orderTotal: true,
-        creditUsed: true, // Use creditUsed instead of remainingBalance for consistency
+        remainingBalance: true, // Use remainingBalance for consistency
         createdAt: true,
         createdByUser: {
           select: {
@@ -203,7 +203,7 @@ export async function previewCreditRecalculation(companyId: string) {
         id: order.id,
         shopifyOrderId: order.shopifyOrderId,
         orderTotal: order.orderTotal.toNumber(),
-        creditUsed: order.creditUsed?.toNumber() || 0, // Use creditUsed instead of remainingBalance
+        creditUsed: order.remainingBalance?.toNumber() || 0, // Use remainingBalance instead of creditUsed
         createdAt: order.createdAt.toISOString(),
         createdBy: [order.createdByUser.firstName, order.createdByUser.lastName]
           .filter(Boolean)
