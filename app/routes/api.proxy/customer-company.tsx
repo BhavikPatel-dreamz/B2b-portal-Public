@@ -63,6 +63,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       // Plan status
       plan: store.plan === "approved payment",
+      allowQuickOrderForUser: store.allowQuickOrderForUser,
 
       // ✅ New stats
       currentMonthOrderCount: companyInfo.currentMonthOrderCount,
@@ -154,6 +155,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       locationsCount: company.locationsCount,
       companyName: company.companyName,
       plan: store.plan === "approved payment",
+      allowQuickOrderForUser: store.allowQuickOrderForUser,
     });
   } catch (error) {
     console.error("Proxy error:", error);
