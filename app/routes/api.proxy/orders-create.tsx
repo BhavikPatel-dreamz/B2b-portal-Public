@@ -196,6 +196,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const user = await prisma.user.findFirst({
       where: {
         companyId,
+        shopifyCustomerId: customerId.startsWith("gid://") ? customerId : `gid://shopify/Customer/${customerId}`,
         isActive: true,
         status: "APPROVED",
       },
@@ -226,7 +227,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Use tiered credit validation (checks both company and user limits)
     const creditValidation = await validateTieredCreditForOrder(
-      companyId,
+      company.id,
       user.id,
       totalAmount
     );
@@ -270,7 +271,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Create B2B Order in database with status "draft"
       b2bOrder = await prisma.b2BOrder.create({
         data: {
-          companyId,
+          companyId: company.id,
           createdByUserId: user.id,
           shopId: store.id,
           orderTotal: new Decimal(totalAmount),
@@ -285,7 +286,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
 
       // Deduct credit and create transaction log
-      await deductTieredCredit(companyId, user.id, b2bOrder.id, totalAmount, "order_created");
+      await deductTieredCredit(company.id, user.id, b2bOrder.id, totalAmount, "order_created");
 
       // Create draft order in Shopify
       const shopifyResult = await createShopifyDraftOrder(admin, {
@@ -307,7 +308,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Restore credit by creating a reversal transaction
         await prisma.creditTransaction.create({
           data: {
-            companyId,
+            companyId: company.id,
             orderId: b2bOrder.id,
             transactionType: "order_cancelled",
             creditAmount: new Decimal(totalAmount),
@@ -376,7 +377,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           // Restore credit
           await prisma.creditTransaction.create({
             data: {
-              companyId,
+              companyId: company.id,
               orderId: b2bOrder.id,
               transactionType: "order_cancelled",
               creditAmount: new Decimal(totalAmount),

@@ -1470,15 +1470,21 @@ export async function getCustomerCompanyInfo(
     });
     const shopId = storeRecord?.id || "";
 
-    // Fetch company account using the unique shopId + shopifyCompanyId
-    const companyAccount = await prisma.companyAccount.findUnique({
+    // Fetch company accounts for ALL associated companies to get their internal IDs
+    const associatedCompanyGids = companyProfiles.map((p: any) => p.company?.id as string).filter(Boolean);
+    const companyAccounts = await prisma.companyAccount.findMany({
       where: {
-        shopId_shopifyCompanyId: {
-          shopId,
-          shopifyCompanyId: primaryCompanyGid,
-        },
+        shopId,
+        shopifyCompanyId: { in: associatedCompanyGids },
       },
+      select: { id: true, shopifyCompanyId: true, creditLimit: true },
     });
+
+    const companyAccountMap = new Map(
+      companyAccounts.map(ca => [ca.shopifyCompanyId, ca])
+    );
+
+    const companyAccount = companyAccountMap.get(primaryCompanyGid);
 
     const [registrationData, currentMonthOrdersRes, pendingDraftOrdersRes] =
       await Promise.all([
@@ -1672,6 +1678,7 @@ export async function getCustomerCompanyInfo(
 
         return {
           companyId: company.id,
+          companyAccountId: companyAccountMap.get(company.id)?.id || null,
           companyName: company.name,
           externalId: company.externalId,
           mainContact: company.mainContact?.customer ?? null,

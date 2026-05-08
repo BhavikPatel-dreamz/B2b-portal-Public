@@ -70,24 +70,32 @@ export async function calculateTieredCreditAvailability(
   userId: string,
   excludeOrderId?: string,
 ): Promise<TieredCreditAvailability | null> {
-  // Get company credit info (reusing existing function)
-  const company = await prisma.companyAccount.findUnique({
+  // Get company credit info (can be either internal ID or Shopify GID)
+  let company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
-    select: { creditLimit: true },
+    select: { id: true, creditLimit: true },
   });
+
+  if (!company) {
+    company = await prisma.companyAccount.findFirst({
+      where: { shopifyCompanyId: companyId },
+      select: { id: true, creditLimit: true },
+    });
+  }
 
   if (!company) {
     return null;
   }
 
+  const internalCompanyId = company.id;
+
   // Calculate company credit usage
   const ordersWithBalance = await prisma.b2BOrder.aggregate({
     where: {
-      companyId,
+      companyId: internalCompanyId,
       paymentStatus: { in: ["pending", "partial"] },
       orderStatus: { notIn: ["cancelled"] },
       NOT: excludeOrderId ? { id: excludeOrderId } : undefined,
-      // If we have shopifyOrderId, we might need to check that too
       shopifyOrderId: excludeOrderId ? { not: excludeOrderId } : undefined,
     },
     _sum: {
@@ -102,7 +110,7 @@ export async function calculateTieredCreditAvailability(
   // We'll keep pending credit calculation for information, but NOT subtract it twice
   const pendingOrders = await prisma.b2BOrder.aggregate({
     where: {
-      companyId,
+      companyId: internalCompanyId,
       paymentStatus: { in: ["pending", "partial"] },
       orderStatus: { in: ["draft", "submitted", "processing"] },
       NOT: excludeOrderId ? { id: excludeOrderId } : undefined,
@@ -221,13 +229,33 @@ export async function deductTieredCredit(
     throw new Error("Company or user not found");
   }
 
+  // Use the resolved internal company ID for transactions and orders
+  // We need to fetch the company record again or get it from calculateTieredCreditAvailability
+  // Let's fetch it to be sure we have the internal ID
+  let company = await prisma.companyAccount.findUnique({
+    where: { id: companyId },
+    select: { id: true },
+  });
+
+  if (!company) {
+    company = await prisma.companyAccount.findFirst({
+      where: { shopifyCompanyId: companyId },
+      select: { id: true },
+    });
+  }
+
+  if (!company) {
+    throw new Error("Company not found for credit deduction");
+  }
+
+  const internalCompanyId = company.id;
   const previousBalance = creditInfo.company.availableCredit;
   const newBalance = previousBalance.minus(amountDecimal);
 
   // Create company credit transaction
   const orderTransactions = await prisma.creditTransaction.findFirst({
     where: {
-      companyId,
+      companyId: internalCompanyId,
       orderId,
     },
   });
@@ -236,7 +264,7 @@ export async function deductTieredCredit(
     await prisma.creditTransaction.update({
       where: { id: orderTransactions.id },
       data: {
-        companyId,
+        companyId: internalCompanyId,
         userId,
         orderId,
         transactionType: "order_updated",
@@ -251,7 +279,7 @@ export async function deductTieredCredit(
   } else {
     const orderTransaction = await prisma.creditTransaction.create({
       data: {
-        companyId,
+        companyId: internalCompanyId,
         userId,
         orderId,
         transactionType,
@@ -279,8 +307,9 @@ export async function deductTieredCredit(
   }
 
   // Update order with credit tracking
-  const order = await prisma.b2BOrder.findFirst({
-    where: { shopifyOrderId: orderId },
+  // Fixed: Use findUnique by internal id instead of findFirst by shopifyOrderId
+  const order = await prisma.b2BOrder.findUnique({
+    where: { id: orderId },
   });
   if (order) {
     await prisma.b2BOrder.update({
@@ -297,7 +326,7 @@ export async function deductTieredCredit(
 
   // **Auto-sync metafields for checkout extension**
   // Run in background to avoid blocking the main transaction
-  autoSyncCreditMetafields(companyId, userId).catch((syncError) => {
+  autoSyncCreditMetafields(internalCompanyId, userId).catch((syncError) => {
     console.warn(
       "Failed to sync credit metafields after deduction (background):",
       syncError,
