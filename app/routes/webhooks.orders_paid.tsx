@@ -68,6 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!store) return new Response();
 
     const orderIdNum = (payload as any).id as number | undefined;
+    const orderNumber = (payload as any).order_number || (payload as any).number;
     const totalPriceStr = ((payload as any).total_price ?? (payload as any).current_total_price ?? "0") as string;
     const customerId = (payload as any).customer?.id;
 
@@ -86,6 +87,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log(`💳 PAYMENT RECEIVED - Starting post-payment credit validation:`, {
       b2bOrderId: order.id,
       shopifyOrderId: orderGid,
+      orderNumber,
       totalAmount,
       companyId: order.companyId,
     });
@@ -106,6 +108,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.log(`✅ POST-PAYMENT VALIDATION PASSED - Order confirmed:`, {
         orderId: order.id,
         shopifyOrderId: orderGid,
+        orderNumber,
       });
 
       // Update order status to reflect successful validation and payment
@@ -125,7 +128,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const exist = await prisma.creditTransaction.findFirst({
           where: {
             companyId: order.companyId!,
-            orderId: order.id,
+            orderId: orderGid,
             transactionType: "order_paid"
           }
         });
@@ -134,18 +137,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           await prisma.creditTransaction.create({
             data: {
               companyId: order.companyId!,
-              orderId: order.id,
+              orderId: orderGid,
               transactionType: "order_paid",
               creditAmount: restoreAmount,
               previousBalance,
               newBalance,
-              notes: `Credit restored for paid order #${order.id}`,
+              notes: `Credit restored for paid order #${orderNumber}`,
               createdBy,
             },
           });
           console.log(`✅ Created order_paid credit transaction: +${restoreAmount} | ${previousBalance} → ${newBalance}`);
         } else {
-          console.log(`ℹ️ order_paid transaction already exists for order ${order.id}, skipping duplicate creation.`);
+          console.log(`ℹ️ order_paid transaction already exists for order ${orderGid}, skipping duplicate creation.`);
         }
       }
       

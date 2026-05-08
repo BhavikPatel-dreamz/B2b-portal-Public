@@ -221,17 +221,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               await prisma.creditTransaction.create({
                 data: {
                   companyId: user.companyId,
-                  orderId: existingOrder.id,
+                  orderId: orderGid,
                   creditAmount: creditChange,
                   transactionType: "order_paid",
                   previousBalance: companyCredit ? companyCredit.availableCredit.minus(creditChange) : new Prisma.Decimal(0),
                   newBalance: companyRemainingBalance,
-                  notes: `Credit restored for paid order ${existingOrder.id}`,
+                  notes: `Credit restored for paid order #${orderNumber}`,
                   createdBy: user.id,
                   createdAt: new Date(),
                 },
               });
-              console.log(`✅ Created order_paid transaction for ${existingOrder.id}: +${creditChange}`);
+              console.log(`✅ Created order_paid transaction for #${orderNumber}: +${creditChange}`);
             }
           }
 
@@ -325,7 +325,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const exist = await prisma.creditTransaction.findFirst({
               where: {
                 companyId: user.companyId,
-                orderId: existingOrder.id,
+                orderId: orderGid,
                 transactionType: paymentStatus === "paid" ? "order_paid" : "order_updated"
               }
             })
@@ -333,12 +333,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               await prisma.creditTransaction.create({
                 data: {
                   companyId: user.companyId,
-                  orderId: existingOrder.id,
+                  orderId: orderGid,
                   creditAmount: creditChange, // Positive if credit restored, Negative if more used
                   transactionType: paymentStatus === "paid" ? "order_paid" : "order_updated",
                   previousBalance: companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0),
                   newBalance: companyRemainingBalance,
-                  notes: `Credit ${creditChange.greaterThan(0) ? 'restored' : 'deducted'} for order update (${paymentStatus})`,
+                  notes: `Credit ${creditChange.greaterThan(0) ? 'restored' : 'deducted'} for order update (${paymentStatus}) - #${orderNumber}`,
                   createdBy: user.id,
                   createdAt: new Date(),
                 },
@@ -402,7 +402,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const exist = await prisma.creditTransaction.findFirst({
           where: {
             companyId: user.companyId,
-            orderId: existingOrder.id,
+            orderId: orderGid,
             transactionType: "order_updated"
           }
         })
@@ -410,12 +410,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           await prisma.creditTransaction.create({
             data: {
               companyId: user.companyId,
-              orderId: existingOrder.id,
+              orderId: orderGid,
               creditAmount: creditChange,
               transactionType: "order_updated",
               previousBalance: companyCredit ? companyCredit.availableCredit : new Prisma.Decimal(0),
               newBalance: companyRemainingBalance,
-              notes: `Credit ${creditChange.greaterThan(0) ? 'restored' : 'deducted'} for fulfillment update`,
+              notes: `Credit ${creditChange.greaterThan(0) ? 'restored' : 'deducted'} for fulfillment update - #${orderNumber}`,
               createdBy: user.id,
               createdAt: new Date(),
             },

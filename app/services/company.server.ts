@@ -283,34 +283,64 @@ export async function getCreditTransactionsByCompany(
     skip: options?.skip,
   });
 
-  // ── Batch fetch users ────────────────────────────────────────
+  // ── Batch fetch users & orders ─────────────────────────────
   const createdByIds = [
     ...new Set(creditTransactions.map((tx) => tx.createdBy).filter(Boolean)),
   ];
+  const orderIds = [
+    ...new Set(creditTransactions.map((tx) => tx.orderId).filter(Boolean)),
+  ] as string[];
 
-  const users = createdByIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: createdByIds as string[] } },
-        select: { id: true, firstName: true, lastName: true, email: true },
-      })
-    : [];
+  const [users, orders] = await Promise.all([
+    createdByIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: createdByIds as string[] } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : Promise.resolve([]),
+    orderIds.length
+      ? prisma.b2BOrder.findMany({
+          where: {
+            OR: [
+              { id: { in: orderIds } },
+              { shopifyOrderId: { in: orderIds } },
+            ],
+          },
+          select: { id: true, shopifyOrderId: true },
+        })
+      : Promise.resolve([]),
+  ]);
 
   // ── Map userId → display name ────────────────────────────────
   const userMap = new Map(
     users.map((u) => [
       u.id,
-      // firstName + lastName if available, else fallback to email
       u.firstName || u.lastName
         ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim()
         : u.email,
     ]),
   );
 
-  // ── Attach createdByName to each transaction ─────────────────
-  return creditTransactions.map((tx) => ({
-    ...tx,
-    createdByName: tx.createdBy ? (userMap.get(tx.createdBy) ?? null) : null,
-  }));
+  // ── Map orderId/shopifyOrderId → shopifyOrderId ──────────────
+  const orderMap = new Map();
+  orders.forEach((o) => {
+    if (o.shopifyOrderId) {
+      orderMap.set(o.id, o.shopifyOrderId);
+      orderMap.set(o.shopifyOrderId, o.shopifyOrderId);
+    }
+  });
+
+  // ── Attach metadata to each transaction ─────────────────────
+  return creditTransactions.map((tx) => {
+    const shopifyOrderId = tx.orderId ? orderMap.get(tx.orderId) : null;
+    const finalOrderId = shopifyOrderId || tx.orderId;
+    return {
+      ...tx,
+      orderId: finalOrderId, // Update orderId to be the Shopify ID if we found one
+      createdByName: tx.createdBy ? (userMap.get(tx.createdBy) ?? null) : null,
+      shopifyOrderId: finalOrderId,
+    };
+  });
 }
 
 /**
