@@ -212,6 +212,20 @@ function sanitizePhoneInput(value: string) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function stripPhoneDialCode(value: string, dialCode?: string | null) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue || !dialCode) return rawValue;
+
+  const dialDigits = String(dialCode).replace(/\D/g, "");
+  const phoneDigits = rawValue.replace(/\D/g, "");
+
+  if (!dialDigits || !phoneDigits.startsWith(dialDigits)) {
+    return phoneDigits || rawValue;
+  }
+
+  return phoneDigits.slice(dialDigits.length);
+}
+
 function isCountrySelectField(field: FormField) {
   return field.type === "select" && /country/i.test(field.key);
 }
@@ -339,6 +353,8 @@ function DynamicField({
       );
 
     case "phone":
+      const displayValue = stripPhoneDialCode(value || "", field.countryCode);
+
       return (
         <div>
           {showFieldLabel ? (
@@ -398,7 +414,7 @@ function DynamicField({
             )}
             <input
               placeholder={placeholder}
-              value={value || ""}
+              value={displayValue || ""}
               type="tel"
               inputMode="numeric"
               pattern="[0-9]*"

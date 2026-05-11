@@ -110,7 +110,7 @@ export async function updateStore(id: string, data: UpdateStoreInput) {
   });
 }
 
-function getStorePlanValue(subscriptionName?: string | null) {
+export function getStorePlanValue(subscriptionName?: string | null) {
   if (subscriptionName === FREE_PLAN) {
     return "free";
   }

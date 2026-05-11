@@ -1,5 +1,6 @@
 import prisma from "app/db.server";
-import axios, { isAxiosError } from "axios";
+import nodemailer from "nodemailer";
+import { resolveStoreSmtpConfig, type ResolvedSmtpConfig } from "./smtp.server";
 
 interface EmailParams {
   to: string;
@@ -13,49 +14,47 @@ type RegistrationEmailResult =
   | { success: true; skipped: true }
   | { success: false; error: string };
 
-async function sendEmail({ to, subject, html, text }: EmailParams) {
+async function sendEmail(
+  { to, subject, html, text }: EmailParams,
+  smtpConfig?: ResolvedSmtpConfig | null,
+) {
   try {
-    // Check if environment variables are configured
-    if (!process.env.BREVO_API_KEY || !process.env.BREVO_FROM_EMAIL) {
+    const resolvedConfig = smtpConfig || resolveStoreSmtpConfig(null);
+
+    if (!resolvedConfig) {
       console.warn(
-        "⚠️ Email service not configured - missing BREVO_API_KEY or BREVO_FROM_EMAIL",
+        "⚠️ Email service not configured - missing SMTP settings",
       );
       return { success: false, error: "Email service not configured" };
     }
 
-    const response = await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      {
-        sender: {
-          email: process.env.BREVO_FROM_EMAIL,
-          name: "B2B Portal",
-        },
-        to: [{ email: to }],
-        subject: subject,
-        htmlContent: html,
-        textContent: text,
+    const transporter = nodemailer.createTransport({
+      host: resolvedConfig.host,
+      port: resolvedConfig.port,
+      secure: resolvedConfig.secure,
+      auth: {
+        user: resolvedConfig.user,
+        pass: resolvedConfig.pass,
       },
-      {
-        headers: {
-          accept: "application/json",
-          "api-key": process.env.BREVO_API_KEY,
-          "content-type": "application/json",
-        },
-      },
-    );
+    });
 
-    console.log("✅ Email sent successfully:", response.data);
-    return { success: true, messageId: response.data.messageId };
+    const response = await transporter.sendMail({
+      from: `"${resolvedConfig.fromName}" <${resolvedConfig.fromEmail}>`,
+      to,
+      subject,
+      html,
+      text,
+    });
+    
+
+    console.log("✅ Email sent successfully:", response.messageId);
+    return { success: true, messageId: response.messageId };
   } catch (error) {
-    if (isAxiosError(error)) {
-      console.error("❌ Brevo API Error:", error.response?.data);
-      return {
-        success: false,
-        error: error.response?.data?.message || "Failed to send email",
-      };
-    }
     console.error("❌ Email send error:", error);
-    return { success: false, error: "Failed to send email" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to send email",
+    };
   }
 }
 
@@ -120,6 +119,7 @@ export async function sendRegistrationEmailForAdmin(
 ): Promise<RegistrationEmailResult> {
   const { storeData, emailTemplateConfig } =
     await getRegistrationEmailContext(storeId);
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
 
   if (emailTemplateConfig && emailTemplateConfig.adminRequest === false) {
     return { success: true, skipped: true };
@@ -139,16 +139,18 @@ export async function sendRegistrationEmailForAdmin(
     "Hello {{storeOwnerName}},<br /><br />A new company has submitted a B2B registration request on {{shopName}}.";
   const rawSubject =
     emailTemplateConfig?.adminRequestSubject || fallbackSubject;
-   const rawTemplate =
-      emailTemplateConfig?.adminRequestTemplate || fallbackTemplate;
+  const rawTemplate =
+    emailTemplateConfig?.adminRequestTemplate || fallbackTemplate;
 
   if (!rawTemplate) {
     throw new Error("Registration email template not found");
   }
 
-
-const decodedTemplate = decodeHtmlEntities(rawTemplate); // ✅ add this
-const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVariables);
+  const decodedTemplate = decodeHtmlEntities(rawTemplate);
+  const processedTemplate = replaceTemplateVariables(
+    decodedTemplate,
+    templateVariables,
+  );
 
   const processedSubject = replaceTemplateVariables(
     rawSubject,
@@ -177,7 +179,7 @@ const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVari
     subject: processedSubject,
     html,
     text,
-  });
+  }, smtpConfig);
 }
 
 export async function sendRegistrationEmailForCustomer(
@@ -190,6 +192,7 @@ export async function sendRegistrationEmailForCustomer(
 ): Promise<RegistrationEmailResult> {
   const { storeData, emailTemplateConfig } =
     await getRegistrationEmailContext(storeId);
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
 
   if (
     emailTemplateConfig &&
@@ -251,7 +254,7 @@ export async function sendRegistrationEmailForCustomer(
     subject: processedSubject,
     html,
     text,
-  });
+  }, smtpConfig);
 }
 
 export async function sendRegistrationEmail(
@@ -306,9 +309,11 @@ function convertToHtmlEmail(
   const footerText =
     options?.footerText ||
     "This email was sent to notify you about a B2B registration request.";
+  
   const logoMarkup = options?.logoUrl
-    ? `<div style="margin-bottom: 16px;"><img src="${options.logoUrl}" alt="Store logo" style="display: block; max-width: 180px; max-height: 72px; width: auto; height: auto; margin: 0 auto;" /></div>`
+    ? `<img src="${options.logoUrl}" alt="Store logo" style="display: block; max-height: 60px; margin-bottom: 12px;" />`
     : "";
+
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -316,96 +321,50 @@ function convertToHtmlEmail(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${emailTitle}</title>
-  <style>
-    body { 
-      font-family: Arial, sans-serif; 
-      background-color: #f4f6f8; 
-      color: #333; 
-      margin: 0;
-      padding: 0;
-    }
-    .container { 
-      max-width: 600px; 
-      margin: 0 auto; 
-      padding: 20px; 
-    }
-    .header { 
-      background-color: #0d6efd; 
-      padding: 20px; 
-      text-align: center; 
-      color: #fff; 
-      border-radius: 8px 8px 0 0; 
-    }
-    .content { 
-      background-color: #ffffff; 
-      padding: 30px; 
-      border: 1px solid #dee2e6; 
-      line-height: 1.6;
-    }
-    .footer { 
-      background-color: #f8f9fa; 
-      padding: 15px; 
-      text-align: center; 
-      font-size: 12px; 
-      color: #6c757d; 
-      border-radius: 0 0 8px 8px; 
-    }
-    .btn { 
-      display: inline-block; 
-      padding: 12px 24px; 
-      background-color: #0d6efd; 
-      color: #fff !important; 
-      text-decoration: none; 
-      border-radius: 4px; 
-      margin: 20px 0; 
-    }
-    .btn:hover { 
-      background-color: #0b5ed7; 
-    }
-  </style>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      ${logoMarkup}
-      <h1>${emailTitle}</h1>
-    </div>
+<body style="margin: 0; padding: 24px; background-color: #f3f4f6; font-family: Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 24px 0;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 720px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb;">
+          
+          <!-- HEADER -->
+          <tr>
+            <td style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
+              ${logoMarkup}
+              <h2 style="margin: 0; font-size: 20px; color: #111827;">${emailTitle}</h2>
+            </td>
+          </tr>
 
-    <div class="content">
-      ${formatContentAsHtml(content)}
-      
-      <p style="text-align: center;">
-        <a href="${ctaUrl}" class="btn">
-          ${ctaLabel}
-        </a>
-      </p>
-    </div>
+          <!-- CONTENT -->
+          <tr>
+            <td style="padding: 24px; font-size: 15px; line-height: 1.6; color: #303030; word-break: break-word;">
+              ${content}
+              
+              <div style="text-align: center; margin-top: 24px;">
+                <a href="${ctaUrl}" style="display: inline-block; padding: 12px 20px; background-color: #0a61c7; color: #ffffff !important; text-decoration: none; border-radius: 6px; font-weight: 600;">
+                  ${ctaLabel}
+                </a>
+              </div>
+            </td>
+          </tr>
 
-    <div class="footer">
-      <p>${footerText}</p>
-    </div>
-  </div>
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding: 16px 24px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; background-color: #f8f9fa;">
+              <p style="margin: 0;">${footerText}</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
 `;
 
   return html;
-}
-
-function formatContentAsHtml(content: string): string {
-  return content
-    .split("\n")
-    .map((line) => {
-      line = line.trim();
-      if (!line) return "<br />";
-
-      if (line.startsWith("•")) {
-        return `<p style="margin: 5px 0; padding-left: 20px;">${line}</p>`;
-      }
-
-      return `<p style="margin: 10px 0;">${line}</p>`;
-    })
-    .join("");
 }
 
 function stripHtmlTags(content: string): string {
@@ -432,6 +391,7 @@ export async function sendCustomerRegistrationApprovalEmail({
 }) {
   const { storeData, emailTemplateConfig } =
     await getRegistrationEmailContext(storeId);
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
 
   if (
     emailTemplateConfig &&
@@ -455,10 +415,14 @@ export async function sendCustomerRegistrationApprovalEmail({
     "Hello {{contactName}},<br /><br />Your company account for {{companyName}} has been approved. You can now begin placing orders on {{shopName}}.";
   const rawSubject =
     emailTemplateConfig?.customerRegistrationApprovedSubject || fallbackSubject;
-const rawTemplate =
-  emailTemplateConfig?.customerRegistrationApprovedTemplate || fallbackTemplate;
-const decodedTemplate = decodeHtmlEntities(rawTemplate); // ✅ add this
-const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVariables);
+  const rawTemplate =
+    emailTemplateConfig?.customerRegistrationApprovedTemplate ||
+    fallbackTemplate;
+  const decodedTemplate = decodeHtmlEntities(rawTemplate);
+  const processedTemplate = replaceTemplateVariables(
+    decodedTemplate,
+    templateVariables,
+  );
   const processedSubject = replaceTemplateVariables(
     rawSubject,
     templateVariables,
@@ -486,7 +450,7 @@ const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVari
     subject: processedSubject,
     html,
     text,
-  });
+  }, smtpConfig);
 }
 
 export async function sendEmployeeAssignmentEmail({
@@ -546,74 +510,69 @@ function generateEmployeeAssignmentTemplate(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Employee Assigned</title>
-  <style>
-    body { font-family: Arial, sans-serif; background-color: #f4f6f8; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background-color: #0d6efd; padding: 20px; text-align: center; color: #fff; border-radius: 8px 8px 0 0; }
-    .content { background-color: #ffffff; padding: 30px; border: 1px solid #dee2e6; }
-    .footer { background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d; border-radius: 0 0 8px 8px; }
-    
-    /* ✅ FIXED BUTTON */
-    .btn { 
-      display: inline-block; 
-      padding: 12px 24px; 
-      background-color: #0d6efd; 
-      color: #ffffff !important; 
-      text-decoration: none; 
-      border-radius: 4px; 
-      margin: 20px 0; 
-    }
-
-    .btn:hover { background-color: #0b5ed7; }
-
-    .highlight { background-color: #e7f1ff; padding: 15px; border-radius: 4px; margin: 20px 0; }
-  </style>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>Employee Assigned</h1>
-    </div>
+<body style="margin: 0; padding: 24px; background-color: #f3f4f6; font-family: Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 24px 0;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 720px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb;">
+          
+          <!-- HEADER -->
+          <tr>
+            <td style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
+              <h2 style="margin: 0; font-size: 20px; color: #111827;">Employee Assigned</h2>
+            </td>
+          </tr>
 
-    <div class="content">
-      <p>Hello <strong>${contactName || "User"}</strong>,</p>
+          <!-- CONTENT -->
+          <tr>
+            <td style="padding: 24px; font-size: 15px; line-height: 1.6; color: #303030; word-break: break-word;">
+              <p>Hello <strong>${contactName || "User"}</strong>,</p>
 
-      <p>
-        We are pleased to inform you that you have been successfully assigned
-        as an <strong>${role}</strong> for the company <strong>${companyName}</strong> by
-        <strong>${adminName}</strong>.
-      </p>
+              <p>
+                We are pleased to inform you that you have been successfully assigned
+                as an <strong>${role}</strong> for the company <strong>${companyName}</strong> by
+                <strong>${adminName}</strong>.
+              </p>
 
-      <div class="highlight">
-        <p><strong>Company Name:</strong> ${companyName}</p>
-        <p><strong>Your Role:</strong> ${role}</p>
-      </div>
+              <div style="background-color: #e7f1ff; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                <p style="margin: 5px 0;"><strong>Company Name:</strong> ${companyName}</p>
+                <p style="margin: 5px 0;"><strong>Your Role:</strong> ${role}</p>
+              </div>
 
-      <p>
-        You can now log in to the platform and access your dashboard.
-      </p>
+              <p>
+                You can now log in to the platform and access your dashboard.
+              </p>
 
-      <p style="text-align: center;">
-        <a href="${dashboardUrl}" class="btn">
-          View Dashboard
-        </a>
-      </p>
+              <div style="text-align: center; margin-top: 24px;">
+                <a href="${dashboardUrl}" style="display: inline-block; padding: 12px 20px; background-color: #0a61c7; color: #ffffff !important; text-decoration: none; border-radius: 6px; font-weight: 600;">
+                  View Dashboard
+                </a>
+              </div>
 
-      <p>
-        If you have any questions or face any issues, please feel free to
-        contact our support team.
-      </p>
+              <p>
+                If you have any questions or face any issues, please feel free to
+                contact our support team.
+              </p>
 
-      <p>
-        Best regards,<br />
-        <strong>${shopName}</strong>
-      </p>
-    </div>
+              <p>
+                Best regards,<br />
+                <strong>${shopName}</strong>
+              </p>
+            </td>
+          </tr>
 
-    <div class="footer">
-      © ${new Date().getFullYear()} ${shopName}. All rights reserved.
-    </div>
-  </div>
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding: 16px 24px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; background-color: #f8f9fa;">
+              © ${new Date().getFullYear()} ${shopName}. All rights reserved.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
 `;
@@ -679,9 +638,13 @@ export async function sendCustomerRegistrationRejectdEmail({
   const rawSubject =
     emailTemplateConfig?.customerRegistrationRejectedSubject || fallbackSubject;
   const rawTemplate =
-  emailTemplateConfig?.customerRegistrationRejectedTemplate || fallbackTemplate;
-const decodedTemplate = decodeHtmlEntities(rawTemplate); // ✅ add this
-const processedTemplate = replaceTemplateVariables(decodedTemplate, templateVariables);
+    emailTemplateConfig?.customerRegistrationRejectedTemplate ||
+    fallbackTemplate;
+  const decodedTemplate = decodeHtmlEntities(rawTemplate);
+  const processedTemplate = replaceTemplateVariables(
+    decodedTemplate,
+    templateVariables,
+  );
   const processedSubject = replaceTemplateVariables(
     rawSubject,
     templateVariables,

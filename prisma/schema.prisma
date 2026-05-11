@@ -47,6 +47,13 @@ model Store {
   companyWelcomeEmailEnabled     Boolean                  @default(true)
   companyWelcomeEmailTemplate    String?
   storeOwnerName                 String?
+  smtpHost                       String?
+  smtpPort                       Int?
+  smtpSecure                     Boolean                  @default(false)
+  smtpUser                       String?
+  smtpPassEncrypted              String?
+  smtpFromEmail                  String?
+  smtpFromName                   String?
   privacyPolicyContent           String?
   privacyPolicylink              String?
   deletedAt                      DateTime?
@@ -137,6 +144,8 @@ model RegistrationSubmission {
   @@index([shopId])
   @@index([email])
   @@index([status])
+  @@index([shopId, createdAt])
+  @@index([createdAt])
 }
 
 model CompanyAccount {
@@ -263,6 +272,8 @@ model B2BOrder {
   @@index([shopId])
   @@index([paymentStatus])
   @@index([createdByUserId])
+  @@index([shopId, createdAt])
+  @@index([createdAt])
 }
 
 model CreditTransaction {

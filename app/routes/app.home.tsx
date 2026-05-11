@@ -71,14 +71,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       currentMonthB2BOrdersCount,
       currentMonthRevenueSum,
     ] = await Promise.all([
-      prisma.b2BOrder.groupBy({
-        by: ["shopifyOrderId"],
+      prisma.b2BOrder.count({
         where: {
           orderStatus: { not: "cancelled" },
           shopId: store.id,
-          shopifyOrderId: { startsWith: "gid://shopify/Order/" },
+          shopifyOrderId: { not: null },
         },
-        _count: { shopifyOrderId: true },
       }),
       countCompanies(store.id),
       countRegistrations(store.id, "PENDING"),
@@ -123,7 +121,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       approvedRegistrations,
       rejectedRegistrations,
       totalUsers,
-      totalOrders: totalOrders.length,
+      totalOrders: totalOrders,
       totalCreditAllowed,
       totalCreditUsed,
       availableCredit: totalCreditAllowed - totalCreditUsed,

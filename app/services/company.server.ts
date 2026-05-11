@@ -441,46 +441,37 @@ export async function getCompanyDashboardData(
   });
 
   // Get order statistics
-  const [totalOrdersData, paidOrdersData, unpaidOrdersData, pendingOrdersData] =
+  const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
     await Promise.all([
-      await prisma.b2BOrder.groupBy({
-        by: ["shopifyOrderId"],
+      prisma.b2BOrder.count({
         where: {
           companyId,
           orderStatus: { notIn: ["cancelled"] },
-          shopifyOrderId: { startsWith: "gid://shopify/Order/" },
+          shopifyOrderId: { not: null },
         },
       }),
-      await prisma.b2BOrder.groupBy({
-        by: ["shopifyOrderId"],
+      prisma.b2BOrder.count({
         where: {
           companyId,
           paymentStatus: "paid",
           orderStatus: { not: "cancelled" },
         },
       }),
-      await prisma.b2BOrder.groupBy({
-        by: ["shopifyOrderId"],
+      prisma.b2BOrder.count({
         where: {
           companyId,
           paymentStatus: { in: ["pending", "partial"] },
           orderStatus: { notIn: ["cancelled"] },
-          shopifyOrderId: { startsWith: "gid://shopify/Order/" },
+          shopifyOrderId: { not: null },
         },
       }),
-      await prisma.b2BOrder.groupBy({
-        by: ["shopifyOrderId"],
+      prisma.b2BOrder.count({
         where: {
           companyId,
           paymentStatus: { in: ["draft", "submitted", "processing"] },
         },
       }),
     ]);
-
-  const totalOrders = totalOrdersData.length;
-  const paidOrders = paidOrdersData.length;
-  const unpaidOrders = unpaidOrdersData.length;
-  const pendingOrders = pendingOrdersData.length;
 
   // Get users from database
   const dbUsers = await prisma.user.findMany({

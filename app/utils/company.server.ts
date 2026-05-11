@@ -98,8 +98,49 @@ type ShopifyCompanyNode = {
     }>;
   };
   locations?: {
-    nodes: Array<{ id: string; name: string }>;
+    nodes: Array<{
+      id: string;
+      name: string;
+      shippingAddress?: ShopifyCompanyAddress | null;
+      billingAddress?: ShopifyCompanyAddress | null;
+    }>;
   };
+};
+
+type ShopifyCompanyAddress = {
+  address1?: string | null;
+  address2?: string | null;
+  city?: string | null;
+  province?: string | null;
+  zip?: string | null;
+  country?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+};
+
+const mapShopifyAddressToRegistrationJson = (
+  address?: ShopifyCompanyAddress | null,
+): Prisma.JsonObject => {
+  if (!address) return EMPTY_ADDRESS_JSON;
+
+  const mapped = {
+    Addr1: address.address1 || "",
+    Addr2: address.address2 || "",
+    City: address.city || "",
+    State: address.province || "",
+    Zip: address.zip || "",
+    Country: address.country || "",
+    FirstName: address.firstName || "",
+    LastName: address.lastName || "",
+    Phone: address.phone || "",
+  } satisfies Prisma.JsonObject;
+
+  const hasAnyValue = Object.values(mapped).some(
+    (value) => typeof value === "string" && value.trim() !== "",
+  );
+
+  return hasAnyValue ? mapped : EMPTY_ADDRESS_JSON;
 };
 
 // export const syncShopifyCompanies = async (
@@ -499,6 +540,28 @@ export const syncShopifyCompanies = async (
                 nodes {
                   id
                   name
+                  shippingAddress {
+                    address1
+                    address2
+                    city
+                    province
+                    zip
+                    country
+                    firstName
+                    lastName
+                    phone
+                  }
+                  billingAddress {
+                    address1
+                    address2
+                    city
+                    province
+                    zip
+                    country
+                    firstName
+                    lastName
+                    phone
+                  }
                 }
               }
             }
@@ -532,11 +595,15 @@ export const syncShopifyCompanies = async (
     for (const company of allCompanies) {
       try {
         const companyName = company.name;
+        const primaryLocation = company.locations?.nodes?.[0];
+        const shippingAddressJson = mapShopifyAddressToRegistrationJson(
+          primaryLocation?.shippingAddress,
+        );
+        const billingAddressJson = mapShopifyAddressToRegistrationJson(
+          primaryLocation?.billingAddress,
+        );
 
-        // Resolve effective contact:
-        // 1. Use mainContact if it has an email
-        // 2. Fall back to first contact with a valid email
-        // 3. null if no contacts have email
+     
         const effectiveContact = (() => {
           if (company.mainContact?.customer?.email) {
             return company.mainContact.customer;
@@ -553,38 +620,65 @@ export const syncShopifyCompanies = async (
           return null;
         })();
 
-        // Always upsert the company regardless of whether we have a contact
-        const upsertedCompany = await prisma.companyAccount.upsert({
+        const existingSyncedCompany = await prisma.companyAccount.findUnique({
           where: {
             shopId_shopifyCompanyId: {
               shopId: store.id,
               shopifyCompanyId: company.id,
             },
           },
-          update: {
-            name: companyName,
-            ...(effectiveContact && {
-              // ✅ Only overwrite contactName if Shopify provides a firstName
-              ...(effectiveContact.firstName && {
-                contactName:
-                  `${effectiveContact.firstName} ${effectiveContact.lastName || ""}`.trim(),
-              }),
-              contactEmail: effectiveContact.email || null,
-            }),
-          },
-          create: {
-            shopId: store.id,
-            shopifyCompanyId: company.id,
-            name: companyName,
-            contactName: effectiveContact?.firstName
-              ? `${effectiveContact.firstName} ${effectiveContact.lastName || ""}`.trim()
-              : null,
-            contactEmail: effectiveContact?.email || null,
-            creditLimit: new Prisma.Decimal(
-              defaultCompanyCreditLimit.toString(),
-            ),
-          },
         });
+
+        const existingLocalCompanyByName = existingSyncedCompany
+          ? null
+          : await prisma.companyAccount.findFirst({
+              where: {
+                shopId: store.id,
+                name: companyName,
+              },
+              orderBy: {
+                updatedAt: "desc",
+              },
+            });
+
+        const companyUpdateData = {
+          name: companyName,
+          shopifyCompanyId: company.id,
+          ...(effectiveContact && {
+            ...(effectiveContact.firstName && {
+              contactName:
+                `${effectiveContact.firstName} ${effectiveContact.lastName || ""}`.trim(),
+            }),
+            contactEmail: effectiveContact.email || null,
+          }),
+        };
+
+        // Reuse an existing local company row when possible so custom
+        // payment terms and credit limits survive a sync.
+        const upsertedCompany = existingSyncedCompany
+          ? await prisma.companyAccount.update({
+              where: { id: existingSyncedCompany.id },
+              data: companyUpdateData,
+            })
+          : existingLocalCompanyByName
+            ? await prisma.companyAccount.update({
+                where: { id: existingLocalCompanyByName.id },
+                data: companyUpdateData,
+              })
+            : await prisma.companyAccount.create({
+                data: {
+                  shopId: store.id,
+                  shopifyCompanyId: company.id,
+                  name: companyName,
+                  contactName: effectiveContact?.firstName
+                    ? `${effectiveContact.firstName} ${effectiveContact.lastName || ""}`.trim()
+                    : null,
+                  contactEmail: effectiveContact?.email || null,
+                  creditLimit: new Prisma.Decimal(
+                    defaultCompanyCreditLimit.toString(),
+                  ),
+                },
+              });
 
         // User + registration sync only if we have an email
         if (effectiveContact?.email) {
@@ -688,6 +782,8 @@ export const syncShopifyCompanies = async (
                     lastName: effectiveContact.lastName,
                   }),
                   shopifyCustomerId,
+                  shipping: shippingAddressJson,
+                  billing: billingAddressJson,
                   shopId: store.id,
                 },
               });
@@ -703,8 +799,8 @@ export const syncShopifyCompanies = async (
                 status: UserStatus.APPROVED,
                 shopId: store.id,
                 contactTitle: "",
-                shipping: EMPTY_ADDRESS_JSON,
-                billing: EMPTY_ADDRESS_JSON,
+                shipping: shippingAddressJson,
+                billing: billingAddressJson,
                 workflowCompleted: true,
               },
             });

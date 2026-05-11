@@ -21,6 +21,15 @@ import {
   serializeConfig,
 } from "./utils/form-config.shared";
 
+type AdminGraphQLClient = {
+  graphql: (
+    query: string,
+    options?: {
+      variables?: Record<string, unknown>;
+    },
+  ) => Promise<Response>;
+};
+
 class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> {
   // Upsert store record whenever Shopify saves a session (install or token refresh)
   async storeSession(session: Session) {
@@ -235,6 +244,10 @@ const shopify = shopifyApp({
       deliveryMethod: DeliveryMethod.Http,
       callbackUrl: "/webhooks/orders/cancelled",
     },
+    ORDERS_UPDATED: {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: "/webhooks/orders/updated",
+    },
     ORDERS_EDITED: {
       deliveryMethod: DeliveryMethod.Http,
       callbackUrl: "/webhooks/orders/edited",
@@ -265,3 +278,46 @@ export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
 export const sessionStorage = shopify.sessionStorage;
+
+function createAdminGraphQLClient(
+  shop: string,
+  accessToken: string,
+): AdminGraphQLClient {
+  return {
+    graphql: async (
+      query: string,
+      options?: {
+        variables?: Record<string, unknown>;
+      },
+    ) => {
+      return fetch(`https://${shop}/admin/api/${ApiVersion.January26}/graphql.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query,
+          variables: options?.variables ?? {},
+        }),
+      });
+    },
+  };
+}
+
+export async function getAdminForShop(shop: string): Promise<AdminGraphQLClient> {
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: shop },
+    select: { accessToken: true },
+  });
+
+  if (!store) {
+    throw new Error(`Store not found for shop ${shop}`);
+  }
+
+  if (!store.accessToken) {
+    throw new Error(`Store access token not available for shop ${shop}`);
+  }
+
+  return createAdminGraphQLClient(shop, store.accessToken);
+}

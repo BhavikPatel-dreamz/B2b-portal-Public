@@ -312,17 +312,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
-    // Both DB lookups run in parallel — saves ~30ms every cache miss
-    const [companyData, storeAdmin] = await Promise.all([
-      prisma.companyAccount.findFirst({
-        where: { shopifyCompanyId: companyId },
-        select: { id: true },          // ← only fetch what you need
-      }),
-      prisma.user.findFirst({
-        where: { companyId: undefined, role: "STORE_ADMIN" }, // fixed below
-        select: { email: true, role: true },
-      }).then(() => null as any),      // placeholder — see note
-    ]);
+    // We need companyData first to get the internal ID for storeAdmin
+    const companyData = await prisma.companyAccount.findFirst({
+      where: { shopifyCompanyId: companyId },
+      select: { id: true },
+    });
 
     // NOTE: storeAdmin query needs companyData.id, so it can't truly be parallel.
     // But we CAN run companyData + Shopify call in parallel, then storeAdmin after:

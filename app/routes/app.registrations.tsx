@@ -892,26 +892,17 @@ const formatPhone = (
 ): string | undefined => {
   if (!phone) return undefined;
 
-  if (phone.startsWith("+")) {
-    const digits = phone.replace(/\D/g, "");
-    if (countryCode === "IN" && digits.length !== 12) {
-      console.warn(
-        `⚠️ Phone digit count invalid for IN: ${phone} (${digits.length} digits, need 12)`,
-      );
-      return undefined;
-    }
-    return phone;
-  }
+  if (phone.startsWith("+")) return phone.replace(/[^\d+]/g, "");
 
   const cleaned = phone.replace(/\D/g, "");
+  if (!cleaned) return undefined;
+
   if (countryCode === "IN") {
     if (cleaned.length === 10) return `+91${cleaned}`;
     if (cleaned.length === 11 && cleaned.startsWith("0"))
       return `+91${cleaned.slice(1)}`;
-    console.warn(
-      `⚠️ Cannot format IN phone: ${phone} (${cleaned.length} digits)`,
-    );
-    return undefined;
+    if (cleaned.length === 12 && cleaned.startsWith("91"))
+      return `+${cleaned}`;
   }
 
   return `+${cleaned}`;
@@ -3554,6 +3545,67 @@ function getPhoneMetaForCountry(countryValue?: string | null) {
   return COUNTRY_PHONE_META[normalized] || { dialCode: "+91", flagEmoji: "🇮🇳" };
 }
 
+function stripPhoneDialCode(
+  phoneValue?: string | null,
+  dialCode?: string | null,
+) {
+  const rawValue = String(phoneValue ?? "").trim();
+  if (!rawValue || !dialCode || !rawValue.startsWith("+")) return rawValue;
+
+  const dialDigits = String(dialCode).replace(/\D/g, "");
+  const phoneDigits = rawValue.replace(/\D/g, "");
+
+  if (!dialDigits || !phoneDigits.startsWith(dialDigits)) {
+    return rawValue;
+  }
+
+  return phoneDigits.slice(dialDigits.length);
+}
+
+function normalizePhoneWithDialCode(
+  phoneValue?: string | null,
+  dialCode?: string | null,
+) {
+  const rawValue = String(phoneValue ?? "").trim();
+  if (!rawValue) return "";
+
+  if (rawValue.startsWith("+")) {
+    return rawValue.replace(/[^\d+]/g, "");
+  }
+
+  const phoneDigits = rawValue.replace(/\D/g, "");
+  if (!phoneDigits) return "";
+
+  const dialDigits = String(dialCode ?? "").replace(/\D/g, "");
+  if (!dialDigits) {
+    return `+${phoneDigits}`;
+  }
+
+  if (
+    phoneDigits.startsWith(dialDigits) &&
+    phoneDigits.length > dialDigits.length
+  ) {
+    return `+${phoneDigits}`;
+  }
+
+  return `+${dialDigits}${phoneDigits}`;
+}
+
+function getCountryValueForField(
+  field: Pick<FormField, "section">,
+  formValues: Record<string, any>,
+) {
+  if (field.section === "billing") {
+    return formValues.biCountry ?? formValues.billCountry ?? "";
+  }
+
+  if (field.section === "shipping") {
+    return formValues.shCountry ?? formValues.shipCountry ?? "";
+  }
+
+  return formValues.shCountry ?? formValues.shipCountry ?? "";
+}
+
 function getProvinceOptionsForCountry(
   countryValue?: string | null,
   shippingProvincesByCountry?: Record<string, CountryOption[]>,
@@ -3902,6 +3954,10 @@ function DynamicField({
   const hasValue = value !== undefined && value !== null && value !== "";
   const showFieldLabel = field.type !== "checkbox";
   const isLocked = field.readOnly || field.type === "email";
+  const displayValue =
+    field.type === "phone"
+      ? stripPhoneDialCode(value, field.countryCode)
+      : value || "";
 
   // If the field has no value yet, show a subtle "add" placeholder style
   const addStyle: React.CSSProperties = hasValue
@@ -3950,7 +4006,7 @@ function DynamicField({
           ) : null}
           <input
             placeholder={`Add ${field.label}`}
-            value={value || ""}
+            value={displayValue}
             onChange={(e) => onChange(e.target.value)}
             style={{ ...inputStyle, paddingRight: 90, ...addStyle }}
           />
@@ -4535,6 +4591,16 @@ function ConfigureCompanyUI({
       editFields,
       customer?.email || submission.email || "",
     );
+    const normalizedEntries = Object.entries(editForm).map(([key, value]) => {
+      const field = editFields.find((candidate) => candidate.key === key);
+      if (field?.type !== "phone") {
+        return [key, String(value ?? "")];
+      }
+
+      const countryValue = getCountryValueForField(field, editForm);
+      const { dialCode } = getPhoneMetaForCountry(String(countryValue ?? ""));
+      return [key, normalizePhoneWithDialCode(String(value ?? ""), dialCode)];
+    });
 
     editFetcher.submit(
       {
@@ -4543,9 +4609,7 @@ function ConfigureCompanyUI({
         customerId: customer?.id || submission.shopifyCustomerId || "",
         companyId: company?.id || "",
         companyLocationId: company?.locationId || "",
-        ...Object.fromEntries(
-          Object.entries(editForm).map(([key, value]) => [key, String(value ?? "")]),
-        ),
+        ...Object.fromEntries(normalizedEntries),
         email: resolvedEmail,
       },
       { method: "post" },

@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { getAdminForShop } from "../shopify.server";
 import { calculateAvailableCredit } from "./tieredCreditService";
 
 /**
@@ -235,7 +235,7 @@ export async function syncAllCreditMetafields(
     }
 
     // Use provided admin context or authenticate
-    const shopifyAdmin = admin || (await authenticate.admin(shop)).admin;
+    const shopifyAdmin = admin || (await getAdminForShop(shop));
 
     // Get user to find company
     const user = await prisma.user.findUnique({
@@ -335,7 +335,7 @@ export async function autoSyncCreditMetafields(
     }
 
     // Authenticate once for all users
-    const { admin } = await authenticate.admin(company.shop.shopDomain);
+    const admin = await getAdminForShop(company.shop.shopDomain);
 
     // Sync metafields for each user in parallel
     const syncPromises = users.map(async (user) => {

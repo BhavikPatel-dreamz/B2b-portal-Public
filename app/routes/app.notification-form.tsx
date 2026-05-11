@@ -9,6 +9,7 @@ import { Link, useFetcher, useLoaderData, useSearchParams } from "react-router";
 
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { encryptSmtpSecret } from "app/utils/smtp.server";
 
 type TemplateItem = {
   id: TemplateId;
@@ -43,6 +44,16 @@ type LoaderData = {
   storeName: string;
   storeLogo: string;
   contactEmail: string;
+  smtpSettings: {
+    host: string;
+    port: string;
+    secure: boolean;
+    user: string;
+    fromEmail: string;
+    fromName: string;
+    hasPassword: boolean;
+    usesCustomConfig: boolean;
+  };
   templates: TemplateStoreValues;
 };
 
@@ -56,6 +67,7 @@ type ActionData = {
   enabled?: boolean;
   storeLogo?: string;
   contactEmail?: string;
+  smtpSettings?: LoaderData["smtpSettings"];
   scheduleEnabled?: boolean;
   scheduleStartTime?: string;
   scheduleEndTime?: string;
@@ -479,6 +491,10 @@ function buildPreviewHtml(subject: string, html: string, logoUrl?: string) {
 </html>`;
 }
 
+function validateEmailAddress(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
@@ -489,6 +505,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shopName: true,
       logo: true,
       contactEmail: true,
+      smtpHost: true,
+      smtpPort: true,
+      smtpSecure: true,
+      smtpUser: true,
+      smtpPassEncrypted: true,
+      smtpFromEmail: true,
+      smtpFromName: true,
     },
   });
 
@@ -542,10 +565,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     : defaultValues;
 
+  const smtpSettings = {
+    host: store.smtpHost || "",
+    port: store.smtpPort ? String(store.smtpPort) : "",
+    secure: store.smtpSecure || false,
+    user: store.smtpUser || "",
+    fromEmail: store.smtpFromEmail || "",
+    fromName: store.smtpFromName || "",
+    hasPassword: Boolean(store.smtpPassEncrypted),
+    usesCustomConfig: Boolean(
+      store.smtpHost ||
+      store.smtpPort ||
+      store.smtpUser ||
+      store.smtpPassEncrypted ||
+      store.smtpFromEmail ||
+      store.smtpFromName,
+    ),
+  };
+
   return Response.json({
     storeName: store.shopName || session.shop,
     storeLogo: store.logo || "",
     contactEmail: store.contactEmail || "",
+    smtpSettings,
     templates,
   } satisfies LoaderData);
 };
@@ -555,7 +597,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
-    select: { id: true },
+    select: {
+      id: true,
+      smtpPassEncrypted: true,
+    },
   });
 
   if (!store) {
@@ -576,6 +621,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       "setTemplateSchedule",
       "saveLogo",
       "saveCustomEmail",
+      "saveSmtpSettings",
     ].includes(intent)
   ) {
     return Response.json(
@@ -590,7 +636,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       formData.get("contactEmail") ?? formData.get("submissionEmail") ?? "",
     ).trim();
 
-    if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+    if (contactEmail && !validateEmailAddress(contactEmail)) {
       return Response.json(
         {
           success: false,
@@ -611,6 +657,247 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? "Primary contact email saved successfully."
         : "Primary contact email removed.",
       contactEmail,
+    } satisfies ActionData);
+  }
+
+  //   if (intent === "saveSmtpSettings") {
+  //     const host = String(formData.get("smtpHost") || "").trim();
+  //     const portRaw = String(formData.get("smtpPort") || "").trim();
+  //     const secure = String(formData.get("smtpSecure") || "") === "true";
+  //     const user = String(formData.get("smtpUser") || "").trim();
+  //     const password = String(formData.get("smtpPass") || "");
+  //     const fromEmail = String(formData.get("smtpFromEmail") || "").trim();
+  //     const fromName = String(formData.get("smtpFromName") || "").trim();
+
+  //     const wantsCustomConfig = Boolean(
+  //       host || portRaw || user || password || fromEmail || fromName,
+  //     );
+
+  //   if (!wantsCustomConfig) {
+  //   await prisma.store.update({
+  //     where: { id: store.id },
+  //     data: {
+  //       smtpHost: null,
+  //       smtpPort: null,
+  //       smtpSecure: false,
+  //       smtpUser: null,
+  //       smtpPassEncrypted: null,
+  //       smtpFromEmail: null,
+  //       smtpFromName: null,
+  //     },
+  //   });
+
+  //   return Response.json({
+  //     success: true,
+  //     message: "SMTP settings reset to default environment configuration.",
+  //     smtpSettings: {
+  //       host: process.env.BREVO_SMTP_HOST || "",
+  //       port: process.env.BREVO_SMTP_PORT || "",
+  //       secure: process.env.SMTP_SECURE === "true",
+  //       user: process.env.BREVO_SMTP_USER || "",
+  //       fromEmail: process.env.BREVO_FROM_EMAIL || "",
+  //       fromName: process.env.SMTP_FROM_NAME || "",
+  //       hasPassword: Boolean(process.env.BREVO_SMTP_PASSWORD),
+  //       usesCustomConfig: false,
+  //     },
+  //   } satisfies ActionData);
+
+  // }
+
+  //     if (!host || !portRaw || !user || !fromEmail) {
+  //       return Response.json(
+  //         {
+  //           success: false,
+  //           errors: ["Host, port, username, and from email are required."],
+  //         } satisfies ActionData,
+  //         { status: 400 },
+  //       );
+  //     }
+
+  //     const port = Number(portRaw);
+  //     if (!Number.isInteger(port) || port <= 0) {
+  //       return Response.json(
+  //         {
+  //           success: false,
+  //           errors: ["SMTP port must be a valid positive number."],
+  //         } satisfies ActionData,
+  //         { status: 400 },
+  //       );
+  //     }
+
+  //     if (!validateEmailAddress(fromEmail)) {
+  //       return Response.json(
+  //         {
+  //           success: false,
+  //           errors: ["Please enter a valid sender email address."],
+  //         } satisfies ActionData,
+  //         { status: 400 },
+  //       );
+  //     }
+
+  //     await prisma.store.update({
+  //       where: { id: store.id },
+  //       data: {
+  //         smtpHost: host,
+  //         smtpPort: port,
+  //         smtpSecure: secure,
+  //         smtpUser: user,
+  //         ...(password
+  //           ? { smtpPassEncrypted: encryptSmtpSecret(password) }
+  //           : {}),
+  //         smtpFromEmail: fromEmail,
+  //         smtpFromName: fromName || "B2B Portal",
+  //       },
+  //     });
+
+  //     return Response.json({
+  //       success: true,
+  //       message: "SMTP settings saved successfully.",
+  //       smtpSettings: {
+  //         host,
+  //         port: String(port),
+  //         secure,
+  //         user,
+  //         fromEmail,
+  //         fromName: fromName || "B2B Portal",
+  //         hasPassword: Boolean(password || store.smtpPassEncrypted),
+  //         usesCustomConfig: true,
+  //       },
+  //     } satisfies ActionData);
+  //   }
+
+  if (intent === "saveSmtpSettings") {
+    const host = String(formData.get("smtpHost") || "").trim();
+    const portRaw = String(formData.get("smtpPort") || "").trim();
+    const secure = String(formData.get("smtpSecure") || "") === "true";
+    const user = String(formData.get("smtpUser") || "").trim();
+    const password = String(formData.get("smtpPass") || "");
+    const fromEmail = String(formData.get("smtpFromEmail") || "").trim();
+    const fromName = String(formData.get("smtpFromName") || "").trim();
+
+    const wantsCustomConfig = Boolean(
+      host || portRaw || user || password || fromEmail || fromName,
+    );
+
+    // ── Reset to .env defaults ──────────────────────────────────────────────────
+    if (!wantsCustomConfig) {
+        // host: process.env.BREVO_SMTP_HOST || "",
+        // port: process.env.BREVO_SMTP_PORT || "",
+        // secure: process.env.SMTP_SECURE === "true",
+        // user: process.env.BREVO_SMTP_USER || "",
+        // fromEmail: process.env.BREVO_FROM_EMAIL || "",
+        // fromName: process.env.SMTP_FROM_NAME || "",
+        // hasPassword: Boolean(process.env.BREVO_SMTP_PASSWORD),
+        // usesCustomConfig: false,
+      const envHost = process.env.BREVO_SMTP_HOST || null;
+      const envPort = process.env.BREVO_SMTP_PORT
+        ? Number(process.env.BREVO_SMTP_PORT)
+        : null;
+      const envSecure = process.env.SMTP_SECURE === "true";
+      const envUser = process.env.BREVO_SMTP_USER || null;
+      const envPass = process.env.BREVO_SMTP_PASSWORD || null;
+      const envFromEmail = process.env.BREVO_FROM_EMAIL || null;
+      const envFromName = process.env.SMTP_FROM_NAME || null;
+
+      await prisma.store.update({
+        where: { id: store.id },
+        data: {
+          smtpHost: envHost,
+          smtpPort: envPort,
+          smtpSecure: envSecure,
+          smtpUser: envUser,
+          smtpPassEncrypted: envPass ? encryptSmtpSecret(envPass) : null,
+          smtpFromEmail: envFromEmail,
+          smtpFromName: envFromName,
+        },
+      });
+
+      return Response.json({
+        success: true,
+        message: "SMTP settings reset to default environment configuration.",
+        smtpSettings: {
+          host: envHost || "",
+          port: envPort ? String(envPort) : "",
+          secure: envSecure,
+          user: envUser || "",
+          fromEmail: envFromEmail || "",
+          fromName: envFromName || "",
+          hasPassword: Boolean(envPass),
+          usesCustomConfig: Boolean(
+            envHost ||
+            envPort ||
+            envUser ||
+            envPass ||
+            envFromEmail ||
+            envFromName,
+          ),
+        },
+      } satisfies ActionData);
+    }
+
+    // ── Save custom SMTP ────────────────────────────────────────────────────────
+    if (!host || !portRaw || !user || !fromEmail) {
+      return Response.json(
+        {
+          success: false,
+          errors: ["Host, port, username, and from email are required."],
+        } satisfies ActionData,
+        { status: 400 },
+      );
+    }
+
+    const port = Number(portRaw);
+    if (!Number.isInteger(port) || port <= 0) {
+      return Response.json(
+        {
+          success: false,
+          errors: ["SMTP port must be a valid positive number."],
+        } satisfies ActionData,
+        { status: 400 },
+      );
+    }
+
+    if (!validateEmailAddress(fromEmail)) {
+      return Response.json(
+        {
+          success: false,
+          errors: ["Please enter a valid sender email address."],
+        } satisfies ActionData,
+        { status: 400 },
+      );
+    }
+
+    // Password: new entered hoy to encrypt karo, nahi to existing DB password rakhvo
+    const encryptedPass = password
+      ? encryptSmtpSecret(password)
+      : store.smtpPassEncrypted;
+
+    await prisma.store.update({
+      where: { id: store.id },
+      data: {
+        smtpHost: host,
+        smtpPort: port,
+        smtpSecure: secure,
+        smtpUser: user,
+        smtpPassEncrypted: encryptedPass,
+        smtpFromEmail: fromEmail,
+        smtpFromName: fromName || "B2B Portal",
+      },
+    });
+
+    return Response.json({
+      success: true,
+      message: "SMTP settings saved successfully.",
+      smtpSettings: {
+        host,
+        port: String(port),
+        secure,
+        user,
+        fromEmail,
+        fromName: fromName || "B2B Portal",
+        hasPassword: Boolean(encryptedPass),
+        usesCustomConfig: true,
+      },
     } satisfies ActionData);
   }
 
@@ -1100,6 +1387,7 @@ export default function NotificationForm() {
     storeName,
     storeLogo: loaderStoreLogo,
     contactEmail: loaderContactEmail,
+    smtpSettings: loaderSmtpSettings,
     templates: loaderTemplates,
   } = useLoaderData<typeof loader>() as LoaderData;
 
@@ -1109,6 +1397,7 @@ export default function NotificationForm() {
   const adminToggleFetcher = useFetcher<ActionData>();
   const logoFetcher = useFetcher<ActionData>();
   const emailDomainFetcher = useFetcher<ActionData>();
+  const smtpFetcher = useFetcher<ActionData>();
   const scheduleFetcher = useFetcher<ActionData>();
   const templateToggleFetchers = useRef<
     Record<TemplateId, ReturnType<typeof useFetcher<ActionData>>>
@@ -1126,7 +1415,23 @@ export default function NotificationForm() {
   const [editorHasContent, setEditorHasContent] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showSmtpModal, setShowSmtpModal] = useState(false);
   const [emailInput, setEmailInput] = useState(loaderContactEmail);
+  const [smtpHost, setSmtpHost] = useState(loaderSmtpSettings.host);
+  const [smtpPort, setSmtpPort] = useState(loaderSmtpSettings.port);
+  const [smtpSecure, setSmtpSecure] = useState(loaderSmtpSettings.secure);
+  const [smtpUser, setSmtpUser] = useState(loaderSmtpSettings.user);
+  const [smtpPass, setSmtpPass] = useState("");
+  const [smtpFromEmail, setSmtpFromEmail] = useState(
+    loaderSmtpSettings.fromEmail,
+  );
+  const [smtpFromName, setSmtpFromName] = useState(loaderSmtpSettings.fromName);
+  const [smtpHasPassword, setSmtpHasPassword] = useState(
+    loaderSmtpSettings.hasPassword,
+  );
+  const [smtpUsesCustomConfig, setSmtpUsesCustomConfig] = useState(
+    loaderSmtpSettings.usesCustomConfig,
+  );
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleTemplateId, setScheduleTemplateId] =
     useState<TemplateId | null>(null);
@@ -1154,6 +1459,17 @@ export default function NotificationForm() {
     setContactEmail(loaderContactEmail);
     setEmailInput(loaderContactEmail);
   }, [loaderContactEmail]);
+  useEffect(() => {
+    setSmtpHost(loaderSmtpSettings.host);
+    setSmtpPort(loaderSmtpSettings.port);
+    setSmtpSecure(loaderSmtpSettings.secure);
+    setSmtpUser(loaderSmtpSettings.user);
+    setSmtpPass("");
+    setSmtpFromEmail(loaderSmtpSettings.fromEmail);
+    setSmtpFromName(loaderSmtpSettings.fromName);
+    setSmtpHasPassword(loaderSmtpSettings.hasPassword);
+    setSmtpUsesCustomConfig(loaderSmtpSettings.usesCustomConfig);
+  }, [loaderSmtpSettings]);
 
   useEffect(() => {
     if (!selectedTemplate || !editorRef.current) return;
@@ -1171,7 +1487,7 @@ export default function NotificationForm() {
     width: "100%",
     maxWidth: 1200,
     margin: "0 auto 18px",
-    padding: "0px 5px 16px 0px",  
+    padding: "0px 5px 16px 0px",
     borderRadius: 14,
     border: "1px solid #dfe3e8",
     background: "linear-gradient(135deg, #ffffff 0%)",
@@ -1285,6 +1601,20 @@ export default function NotificationForm() {
     setEmailInput(saved);
     setShowEmailModal(false);
   }, [emailDomainFetcher.data]);
+  useEffect(() => {
+    if (!smtpFetcher.data?.success || !smtpFetcher.data.smtpSettings) return;
+    const saved = smtpFetcher.data.smtpSettings;
+    setSmtpHost(saved.host);
+    setSmtpPort(saved.port);
+    setSmtpSecure(saved.secure);
+    setSmtpUser(saved.user);
+    setSmtpPass("");
+    setSmtpFromEmail(saved.fromEmail);
+    setSmtpFromName(saved.fromName);
+    setSmtpHasPassword(saved.hasPassword);
+    setSmtpUsesCustomConfig(saved.usesCustomConfig);
+    setShowSmtpModal(false);
+  }, [smtpFetcher.data]);
 
   // Handle schedule updates
   useEffect(() => {
@@ -1516,12 +1846,281 @@ export default function NotificationForm() {
                 emailDomainFetcher.state !== "idle" ? "not-allowed" : "pointer",
               opacity: emailDomainFetcher.state !== "idle" ? 0.7 : 1,
             }}
+          >
+            {emailDomainFetcher.state !== "idle" ? "Saving…" : "Save email"}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  const modalInputStyle = {
+    width: "100%",
+    border: "1px solid #c9cccf",
+    borderRadius: 10,
+    padding: "10px 12px",
+    fontSize: 14,
+    color: "#303030",
+    outline: "none",
+    boxSizing: "border-box",
+    background: "#ffffff",
+  } as const;
+
+  const smtpSettingsModal = showSmtpModal ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(17, 24, 39, 0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        zIndex: 3000,
+      }}
+      onClick={() => setShowSmtpModal(false)}
+    >
+      <div
+        style={{
+          width: "min(560px, 100%)",
+          background: "#ffffff",
+          borderRadius: 16,
+          boxShadow: "0 28px 80px rgba(15, 23, 42, 0.28)",
+          padding: "24px 24px 20px",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 20,
+          }}
+        >
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 16,
+              fontWeight: 700,
+              color: "#202223",
+            }}
+          >
+            SMTP configuration
+          </h2>
+          <button
+            type="button"
+            onClick={() => setShowSmtpModal(false)}
+            aria-label="Close"
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "#6d7175",
+              fontSize: 24,
+              lineHeight: 1,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gap: 14, marginBottom: 20 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#303030" }}>
+              SMTP host
+            </label>
+            <input
+              value={smtpHost}
+              onChange={(e) => setSmtpHost(e.currentTarget.value)}
+              placeholder="smtp.example.com"
+              style={modalInputStyle}
+            />
+          </div>
+
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+          >
+            <div style={{ display: "grid", gap: 8 }}>
+              <label
+                style={{ fontSize: 13, fontWeight: 600, color: "#303030" }}
+              >
+                SMTP port
+              </label>
+              <input
+                value={smtpPort}
+                onChange={(e) => setSmtpPort(e.currentTarget.value)}
+                placeholder="587"
+                style={modalInputStyle}
+              />
+            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginTop: 28,
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#303030",
+              }}
             >
-              {emailDomainFetcher.state !== "idle" ? "Saving…" : "Save email"}
+              <input
+                type="checkbox"
+                checked={smtpSecure}
+                onChange={(e) => setSmtpSecure(e.currentTarget.checked)}
+              />
+              Use secure connection
+            </label>
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#303030" }}>
+              SMTP username
+            </label>
+            <input
+              value={smtpUser}
+              onChange={(e) => setSmtpUser(e.currentTarget.value)}
+              placeholder="username"
+              style={modalInputStyle}
+            />
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#303030" }}>
+              SMTP password
+            </label>
+            <input
+              type="password"
+              value={smtpPass}
+              onChange={(e) => setSmtpPass(e.currentTarget.value)}
+              placeholder={
+                smtpHasPassword
+                  ? "Leave blank to keep existing password"
+                  : "Enter SMTP password"
+              }
+              style={modalInputStyle}
+            />
+          </div>
+
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+          >
+            <div style={{ display: "grid", gap: 8 }}>
+              <label
+                style={{ fontSize: 13, fontWeight: 600, color: "#303030" }}
+              >
+                Sender email
+              </label>
+              <input
+                type="email"
+                value={smtpFromEmail}
+                onChange={(e) => setSmtpFromEmail(e.currentTarget.value)}
+                placeholder="noreply@example.com"
+                style={modalInputStyle}
+              />
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <label
+                style={{ fontSize: 13, fontWeight: 600, color: "#303030" }}
+              >
+                Sender name
+              </label>
+              <input
+                value={smtpFromName}
+                onChange={(e) => setSmtpFromName(e.currentTarget.value)}
+                placeholder="B2B Portal"
+                style={modalInputStyle}
+              />
+            </div>
+          </div>
+
+          {smtpFetcher.data?.errors?.length ? (
+            <div style={{ fontSize: 12, color: "#d72c0d", lineHeight: 1.5 }}>
+              {smtpFetcher.data.errors.join(" ")}
+            </div>
+          ) : null}
+        </div>
+
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              smtpFetcher.submit(
+                { intent: "saveSmtpSettings" },
+                { method: "post" },
+              );
+            }}
+            style={{
+              border: "1px solid #d72c0d",
+              background: "#fff",
+              color: "#d72c0d",
+              borderRadius: 10,
+              padding: "8px 16px",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Reset to default
+          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setShowSmtpModal(false)}
+              style={{
+                border: "1px solid #c9cccf",
+                background: "#ffffff",
+                color: "#303030",
+                borderRadius: 10,
+                padding: "8px 16px",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={smtpFetcher.state !== "idle"}
+              onClick={() => {
+                smtpFetcher.submit(
+                  {
+                    intent: "saveSmtpSettings",
+                    smtpHost,
+                    smtpPort,
+                    smtpSecure: String(smtpSecure),
+                    smtpUser,
+                    smtpPass,
+                    smtpFromEmail,
+                    smtpFromName,
+                  },
+                  { method: "post" },
+                );
+              }}
+              style={{
+                border: "1px solid #303030",
+                background: smtpFetcher.state !== "idle" ? "#555" : "#2f2f2f",
+                color: "#ffffff",
+                borderRadius: 10,
+                padding: "8px 16px",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor:
+                  smtpFetcher.state !== "idle" ? "not-allowed" : "pointer",
+                opacity: smtpFetcher.state !== "idle" ? 0.7 : 1,
+              }}
+            >
+              {smtpFetcher.state !== "idle" ? "Saving…" : "Save SMTP"}
             </button>
           </div>
         </div>
       </div>
+    </div>
   ) : null;
 
   // ── Schedule modal ────────────────────────────────────────────────────────────
@@ -1781,62 +2380,82 @@ export default function NotificationForm() {
         padding: 14,
       }}
     >
+      <span style={{ fontSize: 14, color: "#303030", fontWeight: 600 }}>
+        {smtpFromEmail || "SMTP from environment"}
+      </span>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: 24,
+          padding: "0 10px",
+          borderRadius: 999,
+          background: smtpUsesCustomConfig ? "#d9ecff" : "#f1f2f4",
+          color: smtpUsesCustomConfig ? "#004c97" : "#6d7175",
+          fontSize: 12,
+          fontWeight: 500,
+        }}
+      >
+        {smtpUsesCustomConfig ? "Custom SMTP" : "Default SMTP"}
+      </span>
+      {smtpHasPassword ? (
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            height: 24,
+            padding: "0 10px",
+            borderRadius: 999,
+            background: "#d9f5e5",
+            color: "#0f5132",
+            fontSize: 12,
+            fontWeight: 500,
+          }}
+        >
+          Password saved
+        </span>
+      ) : null}
+
       <div
         style={{
+          marginTop: 16,
+          paddingTop: 16,
+          borderTop: "1px solid #eceef1",
           display: "flex",
           alignItems: "flex-start",
           justifyContent: "space-between",
           gap: 16,
-          marginBottom: 14,
         }}
       >
         <div>
-          <h3
-            style={{
-              margin: "0 0 8px",
-              fontSize: 15,
-              fontWeight: 600,
-              color: "#303030",
-            }}
-          >
-            Sender email
-          </h3>
           <div
             style={{
               display: "flex",
               alignItems: "center",
               gap: 8,
               flexWrap: "wrap",
+              marginBottom: 8,
+            }}
+          ></div>
+          <p
+            style={{
+              margin: 0,
+              color: "#6d7175",
+              fontSize: 13,
+              lineHeight: 1.5,
             }}
           >
-            <span style={{ fontSize: 14, color: "#303030", fontWeight: 500 }}>
-              {contactEmail || "noreply@onboardb2b.com"}
-            </span>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                height: 24,
-                padding: "0 10px",
-                borderRadius: 999,
-                background: contactEmail ? "#d9f5e5" : "#f1f2f4",
-                color: contactEmail ? "#0f5132" : "#6d7175",
-                fontSize: 12,
-                fontWeight: 500,
-              }}
-            >
-              {contactEmail ? "Primary contact" : "App default"}
-            </span>
-          </div>
+            {smtpUsesCustomConfig
+              ? `Emails will use ${smtpHost || "your custom SMTP host"} with live store-specific credentials.`
+              : "Emails will use the default SMTP credentials from environment settings until you save a custom SMTP configuration here."}
+          </p>
         </div>
 
         <button
           type="button"
-          onClick={() => {
-            setEmailInput(contactEmail);
-            setShowEmailModal(true);
-          }}
+          onClick={() => setShowSmtpModal(true)}
           style={{
             border: "1px solid #303030",
             background: "#2f2f2f",
@@ -1849,49 +2468,9 @@ export default function NotificationForm() {
             whiteSpace: "nowrap",
           }}
         >
-          {contactEmail ? "Change email" : "Add primary contact email"}
+          {smtpUsesCustomConfig ? "Change SMTP" : "Add SMTP"}
         </button>
       </div>
-
-      <p
-        style={{
-          margin: 0,
-          color: "#303030",
-          fontSize: 14,
-          lineHeight: 1.5,
-          fontWeight: 600,
-        }}
-      >
-        {contactEmail
-          ? "Notification emails will use the Primary contact email from Store settings."
-          : "Add a Primary contact email to use it for notification emails."}
-      </p>
-
-      {/* Remove primary contact email */}
-      {contactEmail ? (
-        <div style={{ marginTop: 10 }}>
-          <button
-            type="button"
-            onClick={() => {
-              emailDomainFetcher.submit(
-                { intent: "saveCustomEmail", contactEmail: "" },
-                { method: "post" },
-              );
-            }}
-            style={{
-              border: "none",
-              background: "transparent",
-              color: "#d72c0d",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              padding: 0,
-            }}
-          >
-            Remove primary contact email
-          </button>
-        </div>
-      ) : null}
     </section>
   );
 
@@ -1903,7 +2482,8 @@ export default function NotificationForm() {
           <div style={pageHeroStyle}>
             <h1 style={pageHeroTitleStyle}>Notification Templates</h1>
             <p style={pageHeroTextStyle}>
-              Configure branded email templates and preview customer communications.
+              Configure branded email templates and preview customer
+              communications.
             </p>
           </div>
           <div style={pageContentStyle}>
@@ -2353,9 +2933,9 @@ export default function NotificationForm() {
                   </div>
                 </div>
               </div>
-              </div>
             </div>
           </div>
+        </div>
         {showPreview ? (
           <div
             style={{
@@ -2456,6 +3036,8 @@ export default function NotificationForm() {
         ) : null}
 
         {emailModal}
+        {smtpSettingsModal}
+        {scheduleModal}
       </>
     );
   }
@@ -2594,7 +3176,9 @@ export default function NotificationForm() {
                         background: adminNotificationsEnabled
                           ? "#a7f3b7"
                           : "#f1f2f4",
-                        color: adminNotificationsEnabled ? "#166534" : "#6d7175",
+                        color: adminNotificationsEnabled
+                          ? "#166534"
+                          : "#6d7175",
                         fontSize: 11,
                         fontWeight: 600,
                       }}
@@ -3002,6 +3586,8 @@ export default function NotificationForm() {
         </div>
       </div>
       {emailModal}
+      {smtpSettingsModal}
+      {scheduleModal}
     </>
   );
 }

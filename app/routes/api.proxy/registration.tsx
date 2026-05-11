@@ -71,7 +71,7 @@ type StoreRecord = NonNullable<Awaited<ReturnType<typeof getStoreByDomain>>>;
 function formatPhone(phone?: string, countryCode?: string) {
   if (!phone) return undefined;
 
-  if (phone.startsWith("+")) return phone;
+  if (phone.startsWith("+")) return phone.replace(/[^\d+]/g, "");
 
   const cleaned = phone.replace(/\D/g, "");
   if (!cleaned) return undefined;
@@ -81,7 +81,9 @@ function formatPhone(phone?: string, countryCode?: string) {
     if (cleaned.length === 11 && cleaned.startsWith("0")) {
       return `+91${cleaned.slice(1)}`;
     }
-    return undefined;
+    if (cleaned.length === 12 && cleaned.startsWith("91")) {
+      return `+${cleaned}`;
+    }
   }
 
   return `+${cleaned}`;

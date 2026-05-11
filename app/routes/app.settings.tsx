@@ -1288,12 +1288,14 @@ export default function SettingsPage() {
                   defaultChecked={store?.allowQuickOrderForUser}
                   borderBottom
                 />
-                <ToggleRow
-                  name="blockOrderWhenCreditUnavailable"
-                  title="Block orders when credit limit is not available"
-                  description="On by default OFF. Enable this to block checkout and order creation when available credit is not enough."
-                  defaultChecked={store?.blockOrderWhenCreditUnavailable}
-                />
+                {!isFreePlan && (
+                  <ToggleRow
+                    name="blockOrderWhenCreditUnavailable"
+                    title="Block orders when credit limit is not available"
+                    description="Enable this to block checkout and order creation when available credit is not enough."
+                    defaultChecked={store?.blockOrderWhenCreditUnavailable}
+                  />
+                )}
               </div>
             </div>
 
@@ -1392,7 +1394,7 @@ export default function SettingsPage() {
           {/* GDPR Actions Section */}
           <div style={{ marginTop: 32 }}>
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>
-              GDPR Delete Actions
+             Delete Actions
             </h2>
 
             <div
@@ -1411,7 +1413,7 @@ export default function SettingsPage() {
                   lineHeight: 1.5,
                 }}
               >
-                Manually trigger the three GDPR-related webhook flows for this
+                Manually trigger the three webhook flows for this
                 store from settings.
               </p>
 

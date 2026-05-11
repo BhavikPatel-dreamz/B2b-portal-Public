@@ -113,20 +113,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       );
     }
 
-    const locationsData = await getCompanyLocations(companyId, shop, store.accessToken);
-    console.log("🚀 ~ loader ~ locationsData:", locationsData);
-
-    if (locationsData.error) {
-      return Response.json(
-        { error: "Failed to fetch locations" },
-        { status: 500 },
-      );
-    }
-
-    // Fetch shipping zones + provinces from Shopify
-    const graphqlRes = await fetch(
-      `https://${shop}/admin/api/2024-10/graphql.json`,
-      {
+    // Run parallel calls to Shopify — saves ~200-500ms
+    const [locationsData, gql] = await Promise.all([
+      getCompanyLocations(companyId, shop, store.accessToken),
+      fetch(`https://${shop}/admin/api/2024-10/graphql.json`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -161,10 +151,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             }
           `,
         }),
-      },
-    );
+      }).then(res => res.json())
+    ]);
 
-    const gql = await graphqlRes.json();
+    if (locationsData.error) {
+      return Response.json({ error: "Failed to fetch locations" }, { status: 500 });
+    }
 
     if (gql.errors) {
       console.error("GraphQL Error:", gql.errors);

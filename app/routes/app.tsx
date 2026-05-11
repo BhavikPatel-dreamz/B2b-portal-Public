@@ -6,6 +6,7 @@ import { authenticate } from "../shopify.server";
 import { APP_BILLING_PLANS, getIsTestBilling } from "app/utils/billing.server";
 import {
   syncStoreSubscriptionState,
+  getStorePlanValue,
 } from "app/services/store.server";
 import prisma from "app/db.server";
 import { clearAdminCompaniesCache } from "./app.companies";
@@ -28,7 +29,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (requiresPlan(url.pathname)) {
     const store = await prisma.store.findUnique({
       where: { shopDomain: session.shop },
-      select: { plan: true },
+      select: { plan: true, planKey: true },
     });
 
     const billingState = await billing.check({
@@ -36,16 +37,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       isTest: getIsTestBilling(),
     });
 
+    const activeSubscription = billingState.appSubscriptions?.find((s) => s.status === "ACTIVE");
+    const currentPlan = getStorePlanValue(activeSubscription?.name);
+
     if (billingState.hasActivePayment) {
-      await syncStoreSubscriptionState(
-        session.shop,
-        billingState.appSubscriptions || [],
-        admin,
-      );
-      clearAdminCompaniesCache(session.shop);
-      clearDashboardStatsCache(session.shop);
+      // Only sync if plan changed or wasn"t previously synced
+      if (store?.plan !== currentPlan || store?.planKey !== activeSubscription?.id) {
+        console.log("Plan changed or not synced. Syncing...");
+        await syncStoreSubscriptionState(
+          session.shop,
+          billingState.appSubscriptions || [],
+          admin,
+        );
+        clearAdminCompaniesCache(session.shop);
+        clearDashboardStatsCache(session.shop);
+      }
     } else if (store?.plan === "approved payment") {
-      // If we thought they were on a paid plan but they don't have active payment anymore
+      // If we thought they were on a paid plan but they don"t have active payment anymore
       await syncStoreSubscriptionState(
         session.shop,
         [],
@@ -58,8 +66,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const hasPlanAccess = billingState.hasActivePayment || store?.plan === "free";
 
     if (!hasPlanAccess) {
-      const returnTo = `${url.pathname}${url.search}`;
-      return redirect(`/app/select-plan?returnTo=${encodeURIComponent(returnTo)}`);
+      const returnTo = url.pathname + url.search;
+      return redirect("/app/select-plan?returnTo=" + encodeURIComponent(returnTo));
     }
   }
 

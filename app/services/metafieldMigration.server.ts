@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { getAdminForShop } from "../shopify.server";
 
 interface AdminApiContext {
   graphql: (
@@ -227,7 +227,7 @@ export async function migrateAllCompanyMetafields() {
       }
 
       try {
-        const { admin } = await authenticate.admin(company.shop.shopDomain);
+        const admin = await getAdminForShop(company.shop.shopDomain);
 
         const result = await migrateCompanyMetafieldKeys(
           admin,
