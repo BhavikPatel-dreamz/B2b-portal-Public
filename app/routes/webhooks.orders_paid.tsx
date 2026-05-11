@@ -1,17 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticate, getAdminForShop } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { syncCompanyCreditMetafields } from "../services/metafieldSync.server";
 import { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import { getUserByShopifyCustomerId } from "app/services/user.server";
-import { calculateAvailableCredit } from "app/services/tieredCreditService";
+import { calculateAvailableCredit, validateTieredCreditForOrder } from "app/services/tieredCreditService";
 
 
 /**
- * Trigger post-payment credit validation
+ * Perform post-payment credit validation locally
  */
 async function triggerPostPaymentValidation(
   shop: string,
@@ -22,37 +22,53 @@ async function triggerPostPaymentValidation(
   companyId?: string
 ) {
   try {
-    // Call our post-payment validation endpoint
-    const validationUrl = `${process.env.SHOPIFY_APP_URL}/api/proxy/post-payment-validate`;
+    console.log(`🔍 Performing local post-payment validation for order ${shopifyOrderId}`);
 
-    const response = await fetch(validationUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        orderId,
-        shopifyOrderId,
-        totalAmount,
-        customerId,
-        companyId,
-        shop,
-      }),
-    });
+    if (!companyId) {
+      return { success: false, error: "Missing company ID" };
+    }
 
-    const result = await response.json();
+    // Find the user who placed the order to get their tiered credit info
+    const customerGid = `gid://shopify/Customer/${customerId}`;
+    const store = await getStoreByDomain(shop);
+    if (!store) {
+      return { success: false, error: "Store not found" };
+    }
+
+    const user = await getUserByShopifyCustomerId(store.id, customerGid);
+    if (!user) {
+      // If we can't find the user, we'll still allow the paid order but log a warning
+      console.warn(`⚠️ User not found for customer ${customerGid} during post-payment validation`);
+      return { success: true, validationPassed: true };
+    }
+
+    // Perform tiered credit validation
+    // We pass the current order's ID to exclude it from "used credit" calculation
+    // because it was already created and might be counted twice otherwise
+    const validation = await validateTieredCreditForOrder(
+      companyId,
+      user.id,
+      totalAmount,
+      shopifyOrderId
+    );
 
     console.log(`Post-payment validation result:`, {
       orderId,
       shopifyOrderId,
-      success: result.success,
-      validationPassed: result.validationPassed,
+      success: true,
+      validationPassed: validation.canCreate,
+      message: validation.message
     });
 
-    return result;
+    return { 
+      success: true, 
+      validationPassed: validation.canCreate,
+      error: validation.canCreate ? undefined : validation.message
+    };
   } catch (error) {
-    console.error("Failed to trigger post-payment validation:", error);
-    return { success: false, error: "Validation trigger failed" };
+    console.error("Failed to perform post-payment validation:", error);
+    // On error, we fail safe and allow the order since it's already paid
+    return { success: true, validationPassed: true, warning: "Validation error, allowed by default" };
   }
 }
 
@@ -112,45 +128,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
 
       // Update order status to reflect successful validation and payment
-      // **NEW: Create credit restoration transaction for order_paid (BEFORE updating order)**
-
-      
-      const customerGid = `gid://shopify/Customer/${customerId}`;
-      const orderUser = await getUserByShopifyCustomerId(store.id, customerGid);
-      const createdBy = orderUser?.id || "system";
-      
-      const creditInfo = await calculateAvailableCredit(order.companyId!);
-      if (creditInfo) {
-        const restoreAmount = order.creditUsed || new Prisma.Decimal(totalAmount);
-        const previousBalance = creditInfo.availableCredit;
-        const newBalance = previousBalance.plus(restoreAmount);
-        
-        const exist = await prisma.creditTransaction.findFirst({
-          where: {
-            companyId: order.companyId!,
-            orderId: orderGid,
-            transactionType: "order_paid"
-          }
-        });
-
-        if (!exist) {
-          await prisma.creditTransaction.create({
-            data: {
-              companyId: order.companyId!,
-              orderId: orderGid,
-              transactionType: "order_paid",
-              creditAmount: restoreAmount,
-              previousBalance,
-              newBalance,
-              notes: `Credit restored for paid order #${orderNumber}`,
-              createdBy,
-            },
-          });
-          console.log(`✅ Created order_paid credit transaction: +${restoreAmount} | ${previousBalance} → ${newBalance}`);
-        } else {
-          console.log(`ℹ️ order_paid transaction already exists for order ${orderGid}, skipping duplicate creation.`);
-        }
-      }
+      // Note: Credit restoration is handled in webhooks.orders_updated.tsx to avoid duplicates
       
       await updateOrder(order.id, {
         paymentStatus: "paid",
@@ -159,11 +137,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         remainingBalance: new Prisma.Decimal(0),
         paidAt: new Date(),
       });
-  
-
-  // Removed broken transaction code
-
-
     } else {
       // ❌ Credit validation failed - order will be refunded/cancelled
       console.warn(`🚫 POST-PAYMENT VALIDATION FAILED - Order will be refunded:`, {
@@ -183,8 +156,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Sync metafields after order payment to update creditUsed
     try {
-      const { admin } = await authenticate.admin(request);
-      await syncCompanyCreditMetafields(admin, order.companyId!);
+      const shopAdmin = await getAdminForShop(shop);
+      await syncCompanyCreditMetafields(shopAdmin as any, order.companyId!);
       console.log(`✅ Metafields synced for company ${order.companyId} after order payment`);
     } catch (syncError) {
       console.error(`⚠️ Failed to sync metafields after order payment:`, syncError);

@@ -136,18 +136,32 @@ export async function deductCredit(
   const previousBalance = creditInfo.availableCredit;
   const newBalance = previousBalance.minus(amountDecimal);
 
+  // Find order to get both possible IDs
+  const order = await prisma.b2BOrder.findFirst({
+    where: {
+      OR: [
+        { id: orderId },
+        { shopifyOrderId: orderId }
+      ]
+    }
+  });
+
   // Check if credit transaction already exists for this order
   const existingTransaction = await prisma.creditTransaction.findFirst({
     where: {
       companyId,
-      orderId,
+      OR: [
+        { orderId: orderId },
+        order ? { orderId: order.id } : {},
+        order?.shopifyOrderId ? { orderId: order.shopifyOrderId } : {}
+      ].filter(item => Object.keys(item).length > 0) as any,
       transactionType: { in: ["order_created", "order_updated"] },
     },
   });
 
   if (existingTransaction) {
     // Update existing transaction
-    await prisma.creditTransaction.update({
+    const updatedTx = await prisma.creditTransaction.update({
       where: { id: existingTransaction.id },
       data: {
         creditAmount: amountDecimal.negated(), // Negative because we're deducting
@@ -159,9 +173,15 @@ export async function deductCredit(
         createdAt: new Date(),
       },
     });
+    console.log(`✅ CreditTransaction updated:`, {
+      id: updatedTx.id,
+      type: updatedTx.transactionType,
+      amount: updatedTx.creditAmount.toString(),
+      newBalance: updatedTx.newBalance.toString()
+    });
   } else {
     // Create new credit transaction log
-    await prisma.creditTransaction.create({
+    const newTx = await prisma.creditTransaction.create({
       data: {
         companyId,
         orderId,
@@ -173,6 +193,12 @@ export async function deductCredit(
         createdBy: userId,
         createdAt: new Date(),
       },
+    });
+    console.log(`✅ CreditTransaction stored:`, {
+      id: newTx.id,
+      type: newTx.transactionType,
+      amount: newTx.creditAmount.toString(),
+      newBalance: newTx.newBalance.toString()
     });
   }
 

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticate, getAdminForShop } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { validateTieredCreditForOrder, restoreTieredCredit } from "../services/tieredCreditService";
@@ -70,7 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const orderGid = `gid://shopify/Order/${orderIdNum}`;
 
     {
-      console.log(`🔍 Processing B2B order update for Shopify order ID: ${orderGid}, Customer ID: ${store},${orderIdNum}`);
+      console.log(`🔍 Processing B2B order update for Shopify order ID: ${orderGid}, Customer ID: ${customerGid}`);
     }
     // Find our existing B2B order
     const existingOrder = await getOrderByShopifyId(store.id, orderGid);
@@ -160,7 +160,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           const validation = await validateTieredCreditForOrder(
             user.companyId,
             user.id,
-            orderTotal.toNumber()
+            orderTotal.toNumber(),
+            existingOrder.id
           );
 
           if (!validation.canCreate) {
@@ -212,13 +213,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const exist = await prisma.creditTransaction.findFirst({
               where: {
                 companyId: user.companyId,
-                orderId: existingOrder.id,
+                OR: [
+                  { orderId: orderGid },
+                  { orderId: existingOrder.id }
+                ],
                 transactionType: "order_paid"
               }
             });
 
             if (!exist) {
-              await prisma.creditTransaction.create({
+              const newTx = await prisma.creditTransaction.create({
                 data: {
                   companyId: user.companyId,
                   orderId: orderGid,
@@ -230,6 +234,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                   createdBy: user.id,
                   createdAt: new Date(),
                 },
+              });
+              console.log(`✅ CreditTransaction stored:`, {
+                id: newTx.id,
+                type: newTx.transactionType,
+                amount: newTx.creditAmount.toString(),
+                newBalance: newTx.newBalance.toString()
               });
               console.log(`✅ Created order_paid transaction for #${orderNumber}: +${creditChange}`);
             }
@@ -325,12 +335,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const exist = await prisma.creditTransaction.findFirst({
               where: {
                 companyId: user.companyId,
-                orderId: orderGid,
+                OR: [
+                  { orderId: orderGid },
+                  { orderId: existingOrder.id }
+                ],
                 transactionType: paymentStatus === "paid" ? "order_paid" : "order_updated"
               }
             })
             if (!exist) {
-              await prisma.creditTransaction.create({
+              const newTx = await prisma.creditTransaction.create({
                 data: {
                   companyId: user.companyId,
                   orderId: orderGid,
@@ -342,6 +355,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                   createdBy: user.id,
                   createdAt: new Date(),
                 },
+              });
+              console.log(`✅ CreditTransaction stored:`, {
+                id: newTx.id,
+                type: newTx.transactionType,
+                amount: newTx.creditAmount.toString(),
+                newBalance: newTx.newBalance.toString()
               });
             }
           }
@@ -402,12 +421,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const exist = await prisma.creditTransaction.findFirst({
           where: {
             companyId: user.companyId,
-            orderId: orderGid,
+            OR: [
+              { orderId: orderGid },
+              { orderId: existingOrder.id }
+            ],
             transactionType: "order_updated"
           }
         })
         if (!exist) {
-          await prisma.creditTransaction.create({
+          const newTx = await prisma.creditTransaction.create({
             data: {
               companyId: user.companyId,
               orderId: orderGid,
@@ -420,6 +442,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               createdAt: new Date(),
             },
           });
+          console.log(`✅ CreditTransaction stored:`, {
+            id: newTx.id,
+            type: newTx.transactionType,
+            amount: newTx.creditAmount.toString(),
+            newBalance: newTx.newBalance.toString()
+          });
         }
       }
       
@@ -427,8 +455,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Sync metafields after order update to reflect creditUsed changes
     try {
-      const { admin } = await authenticate.admin(request);
-      await syncCompanyCreditMetafields(admin, user.companyId);
+      const admin = await getAdminForShop(shop);
+      await syncCompanyCreditMetafields(admin as any, user.companyId);
       console.log(`✅ Metafields synced for company ${user.companyId} after order update`);
     } catch (syncError) {
       console.error(`⚠️ Failed to sync metafields after order update:`, syncError);

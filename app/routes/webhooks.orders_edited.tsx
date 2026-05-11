@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticate, getAdminForShop } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import { getOrderByShopifyId, updateOrder } from "../services/order.server";
 import { Prisma } from "@prisma/client";
@@ -30,7 +30,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Since order_edit webhook doesn't have full order details,
     // we need to fetch order from Shopify to get current status/totals
-    const adminSession = await authenticate.admin(request);
+    const adminSession = await getAdminForShop(shop);
     if (!adminSession) return new Response();
 
     const orderQuery = `

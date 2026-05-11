@@ -28,6 +28,7 @@ interface TieredCreditAvailability {
  */
 export async function calculateUserCredit(
   userId: string,
+  excludeOrderId?: string,
 ): Promise<UserCreditInfo | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -42,15 +43,57 @@ export async function calculateUserCredit(
     return null;
   }
 
+  // If we're validating an existing order (post-payment), we need to exclude 
+  // that order's usage from the total so we don't count it twice.
+  let currentUsage = user.userCreditUsed;
+  
+  if (excludeOrderId) {
+    // 1. Check if the B2B order exists and has user credit usage
+    const excludedOrder = await prisma.b2BOrder.findFirst({
+      where: {
+        OR: [
+          { id: excludeOrderId },
+          { shopifyOrderId: excludeOrderId }
+        ],
+        createdByUserId: userId
+      },
+      select: { userCreditUsed: true }
+    });
+
+    if (excludedOrder) {
+      currentUsage = currentUsage.minus(excludedOrder.userCreditUsed);
+    } else {
+      // 2. If the order doesn't exist yet, check if credit was already deducted 
+      // via a CreditTransaction for this specific order/shopifyOrderId
+      const excludedTx = await prisma.creditTransaction.findFirst({
+        where: {
+          OR: [
+            { orderId: excludeOrderId },
+            // Try to match Shopify ID format if only numeric was provided
+            { orderId: excludeOrderId.startsWith("gid://") ? excludeOrderId : `gid://shopify/Order/${excludeOrderId}` }
+          ],
+          userId: userId,
+          transactionType: { in: ["order_created", "order_updated", "credit_reserved"] }
+        },
+        select: { creditAmount: true }
+      });
+
+      if (excludedTx) {
+        // creditAmount is negative for deductions, so we take the absolute value or negate it
+        currentUsage = currentUsage.minus(excludedTx.creditAmount.abs());
+      }
+    }
+  }
+
   // If user has no credit limit set, they have unlimited personal credit
   // (still subject to company limits)
   const hasUserLimit = user.userCreditLimit !== null;
   const userCreditLimit = user.userCreditLimit
     ? new Decimal(user.userCreditLimit)
     : new Decimal(0);
-  const userCreditUsed = user.userCreditUsed;
+  const userCreditUsed = user.userCreditUsed; // Keep the actual total usage for reference
   const userCreditAvailable = hasUserLimit
-    ? userCreditLimit.minus(userCreditUsed)
+    ? userCreditLimit.minus(currentUsage)
     : new Decimal(999999999); // Effectively unlimited
 
   return {
@@ -129,7 +172,7 @@ export async function calculateTieredCreditAvailability(
   const companyAvailableCredit = company.creditLimit.minus(companyUsedCredit);
 
   // Get user credit info
-  const userCreditInfo = await calculateUserCredit(userId);
+  const userCreditInfo = await calculateUserCredit(userId, excludeOrderId);
   if (!userCreditInfo) {
     return null;
   }
@@ -176,7 +219,7 @@ export async function validateTieredCreditForOrder(
     };
   }
 
-  // Check company credit first
+  // 1. Check company credit (STRICT LIMIT)
   if (creditInfo.company.availableCredit.lessThan(orderAmountDecimal)) {
     return {
       canCreate: false,
@@ -186,15 +229,17 @@ export async function validateTieredCreditForOrder(
     };
   }
 
-  // Check user credit if they have a limit set
+  // 2. Check user credit (SOFT LIMIT - We allow it if company credit is OK)
   if (
     creditInfo.user.hasUserLimit &&
     creditInfo.user.userCreditAvailable.lessThan(orderAmountDecimal)
   ) {
+    console.warn(`⚠️ Personal credit limit exceeded: Available: $${creditInfo.user.userCreditAvailable.toFixed(2)}, Required: $${orderAmountDecimal.toFixed(2)}`);
+    
     return {
-      canCreate: false,
+      canCreate: true, // Non-blocking
       limitingFactor: "user",
-      message: `Insufficient personal credit. Available: $${creditInfo.user.userCreditAvailable.toFixed(2)}, Required: $${orderAmountDecimal.toFixed(2)}`,
+      message: `Note: Order exceeds personal credit limit. Available: $${creditInfo.user.userCreditAvailable.toFixed(2)}, Required: $${orderAmountDecimal.toFixed(2)}`,
       creditInfo,
     };
   }
@@ -252,16 +297,31 @@ export async function deductTieredCredit(
   const previousBalance = creditInfo.company.availableCredit;
   const newBalance = previousBalance.minus(amountDecimal);
 
+  // Find order to get both possible IDs (internal and Shopify GID)
+  let order = await prisma.b2BOrder.findUnique({
+    where: { id: orderId },
+  });
+
+  if (!order) {
+    order = await prisma.b2BOrder.findUnique({
+      where: { shopifyOrderId: orderId },
+    });
+  }
+
   // Create company credit transaction
   const orderTransactions = await prisma.creditTransaction.findFirst({
     where: {
       companyId: internalCompanyId,
-      orderId,
+      OR: [
+        { orderId: orderId },
+        order ? { orderId: order.id } : {},
+        order?.shopifyOrderId ? { orderId: order.shopifyOrderId } : {}
+      ].filter(item => Object.keys(item).length > 0) as any,
     },
   });
 
   if (orderTransactions) {
-    await prisma.creditTransaction.update({
+    const updatedTx = await prisma.creditTransaction.update({
       where: { id: orderTransactions.id },
       data: {
         companyId: internalCompanyId,
@@ -275,7 +335,12 @@ export async function deductTieredCredit(
         createdBy: userId,
       },
     });
-    console.log("Credit transaction updated for existing order:", orderId);
+    console.log(`✅ CreditTransaction updated:`, {
+      id: updatedTx.id,
+      type: updatedTx.transactionType,
+      amount: updatedTx.creditAmount.toString(),
+      newBalance: updatedTx.newBalance.toString()
+    });
   } else {
     const orderTransaction = await prisma.creditTransaction.create({
       data: {
@@ -290,7 +355,12 @@ export async function deductTieredCredit(
         createdBy: userId,
       },
     });
-    console.log("Credit transaction created:", orderTransaction);
+    console.log(`✅ CreditTransaction stored:`, {
+      id: orderTransaction.id,
+      type: orderTransaction.transactionType,
+      amount: orderTransaction.creditAmount.toString(),
+      newBalance: orderTransaction.newBalance.toString()
+    });
   }
  
 
@@ -307,15 +377,17 @@ export async function deductTieredCredit(
   }
 
   // Update order with credit tracking
-  // Fixed: Use findUnique by internal id or findFirst by shopifyOrderId
-  let order = await prisma.b2BOrder.findUnique({
-    where: { id: orderId },
-  });
-
+  // Reuse the order object we fetched earlier for ID robustness
   if (!order) {
     order = await prisma.b2BOrder.findUnique({
-      where: { shopifyOrderId: orderId },
+      where: { id: orderId },
     });
+
+    if (!order) {
+      order = await prisma.b2BOrder.findUnique({
+        where: { shopifyOrderId: orderId },
+      });
+    }
   }
 
   if (order) {

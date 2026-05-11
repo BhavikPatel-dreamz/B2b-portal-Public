@@ -146,18 +146,18 @@ export async function createOrder(data: CreateOrderInput) {
       }
     })
     
-    if(notifidationRecode){
-    
+    if (notifidationRecode) {
       await prisma.notification.update({
-        where:{
-          id:notifidationRecode.id
+        where: {
+          id: notifidationRecode.id,
         },
-      data: notificationData,
-    }); 
+        data: notificationData,
+      });
+    } else {
+      await prisma.notification.create({
+        data: notificationData,
+      });
     }
-    await prisma.notification.create({
-      data: notificationData,
-    });
   
 
   return order;

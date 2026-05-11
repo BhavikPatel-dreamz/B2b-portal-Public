@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { authenticate, getAdminForShop } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
-import { createOrder } from "../services/order.server";
+import { upsertOrder } from "../services/order.server";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { syncCompanyCreditMetafields } from "../services/metafieldSync.server";
 import { Prisma } from "@prisma/client";
@@ -157,6 +157,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             user.companyId,
             user.id,
             orderTotal.toNumber(),
+            orderGid
           );
 
           if (!validation.canCreate) {
@@ -167,7 +168,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             });
 
             // Still create the order but mark it as requiring attention
-            await createOrder({
+            await upsertOrder({
               companyId: user.companyId,
               createdByUserId: user.id,
               shopId: store.id,
@@ -184,8 +185,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
             // Sync metafields even when validation fails
             try {
-              const { admin } = await authenticate.admin(request);
-              await syncCompanyCreditMetafields(admin, user.companyId);
+              const admin = await getAdminForShop(shop);
+              await syncCompanyCreditMetafields(admin as any, user.companyId);
             } catch (syncError) {
               console.error(`⚠️ Failed to sync metafields after order creation:`, syncError);
             }
@@ -198,7 +199,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           await deductTieredCredit(
             user.companyId,
             user.id,
-            orderGid || `temp-${orderIdNum}`,
+            orderGid!,
             orderTotal.toNumber(),
             `Credit reserved for pending order ${orderIdNum}`,
           );
@@ -217,7 +218,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       // Create B2B order entry via service
-     await createOrder({
+     await upsertOrder({
         companyId: user.companyId,
         createdByUserId: user.id,
         shopId: store.id,
@@ -234,8 +235,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       // Sync metafields after order creation to update creditUsed
       try {
-        const { admin } = await authenticate.admin(request);
-        await syncCompanyCreditMetafields(admin, user.companyId);
+        const admin = await getAdminForShop(shop);
+        await syncCompanyCreditMetafields(admin as any, user.companyId);
         console.log(`✅ Metafields synced for company ${user.companyId} after order creation`);
       } catch (syncError) {
         console.error(`⚠️ Failed to sync metafields after order creation:`, syncError);
