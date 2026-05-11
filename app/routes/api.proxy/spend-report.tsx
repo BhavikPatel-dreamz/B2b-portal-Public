@@ -18,11 +18,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return Response.json({ error: "Store access token not available" }, { status: 500 });
     }
 
-    // Fetch orders for the specified range
+    // Fetch orders for the specified range (entire company)
     const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
       companyId,
       filters: {
-        customerId,
         dateRange,
       },
     });
