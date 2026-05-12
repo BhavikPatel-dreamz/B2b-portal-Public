@@ -169,7 +169,10 @@ export default function Home() {
   //     : 100;
 
   // Calculate percentages for company stats
-  const totalRegistrations = data.totalCompanies;
+  const totalRegistrations =
+    (data.approvedRegistrations || 0) +
+    (data.pendingRegistrations || 0) +
+    (data.rejectedRegistrations || 0);
   const approvedPercentage =
     totalRegistrations > 0
       ? Math.round((data.approvedRegistrations / totalRegistrations) * 100)
@@ -1143,9 +1146,9 @@ export default function Home() {
                   </svg>
                   <div className="chart-center">
                     <div className="chart-center-value">
-                      {data.totalCompanies}
+                      {totalRegistrations}
                     </div>
-                    <div className="chart-center-label">Total</div>
+                    <div className="chart-center-label">Submissions</div>
                   </div>
                 </div>
 
