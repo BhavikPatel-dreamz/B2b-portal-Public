@@ -370,9 +370,44 @@ export async function clearStorePlan(shopDomain: string) {
 }
 
 /**
- * Mark store as uninstalled
+ * Mark store as uninstalled and cleanup company data
  */
 export async function uninstallStore(shopDomain: string) {
+  const store = await prisma.store.findUnique({
+    where: { shopDomain },
+    select: { id: true },
+  });
+
+  if (store) {
+    console.log(`Cleaning up all data for store: ${shopDomain} (${store.id})`);
+    
+    // Comprehensive cleanup of all shop-related data
+    // Cascading deletes handle related records, but we'll be explicit for core data
+    await prisma.$transaction([
+      // Delete all credit transactions first
+      prisma.creditTransaction.deleteMany({
+        where: { company: { shopId: store.id } }
+      }),
+      prisma.companyAccount.deleteMany({ where: { shopId: store.id } }),
+      prisma.user.deleteMany({ where: { shopId: store.id } }),
+      prisma.registrationSubmission.deleteMany({ where: { shopId: store.id } }),
+      prisma.notification.deleteMany({ where: { shopId: store.id } }),
+      prisma.wishlist.deleteMany({ where: { shop: shopDomain } }),
+      prisma.formFieldConfig.deleteMany({ where: { shopId: store.id } }),
+      
+      // Reset all email notification toggles
+      prisma.emailTemplates.updateMany({
+        where: { shopId: store.id },
+        data: {
+          customerRegistration: false,
+          customerRegistrationApproved: false,
+          customerRegistrationRejected: false,
+          adminRequest: false,
+        },
+      }),
+    ]);
+  }
+
   return await prisma.store.update({
     where: { shopDomain },
     data: {
@@ -386,6 +421,9 @@ export async function uninstallStore(shopDomain: string) {
       blockOrderWhenCreditUnavailable: false,
       companyWelcomeEmailEnabled: false,
       smtpSecure: false,
+      contactEmail: "",
+      submissionEmail: "",
+      smtpFromEmail: "",
     },
   });
 }
