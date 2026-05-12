@@ -257,6 +257,55 @@ export default function Home() {
         className="dashboard-container"
         style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}
       >
+         {isFreePlan  ? (
+                    <div
+                      style={{
+                        marginBottom: 16,
+                        padding: 14,
+                        borderRadius: 14,
+                        border: "1px solid #f1c40f",
+                        background: "linear-gradient(180deg, #fffdf2 0%, #fff7db 100%)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 650, color: "#202223" }}>
+                            Free plan limit reached
+                          </div>
+                          <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
+                            Companies: {data.totalCompanies}/{10} · Registrations: {data.approvedRegistrations}/{10}
+                          </div>
+                        </div>
+                        <Link
+                          to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
+                          style={{ textDecoration: "none" }}
+                        >
+                          <button
+                            type="button"
+                            style={{
+                              padding: "10px 16px",
+                              borderRadius: 10,
+                              border: "none",
+                              background: "#202223",
+                              color: "white",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Upgrade Plan
+                          </button>
+                        </Link>
+                      </div>
+                    </div>
+                  ) : null}
         <style>{`
         * {
           box-sizing: border-box;

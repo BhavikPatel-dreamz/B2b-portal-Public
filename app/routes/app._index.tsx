@@ -15,6 +15,8 @@ import { LoaderFunctionArgs } from "react-router";
 import { syncShopifyCompanies } from "app/utils/company.server";
 import { countRegistrations } from "../services/registration.server";
 import { clearAdminCompaniesCache } from "./app.companies";
+import { clearSelectPlanCache } from "./app.select-plan"; 
+import { getFreePlanUsage } from "app/utils/free-plan-limits.server";
 
 
 type Tutorial = {
@@ -113,6 +115,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 // Fetch pending registrations count
   const pendingRegistrations = await countRegistrations(store.id, "PENDING");
+  
+  const isFreePlan = store.plan === "free";
+  let freePlanCompanyCount = 0;
+  
+  if (isFreePlan) {
+    const usage = await getFreePlanUsage(store.id);
+    freePlanCompanyCount = usage.companyCount;
+  }
 
   return Response.json({
     themes,
@@ -121,6 +131,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     completedSetupSteps: store.completedSetupSteps || [],
     setupFinished: store.setupFinished,
     pendingRegistrations,
+    isFreePlan,
+    freePlanCompanyCount,
   });
 };
 
@@ -195,6 +207,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (result.success) {
     clearAdminCompaniesCache(session.shop);
+    clearSelectPlanCache(session.shop);
   }
 
   return Response.json({
@@ -207,13 +220,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Welcome() {
-  const { store, themes = [], completedSetupSteps = [], setupFinished = false, pendingRegistrations = 0 } = useLoaderData<typeof loader>() as {
-    themes: ThemeSummary[];
-    store: { shopDomain: string; id: string } | null;
-    completedSetupSteps: string[];
-    setupFinished: boolean;
-    pendingRegistrations: number;
-  };
+const {
+  store,
+  themes = [],
+  completedSetupSteps = [],
+  setupFinished = false,
+  pendingRegistrations = 0,
+  isFreePlan = false,
+  freePlanCompanyCount = 0,
+} = useLoaderData<typeof loader>() as {
+  themes: ThemeSummary[];
+  store: { shopDomain: string; id: string } | null;
+  completedSetupSteps: string[];
+  setupFinished: boolean;
+  pendingRegistrations: number;
+  isFreePlan: boolean;
+  freePlanCompanyCount: number;
+};
   const syncFetcher = useFetcher<ActionResponse>();
   const setupFetcher = useFetcher();
   const navigate = useNavigate();
@@ -1601,6 +1624,55 @@ export default function Welcome() {
             Welcome to SmartB2B portal, where you can set up your B2B experience, manage company accounts, and streamline customer onboarding in one place.
           </p>
         </div>
+   {isFreePlan  ? (
+                    <div
+                      style={{
+                        marginBottom: 16,
+                        padding: 14,
+                        borderRadius: 14,
+                        border: "1px solid #f1c40f",
+                        background: "linear-gradient(180deg, #fffdf2 0%, #fff7db 100%)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 650, color: "#202223" }}>
+                            Free plan limit reached
+                          </div>
+                          <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
+                            Companies: {freePlanCompanyCount}/{10}
+                          </div>
+                        </div>
+                        <Link
+                          to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
+                          style={{ textDecoration: "none" }}
+                        >
+                          <button
+                            type="button"
+                            style={{
+                              padding: "10px 16px",
+                              borderRadius: 10,
+                              border: "none",
+                              background: "#202223",
+                              color: "white",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Upgrade Plan
+                          </button>
+                        </Link>
+                      </div>
+                    </div>
+                  ) : null}
 
        
 

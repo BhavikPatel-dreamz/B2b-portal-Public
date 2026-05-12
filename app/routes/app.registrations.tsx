@@ -26,7 +26,7 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import {
   sendCustomerRegistrationApprovalEmail,
-  sendCustomerRegistrationRejectdEmail,
+  sendCustomerRegistrationRejectedEmail,
 } from "app/utils/email";
 import { updateCompanyMetafield } from "app/services/company.server";
 import EditDetailsModal, {
@@ -2781,7 +2781,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
         clearRegistrationViewCaches(shop);
 
-        await sendCustomerRegistrationRejectdEmail({
+        await sendCustomerRegistrationRejectedEmail({
           storeId: store.id,
           storeOwnerName: store.storeOwnerName || "Store Owner",
           email: registration.email,

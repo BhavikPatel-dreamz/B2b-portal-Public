@@ -46,47 +46,53 @@ export function decryptSmtpSecret(value?: string | null) {
   const [ivHex, tagHex, encryptedHex] = value.split(":");
   if (!ivHex || !tagHex || !encryptedHex) return "";
 
-  const decipher = crypto.createDecipheriv(
-    "aes-256-gcm",
-    getEncryptionKey(),
-    Buffer.from(ivHex, "hex"),
-  );
-  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  try {
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      getEncryptionKey(),
+      Buffer.from(ivHex, "hex"),
+    );
+    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
 
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(encryptedHex, "hex")),
-    decipher.final(),
-  ]);
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(encryptedHex, "hex")),
+      decipher.final(),
+    ]);
 
-  return decrypted.toString("utf8");
+    return decrypted.toString("utf8");
+  } catch (err) {
+    console.error(
+      "❌ Failed to decrypt SMTP secret. This likely means the encryption key (SHOPIFY_API_SECRET or SMTP_ENCRYPTION_KEY) has changed since the secret was saved.",
+      err,
+    );
+    return "";
+  }
 }
 
 export function resolveStoreSmtpConfig(
   store?: StoreSmtpSource | null,
 ): ResolvedSmtpConfig | null {
-  const host = store?.smtpHost?.trim() || process.env.SMTP_HOST || process.env.BREVO_SMTP_HOST || "";
+  const host = store?.smtpHost?.trim() || process.env.SMTP_HOST  ||"";
   const port = Number(
     store?.smtpPort ||
       process.env.SMTP_PORT ||
-      process.env.BREVO_SMTP_PORT ||
+      process.env.SMTP_PORT ||
       587,
   );
   const secure =
     store?.smtpSecure ??
     (process.env.SMTP_SECURE === "true");
-  const user = store?.smtpUser?.trim() || process.env.SMTP_USER || process.env.BREVO_SMTP_USER || "";
+  const user = store?.smtpUser?.trim() || process.env.SMTP_USER || "";
   const pass =
     decryptSmtpSecret(store?.smtpPassEncrypted) ||
-    process.env.SMTP_PASS ||
-    process.env.BREVO_SMTP_PASSWORD ||
+    process.env.SMTP_PASSWORD ||
     "";
   const fromEmail =
     store?.smtpFromEmail?.trim() ||
     process.env.SMTP_FROM_EMAIL ||
-    process.env.BREVO_FROM_EMAIL ||
     "";
   const fromName =
-    store?.smtpFromName?.trim() || process.env.SMTP_FROM_NAME || "B2B Portal";
+    store?.smtpFromName?.trim() || process.env.SMTP_FROM_NAME || "SmartB2B";
 
   if (!host || !port || !user || !pass || !fromEmail) {
     return null;

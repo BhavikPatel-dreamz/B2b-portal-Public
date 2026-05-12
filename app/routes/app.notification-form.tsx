@@ -476,11 +476,6 @@ function buildPreviewHtml(subject: string, html: string, logoUrl?: string) {
           </tr>
 
           <!-- FOOTER -->
-          <tr>
-            <td class="email-footer">
-              Preview using sample data
-            </td>
-          </tr>
 
         </table>
 
@@ -660,111 +655,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } satisfies ActionData);
   }
 
-  //   if (intent === "saveSmtpSettings") {
-  //     const host = String(formData.get("smtpHost") || "").trim();
-  //     const portRaw = String(formData.get("smtpPort") || "").trim();
-  //     const secure = String(formData.get("smtpSecure") || "") === "true";
-  //     const user = String(formData.get("smtpUser") || "").trim();
-  //     const password = String(formData.get("smtpPass") || "");
-  //     const fromEmail = String(formData.get("smtpFromEmail") || "").trim();
-  //     const fromName = String(formData.get("smtpFromName") || "").trim();
-
-  //     const wantsCustomConfig = Boolean(
-  //       host || portRaw || user || password || fromEmail || fromName,
-  //     );
-
-  //   if (!wantsCustomConfig) {
-  //   await prisma.store.update({
-  //     where: { id: store.id },
-  //     data: {
-  //       smtpHost: null,
-  //       smtpPort: null,
-  //       smtpSecure: false,
-  //       smtpUser: null,
-  //       smtpPassEncrypted: null,
-  //       smtpFromEmail: null,
-  //       smtpFromName: null,
-  //     },
-  //   });
-
-  //   return Response.json({
-  //     success: true,
-  //     message: "SMTP settings reset to default environment configuration.",
-  //     smtpSettings: {
-  //       host: process.env.BREVO_SMTP_HOST || "",
-  //       port: process.env.BREVO_SMTP_PORT || "",
-  //       secure: process.env.SMTP_SECURE === "true",
-  //       user: process.env.BREVO_SMTP_USER || "",
-  //       fromEmail: process.env.BREVO_FROM_EMAIL || "",
-  //       fromName: process.env.SMTP_FROM_NAME || "",
-  //       hasPassword: Boolean(process.env.BREVO_SMTP_PASSWORD),
-  //       usesCustomConfig: false,
-  //     },
-  //   } satisfies ActionData);
-
-  // }
-
-  //     if (!host || !portRaw || !user || !fromEmail) {
-  //       return Response.json(
-  //         {
-  //           success: false,
-  //           errors: ["Host, port, username, and from email are required."],
-  //         } satisfies ActionData,
-  //         { status: 400 },
-  //       );
-  //     }
-
-  //     const port = Number(portRaw);
-  //     if (!Number.isInteger(port) || port <= 0) {
-  //       return Response.json(
-  //         {
-  //           success: false,
-  //           errors: ["SMTP port must be a valid positive number."],
-  //         } satisfies ActionData,
-  //         { status: 400 },
-  //       );
-  //     }
-
-  //     if (!validateEmailAddress(fromEmail)) {
-  //       return Response.json(
-  //         {
-  //           success: false,
-  //           errors: ["Please enter a valid sender email address."],
-  //         } satisfies ActionData,
-  //         { status: 400 },
-  //       );
-  //     }
-
-  //     await prisma.store.update({
-  //       where: { id: store.id },
-  //       data: {
-  //         smtpHost: host,
-  //         smtpPort: port,
-  //         smtpSecure: secure,
-  //         smtpUser: user,
-  //         ...(password
-  //           ? { smtpPassEncrypted: encryptSmtpSecret(password) }
-  //           : {}),
-  //         smtpFromEmail: fromEmail,
-  //         smtpFromName: fromName || "B2B Portal",
-  //       },
-  //     });
-
-  //     return Response.json({
-  //       success: true,
-  //       message: "SMTP settings saved successfully.",
-  //       smtpSettings: {
-  //         host,
-  //         port: String(port),
-  //         secure,
-  //         user,
-  //         fromEmail,
-  //         fromName: fromName || "B2B Portal",
-  //         hasPassword: Boolean(password || store.smtpPassEncrypted),
-  //         usesCustomConfig: true,
-  //       },
-  //     } satisfies ActionData);
-  //   }
 
   if (intent === "saveSmtpSettings") {
     const host = String(formData.get("smtpHost") || "").trim();
@@ -781,22 +671,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ── Reset to .env defaults ──────────────────────────────────────────────────
     if (!wantsCustomConfig) {
-        // host: process.env.BREVO_SMTP_HOST || "",
-        // port: process.env.BREVO_SMTP_PORT || "",
-        // secure: process.env.SMTP_SECURE === "true",
-        // user: process.env.BREVO_SMTP_USER || "",
-        // fromEmail: process.env.BREVO_FROM_EMAIL || "",
-        // fromName: process.env.SMTP_FROM_NAME || "",
-        // hasPassword: Boolean(process.env.BREVO_SMTP_PASSWORD),
-        // usesCustomConfig: false,
-      const envHost = process.env.BREVO_SMTP_HOST || null;
-      const envPort = process.env.BREVO_SMTP_PORT
-        ? Number(process.env.BREVO_SMTP_PORT)
+      const envHost = process.env.SMTP_HOST || null;
+      const envPort = process.env.SMTP_PORT
+        ? Number(process.env.SMTP_PORT)
         : null;
       const envSecure = process.env.SMTP_SECURE === "true";
-      const envUser = process.env.BREVO_SMTP_USER || null;
-      const envPass = process.env.BREVO_SMTP_PASSWORD || null;
-      const envFromEmail = process.env.BREVO_FROM_EMAIL || null;
+      const envUser = process.env.SMTP_USER || null;
+      const envPass = process.env.SMTP_PASSWORD || null;
+      const envFromEmail = process.env.SMTP_FROM_EMAIL || null;
       const envFromName = process.env.SMTP_FROM_NAME || null;
 
       await prisma.store.update({

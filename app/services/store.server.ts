@@ -1,7 +1,7 @@
 import prisma from "../db.server";
 import { FREE_PLAN, PAID_PLAN } from "../billing-plans.shared";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
-import { registerCartValidationFunction, unregisterAllCartValidations } from "./cartValidationRegistration.server";
+import { registerCartValidationFunction } from "./cartValidationRegistration.server";
 
 export interface CreateStoreInput {
   shopDomain: string;

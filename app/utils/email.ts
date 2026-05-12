@@ -17,14 +17,12 @@ type RegistrationEmailResult =
 async function sendEmail(
   { to, subject, html, text }: EmailParams,
   smtpConfig?: ResolvedSmtpConfig | null,
-) {
+): Promise<RegistrationEmailResult> {
   try {
     const resolvedConfig = smtpConfig || resolveStoreSmtpConfig(null);
 
     if (!resolvedConfig) {
-      console.warn(
-        "⚠️ Email service not configured - missing SMTP settings",
-      );
+      console.warn("⚠️ Email service not configured - missing SMTP settings");
       return { success: false, error: "Email service not configured" };
     }
 
@@ -36,7 +34,11 @@ async function sendEmail(
         user: resolvedConfig.user,
         pass: resolvedConfig.pass,
       },
+      tls: {
+        rejectUnauthorized: false,
+      },
     });
+    
 
     const response = await transporter.sendMail({
       from: `"${resolvedConfig.fromName}" <${resolvedConfig.fromEmail}>`,
@@ -45,7 +47,6 @@ async function sendEmail(
       html,
       text,
     });
-    
 
     console.log("✅ Email sent successfully:", response.messageId);
     return { success: true, messageId: response.messageId };
@@ -166,20 +167,21 @@ export async function sendRegistrationEmailForAdmin(
       ctaLabel: "View B2B Page",
       ctaUrl: `https://admin.shopify.com/store/${
         (storeData?.shopDomain || "store.com").split(".")[0]
-      }/apps/b2b-portal-public-3/app/registrations`,
-      footerText:
-        "This email was sent to notify you about a B2B registration request.",
+      }/apps/b2b-portal-public-3/app/registrations`
     },
   );
 
   const text = stripHtmlTags(processedTemplate);
 
-  return sendEmail({
-    to: contactEmail,
-    subject: processedSubject,
-    html,
-    text,
-  }, smtpConfig);
+  return sendEmail(
+    {
+      to: contactEmail,
+      subject: processedSubject,
+      html,
+      text,
+    },
+    smtpConfig,
+  );
 }
 
 export async function sendRegistrationEmailForCustomer(
@@ -249,12 +251,15 @@ export async function sendRegistrationEmailForCustomer(
 
   const text = stripHtmlTags(processedTemplate);
 
-  return sendEmail({
-    to: contactEmail,
-    subject: processedSubject,
-    html,
-    text,
-  }, smtpConfig);
+  return sendEmail(
+    {
+      to: contactEmail,
+      subject: processedSubject,
+      html,
+      text,
+    },
+    smtpConfig,
+  );
 }
 
 export async function sendRegistrationEmail(
@@ -309,7 +314,7 @@ function convertToHtmlEmail(
   const footerText =
     options?.footerText ||
     "This email was sent to notify you about a B2B registration request.";
-  
+
   const logoMarkup = options?.logoUrl
     ? `<img src="${options.logoUrl}" alt="Store logo" style="display: block; max-height: 60px; margin-bottom: 12px;" />`
     : "";
@@ -388,7 +393,7 @@ export async function sendCustomerRegistrationApprovalEmail({
   companyName: string;
   contactName: string;
   note?: string | null;
-}) {
+}): Promise<RegistrationEmailResult> {
   const { storeData, emailTemplateConfig } =
     await getRegistrationEmailContext(storeId);
   const smtpConfig = resolveStoreSmtpConfig(storeData);
@@ -445,12 +450,15 @@ export async function sendCustomerRegistrationApprovalEmail({
   );
   const text = stripHtmlTags(processedTemplate);
 
-  return sendEmail({
-    to: email,
-    subject: processedSubject,
-    html,
-    text,
-  }, smtpConfig);
+  return sendEmail(
+    {
+      to: email,
+      subject: processedSubject,
+      html,
+      text,
+    },
+    smtpConfig,
+  );
 }
 
 export async function sendEmployeeAssignmentEmail({
@@ -469,7 +477,7 @@ export async function sendEmployeeAssignmentEmail({
   email: string;
   companyName: string;
   contactName: string;
-}) {
+}): Promise<RegistrationEmailResult> {
   const { html, text } = generateEmployeeAssignmentTemplate(
     shopName || "Shop Name",
     shopDomain || "shop-domain.myshopify.com",
@@ -598,7 +606,7 @@ ${shopName}
   return { html, text };
 }
 
-export async function sendCustomerRegistrationRejectdEmail({
+export async function sendCustomerRegistrationRejectedEmail({
   storeId,
   storeOwnerName,
   email,
@@ -612,7 +620,7 @@ export async function sendCustomerRegistrationRejectdEmail({
   companyName: string;
   contactName: string;
   note?: string | null;
-}) {
+}): Promise<RegistrationEmailResult> {
   const { storeData, emailTemplateConfig } =
     await getRegistrationEmailContext(storeId);
 

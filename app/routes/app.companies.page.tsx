@@ -387,7 +387,7 @@ export default function CompaniesPage() {
         "Updated At",
         "Status",
         ...(!isFreePlan
-          ? ["Credit Limit", "Used Credit", "Available Credit", "Usage %"]
+          ? ["Credit Limit", "Used Credit", "Available Credit"]
           : []),
       ],
       ...companies.map((company) => [
@@ -550,8 +550,7 @@ export default function CompaniesPage() {
         </p>
       </div>
       <div style={contentPanelStyle}>
-          {isFreePlan &&
-          (freePlanCompanyLimitReached || freePlanRegistrationLimitReached) ? (
+          {isFreePlan  ? (
             <div
               style={{
                 marginBottom: 16,
@@ -850,7 +849,7 @@ export default function CompaniesPage() {
                           {renderSortArrow("contact")}
                         </button>
                       </th>
-                      <th style={{ ...tableHeaderCellStyle, minWidth: 90 }}>
+                      {isFreePlan && <th style={{ ...tableHeaderCellStyle, minWidth: 90 }}>
                         <button
                           type="button"
                           onClick={() => toggleSort("users")}
@@ -859,12 +858,12 @@ export default function CompaniesPage() {
                           <span>Users</span>
                           {renderSortArrow("users")}
                         </button>
-                      </th>
-                      {!isFreePlan && (
+                      </th>}
+                      {/* {!isFreePlan && (
                         <th style={{ ...tableHeaderCellStyle, minWidth: 140 }}>
                           Payment Terms
                         </th>
-                      )}
+                      )} */}
                       {!isFreePlan && (
                         <>
                           <th style={{ ...tableHeaderCellStyle, minWidth: 120 }}>
@@ -876,9 +875,9 @@ export default function CompaniesPage() {
                           <th style={{ ...tableHeaderCellStyle, minWidth: 140 }}>
                             Available Credit
                           </th>
-                          <th style={{ ...tableHeaderCellStyle, minWidth: 90 }}>
+                          { isFreePlan && <th style={{ ...tableHeaderCellStyle, minWidth: 90 }}>
                             Usage %
-                          </th>
+                          </th>}
                         </>
                       )}
                       <th style={{ ...tableHeaderCellStyle, minWidth: 130 }}>
@@ -945,14 +944,16 @@ export default function CompaniesPage() {
                                 <span style={{ color: "#5c5f62" }}>Not set</span>
                               )}
                             </td>
-                            <td style={tableCellStyle}>
-                              {company.userCount}
-                            </td>
-                            {!isFreePlan && (
+                            { isFreePlan && (
+                              <td style={tableCellStyle}>
+                                {company.userCount}
+                              </td>
+                            )}
+                            {/* {!isFreePlan && (
                               <td style={tableCellStyle}>
                                 {company.paymentTerm || "No payment terms"}
                               </td>
-                            )}
+                            )} */}
                             {!isFreePlan && (
                               <>
                                 <td style={tableCellStyle}>
@@ -982,7 +983,7 @@ export default function CompaniesPage() {
                                 >
                                   {formatCredit(company.availableCredit, currencyCode)}
                                 </td>
-                                <td
+                                {/* <td
                                   style={{
                                     ...tableCellStyle,
                                     color:
@@ -995,7 +996,7 @@ export default function CompaniesPage() {
                                   }}
                                 >
                                   {company.creditUsagePercentage}%
-                                </td>
+                                </td> */}
                               </>
                             )}
                             <td

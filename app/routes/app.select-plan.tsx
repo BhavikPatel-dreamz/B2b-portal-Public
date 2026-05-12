@@ -21,6 +21,33 @@ import { LoaderFunctionArgs } from "react-router";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
 
+
+
+// ============================================================
+// 🗂️  CACHE SETUP
+// ============================================================
+
+declare global {
+  var __selectPlanCache:
+    | Map<string, { data: any; timestamp: number }>
+    | undefined;
+}
+
+const selectPlanCache: Map<string, { data: any; timestamp: number }> =
+  globalThis.__selectPlanCache ??
+  (globalThis.__selectPlanCache = new Map());
+
+const SELECT_PLAN_CACHE_TTL = 2 * 60 * 1000; // 2 min
+
+// ============================================================
+// 🧹 CACHE HELPER
+// ============================================================
+
+export const clearSelectPlanCache = (shop: string) => {
+  const key = `select-plan-${shop}`;
+  selectPlanCache.delete(key);
+  console.log("🧹 SelectPlan cache cleared for:", shop);
+};
 function getBillingErrorMessage(error) {
   const defaultMessage = "Billing action failed";
   const rawMessage =
@@ -44,48 +71,74 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { authenticate } = await import("../shopify.server");
   const { billing, session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
+  const shop = session.shop;
+
   console.log("Running loader for select-plan route", billing);
 
-  // eslint-disable-next-line no-undef
   const isTest =
-    // eslint-disable-next-line no-undef
     process.env.SHOPIFY_BILLING_TEST == "true" ||
-    // eslint-disable-next-line no-undef
     process.env.NODE_ENV !== "production";
+
+  // ── CACHE KEY ──────────────────────────────────────────────
+  const cacheKey = `select-plan-${shop}`;
+  const cached = selectPlanCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < SELECT_PLAN_CACHE_TTL) {
+    console.log(`⚡ Cache HIT → ${cacheKey}`);
+
+    // returnTo is URL-specific, so always override from current request
+    const returnTo =
+      url.searchParams.get("returnTo")?.startsWith("/app/")
+        ? url.searchParams.get("returnTo")
+        : "/app";
+
+    return { ...cached.data, returnTo };
+  }
+
+  // ── CACHE MISS — run billing check + DB ───────────────────
+  console.log("🐢 Cache MISS → running billing check + DB");
 
   const { hasActivePayment, appSubscriptions } = await billing.check({
     plans: [PAID_PLAN],
     isTest,
   });
+
   const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
+    where: { shopDomain: shop },
     select: { plan: true, planKey: true },
   });
 
   if (hasActivePayment) {
-    await syncStoreSubscriptionState(session.shop, appSubscriptions || [], admin);
-    clearAdminCompaniesCache(session.shop);
-    clearDashboardStatsCache(session.shop);
+    await syncStoreSubscriptionState(shop, appSubscriptions || [], admin);
+    clearAdminCompaniesCache(shop);
+    clearDashboardStatsCache(shop);
+    // Active payment state changed — bust select-plan cache too
+    clearSelectPlanCache(shop);
   }
 
-  return {
+  const returnTo =
+    url.searchParams.get("returnTo")?.startsWith("/app/")
+      ? url.searchParams.get("returnTo")
+      : "/app";
+
+  const result = {
     isTest,
     hasActivePayment: hasActivePayment || store?.plan === "free",
     currentPlan: store?.plan || null,
     currentPlanKey: store?.planKey || null,
-    returnTo:
-      url.searchParams.get("returnTo") &&
-      url.searchParams.get("returnTo")?.startsWith("/app/")
-        ? url.searchParams.get("returnTo")
-        : "/app",
     activePlans: (appSubscriptions || []).map((s) => ({
       id: s.id,
       name: s.name,
       status: s.status,
     })),
   };
-};
 
+  // ✅ Cache set (returnTo is excluded — it's per-request)
+  selectPlanCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  console.log(`✅ Cache SET → ${cacheKey}`);
+
+  return { ...result, returnTo };
+};
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { authenticate } = await import("../shopify.server");
   const { billing, session, admin } = await authenticate.admin(request);
@@ -114,6 +167,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await setStoreFreePlan(session.shop, admin);
       clearAdminCompaniesCache(session.shop);
       clearDashboardStatsCache(session.shop);
+      clearSelectPlanCache(session.shop);
       return redirect(returnTo);
     }
 
@@ -137,7 +191,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.error("Billing request failed", err);
     return { ok: false, plan, billingUnsupported, message };
   }
-
+  clearSelectPlanCache(session.shop);
   return { ok: true };
 };
 
@@ -307,6 +361,86 @@ export default function SelectPlan() {
         </p>
       </div>
       <div style={contentPanelStyle}>
+       <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #dfe3e8",
+            borderRadius: 16,
+            boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
+            padding: "18px 20px",
+          }}
+        >
+          <h2
+            style={{
+              margin: "0 0 14px",
+              fontSize: "18px",
+              fontWeight: 700,
+              color: "#202223",
+            }}
+          >
+            Selected plan
+          </h2>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              flexWrap: "wrap",
+              background: "#f6f6f7",
+              borderRadius: 12,
+              padding: "16px 18px",
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            <div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "16px",
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {activePlanName || "No plan selected"}
+              </p>
+              {selectedPriceLabel && (
+                <p style={{ margin: "6px 0 0", fontSize: "14px", color: "#5c5f62" }}>
+                  {selectedPriceLabel}
+                </p>
+              )}
+            </div>
+            {hasShopifySubscription && activePlanName && (
+              <cancelFetcher.Form method="post" action="/app/cancel-subscription">
+                <button
+                  type="submit"
+                  disabled={isSubmitting || isCancelling}
+                  style={{
+                    minWidth: "160px",
+                    height: "42px",
+                    borderRadius: "10px",
+                    border: "1px solid #dc2626",
+                    background: isSubmitting || isCancelling ? "#fecaca" : "#ffffff",
+                    color: "#dc2626",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: "0 18px",
+                  }}
+                >
+                  {isCancelling ? "Cancelling..." : "Cancel subscription"}
+                </button>
+              </cancelFetcher.Form>
+            )}
+            {!hasShopifySubscription && (
+              <p style={{ margin: 0, fontSize: "14px", color: "#5c5f62" }}>
+                No cancellation available
+              </p>
+            )}
+          </div>
+        </div>
+        </div>
+      <div style={contentPanelStyle}>
         <div style={{ marginBottom: "22px" }}>
           <h2
             style={{
@@ -316,7 +450,7 @@ export default function SelectPlan() {
               margin: "0 0 18px",
             }}
           >
-            Pricing
+            {/* Pricing */}
           </h2>
 
           <div style={pricingGridStyle}>
@@ -539,84 +673,7 @@ export default function SelectPlan() {
           </div>
         </div>
 
-        <div
-          style={{
-            background: "#ffffff",
-            border: "1px solid #dfe3e8",
-            borderRadius: 16,
-            boxShadow: "0 1px 2px rgba(0, 0, 0, 0.04)",
-            padding: "18px 20px",
-          }}
-        >
-          <h2
-            style={{
-              margin: "0 0 14px",
-              fontSize: "18px",
-              fontWeight: 700,
-              color: "#202223",
-            }}
-          >
-            Selected plan
-          </h2>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "16px",
-              flexWrap: "wrap",
-              background: "#f6f6f7",
-              borderRadius: 12,
-              padding: "16px 18px",
-              border: "1px solid #e5e7eb",
-            }}
-          >
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "16px",
-                  fontWeight: 700,
-                  color: "#111827",
-                }}
-              >
-                {activePlanName || "No plan selected"}
-              </p>
-              {selectedPriceLabel && (
-                <p style={{ margin: "6px 0 0", fontSize: "14px", color: "#5c5f62" }}>
-                  {selectedPriceLabel}
-                </p>
-              )}
-            </div>
-            {hasShopifySubscription && activePlanName && (
-              <cancelFetcher.Form method="post" action="/app/cancel-subscription">
-                <button
-                  type="submit"
-                  disabled={isSubmitting || isCancelling}
-                  style={{
-                    minWidth: "160px",
-                    height: "42px",
-                    borderRadius: "10px",
-                    border: "1px solid #dc2626",
-                    background: isSubmitting || isCancelling ? "#fecaca" : "#ffffff",
-                    color: "#dc2626",
-                    fontSize: "14px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    padding: "0 18px",
-                  }}
-                >
-                  {isCancelling ? "Cancelling..." : "Cancel subscription"}
-                </button>
-              </cancelFetcher.Form>
-            )}
-            {!hasShopifySubscription && (
-              <p style={{ margin: 0, fontSize: "14px", color: "#5c5f62" }}>
-                No cancellation available
-              </p>
-            )}
-          </div>
-        </div>
+       
       </div>
     </div>
   );
