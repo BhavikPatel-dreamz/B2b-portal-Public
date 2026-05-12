@@ -404,13 +404,18 @@ export async function deductTieredCredit(
   }
 
   // **Auto-sync metafields for checkout extension**
-  // Run in background to avoid blocking the main transaction
-  autoSyncCreditMetafields(internalCompanyId, userId).catch((syncError) => {
-    console.warn(
-      "Failed to sync credit metafields after deduction (background):",
-      syncError,
-    );
-  });
+  // Run in background with a slight delay to ensure DB transaction is fully committed
+  // and to avoid blocking the main execution flow.
+  if (internalCompanyId) {
+    setTimeout(() => {
+      autoSyncCreditMetafields(internalCompanyId, userId).catch((syncError) => {
+        console.warn(
+          "Failed to sync credit metafields after deduction (background):",
+          syncError,
+        );
+      });
+    }, 0);
+  }
 }
 
 /**

@@ -160,11 +160,12 @@ export async function deductCredit(
   });
 
   if (existingTransaction) {
-    // Update existing transaction
+    // If it's a recent update and amount hasn't changed much, we might want to skip the sync
+    // but for now let's just ensure we don't block the main flow.
     const updatedTx = await prisma.creditTransaction.update({
       where: { id: existingTransaction.id },
       data: {
-        creditAmount: amountDecimal.negated(), // Negative because we're deducting
+        creditAmount: amountDecimal.negated(),
         previousBalance,
         newBalance,
         transactionType: "order_updated",
@@ -173,12 +174,7 @@ export async function deductCredit(
         createdAt: new Date(),
       },
     });
-    console.log(`✅ CreditTransaction updated:`, {
-      id: updatedTx.id,
-      type: updatedTx.transactionType,
-      amount: updatedTx.creditAmount.toString(),
-      newBalance: updatedTx.newBalance.toString()
-    });
+    console.log(`✅ CreditTransaction updated:`, updatedTx.id);
   } else {
     // Create new credit transaction log
     const newTx = await prisma.creditTransaction.create({
@@ -186,7 +182,7 @@ export async function deductCredit(
         companyId,
         orderId,
         transactionType: "order_created",
-        creditAmount: amountDecimal.negated(), // Negative because we're deducting
+        creditAmount: amountDecimal.negated(),
         previousBalance,
         newBalance,
         notes: `Credit deducted for order ${orderId}`,
@@ -194,50 +190,30 @@ export async function deductCredit(
         createdAt: new Date(),
       },
     });
-    console.log(`✅ CreditTransaction stored:`, {
-      id: newTx.id,
-      type: newTx.transactionType,
-      amount: newTx.creditAmount.toString(),
-      newBalance: newTx.newBalance.toString()
-    });
+    console.log(`✅ CreditTransaction stored:`, newTx.id);
   }
 
-
-  // Check if the order exists in our database before updating
-  const existingOrder = await prisma.b2BOrder.findUnique({
-    where: { id: orderId },
-    select: { id: true },
+  // Update order if it exists
+  await prisma.b2BOrder.updateMany({
+    where: {
+      OR: [
+        { id: orderId },
+        { shopifyOrderId: orderId }
+      ]
+    },
+    data: {
+      creditUsed: amountDecimal,
+      remainingBalance: amountDecimal,
+    },
   });
 
-  if (existingOrder) {
-    // Update the order to reflect credit used
-    await prisma.b2BOrder.update({
-      where: { id: orderId },
-      data: {
-        creditUsed: amountDecimal,
-        remainingBalance: amountDecimal,
-      },
-    });
-  } else {
-    console.log(
-      `⚠️ Order ${orderId} not found in database - skipping order update`,
-    );
-  }
-
-  // Sync updated credit information to Shopify metafields for cart validation
-  // Run in background to avoid blocking the main transaction
+  // Sync updated credit information in the background
   if (admin) {
-    syncCompanyCreditMetafields(admin, companyId)
-      .then(() => {
-        console.log(
-          `✅ Synced credit data to Shopify metafields for company ${companyId}`,
-        );
-      })
-      .catch((syncError) => {
-        console.error(`❌ Failed to sync credit metafields:`, syncError);
-      });
-  } else {
-    console.log(`⚠️ No admin context provided - skipping metafield sync`);
+    // We use a small delay or check to avoid overlapping syncs
+    // For now, just ensure it's unblocked
+    setTimeout(() => {
+      syncCompanyCreditMetafields(admin, companyId).catch(err => console.error("Sync error:", err));
+    }, 0);
   }
 
   return {

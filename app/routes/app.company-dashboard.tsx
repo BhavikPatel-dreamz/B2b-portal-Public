@@ -43,7 +43,9 @@ type LoaderData = {
     orderTotal: number;
     paidAmount: number;
     remainingBalance: number;
+    newBalance: number;
     creditUsed: number;
+    notes: string | null;
     paymentStatus: string;
     orderStatus: string;
     createdAt: string;
@@ -892,12 +894,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     usedCredit: isFreePlan ? 0 : creditSummary.usedCredit.toNumber(),
     pendingCredit: isFreePlan ? 0 : creditSummary.pendingCredit.toNumber(),
     creditPercentageUsed: isFreePlan ? 0 : creditPercentageUsed,
-    recentOrders: dashboardData.recentOrders.map((order) => ({
+    recentOrders: dashboardData.recentOrders.map((order: any) => ({
       id: order.id,
       shopifyOrderId: order.shopifyOrderId,
       orderTotal: order.orderTotal.toNumber(),
       paidAmount: order.paidAmount.toNumber(),
       remainingBalance: order.remainingBalance.toNumber(),
+      newBalance: order.newBalance?.toNumber() ?? order.remainingBalance.toNumber(),
+      notes: order.notes,
       paymentStatus: order.paymentStatus,
       orderStatus: order.orderStatus,
       creditUsed: order.creditUsed.toNumber(),
@@ -2086,7 +2090,7 @@ export default function CompanyDashboard() {
                       {(tx.shopifyOrderId)}
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
-                      {tx.createdAt.replace(/_/g, " ").toUpperCase()}
+                      {formatDate(tx.createdAt)}
                     </td>
                     <td
                       style={{
@@ -2115,11 +2119,11 @@ export default function CompanyDashboard() {
                     <td
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
-                      {formatCurrency(tx.remainingBalance, data.currencyCode)}
+                      {formatCurrency(tx.newBalance, data.currencyCode)}
                     </td>
-                    {/* <td style={{ padding: 12, fontSize: 13 }}>
+                    <td style={{ padding: 12, fontSize: 13 }}>
                       {tx.notes || "—"}
-                    </td> */}
+                    </td>
                   </tr>
                 ))}
               </tbody>

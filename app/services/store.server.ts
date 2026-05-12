@@ -378,6 +378,14 @@ export async function uninstallStore(shopDomain: string) {
     data: {
       isActive: false,
       uninstalledAt: new Date(),
+      setupFinished: false,
+      completedSetupSteps: [],
+      autoApproveB2BOnboarding: false,
+      orderConfirmationToMainAccount: false,
+      allowQuickOrderForUser: false,
+      blockOrderWhenCreditUnavailable: false,
+      companyWelcomeEmailEnabled: false,
+      smtpSecure: false,
     },
   });
 }
@@ -394,6 +402,8 @@ export async function deleteStore(shopDomain: string) {
       accessToken: null,
       scope: null,
       isActive: false,
+      setupFinished: false,
+      completedSetupSteps: [],
       autoApproveB2BOnboarding: false,
       orderConfirmationToMainAccount: false,
       allowQuickOrderForUser: false,

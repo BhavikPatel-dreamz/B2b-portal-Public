@@ -1,5 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
+import { Decimal } from "@prisma/client/runtime/library";
+import prisma from "../db.server";
 
 import { deductCredit } from "../services/tieredCreditService";
 import { getCompanyByUserId } from "../services/user.server";
@@ -88,6 +90,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const totalAmount = parseFloat(draftOrder.total_price || "0");
     console.log(`💰 Draft order total: ${totalAmount} ${draftOrder.currency}`);
+
+    // PREVENT DOUBLE DEDUCTION: Check if this order was already processed by the app proxy
+    const existingB2bOrder = await prisma.b2BOrder.findFirst({
+      where: {
+        OR: [
+          { shopifyOrderId: draftOrder.id.toString() },
+          { 
+            companyId: b2bUser.company.id,
+            orderTotal: new Decimal(totalAmount),
+            orderStatus: { in: ["draft", "submitted", "processing"] },
+            createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) } // Within last 5 mins
+          }
+        ]
+      }
+    });
+
+    if (existingB2bOrder && existingB2bOrder.creditUsed.greaterThan(0)) {
+      console.log(`ℹ️ Order ${draftOrder.id} already has credit deducted (${existingB2bOrder.creditUsed}). Skipping redundant deduction.`);
+      
+      // Still update the shopifyOrderId if it was missing or generic
+      if (!existingB2bOrder.shopifyOrderId || existingB2bOrder.shopifyOrderId === "") {
+        await prisma.b2BOrder.update({
+          where: { id: existingB2bOrder.id },
+          data: { shopifyOrderId: draftOrder.id.toString(), orderStatus: "submitted" }
+        });
+      }
+      return new Response("OK", { status: 200 });
+    }
 
     // Reserve credit for the draft order (pending review)
     try {

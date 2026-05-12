@@ -440,6 +440,37 @@ export async function getCompanyDashboardData(
     },
   });
 
+  // Fetch transactions to get the correct "New Balance" for each order
+  const orderIds = recentOrders
+    .map((o) => o.shopifyOrderId)
+    .filter(Boolean) as string[];
+  
+  const transactions = await prisma.creditTransaction.findMany({
+    where: {
+      companyId,
+      orderId: { in: orderIds },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const orderToBalanceMap = new Map();
+  const orderToNotesMap = new Map();
+  transactions.forEach((tx) => {
+    // Store the latest balance and notes for each order ID
+    if (tx.orderId && !orderToBalanceMap.has(tx.orderId)) {
+      orderToBalanceMap.set(tx.orderId, tx.newBalance);
+      orderToNotesMap.set(tx.orderId, tx.notes);
+    }
+  });
+
+  const recentOrdersWithBalance = recentOrders.map((order) => ({
+    ...order,
+    newBalance: order.shopifyOrderId
+      ? orderToBalanceMap.get(order.shopifyOrderId) || order.remainingBalance
+      : order.remainingBalance,
+    notes: order.shopifyOrderId ? orderToNotesMap.get(order.shopifyOrderId) : null,
+  }));
+
   // Get order statistics
   const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
     await Promise.all([
@@ -532,7 +563,7 @@ export async function getCompanyDashboardData(
 
   return {
     company,
-    recentOrders,
+    recentOrders: recentOrdersWithBalance,
     orderStats: {
       total: totalOrders,
       paid: paidOrders,

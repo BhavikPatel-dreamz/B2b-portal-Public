@@ -247,47 +247,92 @@ export async function syncAllCreditMetafields(
       throw new Error("User not found");
     }
 
-    // Sync customer metafields
-    const customerResult = await syncCustomerCreditMetafields(
-      shopifyAdmin as any,
-      customerId,
-      userId,
-    );
+    // Update customer and company metafields using a single metafieldsSet mutation
+    const company = user.companyId ? await prisma.companyAccount.findUnique({
+      where: { id: user.companyId },
+      select: { creditLimit: true, shopifyCompanyId: true },
+    }) : null;
 
-    if (!customerResult.success) {
-      return {
-        success: false,
-        error: customerResult.error,
-        customer: customerResult,
-        company: { success: false },
-      };
+    let companyMetafields: MetafieldUpdate[] = [];
+    if (company && company.shopifyCompanyId) {
+      const creditData = await calculateAvailableCredit(user.companyId!);
+      if (creditData) {
+        const availableCredit = creditData.availableCredit;
+        const usedCredit = company.creditLimit.sub(availableCredit);
+        companyMetafields = [
+          {
+            namespace: "custom",
+            key: "company_credit_limit",
+            value: company.creditLimit.toString(),
+            type: "number_decimal",
+          },
+          {
+            namespace: "custom",
+            key: "company_credit_used",
+            value: usedCredit.toString(),
+            type: "number_decimal",
+          },
+        ];
+      }
     }
-    // Sync company metafields
-    let companyResult;
-    if (user.companyId) {
-      companyResult = await syncCompanyCreditMetafields(
-        shopifyAdmin as any,
-        user.companyId,
-      );
-    } else {
-      companyResult = {
-        success: true,
-        message: "User not associated with a company, skipping company sync.",
-      };
+
+    const mutation = `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            namespace
+            key
+            value
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const metafieldInputs = [
+      ...metafields.map((field) => ({
+        ownerId: customerId,
+        namespace: field.namespace,
+        key: field.key,
+        value: field.value,
+        type: field.type,
+      })),
+      ...companyMetafields.map((field) => ({
+        ownerId: company!.shopifyCompanyId!,
+        namespace: field.namespace,
+        key: field.key,
+        value: field.value,
+        type: field.type,
+      }))
+    ];
+
+    const response = await shopifyAdmin.graphql(mutation, {
+      variables: { metafields: metafieldInputs },
+    });
+
+    const data = await response.json();
+
+    if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
+      const error =
+        data.errors?.[0]?.message ||
+        data.data?.metafieldsSet?.userErrors?.[0]?.message;
+      throw new Error(`Failed to update metafields: ${error}`);
     }
 
     return {
-      success: customerResult.success && companyResult.success,
-      customer: customerResult,
-      company: companyResult,
+      success: true,
+      customer: { success: true, data: data.data?.metafieldsSet?.metafields.filter((m: any) => m.ownerId === customerId) },
+      company: company ? { success: true, data: data.data?.metafieldsSet?.metafields.filter((m: any) => m.ownerId === company.shopifyCompanyId) } : { success: true }
     };
   } catch (error: unknown) {
     console.error("Error syncing all credit metafields:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
-      customer: { success: false },
-      company: { success: false },
     };
   }
 }
