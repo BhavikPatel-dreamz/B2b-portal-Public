@@ -384,13 +384,30 @@ export async function uninstallStore(shopDomain: string) {
     // Comprehensive cleanup of all shop-related data
     // Cascading deletes handle related records, but we'll be explicit for core data
     await prisma.$transaction([
-      // Delete all credit transactions first
+      // Delete all credit transactions
       prisma.creditTransaction.deleteMany({
         where: { company: { shopId: store.id } }
       }),
+      
+      // Delete all company accounts (this also deletes approved users linked to them)
       prisma.companyAccount.deleteMany({ where: { shopId: store.id } }),
-      prisma.user.deleteMany({ where: { shopId: store.id } }),
-      prisma.registrationSubmission.deleteMany({ where: { shopId: store.id } }),
+      
+      // Delete ONLY approved users (Pending/Rejected stay as requested)
+      prisma.user.deleteMany({ 
+        where: { 
+          shopId: store.id,
+          status: "APPROVED"
+        } 
+      }),
+      
+      // Delete ONLY approved registration submissions (Pending/Rejected stay as requested)
+      prisma.registrationSubmission.deleteMany({ 
+        where: { 
+          shopId: store.id,
+          status: "APPROVED"
+        } 
+      }),
+      
       prisma.notification.deleteMany({ where: { shopId: store.id } }),
       prisma.wishlist.deleteMany({ where: { shop: shopDomain } }),
       prisma.formFieldConfig.deleteMany({ where: { shopId: store.id } }),
