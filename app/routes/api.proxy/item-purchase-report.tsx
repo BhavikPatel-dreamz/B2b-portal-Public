@@ -15,17 +15,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const searchQuery = filters?.query?.toLowerCase() || "";
     const dateRangePreset = filters?.dateRange?.preset || "current_month";
 
-    const { shop, store, companyId, customerId } = await authenticateApiProxyRequest(request);
+    const { shop, store, companyId, companyInfo } = await authenticateApiProxyRequest(request);
 
     if (!store.accessToken) {
         return Response.json({ error: "Store access token not available" }, { status: 500 });
     }
 
+    // Determine allowed locations based on user's role
+    const primaryCompany = companyInfo.companies[0];
+    const allowedLocationIds = primaryCompany.hasAllLocationAccess ? [] : primaryCompany.assignedLocationIds;
+
     // Fetch orders for the specified date range for the entire company
     const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
       companyId,
+      allowedLocationIds,
       filters: {
-        customerId,
         dateRange: filters?.dateRange || { preset: "current_month" }
       },
     });
