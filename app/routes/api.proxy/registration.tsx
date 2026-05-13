@@ -373,6 +373,7 @@ function extractErrorMessage(error: unknown): string {
   return "Something went wrong.";
 }
 
+// ─── ✅ FIXED: createOrFindCustomer now updates existing customer if fields are missing ───
 async function createOrFindCustomer(
   admin: AdminGraphQLClient,
   {
@@ -386,7 +387,8 @@ async function createOrFindCustomer(
     lastName: string;
     phone?: string;
   },
-) : Promise<{ customer: ShopifyCustomer; created: boolean }> {
+): Promise<{ customer: ShopifyCustomer; created: boolean }> {
+  // Step 1: Look up existing customer by email
   const existingResponse = await admin.graphql(
     `#graphql
     query CustomerByEmail($query: String!) {
@@ -406,6 +408,7 @@ async function createOrFindCustomer(
       },
     },
   );
+
   const existingPayload = await existingResponse.json();
   const existingCustomer = (existingPayload as Record<string, unknown>)?.data as
     | {
@@ -417,9 +420,70 @@ async function createOrFindCustomer(
   const customerNode = existingCustomer?.customers?.nodes?.[0];
 
   if (customerNode) {
+    // ✅ FIX: Check if Shopify customer is missing firstName, lastName, or phone.
+    // If so, update them with the values from the registration form.
+    const needsUpdate =
+      (!customerNode.firstName && firstName) ||
+      (!customerNode.lastName && lastName) ||
+      (!customerNode.phone && phone);
+
+    if (needsUpdate) {
+      console.log("🔄 Existing customer found but missing fields — updating...");
+
+      const updateResponse = await admin.graphql(
+        `#graphql
+        mutation UpdateCustomer($input: CustomerInput!) {
+          customerUpdate(input: $input) {
+            customer {
+              id
+              email
+              firstName
+              lastName
+              phone
+            }
+            userErrors { field message }
+          }
+        }`,
+        {
+          variables: {
+            input: {
+              id: customerNode.id,
+              // Only fill in fields that are currently blank in Shopify
+              firstName: customerNode.firstName || firstName || undefined,
+              lastName: customerNode.lastName || lastName || undefined,
+              phone: customerNode.phone || phone || undefined,
+            },
+          },
+        },
+      );
+
+      const updatePayload = await updateResponse.json();
+      const updateErrors = getGraphQLMessages(updatePayload, [
+        "data",
+        "customerUpdate",
+      ]);
+
+      if (updateErrors.length > 0) {
+        // Log the warning but don't throw — registration can still proceed
+        console.warn("⚠️ Customer update had errors:", updateErrors.join(", "));
+      } else {
+        const updatedCustomer = (
+          (updatePayload as Record<string, unknown>)?.data as {
+            customerUpdate?: { customer?: ShopifyCustomer };
+          }
+        )?.customerUpdate?.customer;
+
+        if (updatedCustomer) {
+          console.log("✅ Customer updated successfully:", updatedCustomer);
+          return { customer: updatedCustomer, created: false };
+        }
+      }
+    }
+
     return { customer: customerNode, created: false };
   }
 
+  // Step 2: Customer not found — create a new one
   const createResponse = await admin.graphql(
     `#graphql
     mutation CreateCustomer($input: CustomerInput!) {
@@ -980,14 +1044,14 @@ export const loader: LoaderFunction = async ({ request }) => {
       shopId: store.id,
     },
   });
- 
+
   return json({
     success: true,
     message: "Registration details fetched successfully.",
     data,
   });
 };
- 
+
 // ─── ACTION (POST) ─────────────────────────────────────────────────────────────
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("📝 Registration API called");
@@ -995,6 +1059,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // ✅ Handle CORS preflight
   const preflight = handlePreflight(request);
   if (preflight) return preflight;
+
   try {
     const url = new URL(request.url);
     const shop = url.searchParams.get("shop");
@@ -1022,7 +1087,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     for (const [key, value] of formData.entries()) {
       allFields[key] = typeof value === "string" ? value : value.name;
     }
- 
+
     // ✅ Extract main fields
     const companyName = getFieldValueByKeyMatch(allFields, "companyName", {
       startsWith: true,
@@ -1041,18 +1106,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const lastName = getFieldValueByKeyMatch(allFields, "lastName");
     const contactTitle = getFieldValueByKeyMatch(allFields, "contactTitle");
 
-
     // ✅ Basic validation
     if (!companyName) {
       return json(
         { success: false, error: "Company name is required." },
-        { status: 400 }
+        { status: 400 },
       );
     }
-    if(!email) {
+    if (!email) {
       return json(
         { success: false, error: "Email is required." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -1060,13 +1124,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!emailRegex.test(email)) {
       return json({ success: false, error: "Invalid email format." }, { status: 400 });
     }
- 
+
     // ✅ Duplicate email check
     const existing = await prisma.registrationSubmission.findFirst({
       where: { shopId: store.id, email },
     });
     console.log("✅ Existing Registration:", existing);
- 
+
     if (existing) {
       return json({ success: false, error: "Email already registered." }, { status: 409 });
     }
@@ -1116,6 +1180,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ success: false, error: "Company already registered." }, { status: 409 });
     }
 
+    // ✅ FIX: createOrFindCustomer now updates existing customer if firstName/lastName/phone are null
     const { customer } = await createOrFindCustomer(admin, {
       email,
       firstName,
@@ -1268,4 +1333,3 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ success: false, error: message }, { status: 500 });
   }
 };
- 
