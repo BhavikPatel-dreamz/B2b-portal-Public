@@ -1249,8 +1249,8 @@ export default function SettingsPage() {
                       id="themeColorText"
                       name="themeColor"
                       type="text"
-                      defaultValue={store?.themeColor || ""}
-                      placeholder="#005bd3"
+                      defaultValue={store?.themeColor || "#0f172a"}
+                      placeholder="#0f172a"
                       style={{
                         flex: 1,
                         padding: "10px 12px",

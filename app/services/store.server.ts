@@ -46,6 +46,7 @@ export async function upsertStore(data: CreateStoreInput) {
       accessToken: data.accessToken,
       scope: data.scope,
       currencyCode: data.currencyCode,
+      themeColor: "#0f172a",
     },
     update: {
       shopName: data.shopName,
