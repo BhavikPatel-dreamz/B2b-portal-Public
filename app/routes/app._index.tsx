@@ -6,6 +6,7 @@ import {
   type ActionFunctionArgs,
   type HeadersFunction
 } from "react-router";
+import { PAID_PLAN } from "app/billing-plans.shared";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import  { useEffect, useState } from "react";
@@ -64,45 +65,37 @@ const hasReadThemesScopeError = (error: unknown) => {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  // ✅ Add billing to destructuring
+  const { admin, session, billing } = await authenticate.admin(request);
 
   let themes: ThemeSummary[] = [];
   let missingScope = false;
 
   try {
-    const response = await admin.graphql(
-      `#graphql
+    const response = await admin.graphql(`#graphql
       {
         themes(first: 10) {
-          nodes {
-            id
-            name
-            role
-          }
+          nodes { id name role }
         }
       }`
     );
-
     const { data } = await response.json();
-
     themes = (data?.themes?.nodes ?? []).map((theme: { id: string; name: string; role: string }) => ({
       name: theme.name,
       role: theme.role,
       gid: theme.id,
       numericId: theme.id.split("/").pop(),
     }));
-    
   } catch (error) {
     if (hasReadThemesScopeError(error)) {
       missingScope = true;
-      console.warn("Skipping theme load on app index because read_themes is not granted for this shop.");
     } else {
       console.error("Unable to load themes for app index", error);
     }
   }
 
   const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop }, 
+    where: { shopDomain: session.shop },
   });
 
   if (!store) {
@@ -112,13 +105,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 
-
-// Fetch pending registrations count
   const pendingRegistrations = await countRegistrations(store.id, "PENDING");
-  
-  const isFreePlan = store.plan === "free";
+
+  // ✅ Check DB first — if paid, skip billing API call entirely
+  let isFreePlan = store.plan === "free";
+
+  if (isFreePlan) {
+    try {
+      const isTest =
+        process.env.SHOPIFY_BILLING_TEST == "true" ||
+        process.env.NODE_ENV !== "production";
+
+      const { hasActivePayment, appSubscriptions } = await billing.check({
+        plans: [PAID_PLAN], // import from billing-plans.shared
+        isTest,
+      });
+
+      if (hasActivePayment) {
+        // ✅ DB is stale — sync it now so popup never shows again
+        console.log("🔄 Dashboard: DB says free but Shopify has active payment — syncing");
+        const { syncStoreSubscriptionState } = await import("app/services/store.server");
+        const { clearAdminCompaniesCache } = await import("./app.companies");
+        const { clearDashboardStatsCache } = await import("app/utils/dashboard-cache.server");
+        const { clearSelectPlanCache } = await import("./app.select-plan");
+
+        await syncStoreSubscriptionState(session.shop, appSubscriptions || [], admin);
+        clearAdminCompaniesCache(session.shop);
+        clearDashboardStatsCache(session.shop);
+        clearSelectPlanCache(session.shop);
+
+        isFreePlan = false; // ✅ Don't show popup
+      }
+    } catch (err) {
+      console.error("Dashboard billing check failed — falling back to DB plan", err);
+      // isFreePlan stays true — safe fallback
+    }
+  }
+
   let freePlanCompanyCount = 0;
-  
   if (isFreePlan) {
     const usage = await getFreePlanUsage(store.id);
     freePlanCompanyCount = usage.companyCount;

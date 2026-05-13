@@ -74,27 +74,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const shop = session.shop;
 
-  console.log("Running loader for select-plan route", billing);
-
   const isTest =
     process.env.SHOPIFY_BILLING_TEST == "true" ||
     process.env.NODE_ENV !== "production";
+
   const isReturnFromBilling = url.searchParams.has("charge_id");
+  const isPendingReturn = url.searchParams.has("charge_id_pending"); // ✅ NEW
+
   const returnTo =
     url.searchParams.get("returnTo")?.startsWith("/app/")
       ? url.searchParams.get("returnTo")
       : "/app";
 
-  // ── CACHE KEY ──────────────────────────────────────────────
   const cacheKey = `select-plan-${shop}`;
   const cached = selectPlanCache.get(cacheKey);
 
-  if (cached && Date.now() - cached.timestamp < SELECT_PLAN_CACHE_TTL) {
+  // ✅ SKIP cache entirely when returning from Shopify billing
+  if (
+    !isReturnFromBilling &&
+    !isPendingReturn &&
+    cached &&
+    Date.now() - cached.timestamp < SELECT_PLAN_CACHE_TTL
+  ) {
     console.log(`⚡ Cache HIT → ${cacheKey}`);
     return { ...cached.data, returnTo };
   }
 
-  // ── CACHE MISS — run billing check + DB ───────────────────
   console.log("🐢 Cache MISS → running billing check + DB");
 
   const store = await prisma.store.findUnique({
@@ -111,13 +116,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       activePlans: [],
     };
     selectPlanCache.set(cacheKey, { data: result, timestamp: Date.now() });
-    console.log(`✅ Cache SET → ${cacheKey}`);
     return { ...result, returnTo };
   }
 
   const isFreePlan = store.plan === "free";
 
-  if (!isReturnFromBilling && isFreePlan) {
+  // ✅ Free plan fast-path ONLY when NOT returning from billing
+  if (!isReturnFromBilling && !isPendingReturn && isFreePlan) {
     const result = {
       isTest,
       hasActivePayment: false,
@@ -135,6 +140,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     isTest,
   });
 
+  // ✅ Always sync + redirect when returning from billing
+  if (isReturnFromBilling || isPendingReturn) {
+    await syncStoreSubscriptionState(shop, appSubscriptions || [], admin);
+    clearAdminCompaniesCache(shop);
+    clearDashboardStatsCache(shop);
+    clearSelectPlanCache(shop);
+
+    console.log("✅ Billing return synced, redirecting to", returnTo);
+    throw redirect('/app'); // /app now loads with guaranteed fresh data
+  }
+
+  // Normal flow (not returning from billing)
   if (hasActivePayment) {
     const activeSubscription = (appSubscriptions || []).find(
       (s) => s.status === "ACTIVE",
@@ -147,7 +164,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       await syncStoreSubscriptionState(shop, appSubscriptions || [], admin);
       clearAdminCompaniesCache(shop);
       clearDashboardStatsCache(shop);
-      // Active payment state changed — bust select-plan cache too
       clearSelectPlanCache(shop);
     }
   }
@@ -164,7 +180,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
   };
 
-  // ✅ Cache set (returnTo is excluded — it's per-request)
   selectPlanCache.set(cacheKey, { data: result, timestamp: Date.now() });
   console.log(`✅ Cache SET → ${cacheKey}`);
 
@@ -178,7 +193,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const plan = formData.get("plan");
   const returnToRaw = String(formData.get("returnTo") || "/app");
   console.log("Return to raw:", returnToRaw);
-  const returnTo = returnToRaw.startsWith("/app/") ? returnToRaw : "/app";
+  const returnTo = returnToRaw === "/app" || returnToRaw.startsWith("/app/") ? returnToRaw : "/app";
   const requestUrl = new URL(request.url);
   console.log("Running action for select-plan route111", requestUrl);
 
@@ -204,7 +219,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const shopName = session.shop.split(".")[0];
     const appHandle = "b2b-portal-public-dev";
-    const returnUrl = `https://admin.shopify.com/store/${shopName}/apps/${appHandle}${returnTo}`;
+   // Change your returnUrl to pass through select-plan first
+    const returnUrl = `https://admin.shopify.com/store/${shopName}/apps/${appHandle}/app/?charge_id_pending=1&returnTo=${encodeURIComponent(returnTo)}`;
 
     console.log("Requesting billing for plan", returnUrl, "isTest:", isTest);
     await billing.request({

@@ -22,6 +22,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
       companyId,
       filters: {
+        customerId,
         dateRange,
       },
     });
