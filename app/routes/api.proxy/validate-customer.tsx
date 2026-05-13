@@ -178,7 +178,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           logo: store.logo,
           email: store.contactEmail,
           storeName: store.shopName,
-          themeColor: store.themeColor,
+          themeColor: store.themeColor || "#0f172a",
           customerId: loggedInCustomerId,
           customerName,
           customerStatus: status,
