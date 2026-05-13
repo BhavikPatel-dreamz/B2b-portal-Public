@@ -18,6 +18,7 @@ import {
 import { createUser, getUserByEmail } from "app/services/user.server";
 import { getCompaniesByShop } from "app/services/company.server";
 import { calculateAvailableCredit } from "../services/creditService";
+import { getFreePlanUsage } from "app/utils/free-plan-limits.server";
 import {
   processCustomersDataRequest,
   processCustomersRedact,
@@ -43,6 +44,10 @@ interface LoaderData {
     companyWelcomeEmailEnabled?: boolean;
     privacyPolicylink?: string;
     privacyPolicyContent?: string;
+    freePlanUsage?: {
+      companyCount: number;
+      registrationCount: number;
+    };
   };
 }
 
@@ -89,6 +94,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  const freePlanUsage =
+    store.plan === "free" ? await getFreePlanUsage(store.id) : undefined;
+
   return Response.json(
     {
       storeMissing: false,
@@ -112,6 +120,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
         privacyPolicylink: store.privacyPolicylink || "",
         privacyPolicyContent: store.privacyPolicyContent || "",
+        freePlanUsage: freePlanUsage
+          ? {
+              companyCount: freePlanUsage.companyCount,
+              registrationCount: freePlanUsage.registrationCount,
+            }
+          : undefined,
       },
     } satisfies LoaderData,
     { status: 200 },
@@ -887,6 +901,14 @@ export default function SettingsPage() {
         "This will permanently delete all B2B portal data for this store, including companies, registrations, users, credit information, and app settings.",
       warning: "This action cannot be undone.",
     },
+    "customers-data-request": {
+      buttonLabel: "Customers Data Request",
+      confirmLabel: "Run Data Request",
+      title: "Confirm Customers Data Request",
+      description:
+        "This will initiate the customers/data_request workflow for the current store.",
+      warning: "This action cannot be undone.",
+    },
     "customers-redact": {
       buttonLabel: "Customers Redact",
       confirmLabel: "Delete Customer Data",
@@ -1195,6 +1217,9 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+ 
+              
+
               {/* ── Theme Settings ──────────────────────────────────────── */}
               <div style={{ display: activeTab === "theme" ? "grid" : "none", gap: 16 }}>
                 <div style={{ display: "grid", gap: 6 }}>
@@ -1254,6 +1279,55 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+                   {isFreePlan  ? (
+             <Link
+                      to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
+                      style={{
+                        display: "block",
+                        marginBottom: 16,
+                        padding: 14,
+                        borderRadius: 14,
+                        border: "1px solid #f1c40f",
+                        background: "linear-gradient(180deg, #fffdf2 0%, #fff7db 100%)",
+                        textDecoration: "none",
+                        color: "inherit",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 650, color: "#202223" }}>
+                            Free plan limit reached
+                          </div>
+                          <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
+                            Companies: {store.freePlanUsage?.companyCount ?? 0}/{10} · Registrations: {store.freePlanUsage?.registrationCount ?? 0}/{10}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "10px 16px",
+                            borderRadius: 10,
+                            background: "#202223",
+                            color: "white",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Upgrade Plan
+                        </div>
+                      </div>
+                    </Link>
+                  ) : null}
+
               {/* ── Save button ─────────────────────────────────────────── */}
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <s-button type="submit" variant="primary" {...(isSaving ? { loading: true } : {})}>
@@ -1261,6 +1335,7 @@ export default function SettingsPage() {
                 </s-button>
               </div>
             </fetcher.Form>
+            
 
             {/* ── Delete Actions ───────────────────────────────────────── */}
             <div style={{ marginTop: 32 }}>

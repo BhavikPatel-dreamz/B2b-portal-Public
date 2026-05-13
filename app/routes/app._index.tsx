@@ -1813,7 +1813,7 @@ const {
         </div>
 
         {/* Tutorials */}
-        <div className="tutorials-section">
+        {/* <div className="tutorials-section">
           <div className="tutorials-header">
             <div>
               <h2 className="tutorials-title">Guide videos</h2>
@@ -1858,25 +1858,25 @@ const {
         </div>
 
 
-        {/* Modal Popup */}
+     
         {selectedTutorial && (
           <div className="modal-overlay" onClick={closeModal}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              {/* Close button */}
+        
               <button className="modal-close-btn" onClick={closeModal}>
                 ✕
               </button>
 
-              {/* Main Content Area */}
+       
               <div className="modal-main">
-                {/* Header with status */}
+           
                 <div className="modal-main-header">
                   <div className="header-left">
                     <h2>{selectedTutorial.title}</h2>  
                   </div>
                 </div>
 
-                {/* Video Player */}
+               
                 <div className="video-wrapper">
                   <iframe
                     width="100%"
@@ -1889,13 +1889,13 @@ const {
                   ></iframe>
                 </div>
 
-                {/* Footer buttons */}
+               
                 <div className="modal-footer">
                 </div>
               </div>
             </div>
           </div>
-        )}
+        )} */}
 
      
       </div>
