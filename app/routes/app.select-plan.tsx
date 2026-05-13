@@ -15,6 +15,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   setStoreFreePlan,
   syncStoreSubscriptionState,
+  getStorePlanValue,
 } from "app/services/store.server";
 import prisma from "app/db.server";
 import { LoaderFunctionArgs } from "react-router";
@@ -78,6 +79,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const isTest =
     process.env.SHOPIFY_BILLING_TEST == "true" ||
     process.env.NODE_ENV !== "production";
+  const isReturnFromBilling = url.searchParams.has("charge_id");
+  const returnTo =
+    url.searchParams.get("returnTo")?.startsWith("/app/")
+      ? url.searchParams.get("returnTo")
+      : "/app";
 
   // ── CACHE KEY ──────────────────────────────────────────────
   const cacheKey = `select-plan-${shop}`;
@@ -85,41 +91,66 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (cached && Date.now() - cached.timestamp < SELECT_PLAN_CACHE_TTL) {
     console.log(`⚡ Cache HIT → ${cacheKey}`);
-
-    // returnTo is URL-specific, so always override from current request
-    const returnTo =
-      url.searchParams.get("returnTo")?.startsWith("/app/")
-        ? url.searchParams.get("returnTo")
-        : "/app";
-
     return { ...cached.data, returnTo };
   }
 
   // ── CACHE MISS — run billing check + DB ───────────────────
   console.log("🐢 Cache MISS → running billing check + DB");
 
-  const { hasActivePayment, appSubscriptions } = await billing.check({
-    plans: [PAID_PLAN],
-    isTest,
-  });
-
   const store = await prisma.store.findUnique({
     where: { shopDomain: shop },
     select: { plan: true, planKey: true },
   });
 
-  if (hasActivePayment) {
-    await syncStoreSubscriptionState(shop, appSubscriptions || [], admin);
-    clearAdminCompaniesCache(shop);
-    clearDashboardStatsCache(shop);
-    // Active payment state changed — bust select-plan cache too
-    clearSelectPlanCache(shop);
+  if (!store) {
+    const result = {
+      isTest,
+      hasActivePayment: false,
+      currentPlan: null,
+      currentPlanKey: null,
+      activePlans: [],
+    };
+    selectPlanCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    console.log(`✅ Cache SET → ${cacheKey}`);
+    return { ...result, returnTo };
   }
 
-  const returnTo =
-    url.searchParams.get("returnTo")?.startsWith("/app/")
-      ? url.searchParams.get("returnTo")
-      : "/app";
+  const isFreePlan = store.plan === "free";
+
+  if (!isReturnFromBilling && isFreePlan) {
+    const result = {
+      isTest,
+      hasActivePayment: false,
+      currentPlan: "free",
+      currentPlanKey: store.planKey || null,
+      activePlans: [],
+    };
+    selectPlanCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    console.log(`✅ Fast path free plan → ${cacheKey}`);
+    return { ...result, returnTo };
+  }
+
+  const { hasActivePayment, appSubscriptions } = await billing.check({
+    plans: [PAID_PLAN],
+    isTest,
+  });
+
+  if (hasActivePayment) {
+    const activeSubscription = (appSubscriptions || []).find(
+      (s) => s.status === "ACTIVE",
+    );
+
+    if (
+      store.plan !== getStorePlanValue(activeSubscription?.name) ||
+      store.planKey !== activeSubscription?.id
+    ) {
+      await syncStoreSubscriptionState(shop, appSubscriptions || [], admin);
+      clearAdminCompaniesCache(shop);
+      clearDashboardStatsCache(shop);
+      // Active payment state changed — bust select-plan cache too
+      clearSelectPlanCache(shop);
+    }
+  }
 
   const result = {
     isTest,
@@ -184,6 +215,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("Billing request sent");
   } catch (err) {
     if (err instanceof Response) {
+      clearSelectPlanCache(session.shop); 
+      clearDashboardStatsCache(session.shop);
       throw err;
     }
 
@@ -192,6 +225,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { ok: false, plan, billingUnsupported, message };
   }
   clearSelectPlanCache(session.shop);
+  clearDashboardStatsCache(session.shop);
   return { ok: true };
 };
 
