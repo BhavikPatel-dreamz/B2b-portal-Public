@@ -1,6 +1,6 @@
 import { PAID_PLAN } from "app/billing-plans.shared";
 import { ActionFunctionArgs,redirect } from "react-router";
-import { clearStorePlan } from "app/services/store.server";
+import { setStoreFreePlan } from "app/services/store.server";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
 import { clearSelectPlanCache } from "./app.select-plan"; 
@@ -8,7 +8,7 @@ import { clearSelectPlanCache } from "./app.select-plan";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { authenticate } = await import("../shopify.server");
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, session, admin } = await authenticate.admin(request);
 
   // eslint-disable-next-line no-undef
   const isTest =
@@ -28,11 +28,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("Active subscription found:", activeSubscription);
 
   if (!billingCheck.hasActivePayment || !activeSubscription) {
-    await clearStorePlan(session.shop);
+    await setStoreFreePlan(session.shop, admin);
     clearSelectPlanCache(session.shop);
     clearAdminCompaniesCache(session.shop);
     clearDashboardStatsCache(session.shop);
-    return { ok: false, message: "No active subscription found to cancel." };
+    return { ok: false, message: "No active subscription found to cancel. Store has been downgraded to free plan." };
   }
 
 
@@ -43,7 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
   console.log("Cancelled subscription:", cancelledSubscription);
 
-  await clearStorePlan(session.shop);
+  await setStoreFreePlan(session.shop, admin);
   clearSelectPlanCache(session.shop);
   clearAdminCompaniesCache(session.shop);
   clearDashboardStatsCache(session.shop);

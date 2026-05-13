@@ -162,7 +162,8 @@ export async function setShopValidationMetafields(
     console.log(
       `🏷️ Setting validation metafields (enabled: ${enabled}, blockOrderWhenCreditUnavailable: ${blockOrderWhenCreditUnavailable}) for ${shopId}`,
     );
-    const metafieldRes = await admin.graphql(`
+    const metafieldRes = await admin.graphql(
+      `
       mutation SetMetafield($metafields: [MetafieldsSetInput!]!) {
         metafieldsSet(metafields: $metafields) {
           metafields {
@@ -176,30 +177,35 @@ export async function setShopValidationMetafields(
           }
         }
       }
-    `, {
-      variables: {
-        metafields: [
-          {
-            namespace: "smartb2b",
-            key: "validation_enabled",
-            type: "single_line_text_field",
-            value: enabled ? "true" : "false",
-            ownerId: shopId
-          },
-          {
-            namespace: "smartb2b",
-            key: "block_orders_when_credit_unavailable",
-            type: "single_line_text_field",
-            value: blockOrderWhenCreditUnavailable ? "true" : "false",
-            ownerId: shopId
-          }
-        ]
-      }
-    });
+    `,
+      {
+        variables: {
+          metafields: [
+            {
+              namespace: "smartb2b",
+              key: "validation_enabled",
+              type: "single_line_text_field",
+              value: enabled ? "true" : "false",
+              ownerId: shopId,
+            },
+            {
+              namespace: "smartb2b",
+              key: "block_orders_when_credit_unavailable",
+              type: "single_line_text_field",
+              value: blockOrderWhenCreditUnavailable ? "true" : "false",
+              ownerId: shopId,
+            },
+          ],
+        },
+      },
+    );
 
     const metafieldData = await metafieldRes.json();
     if (metafieldData.data?.metafieldsSet?.userErrors?.length > 0) {
-      console.error("❌ Error setting shop metafield:", metafieldData.data.metafieldsSet.userErrors[0].message);
+      console.error(
+        "❌ Error setting shop metafield:",
+        metafieldData.data.metafieldsSet.userErrors[0].message,
+      );
     } else {
       console.log("✅ Shop validation metafields updated");
     }
@@ -213,7 +219,11 @@ export async function setShopValidationMetafields(
  * If plan is paid, restore terms from DB to Shopify
  * If plan is free, nullify terms in Shopify but keep them in DB
  */
-export async function syncStorePaymentTerms(storeId: string, admin: AdminApiContext, isPaid: boolean) {
+export async function syncStorePaymentTerms(
+  storeId: string,
+  admin: AdminApiContext,
+  isPaid: boolean,
+) {
   const companies = await prisma.companyAccount.findMany({
     where: { shopId: storeId },
     select: { shopifyCompanyId: true, paymentTerm: true },
@@ -245,7 +255,7 @@ export async function syncStorePaymentTerms(storeId: string, admin: AdminApiCont
 
       // Determine what to set in Shopify
       // If paid, use the stored paymentTerm from DB. If free, use null.
-      const targetPaymentTerm = isPaid ? (company.paymentTerm || null) : null;
+      const targetPaymentTerm = isPaid ? company.paymentTerm || null : null;
 
       for (const edge of locations) {
         const locationId = edge.node.id;
@@ -263,16 +273,19 @@ export async function syncStorePaymentTerms(storeId: string, admin: AdminApiCont
               userErrors { field message }
             }
           }`,
-          { 
-            variables: { 
+          {
+            variables: {
               companyLocationId: locationId,
-              paymentTermsTemplateId: targetPaymentTerm
-            } 
+              paymentTermsTemplateId: targetPaymentTerm,
+            },
           },
         );
       }
     } catch (error) {
-      console.error(`Error syncing Shopify payment terms for company ${company.shopifyCompanyId}:`, error);
+      console.error(
+        `Error syncing Shopify payment terms for company ${company.shopifyCompanyId}:`,
+        error,
+      );
     }
   }
 }
@@ -305,7 +318,9 @@ export async function syncStoreSubscriptionState(
 
   // Always ensure cart validation is registered and set the metafield based on the plan
   if (admin && store) {
-    console.log(`🔄 Syncing store plan (${plan}) and updating cart validation...`);
+    console.log(
+      `🔄 Syncing store plan (${plan}) and updating cart validation...`,
+    );
     await registerCartValidationFunction(admin);
     const currentStore = await prisma.store.findUnique({
       where: { shopDomain },
@@ -316,16 +331,49 @@ export async function syncStoreSubscriptionState(
       blockOrderWhenCreditUnavailable:
         currentStore?.blockOrderWhenCreditUnavailable ?? false,
     });
-    
+
     // Sync payment terms visibility in Shopify
-    console.log(`🔄 Syncing payment terms visibility for ${shopDomain} (isPaid: ${isPaid})...`);
+    console.log(
+      `🔄 Syncing payment terms visibility for ${shopDomain} (isPaid: ${isPaid})...`,
+    );
     await syncStorePaymentTerms(store.id, admin, isPaid);
   }
 
   return updatedStore;
 }
 
-export async function setStoreFreePlan(shopDomain: string, admin?: AdminApiContext) {
+/**
+ * Fast version of syncStoreSubscriptionState that only updates the database
+ * Used during redirects to avoid blocking the UI with Shopify API calls
+ */
+export async function syncStoreSubscriptionStateFast(
+  shopDomain: string,
+  appSubscriptions: AppSubscriptionSummary[] = [],
+) {
+  const activeSubscription =
+    appSubscriptions.find((subscription) => subscription.status === "ACTIVE") ||
+    null;
+
+  const plan = getStorePlanValue(activeSubscription?.name);
+
+  const updatedStore = await prisma.store.updateMany({
+    where: { shopDomain },
+    data: {
+      plan: plan,
+      planKey: activeSubscription?.id ?? null,
+      updatedAt: new Date(),
+    },
+  });
+
+  console.log(`⚡ Fast sync: Updated store ${shopDomain} plan to ${plan}`);
+
+  return updatedStore;
+}
+
+export async function setStoreFreePlan(
+  shopDomain: string,
+  admin?: AdminApiContext,
+) {
   const store = await prisma.store.findUnique({
     where: { shopDomain },
     select: { id: true },
@@ -335,7 +383,9 @@ export async function setStoreFreePlan(shopDomain: string, admin?: AdminApiConte
     // Update Shopify if admin client is provided
     if (admin) {
       // Ensure cart validation is registered but disabled on free plan
-      console.log(`🧹 Store ${shopDomain} set to free plan, ensuring cart validation is registered but disabled...`);
+      console.log(
+        `🧹 Store ${shopDomain} set to free plan, ensuring cart validation is registered but disabled...`,
+      );
       await registerCartValidationFunction(admin);
       await setShopValidationMetafields(admin, {
         enabled: false,
@@ -343,7 +393,9 @@ export async function setStoreFreePlan(shopDomain: string, admin?: AdminApiConte
       });
 
       // Hide payment terms in Shopify but keep in DB
-      console.log(`🧹 Hiding payment terms in Shopify for store ${shopDomain}...`);
+      console.log(
+        `🧹 Hiding payment terms in Shopify for store ${shopDomain}...`,
+      );
       await syncStorePaymentTerms(store.id, admin, false);
     }
   }
@@ -380,34 +432,34 @@ export async function uninstallStore(shopDomain: string) {
 
   if (store) {
     console.log(`Cleaning up all data for store: ${shopDomain} (${store.id})`);
-    
+
     // Comprehensive cleanup of all shop-related data
     // Cascading deletes handle related records, but we'll be explicit for core data
     await prisma.$transaction([
       // Delete all credit transactions
       prisma.creditTransaction.deleteMany({
-        where: { company: { shopId: store.id } }
+        where: { company: { shopId: store.id } },
       }),
-      
+
       // Delete all company accounts (this also deletes approved users linked to them)
       prisma.companyAccount.deleteMany({ where: { shopId: store.id } }),
-      
+
       // Delete ONLY approved users (Pending/Rejected stay as requested)
-      prisma.user.deleteMany({ 
-        where: { 
+      prisma.user.deleteMany({
+        where: {
           shopId: store.id,
-          status: "APPROVED"
-        } 
+          status: "APPROVED",
+        },
       }),
-      
+
       // Delete ONLY approved registration submissions (Pending/Rejected stay as requested)
-      prisma.registrationSubmission.deleteMany({ 
-        where: { 
+      prisma.registrationSubmission.deleteMany({
+        where: {
           shopId: store.id,
-          status: "APPROVED"
-        } 
+          status: "APPROVED",
+        },
       }),
-      
+
       prisma.notification.deleteMany({ where: { shopId: store.id } }),
       prisma.wishlist.deleteMany({ where: { shop: shopDomain } }),
       prisma.formFieldConfig.deleteMany({ where: { shopId: store.id } }),

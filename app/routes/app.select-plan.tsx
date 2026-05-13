@@ -15,6 +15,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   setStoreFreePlan,
   syncStoreSubscriptionState,
+  syncStoreSubscriptionStateFast,
   getStorePlanValue,
 } from "app/services/store.server";
 import prisma from "app/db.server";
@@ -142,13 +143,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // ✅ Always sync + redirect when returning from billing
   if (isReturnFromBilling || isPendingReturn) {
-    await syncStoreSubscriptionState(shop, appSubscriptions || [], admin);
+    // Use fast sync to avoid blocking redirect with Shopify API calls
+    await syncStoreSubscriptionStateFast(shop, appSubscriptions || []);
     clearAdminCompaniesCache(shop);
     clearDashboardStatsCache(shop);
     clearSelectPlanCache(shop);
 
-    console.log("✅ Billing return synced, redirecting to", returnTo);
-    throw redirect('/app'); // /app now loads with guaranteed fresh data
+    console.log("✅ Billing return synced (fast), redirecting to", returnTo);
+    throw redirect(returnTo || '/app'); // Use returnTo or default to /app
   }
 
   // Normal flow (not returning from billing)
@@ -210,6 +212,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (plan === FREE_PLAN) {
+      const billingCheck = await billing.check({
+        plans: [PAID_PLAN],
+        isTest,
+      });
+
+      const activeSubscription = (billingCheck.appSubscriptions || []).find(
+        (s) => s.status === "ACTIVE",
+      );
+
+      if (billingCheck.hasActivePayment && activeSubscription) {
+        console.log("Cancelling active paid subscription before downgrading to free plan", activeSubscription.id);
+        await billing.cancel({
+          subscriptionId: activeSubscription.id,
+          isTest,
+          prorate: true,
+        });
+      }
+
       await setStoreFreePlan(session.shop, admin);
       clearAdminCompaniesCache(session.shop);
       clearDashboardStatsCache(session.shop);

@@ -258,13 +258,17 @@ export default function Home() {
         style={{ width: "100%", maxWidth: 1200, margin: "0 auto" }}
       >
          {isFreePlan  ? (
-                    <div
+             <Link
+                      to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
                       style={{
+                        display: "block",
                         marginBottom: 16,
                         padding: 14,
                         borderRadius: 14,
                         border: "1px solid #f1c40f",
                         background: "linear-gradient(180deg, #fffdf2 0%, #fff7db 100%)",
+                        textDecoration: "none",
+                        color: "inherit",
                       }}
                     >
                       <div
@@ -284,27 +288,22 @@ export default function Home() {
                             Companies: {data.totalCompanies}/{10} · Registrations: {data.approvedRegistrations}/{10}
                           </div>
                         </div>
-                        <Link
-                          to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
-                          style={{ textDecoration: "none" }}
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "10px 16px",
+                            borderRadius: 10,
+                            background: "#202223",
+                            color: "white",
+                            fontWeight: 600,
+                          }}
                         >
-                          <button
-                            type="button"
-                            style={{
-                              padding: "10px 16px",
-                              borderRadius: 10,
-                              border: "none",
-                              background: "#202223",
-                              color: "white",
-                              fontWeight: 600,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Upgrade Plan
-                          </button>
-                        </Link>
+                          Upgrade Plan
+                        </div>
                       </div>
-                    </div>
+                    </Link>
                   ) : null}
         <style>{`
         * {

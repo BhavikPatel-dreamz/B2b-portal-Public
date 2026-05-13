@@ -551,13 +551,17 @@ export default function CompaniesPage() {
       </div>
       <div style={contentPanelStyle}>
           {isFreePlan  ? (
-            <div
+             <Link
+                      to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
               style={{
+                display: "block",
                 marginBottom: 16,
                 padding: 14,
                 borderRadius: 14,
                 border: "1px solid #f1c40f",
                 background: "linear-gradient(180deg, #fffdf2 0%, #fff7db 100%)",
+                textDecoration: "none",
+                color: "inherit",
               }}
             >
               <div
@@ -577,27 +581,23 @@ export default function CompaniesPage() {
                     Companies: {freePlanCompanyCount}/{freePlanCompanyLimit} · Registrations: {freePlanRegistrationCount}/{freePlanRegistrationLimit}
                   </div>
                 </div>
-                <Link
-                  to="/app/select-plan?returnTo=%2Fapp%2Fcompanies"
-                  style={{ textDecoration: "none" }}
-                >
-                  <button
-                    type="button"
+                  <div
                     style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                       padding: "10px 16px",
                       borderRadius: 10,
-                      border: "none",
                       background: "#202223",
                       color: "white",
                       fontWeight: 600,
-                      cursor: "pointer",
                     }}
                   >
                     Upgrade Plan
-                  </button>
-                </Link>
+                  </div>
+                
               </div>
-            </div>
+            </Link>
           ) : null}
           <div style={tabsRowStyle}>
             {[
