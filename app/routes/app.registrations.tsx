@@ -58,7 +58,7 @@ export interface RegistrationSubmission {
   creditLimit: string;
   email: string;
   phone: string;
-  shipping?: {
+  location?: {
     phone?: string | null;
     Phone?: string | null;
   } | null;
@@ -909,8 +909,7 @@ const formatPhone = (
 };
 
 function parseFormFields(form: Record<string, any>) {
-  const shipping: Record<string, any> = {};
-  const billing: Record<string, any> = {};
+  const location: Record<string, any> = {};
   const customFields: Record<string, any> = {};
 
   const coreKeys = [
@@ -934,21 +933,18 @@ function parseFormFields(form: Record<string, any>) {
   Object.entries(form).forEach(([key, value]) => {
     if (key.startsWith("ship")) {
       // e.g. shipAddr1 → Addr1, shipCity → City
-      shipping[key.replace("ship", "")] = value;
-    } else if (key.startsWith("bill")) {
-      // e.g. billAddr1 → Addr1, billCity → City
-      billing[key.replace("bill", "")] = value;
+      location[key.replace("ship", "")] = value;
     } else if (!coreKeys.includes(key)) {
       // anything else that isn't a core key → customFields
       customFields[key] = value;
     }
   });
 
-  return { shipping, billing, customFields };
+  return { location, customFields };
 }
 
 function mapEditFormAddressKey(key: string) {
-  const shippingMap: Record<string, string> = {
+  const locationMap: Record<string, string> = {
     shDepartment: "Dept",
     shFirstName: "FirstName",
     shLastName: "LastName",
@@ -961,33 +957,12 @@ function mapEditFormAddressKey(key: string) {
     shZip: "Zip",
   };
 
-  const billingMap: Record<string, string> = {
-    biDepartment: "Dept",
-    biFirstName: "FirstName",
-    biLastName: "LastName",
-    biPhone: "Phone",
-    biAddr1: "Addr1",
-    biAddr2: "Addr2",
-    biCity: "City",
-    biCountry: "Country",
-    biState: "State",
-    biZip: "Zip",
-  };
-
   if (key.startsWith("ship")) {
-    return { bucket: "shipping" as const, field: key.replace(/^ship/, "") };
+    return { bucket: "location" as const, field: key.replace(/^ship/, "") };
   }
 
-  if (key.startsWith("bill")) {
-    return { bucket: "billing" as const, field: key.replace(/^bill/, "") };
-  }
-
-  if (shippingMap[key]) {
-    return { bucket: "shipping" as const, field: shippingMap[key] };
-  }
-
-  if (billingMap[key]) {
-    return { bucket: "billing" as const, field: billingMap[key] };
+  if (locationMap[key]) {
+    return { bucket: "location" as const, field: locationMap[key] };
   }
 
   return null;
@@ -1003,19 +978,15 @@ export async function assignLocationAddresses(
     return;
   }
 
-  const shipping = registrationData.shipping;
-  const billing = registrationData.billing;
-  const isSameAsBilling = billing?.SameAsShip === "true";
+  const location = registrationData.location;
 
   console.log("📦 assignLocationAddresses called:", {
     locationId,
-    isSameAsBilling,
-    shipping,
-    billing,
+    location,
   });
 
   const formatAddressErrors = (
-    addressType: "Shipping" | "Billing",
+    addressType: "Location",
     userErrors: Array<{ field?: string[]; message?: string }>,
   ) =>
     userErrors
@@ -1028,32 +999,30 @@ export async function assignLocationAddresses(
       })
       .join("\n");
 
-  // ── Shipping address ──
-  if (shipping) {
-    const shippingAddress = {
-      address1: shipping.Addr1 || "",
-      address2: shipping.Addr2 || "",
-      city: shipping.City || "",
-      zip: shipping.Zip || "",
-      countryCode: shipping.Country || "",
-      zoneCode: shipping.State || "",
-      phone: formatPhone(shipping.Phone, shipping.Country),
-      firstName: shipping.FirstName || "",
-      lastName: shipping.LastName || "",
+  // ── Location address ──
+  if (location) {
+    const locationAddress = {
+      address1: location.Addr1 || "",
+      address2: location.Addr2 || "",
+      city: location.City || "",
+      zip: location.Zip || "",
+      countryCode: location.Country || "",
+      zoneCode: location.State || "",
+      phone: formatPhone(location.Phone, location.Country),
+      firstName: location.FirstName || "",
+      lastName: location.LastName || "",
       recipient:
-        `${shipping.FirstName || ""} ${shipping.LastName || ""}`.trim(),
+        `${location.FirstName || ""} ${location.LastName || ""}`.trim(),
     };
 
-    const addressTypes = isSameAsBilling
-      ? ["SHIPPING", "BILLING"]
-      : ["SHIPPING"];
+    const addressTypes = ["SHIPPING", "BILLING"];
 
-    console.log("🚚 Assigning SHIPPING address:", {
-      shippingAddress,
+    console.log("🚚 Assigning LOCATION address:", {
+      locationAddress,
       addressTypes,
     });
 
-    const shippingRes = await admin
+    const locationRes = await admin
       .graphql(
         `#graphql
         mutation AssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
@@ -1066,88 +1035,27 @@ export async function assignLocationAddresses(
             userErrors { field message code }
           }
         }`,
-        { variables: { locationId, address: shippingAddress, addressTypes } },
+        { variables: { locationId, address: locationAddress, addressTypes } },
       )
       .then((r: any) => r.json());
 
-    const shippingUserErrors =
-      shippingRes?.data?.companyLocationAssignAddress?.userErrors || [];
+    const locationUserErrors =
+      locationRes?.data?.companyLocationAssignAddress?.userErrors || [];
 
-    if (shippingUserErrors.length > 0) {
+    if (locationUserErrors.length > 0) {
       console.error(
-        "❌ SHIPPING address userErrors:",
-        JSON.stringify(shippingUserErrors, null, 2),
-      );
-      console.error(
-        "❌ Input that caused error:",
-        JSON.stringify({ shippingAddress, addressTypes }, null, 2),
-      );
-      throw new Error(formatAddressErrors("Shipping", shippingUserErrors));
-    } else {
-      console.log(
-        "✅ SHIPPING address assigned successfully:",
-        shippingRes?.data?.companyLocationAssignAddress?.addresses,
-      );
-    }
-  }
-
-  // ── Billing address (only if different from shipping) ──
-  if (billing && !isSameAsBilling) {
-    const billingAddress = {
-      address1: billing.Addr1 || "",
-      address2: billing.Addr2 || "",
-      city: billing.City || "",
-      zip: billing.Zip || "",
-      countryCode: billing.Country || "",
-      zoneCode: billing.State || "",
-      phone: formatPhone(billing.Phone, billing.Country),
-      firstName: billing.FirstName || "",
-      lastName: billing.LastName || "",
-      recipient: `${billing.FirstName || ""} ${billing.LastName || ""}`.trim(),
-    };
-
-    console.log("🧾 Assigning BILLING address:", billingAddress);
-
-    const billingRes = await admin
-      .graphql(
-        `#graphql
-        mutation AssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
-          companyLocationAssignAddress(
-            locationId: $locationId
-            address: $address
-            addressTypes: $addressTypes
-          ) {
-            addresses { id address1 city zip countryCode }
-            userErrors { field message code }
-          }
-        }`,
-        {
-          variables: {
-            locationId,
-            address: billingAddress,
-            addressTypes: ["BILLING"],
-          },
-        },
-      )
-      .then((r: any) => r.json());
-
-    const billingUserErrors =
-      billingRes?.data?.companyLocationAssignAddress?.userErrors || [];
-
-    if (billingUserErrors.length > 0) {
-      console.error(
-        "❌ BILLING address userErrors:",
-        JSON.stringify(billingUserErrors, null, 2),
+        "❌ LOCATION address userErrors:",
+        JSON.stringify(locationUserErrors, null, 2),
       );
       console.error(
         "❌ Input that caused error:",
-        JSON.stringify(billingAddress, null, 2),
+        JSON.stringify({ locationAddress, addressTypes }, null, 2),
       );
-      throw new Error(formatAddressErrors("Billing", billingUserErrors));
+      throw new Error(formatAddressErrors("Location", locationUserErrors));
     } else {
       console.log(
-        "✅ BILLING address assigned successfully:",
-        billingRes?.data?.companyLocationAssignAddress?.addresses,
+        "✅ LOCATION address assigned successfully:",
+        locationRes?.data?.companyLocationAssignAddress?.addresses,
       );
     }
   }
@@ -1265,8 +1173,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // ── Parse shipping / billing / custom fields ──
-        const { shipping, billing, customFields } = parseFormFields(
+        // ── Parse location / custom fields ──
+        const { location, customFields } = parseFormFields(
           form as Record<string, any>,
         );
 
@@ -1323,8 +1231,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               status: "PENDING",
               companyName: "",
               shopId: store.id,
-              shipping,
-              billing,
+              location,
               customFields,
             },
           });
@@ -1340,8 +1247,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               status: "PENDING",
               companyName: registrationData.companyName || "",
               shopId: store.id,
-              shipping,
-              billing,
+              location,
               customFields,
             },
           });
@@ -1411,8 +1317,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
-        // ── Parse shipping / billing / custom fields ──
-        const { shipping, billing, customFields } = parseFormFields(
+        // ── Parse location / custom fields ──
+        const { location, customFields } = parseFormFields(
           form as Record<string, any>,
         );
 
@@ -1471,8 +1377,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               status: "PENDING",
               companyName: "",
               shopId: store.id,
-              shipping,
-              billing,
+              location,
               customFields,
             },
           });
@@ -1486,8 +1391,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               contactTitle,
               shopifyCustomerId: customerId,
               status: "PENDING",
-              shipping,
-              billing,
+              location,
               customFields,
             },
           });
@@ -2845,18 +2749,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
         console.log(
-          existingRegistration.shipping,
-          "existingRegistration.shipping5555",
+          existingRegistration.location,
+          "existingRegistration.location",
         );
-        const shipping = {
-          ...((existingRegistration.shipping as Record<string, any>) || {}),
-        };
-        console.log(
-          existingRegistration.billing,
-          "existingRegistration.shipping4444448",
-        );
-        const billing = {
-          ...((existingRegistration.billing as Record<string, any>) || {}),
+        const location = {
+          ...((existingRegistration.location as Record<string, any>) || {}),
         };
         const customFields = {
           ...(((existingRegistration.customFields as Record<
@@ -2882,13 +2779,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               : String(rawValue ?? "");
 
           const addressKey = mapEditFormAddressKey(key);
-          if (addressKey?.bucket === "shipping") {
-            shipping[addressKey.field] = value;
-            return;
-          }
-
-          if (addressKey?.bucket === "billing") {
-            billing[addressKey.field] = value;
+          if (addressKey?.bucket === "location") {
+            location[addressKey.field] = value;
             return;
           }
 
@@ -2911,9 +2803,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
           customFields[key] = value;
         });
-
-        customFields.billSameAsShip = useSameAddress ? "true" : "false";
-        billing.SameAsShip = useSameAddress ? "true" : "false";
 
         if (customFields.taxId && !customFields.taxRegistrationId) {
           customFields.taxRegistrationId = customFields.taxId;
@@ -2982,8 +2871,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               contactTitle || existingRegistration.contactTitle || "",
             shopifyCustomerId:
               customerId || existingRegistration.shopifyCustomerId,
-            shipping,
-            billing,
+            location,
             customFields,
           },
         });
@@ -3595,14 +3483,6 @@ function getCountryValueForField(
   field: Pick<FormField, "section">,
   formValues: Record<string, any>,
 ) {
-  if (field.section === "billing") {
-    return formValues.biCountry ?? formValues.billCountry ?? "";
-  }
-
-  if (field.section === "shipping") {
-    return formValues.shCountry ?? formValues.shipCountry ?? "";
-  }
-
   return formValues.shCountry ?? formValues.shipCountry ?? "";
 }
 
@@ -3650,11 +3530,7 @@ function getFieldSourcePath(field: FieldDef): string {
   }
 
   if (field.section === "shipping" && field.key.startsWith("ship")) {
-    return `shipping.${field.key.replace(/^ship/, "")}`;
-  }
-
-  if (field.section === "billing" && field.key.startsWith("bill")) {
-    return `billing.${field.key.replace(/^bill/, "")}`;
+    return `location.${field.key.replace(/^ship/, "")}`;
   }
 
   switch (field.key) {
@@ -3835,17 +3711,11 @@ function resolveSourceValue(
     }
     return (submission as any)?.[key] ?? "";
   }
-  if (root === "shipping") {
-    const s = (submission as any)?.shipping as
+  if (root === "location" || root === "shipping") {
+    const s = (submission as any)?.location as
       | Record<string, string>
       | undefined;
     return s?.[key] ?? "";
-  }
-  if (root === "billing") {
-    const b = (submission as any)?.billing as
-      | Record<string, string>
-      | undefined;
-    return b?.[key] ?? "";
   }
   return "";
 }
@@ -3856,16 +3726,13 @@ function resolveSourceValue(
 export function buildInitialEditForm(
   submission: any,
   customer: any,
-  billingSame: boolean,
   fields: FormField[],
 ): Record<string, string | boolean> {
   const resolvedEmail = customer?.email ?? submission?.email ?? "";
-  const shipping = (submission as any)?.shipping as
+  const location = (submission as any)?.location as
     | Record<string, string>
     | undefined;
-  const billing = (submission as any)?.billing as
-    | Record<string, string>
-    | undefined;
+
   const form: Record<string, string | boolean> = {
     companyName: submission.companyName || "",
     taxId:
@@ -3880,24 +3747,17 @@ export function buildInitialEditForm(
       "",
     contactPhone:
       submission.phone ?? (submission as any)?.customFields?.phone ?? "",
-    shDepartment: shipping?.Department || "",
-    shFirstName: shipping?.FirstName || "",
-    shLastName: shipping?.LastName || "",
-    shPhone: shipping?.Phone || "",
-    shAddr1: shipping?.Addr1 || "",
-    shAddr2: shipping?.Addr2 || "",
-    shCity: shipping?.City || "",
-    shCountry: shipping?.Country || "",
-    shState: shipping?.State || "",
-    shZip: shipping?.Zip || "",
-    biAddr1: billing?.Addr1 || "",
-    biAddr2: billing?.Addr2 || "",
-    biCity: billing?.City || "",
-    biCountry: billing?.Country || "",
-    biState: billing?.State || "",
-    biZip: billing?.Zip || "",
+    shDepartment: location?.Department || "",
+    shFirstName: location?.FirstName || "",
+    shLastName: location?.LastName || "",
+    shPhone: location?.Phone || "",
+    shAddr1: location?.Addr1 || "",
+    shAddr2: location?.Addr2 || "",
+    shCity: location?.City || "",
+    shCountry: location?.Country || "",
+    shState: location?.State || "",
+    shZip: location?.Zip || "",
     email: resolvedEmail,
-    useSameAddress: billingSame,
   };
 
   for (const field of fields) {
@@ -4232,69 +4092,24 @@ export function DynamicEditModal({
 
             if (sectionFields.length === 0) return null;
 
-            // Billing section gets special "same as shipping" toggle
-            const isBilling = section.key === "billing";
-
             return (
               <div key={section.key} style={sectionStyle}>
-                {/* Section heading row */}
-                {isBilling ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <h4 style={{ ...sectionHeadingStyle, margin: 0 }}>
-                      {section.label}
-                    </h4>
-                    <label
-                      htmlFor="company-tax-id"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        fontSize: 13,
-                        cursor: "pointer",
-                        color: "#374151",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!!editForm.useSameAddress}
-                        onChange={(e) =>
-                          setEditForm((f) => ({
-                            ...f,
-                            useSameAddress: e.target.checked,
-                          }))
-                        }
-                      />
-                      Same as shipping
-                    </label>
-                  </div>
-                ) : (
-                  <h4 style={sectionHeadingStyle}>{section.label}</h4>
-                )}
+                <h4 style={sectionHeadingStyle}>{section.label}</h4>
 
-                {/* For billing: only render fields if not "same as shipping" */}
-                {isBilling && editForm.useSameAddress ? null : (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(220px, 1fr))",
-                      gap: 10,
-                    }}
-                  >
-                    {sectionFields.map((field) =>
-                      (() => {
-                        const countryValue =
-                          field.section === "billing"
-                            ? (editForm.biCountry ?? editForm.billCountry)
-                            : field.section === "shipping"
-                              ? (editForm.shCountry ?? editForm.shipCountry)
-                              : (editForm.shCountry ?? editForm.shipCountry);
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  {sectionFields.map((field) =>
+                    (() => {
+                      const countryValue =
+                        field.section === "shipping"
+                          ? (editForm.shCountry ?? editForm.shipCountry)
+                          : (editForm.shCountry ?? editForm.shipCountry);
                         const phoneMeta =
                           field.type === "phone"
                             ? getPhoneMetaForCountry(String(countryValue ?? ""))
@@ -4338,7 +4153,6 @@ export function DynamicEditModal({
                       })(),
                     )}
                   </div>
-                )}
               </div>
             );
           })}
@@ -4466,15 +4280,12 @@ function ConfigureCompanyUI({
   const editFetcher = useFetcher<ActionJson>();
   const shopify     = useAppBridge();
  
-  const s = (submission as any)?.shipping as Record<string, string> | undefined;
-  const b = (submission as any)?.billing  as Record<string, string> | undefined;
+  const loc = (submission as any)?.location as Record<string, string> | undefined;
  
-  const shippingLine1    = s?.Addr1 || "Address line 1";
-  const shippingRecipient = s
-    ? `${s.FirstName || ""} ${s.LastName || ""}`.trim() || "Recipient"
+  const locationLine1    = loc?.Addr1 || "Address line 1";
+  const locationRecipient = loc
+    ? `${loc.FirstName || ""} ${loc.LastName || ""}`.trim() || "Recipient"
     : "Recipient";
-  const billingSame =
-    !b || (submission as any)?.customFields?.billSameAsShip !== "false";
  
   const {
     displayBlocks: editDisplayBlocks,
@@ -4490,11 +4301,11 @@ function ConfigureCompanyUI({
     : `${submission.firstName || ""} ${submission.lastName || ""}`.trim();
   const companyDisplayName = company?.name || submission.companyName;
   const [editForm, setEditForm] = useState(() =>
-    buildInitialEditForm(submission, customer, billingSame, editFields),
+    buildInitialEditForm(submission, customer, editFields),
   );
   useEffect(() => {
-    setEditForm(buildInitialEditForm(submission, customer, billingSame, editFields));
-  }, [submission, customer, billingSame, editFields]);
+    setEditForm(buildInitialEditForm(submission, customer, editFields));
+  }, [submission, customer, editFields]);
   useEffect(() => {
     setTaxId(getSubmissionTaxId(submission));
   }, [submission]);
@@ -5964,9 +5775,8 @@ export function RegistrationApprovalsPanel({
                     const phone =
                       [
                         submission.phone,
-                        submission.shipping?.Phone,
-                        submission.shipping?.phone,
-                      ].find(
+                        submission.location?.Phone,
+                        submission.location?.phone,                      ].find(
                         (value): value is string =>
                           typeof value === "string" && value.trim().length > 0,
                       ) || "-";
