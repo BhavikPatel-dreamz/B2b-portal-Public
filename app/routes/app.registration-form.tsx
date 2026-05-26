@@ -37,7 +37,6 @@ export type FieldType =
 export type FieldCategory =
   | "general"
   | "shipping"
-  | "billing"
   | "custom"
   | "display";
 export type FieldWidth = "full" | "half";
@@ -148,8 +147,7 @@ interface LoaderData {
 export const SECTION_LABELS: Record<string, string> = {
   company: "Company information",
   contact: "Contact information",
-  shipping: "Shipping address",
-  billing: "Billing address",
+  shipping: "Company location",
 };
 
 const CATEGORY_INFO: Record<
@@ -163,14 +161,9 @@ const CATEGORY_INFO: Record<
       "Collect general information about the company, and who represents it as the main contact",
   },
   shipping: {
-    label: "Shipping",
+    label: "Location",
     icon: "🚚",
-    description: "Collect the company's main shipping address",
-  },
-  billing: {
-    label: "Billing",
-    icon: "💳",
-    description: "Collect the company's main billing address",
+    description: "Collect the company's main location address",
   },
   custom: {
     label: "Custom",
@@ -209,28 +202,13 @@ export const PALETTE: Record<
   ],
   shipping: [
     { paletteKey: "shipDept", label: "Department/attention", type: "text", key: "shipDept", section: "shipping", width: "full" },
-    { paletteKey: "shipFirstName", label: "Shipping first name", type: "text", key: "shipFirstName", section: "shipping", width: "half" },
-    { paletteKey: "shipLastName", label: "Shipping last name", type: "text", key: "shipLastName", section: "shipping", width: "half" },
-    { paletteKey: "shipPhone", label: "Shipping phone", type: "phone", key: "shipPhone", section: "shipping", width: "full" },
-    { paletteKey: "shipAddr1", label: "Shipping address line 1", type: "text", key: "shipAddr1", section: "shipping", width: "full" },
-    { paletteKey: "shipAddr2", label: "Shipping address line 2", type: "text", key: "shipAddr2", section: "shipping", width: "full" },
-    { paletteKey: "shipCity", label: "Shipping city", type: "text", key: "shipCity", section: "shipping", width: "full" },
-    { paletteKey: "shipCountry", label: "Shipping country", type: "country", key: "shipCountry", section: "shipping", width: "full" },
-    { paletteKey: "shipState", label: "Shipping state/province", type: "state", key: "shipState", section: "shipping", width: "full" },
-    { paletteKey: "shipZip", label: "Shipping ZIP/Postal code", type: "text", key: "shipZip", section: "shipping", width: "full" },
-  ],
-  billing: [
-    { paletteKey: "billSameAsShip", label: "Same as shipping address", type: "checkbox", key: "billSameAsShip", section: "billing", width: "full" },
-    { paletteKey: "billDept", label: "Department/attention", type: "text", key: "billDept", section: "billing", width: "full" },
-    { paletteKey: "billFirstName", label: "Billing first name", type: "text", key: "billFirstName", section: "billing", width: "half" },
-    { paletteKey: "billLastName", label: "Billing last name", type: "text", key: "billLastName", section: "billing", width: "half" },
-    { paletteKey: "billPhone", label: "Billing phone", type: "phone", key: "billPhone", section: "billing", width: "full" },
-    { paletteKey: "billAddr1", label: "Billing address line 1", type: "text", key: "billAddr1", section: "billing", width: "full" },
-    { paletteKey: "billAddr2", label: "Billing address line 2", type: "text", key: "billAddr2", section: "billing", width: "full" },
-    { paletteKey: "billCity", label: "Billing city", type: "text", key: "billCity", section: "billing", width: "full" },
-    { paletteKey: "billCountry", label: "Billing country", type: "country", key: "billCountry", section: "billing", width: "full" },
-    { paletteKey: "billState", label: "Billing state/province", type: "state", key: "billState", section: "billing", width: "full" },
-    { paletteKey: "billZip", label: "Billing ZIP/Postal code", type: "text", key: "billZip", section: "billing", width: "full" },
+    { paletteKey: "shipPhone", label: "Phone", type: "phone", key: "shipPhone", section: "shipping", width: "full" },
+    { paletteKey: "shipAddr1", label: "Company location line 1", type: "text", key: "shipAddr1", section: "shipping", width: "full" },
+    { paletteKey: "shipAddr2", label: "Company location line 2", type: "text", key: "shipAddr2", section: "shipping", width: "full" },
+    { paletteKey: "shipCity", label: "City", type: "text", key: "shipCity", section: "shipping", width: "full" },
+    { paletteKey: "shipCountry", label: "Country", type: "country", key: "shipCountry", section: "shipping", width: "full" },
+    { paletteKey: "shipState", label: "State/province", type: "state", key: "shipState", section: "shipping", width: "full" },
+    { paletteKey: "shipZip", label: "ZIP/Postal code", type: "text", key: "shipZip", section: "shipping", width: "full" },
   ],
   custom: [
     { paletteKey: "c_text", label: "Single-line text", type: "text", key: "custom_text", width: "full" },
@@ -329,7 +307,6 @@ export function deserializeConfig(stored: StoredConfig): FormConfig {
   const inferCategory = (f: StoredField): FieldCategory => {
     if (DISPLAY_TYPES.includes(f.type)) return "display";
     if (f.section === "shipping") return "shipping";
-    if (f.section === "billing") return "billing";
     if (f.section === "company" || f.section === "contact") return "general";
     return "custom";
   };
@@ -338,6 +315,7 @@ export function deserializeConfig(stored: StoredConfig): FormConfig {
 
   const fields: FieldDef[] = stored.flatMap((group, stepIdx) =>
     group.fields
+      .filter((f) => f.section !== "billing")
       .sort((a, b) => a.order - b.order)
       .map(
         (f): FieldDef => ({
@@ -747,7 +725,7 @@ function ToolbarIconButton({
   );
 }
 
-function SidebarIcon({ kind }: { kind: "general" | "shipping" | "billing" | "custom" | "display" | "steps" }) {
+function SidebarIcon({ kind }: { kind: "general" | "shipping" | "custom" | "display" | "steps" }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
   if (kind === "general") {
@@ -766,15 +744,6 @@ function SidebarIcon({ kind }: { kind: "general" | "shipping" | "billing" | "cus
         <path d="M12.5 11h4l2 2.5v2h-6z" />
         <circle cx="7" cy="18" r="1.7" />
         <circle cx="17" cy="18" r="1.7" />
-      </svg>
-    );
-  }
-
-  if (kind === "billing") {
-    return (
-      <svg {...common}>
-        <rect x="3.5" y="6" width="13" height="11" rx="2" />
-        <rect x="8.5" y="8.5" width="12" height="11" rx="2" />
       </svg>
     );
   }
@@ -2578,7 +2547,7 @@ export default function FormEditor() {
               <div style={{ padding: "0 12px 10px", fontSize: 12, fontWeight: 700, color: "#111827" }}>
                 Fields
               </div>
-              {(["general", "shipping", "billing", "custom"] as FieldCategory[]).map((cat) => (
+              {(["general", "shipping", "custom"] as FieldCategory[]).map((cat) => (
                 <button
                   key={cat}
                   onClick={() => { setActiveCategory(cat); setEditingSteps(false); setActiveSection(null); setActiveFieldId(null); }}
@@ -3909,7 +3878,7 @@ export default function FormEditor() {
                   );
                 })}
               </div>
-              {["general", "shipping", "billing"].includes(activeCategory) && (
+              {["general", "shipping"].includes(activeCategory) && (
                 <button
                   onClick={() => palette.forEach((item) => addField(item))}
                   disabled={allCategoryFieldsUsed}

@@ -8,6 +8,7 @@ export default async () => {
   render(<Extension />, document.body);
 };
 const API_URL = "https://smartb2b.dynamicdreamz.com";
+// "https://dd-20.dynamicdreamz.com"
 // "https://dd-79.dynamicdreamz.com"
 //"https://b2b-portal-public.vercel.app"
 // "https://smartb2b.dynamicdreamz.com";
@@ -15,7 +16,7 @@ const API_URL = "https://smartb2b.dynamicdreamz.com";
 const SECTION_LABELS = {
   company: "Company information",
   contact: "Contact information",
-  shipping: "Shipping address",
+  shipping: "Company location",
   billing: "Billing address",
 };
 

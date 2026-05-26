@@ -132,15 +132,11 @@ function getResolvedSectionCountryValue(
   editForm: Record<string, any>,
 ) {
   const configuredCountryValue =
-    field.section === "billing"
-      ? editForm.billCountry
-      : field.section === "shipping"
+    field.section === "shipping"
         ? editForm.shipCountry
         : undefined;
   const legacyCountryValue =
-    field.section === "billing"
-      ? editForm.biCountry
-      : field.section === "shipping"
+    field.section === "shipping"
         ? editForm.shCountry
         : undefined;
 
@@ -236,22 +232,12 @@ function isStateSelectField(field: FormField) {
 
 function getZipKeysForSection(
   section: string,
-  useSameAddress: boolean,
 ) {
   const zipKeys = new Set<string>();
 
   if (section === "shipping") {
     zipKeys.add("shipZip");
     zipKeys.add("shZip");
-    if (useSameAddress) {
-      zipKeys.add("billZip");
-      zipKeys.add("biZip");
-    }
-  }
-
-  if (section === "billing") {
-    zipKeys.add("billZip");
-    zipKeys.add("biZip");
   }
 
   return Array.from(zipKeys);
@@ -259,7 +245,7 @@ function getZipKeysForSection(
 
 function sortSectionFields(section: string, fields: FormField[]) {
   const preferredOrder =
-    section === "shipping" || section === "billing"
+    section === "shipping"
       ? [
           "Country",
           "FirstName",
@@ -670,16 +656,7 @@ export default function EditDetailsModal({
 
           if (sectionFields.length === 0) return null;
 
-          const isBilling = section.key === "billing";
-          const sameAsShippingField = isBilling
-            ? sectionFields.find((field) => field.key === "billSameAsShip")
-            : null;
-          const visibleSectionFields =
-            sameAsShippingField == null
-              ? sectionFields
-              : sectionFields.filter(
-                  (field) => field.key !== sameAsShippingField.key,
-                );
+          const visibleSectionFields = sectionFields;
           const sectionCountryOptions =
             visibleSectionFields.find(
               (field) => field.type === "select" && /country/i.test(field.key),
@@ -690,54 +667,15 @@ export default function EditDetailsModal({
 
           return (
             <div key={section.key} style={sectionStyle}>
-              {isBilling && sameAsShippingField ? (
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <h4 style={{ ...sectionHeadingStyle, margin: 0 }}>
-                    {section.label}
-                  </h4>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      fontSize: 13,
-                      cursor: "pointer",
-                      color: "#374151",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!!editForm.useSameAddress}
-                      onChange={(e) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          useSameAddress: e.target.checked,
-                        }))
-                      }
-                    />
-                    {sameAsShippingField.label}
-                  </label>
-                </div>
-              ) : (
-                <h4 style={sectionHeadingStyle}>{section.label}</h4>
-              )}
+              <h4 style={sectionHeadingStyle}>{section.label}</h4>
 
-              {isBilling &&
-              sameAsShippingField &&
-              editForm.useSameAddress ? null : (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                    gap: 10,
-                  }}
-                >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: 10,
+                }}
+              >
                   {visibleSectionFields.map((field) => {
                     const countryValue = getResolvedSectionCountryValue(
                       field,
@@ -782,15 +720,6 @@ export default function EditDetailsModal({
                           value={String(editForm[field.key] ?? "")}
                           disabled={!isEditingEnabled}
                           onPhoneCountryChange={(nextCountryCode) => {
-                            if (field.section === "billing") {
-                              setEditForm((f) => ({
-                                ...f,
-                                billCountry: nextCountryCode,
-                                biCountry: nextCountryCode,
-                              }));
-                              return;
-                            }
-
                             setEditForm((f) => ({
                               ...f,
                               shipCountry: nextCountryCode,
@@ -807,7 +736,6 @@ export default function EditDetailsModal({
                               ) {
                                 for (const zipKey of getZipKeysForSection(
                                   field.section,
-                                  Boolean(f.useSameAddress),
                                 )) {
                                   updated[zipKey] = "";
                                 }
@@ -821,7 +749,6 @@ export default function EditDetailsModal({
                     );
                   })}
                 </div>
-              )}
             </div>
           );
         })}

@@ -125,8 +125,7 @@ model RegistrationSubmission {
   firstName         String
   lastName          String
   contactTitle      String
-  shipping          Json
-  billing           Json
+  location          Json?
   customFields      Json?
   isPrivacyPolicy   Boolean    @default(false)
   isDisable         Boolean    @default(false)
@@ -262,6 +261,7 @@ model B2BOrder {
   paidAt           DateTime?
   userCreditUsed   Decimal        @db.Decimal(14, 2)
   notes            String?
+  source           String?
   company          CompanyAccount @relation("CompanyAccountOrders", fields: [companyId], references: [id], onDelete: Cascade)
   createdByUser    User           @relation("UserCreatedOrders", fields: [createdByUserId], references: [id])
   shop             Store          @relation("StoreOrders", fields: [shopId], references: [id], onDelete: Cascade)

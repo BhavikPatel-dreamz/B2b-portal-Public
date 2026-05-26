@@ -116,18 +116,12 @@ function createAdminGraphQLClient(
 }
 
 function parseFormFields(form: FormFields) {
-  const shipping: AddressFields = {};
-  const billing: AddressFields = {};
+  const location: AddressFields = {};
   const customFields: FormFields = {};
 
   Object.entries(form).forEach(([key, value]) => {
     if (key.startsWith("ship")) {
-      shipping[key.replace("ship", "")] = value;
-      return;
-    }
-
-    if (key.startsWith("bill")) {
-      billing[key.replace("bill", "")] = value;
+      location[key.replace("ship", "")] = value;
       return;
     }
 
@@ -136,7 +130,7 @@ function parseFormFields(form: FormFields) {
     }
   });
 
-  return { shipping, billing, customFields };
+  return { location, customFields };
 }
 
 function normalizePhoneForComparison(
@@ -166,28 +160,20 @@ function getAddressFieldValue(
 }
 
 function getSubmissionPhoneCandidates(submission: {
-  shipping?: unknown;
-  billing?: unknown;
+  location?: unknown;
   customFields?: unknown;
 }) {
-  const shippingPhone = getAddressFieldValue(submission.shipping, "Phone", "phone");
-  const shippingCountry = getAddressFieldValue(
-    submission.shipping,
-    "Country",
-    "country",
-  );
-  const billingPhone = getAddressFieldValue(submission.billing, "Phone", "phone");
-  const billingCountry = getAddressFieldValue(
-    submission.billing,
+  const locationPhone = getAddressFieldValue(submission.location, "Phone", "phone");
+  const locationCountry = getAddressFieldValue(
+    submission.location,
     "Country",
     "country",
   );
   const customPhone = getAddressFieldValue(submission.customFields, "phone");
 
   return [
-    normalizePhoneForComparison(customPhone, shippingCountry || billingCountry),
-    normalizePhoneForComparison(shippingPhone, shippingCountry),
-    normalizePhoneForComparison(billingPhone, billingCountry),
+    normalizePhoneForComparison(customPhone, locationCountry),
+    normalizePhoneForComparison(locationPhone, locationCountry),
   ].filter(Boolean);
 }
 
@@ -808,19 +794,17 @@ async function assignCustomerToCompany(
 async function assignLocationAddresses(
   admin: AdminGraphQLClient,
   locationId: string,
-  shipping: AddressFields,
-  billing: AddressFields,
+  location: AddressFields,
   fallbackFirstName: string,
   fallbackLastName: string,
 ) {
-  const isSameAsShipping = billing?.SameAsShip === "true";
-  const shippingAddress = buildAddress(
-    shipping,
+  const locationAddress = buildAddress(
+    location,
     fallbackFirstName,
     fallbackLastName,
   );
 
-  if (shippingAddress) {
+  if (locationAddress) {
     const shippingResponse = await admin.graphql(
       `#graphql
       mutation AssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
@@ -836,8 +820,8 @@ async function assignLocationAddresses(
       {
         variables: {
           locationId,
-          address: shippingAddress,
-          addressTypes: isSameAsShipping ? ["SHIPPING", "BILLING"] : ["SHIPPING"],
+          address: locationAddress,
+          addressTypes: ["SHIPPING", "BILLING"],
         },
       },
     );
@@ -848,49 +832,7 @@ async function assignLocationAddresses(
       "companyLocationAssignAddress",
     ]);
     if (shippingErrors.length > 0) {
-      throw new Error(`Shipping address failed: ${shippingErrors.join(", ")}`);
-    }
-  }
-
-  if (billing && !isSameAsShipping) {
-    const billingAddress = buildAddress(
-      billing,
-      fallbackFirstName,
-      fallbackLastName,
-    );
-
-    if (!billingAddress) {
-      return;
-    }
-
-    const billingResponse = await admin.graphql(
-      `#graphql
-      mutation AssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
-        companyLocationAssignAddress(
-          locationId: $locationId
-          address: $address
-          addressTypes: $addressTypes
-        ) {
-          addresses { id address1 city zip countryCode }
-          userErrors { field message code }
-        }
-      }`,
-      {
-        variables: {
-          locationId,
-          address: billingAddress,
-          addressTypes: ["BILLING"],
-        },
-      },
-    );
-
-    const billingPayload = await billingResponse.json();
-    const billingErrors = getGraphQLMessages(billingPayload, [
-      "data",
-      "companyLocationAssignAddress",
-    ]);
-    if (billingErrors.length > 0) {
-      throw new Error(`Billing address failed: ${billingErrors.join(", ")}`);
+      throw new Error(`Company location failed: ${shippingErrors.join(", ")}`);
     }
   }
 }
@@ -1135,14 +1077,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ success: false, error: "Email already registered." }, { status: 409 });
     }
 
-    const { shipping, billing, customFields } = parseFormFields(allFields);
+    const { location, customFields } = parseFormFields(allFields);
     const phone = formatPhone(
-      allFields.phone || shipping.Phone || billing.Phone,
-      shipping.Country || billing.Country,
+      allFields.phone || location.Phone,
+      location.Country,
     );
     const normalizedPhone = normalizePhoneForComparison(
       phone,
-      shipping.Country || billing.Country,
+      location.Country,
     );
 
     if (phone) {
@@ -1154,8 +1096,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: { shopId: store.id },
         select: {
           id: true,
-          shipping: true,
-          billing: true,
+          location: true,
           customFields: true,
         },
       });
@@ -1203,18 +1144,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const { company } = await createOrFindCompany(admin, companyName);
-    const location = await getOrCreateCompanyLocation(
+    const shopifyLocation = await getOrCreateCompanyLocation(
       admin,
       company.id,
       companyName,
     );
 
-    await assignCustomerToCompany(admin, company.id, customer.id, location.id);
+    await assignCustomerToCompany(admin, company.id, customer.id, shopifyLocation.id);
     await assignLocationAddresses(
       admin,
-      location.id,
-      shipping,
-      billing,
+      shopifyLocation.id,
+      location,
       firstName,
       lastName,
     );
@@ -1226,8 +1166,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         firstName,
         lastName,
         contactTitle,
-        shipping,
-        billing,
+        location,
         customFields,
         shopId: store.id,
         shopifyCustomerId: customer?.id || allFields.shopifyCustomerId || null,
@@ -1317,7 +1256,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : "Registration submitted successfully!",
       autoApproved,
       redirectTo: autoApproved
-        ? `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`
+        ? `https://${store.shopDomain}/apps/b2b-portal-public/smartb2b`
         : null,
       registrationdata: finalRegistration,
       customer,
