@@ -1,59 +1,84 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { getStoreByDomain } from "app/services/store.server";
-import { apiVersion } from "app/shopify.server";
+import { unauthenticated } from "app/shopify.server";
+import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
+function json(data: unknown, init: ResponseInit = {}) {
+  return Response.json(data, {
+    ...init,
+    headers: {
+      ...CORS_HEADERS,
+      ...(init.headers ?? {}),
+    },
+  });
+}
+
+type ShippingZonesPayload = {
+  errors?: unknown;
+  data?: {
+    shop?: {
+      countriesInShippingZones?: {
+        countryCodes?: string[];
+        includeRestOfWorld?: boolean;
+      } | null;
+    } | null;
+    deliveryProfiles?: {
+      nodes?: Array<{
+        profileLocationGroups?: Array<{
+          locationGroupZones?: {
+            nodes?: Array<{
+              zone?: {
+                countries?: Array<{
+                  code?: { countryCode?: string | null } | null;
+                  name?: string | null;
+                  provinces?: Array<{ code: string; name: string }>;
+                }>;
+              } | null;
+            }>;
+          } | null;
+        }>;
+      }>;
+    } | null;
+  };
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  const shop = url.searchParams.get("shop");
-
-  if (!shop) {
-    return Response.json({ error: "Missing shop parameter" }, { status: 400 });
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
-  // Resolve the current offline token from the Store table, which is kept
-  // in sync when Shopify installs or refreshes the app session.
-  const store = await getStoreByDomain(shop);
-  console.log(store?.accessToken, "<--- Access token from store");
+  try {
+    const { shop } = await authenticateCustomerAccountSession(request, {
+      requireCustomer: false,
+    });
 
-  if (!store) {
-    return Response.json({ error: "Store not found for shop" }, { status: 404 });
-  }
+    const { admin } = await unauthenticated.admin(shop);
 
-  if (!store.accessToken) {
-    return Response.json({ error: "Store access token not available" }, { status: 401 });
-  }
-
-  // ── 2. Call Admin GraphQL directly with the token ─────────────────────
-  const graphqlRes = await fetch(
-  `https://${shop}/admin/api/${apiVersion}/graphql.json`,
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": store.accessToken,
-    },
-    body: JSON.stringify({
-      query: `
-        query GetShippingCountriesWithProvinces {
-          # ✅ Source of truth — ALL country codes in shipping zones
-          shop {
-            countriesInShippingZones {
-              countryCodes
-              includeRestOfWorld
-            }
+    const response = await admin.graphql(
+      `#graphql
+      query GetShippingCountriesWithProvinces {
+        shop {
+          countriesInShippingZones {
+            countryCodes
+            includeRestOfWorld
           }
-          # Used only to get names + provinces
-          deliveryProfiles(first: 10) {
-            nodes {
-              profileLocationGroups {
-                locationGroupZones(first: 100) {
-                  nodes {
-                    zone {
-                      countries {
-                        code { countryCode }
-                        name
-                        provinces { code name }
-                      }
+        }
+        deliveryProfiles(first: 10) {
+          nodes {
+            profileLocationGroups {
+              locationGroupZones(first: 100) {
+                nodes {
+                  zone {
+                    countries {
+                      code { countryCode }
+                      name
+                      provinces { code name }
                     }
                   }
                 }
@@ -61,96 +86,106 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             }
           }
         }
-      `,
-    }),
-  }
-);
+      }
+      `
+    );
 
-const json = await graphqlRes.json();
-console.log(json, "<--- GraphQL response");
+    const payload = (await response.json()) as ShippingZonesPayload;
 
-if (!graphqlRes.ok) {
-  return Response.json(
-    {
-      error: "Shopify Admin API request failed",
-      status: graphqlRes.status,
-      details: json?.errors ?? json,
-    },
-    { status: graphqlRes.status }
-  );
-}
+    if (!response.ok) {
+      return json(
+        {
+          error: "Shopify Admin API request failed",
+          status: response.status,
+          details: payload?.errors ?? payload,
+        },
+        { status: response.status }
+      );
+    }
 
-if (json.errors) {
-  return Response.json({ errors: json.errors }, { status: 500 });
-}
+    if (payload.errors) {
+      return json({ errors: payload.errors }, { status: 500 });
+    }
 
-// ── Step 1: Get ALL valid country codes from shop ─────────────────────
-const shippingZoneData = json.data?.shop?.countriesInShippingZones;
-const validCountryCodes = new Set<string>(shippingZoneData?.countryCodes || []);
-const includeRestOfWorld = shippingZoneData?.includeRestOfWorld ?? false;
+    const shippingZoneData = payload.data?.shop?.countriesInShippingZones;
+    const validCountryCodes = new Set<string>(
+      shippingZoneData?.countryCodes || []
+    );
+    const includeRestOfWorld = shippingZoneData?.includeRestOfWorld ?? false;
 
-console.log("Total shipping zone countries:", validCountryCodes.size);
-console.log("Includes Rest of World:", includeRestOfWorld);
-console.log("Country codes:", [...validCountryCodes]);
+    console.log("Total shipping zone countries:", validCountryCodes.size);
+    console.log("Includes Rest of World:", includeRestOfWorld);
+    console.log("Country codes:", [...validCountryCodes]);
 
-// ── Step 2: Build map from delivery profiles (names + provinces) ──────
-const countriesMap = new Map<string, {
-  value: string;
-  label: string;
-  provinces: { value: string; label: string }[];
-}>();
+    const countriesMap = new Map<string, {
+      value: string;
+      label: string;
+      provinces: { value: string; label: string }[];
+    }>();
 
-for (const profile of json.data?.deliveryProfiles?.nodes || []) {
-  for (const group of profile.profileLocationGroups || []) {
-    for (const zoneNode of group.locationGroupZones?.nodes || []) {
-      for (const country of zoneNode.zone?.countries || []) {
-        const countryCode = country.code?.countryCode;
-        if (!countryCode) continue;
+    for (const profile of payload.data?.deliveryProfiles?.nodes || []) {
+      for (const group of profile.profileLocationGroups || []) {
+        for (const zoneNode of group.locationGroupZones?.nodes || []) {
+          for (const country of zoneNode.zone?.countries || []) {
+            const countryCode = country.code?.countryCode;
+            if (!countryCode) continue;
 
-        const provinces = (country.provinces || []).map(
-          (p: { code: string; name: string }) => ({
-            value: p.code,
-            label: p.name,
-          })
-        );
+            const provinces = (country.provinces || []).map(
+              (province: { code: string; name: string }) => ({
+                value: province.code,
+                label: province.name,
+              })
+            );
 
-        if (countriesMap.has(countryCode)) {
-          const existing = countriesMap.get(countryCode)!;
-          const existingCodes = new Set(existing.provinces.map(p => p.value));
-          for (const p of provinces) {
-            if (!existingCodes.has(p.value)) existing.provinces.push(p);
+            if (countriesMap.has(countryCode)) {
+              const existing = countriesMap.get(countryCode)!;
+              const existingCodes = new Set(
+                existing.provinces.map((province) => province.value)
+              );
+              for (const province of provinces) {
+                if (!existingCodes.has(province.value)) {
+                  existing.provinces.push(province);
+                }
+              }
+            } else {
+              countriesMap.set(countryCode, {
+                value: countryCode,
+                label: country.name ?? countryCode,
+                provinces,
+              });
+            }
           }
-        } else {
-          countriesMap.set(countryCode, {
-            value: countryCode,
-            label: country.name,
-            provinces,
-          });
         }
       }
     }
+
+    for (const code of validCountryCodes) {
+      if (!countriesMap.has(code)) {
+        countriesMap.set(code, {
+          value: code,
+          label: code,
+          provinces: [],
+        });
+      }
+    }
+
+    const countries = Array.from(countriesMap.values())
+      .filter((country) => validCountryCodes.has(country.value))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    return json({ countries, total: countries.length });
+  } catch (error) {
+    if (error instanceof Response) {
+      return json(
+        { error: error.statusText || "Unauthorized" },
+        { status: error.status || 401 }
+      );
+    }
+
+    console.error("❌ Error fetching shipping zones:", error);
+    return json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
   }
-}
-
-// ── Step 3: Add any missing countries from validCountryCodes ──────────
-// (codes in shipping zones but not found in delivery profile details)
-for (const code of validCountryCodes) {
-  if (!countriesMap.has(code)) {
-    countriesMap.set(code, {
-      value: code,
-      label: code,       // fallback: use code as label
-      provinces: [],
-    });
-  }
-}
-
-// ── Step 4: Filter to ONLY valid shipping zone countries ──────────────
-const countries = Array.from(countriesMap.values())
-  .filter(c => validCountryCodes.has(c.value))   // ✅ strict filter
-  .sort((a, b) => a.label.localeCompare(b.label));
-
-return Response.json(
-  { countries, total: countries.length },
-  { headers: { "Access-Control-Allow-Origin": "*" } }
-);
 };

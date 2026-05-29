@@ -1,10 +1,11 @@
 import { LoaderFunctionArgs } from "react-router";
-import { getStoreByDomain } from "app/services/store.server";
+import { unauthenticated } from "../../shopify.server";
+import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -18,6 +19,32 @@ function json(data: unknown, init: ResponseInit = {}) {
   });
 }
 
+type CustomerDetailPayload = {
+  errors?: unknown;
+  data?: {
+    customer?: {
+      id: string;
+      email: string | null;
+      firstName: string | null;
+      lastName: string | null;
+      phone: string | null;
+      defaultAddress?: {
+        firstName: string | null;
+        lastName: string | null;
+        address1: string | null;
+        address2: string | null;
+        city: string | null;
+        province: string | null;
+        provinceCode: string | null;
+        zip: string | null;
+        country: string | null;
+        countryCodeV2: string | null;
+        phone: string | null;
+      } | null;
+    } | null;
+  };
+};
+
 // ─── LOADER ────────────────────────────────────────────────────────────────────
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") {
@@ -25,66 +52,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   try {
-    const url = new URL(request.url);
-    const shop = url.searchParams.get("shop");
-    const customerId = url.searchParams.get("customerId");
+    const { shop, customerGid, customerId: numericCustomerId } =
+      await authenticateCustomerAccountSession(request);
 
     if (!shop) {
       return json({ error: "Missing shop" }, { status: 400 });
     }
 
-    if (!customerId) {
-      return json({ error: "Missing customerId" }, { status: 400 });
-    }
-
-    const store = await getStoreByDomain(shop);
-
-    if (!store) {
-      return json({ error: "Store not found" }, { status: 404 });
-    }
-
-    if (!store.accessToken) {
-      return json({ error: "Store access token not configured" }, { status: 500 });
-    }
+    const { admin } = await unauthenticated.admin(shop);
 
     // ─── Fetch customer from Shopify ───────────────────────────────────────
-    const response = await fetch(
-      `https://${shop}/admin/api/2025-01/graphql.json`,
+    const response = await admin.graphql(
+      `#graphql
+      query GetCustomerDetail($customerId: ID!) {
+        customer(id: $customerId) {
+          id
+          email
+          firstName
+          lastName
+          phone
+          defaultAddress {
+            firstName
+            lastName
+            address1
+            address2
+            city
+            province
+            provinceCode
+            zip
+            country
+            countryCodeV2
+            phone
+          }
+        }
+      }`,
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": store.accessToken,
+        variables: {
+          customerId: customerGid,
         },
-        body: JSON.stringify({
-          query: `
-            query GetCustomerDetail($customerId: ID!) {
-              customer(id: $customerId) {
-                id
-                email
-                firstName
-                lastName
-                phone
-                defaultAddress {
-                  firstName
-                  lastName
-                  address1
-                  address2
-                  city
-                  province
-                  provinceCode
-                  zip
-                  country
-                  countryCodeV2
-                  phone
-                }
-              }
-            }
-          `,
-          variables: {
-            customerId: `gid://shopify/Customer/${customerId}`,
-          },
-        }),
       }
     );
 
@@ -92,47 +97,54 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return json({ error: "Failed to fetch customer from Shopify" }, { status: 502 });
     }
 
-    const result = await response.json();
+    const result = (await response.json()) as CustomerDetailPayload;
 
     if (result.errors) {
       console.error("GraphQL Errors:", result.errors);
       return json({ error: result.errors }, { status: 400 });
     }
 
-    const customer = result?.data?.customer;
+    const customerData = result?.data?.customer;
 
-    if (!customer) {
+    if (!customerData) {
       return json({ error: "Customer not found" }, { status: 404 });
     }
 
     return json({
       success: true,
       customer: {
-        id: customerId,
-        gid: customer.id,
-        email: customer.email,
-        firstName: customer.firstName,
-        lastName: customer.lastName,
-        phone: customer.phone,
-        defaultAddress: customer.defaultAddress
+        id: numericCustomerId,
+        gid: customerData.id,
+        email: customerData.email,
+        firstName: customerData.firstName,
+        lastName: customerData.lastName,
+        phone: customerData.phone,
+        defaultAddress: customerData.defaultAddress
           ? {
-              firstName: customer.defaultAddress.firstName,
-              lastName: customer.defaultAddress.lastName,
-              address1: customer.defaultAddress.address1,
-              address2: customer.defaultAddress.address2,
-              city: customer.defaultAddress.city,
-              province: customer.defaultAddress.province,
-              provinceCode: customer.defaultAddress.provinceCode,
-              zip: customer.defaultAddress.zip,
-              country: customer.defaultAddress.country,
-              countryCode: customer.defaultAddress.countryCodeV2,
-              phone: customer.defaultAddress.phone,
+              firstName: customerData.defaultAddress.firstName,
+              lastName: customerData.defaultAddress.lastName,
+              address1: customerData.defaultAddress.address1,
+              address2: customerData.defaultAddress.address2,
+              city: customerData.defaultAddress.city,
+              province: customerData.defaultAddress.province,
+              provinceCode: customerData.defaultAddress.provinceCode,
+              zip: customerData.defaultAddress.zip,
+              country: customerData.defaultAddress.country,
+              countryCode: customerData.defaultAddress.countryCodeV2,
+              phone: customerData.defaultAddress.phone,
             }
           : null,
       },
     });
 
   } catch (error) {
+    if (error instanceof Response) {
+      return json(
+        { error: error.statusText || "Unauthorized" },
+        { status: error.status || 401 }
+      );
+    }
+
     console.error("❌ Error fetching customer detail:", error);
     return json(
       { error: error instanceof Error ? error.message : "Unknown error" },

@@ -1,6 +1,10 @@
 // @ts-nocheck
 // use-strict
 import "@shopify/ui-extensions/preact";
+import {
+  useExtensionEditor,
+  useSessionToken,
+} from "@shopify/ui-extensions/customer-account/preact";
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 
@@ -116,10 +120,12 @@ const COUNTRY_PHONE_META = {
 };
 
 const FORM_ROW_BREAKPOINT = 680;
-const PHONE_ROW_BREAKPOINT = 420;
 const ACTION_ROW_BREAKPOINT = 520;
 
 function Extension() {
+  const editor = useExtensionEditor();
+  const isEditor = Boolean(editor);
+  const sessionToken = useSessionToken();
   const [fields, setFields] = useState([]);
   const [formData, setFormData] = useState({});
   const [customerDetails, setCustomerDetails] = useState(null);
@@ -183,18 +189,19 @@ function Extension() {
   }, []);
 
   useEffect(() => {
-    if (!shopDomain || !customerId) return;
-    const customerIdWithoutPrefix = customerId.replace(
-      "gid://shopify/Customer/",
-      "",
-    );
-
     const fetchAccountStatus = async () => {
       try {
         setAccountCheckComplete(false);
+        const token = await sessionToken.get();
         const res = await fetch(
-          `${API_URL}/api/proxy/customer-account?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
-          { method: "GET", headers: { Accept: "application/json" } },
+          `${API_URL}/api/proxy/customer-account`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
         const result = await res.json();
         const {
@@ -245,20 +252,23 @@ function Extension() {
       }
     };
     fetchAccountStatus();
-  }, [shopDomain, customerId]);
+  }, [sessionToken]);
 
   useEffect(() => {
     if (!shopDomain || !customerId || !accountCheckComplete || isRedirecting)
       return;
-    const customerIdWithoutPrefix = customerId.replace(
-      "gid://shopify/Customer/",
-      "",
-    );
     const fetchCustomerDetails = async () => {
       try {
+        const token = await sessionToken.get();
         const res = await fetch(
-          `${API_URL}/api/proxy/customer-detail?customerId=${customerIdWithoutPrefix}&shop=${shopDomain}`,
-          { method: "GET", headers: { Accept: "application/json" } },
+          `${API_URL}/api/proxy/customer-detail`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
         const result = await res.json();
         if (!res.ok)
@@ -269,25 +279,31 @@ function Extension() {
       }
     };
     fetchCustomerDetails();
-  }, [shopDomain, customerId, accountCheckComplete, isRedirecting]);
+  }, [shopDomain, customerId, accountCheckComplete, isRedirecting, sessionToken]);
 
   useEffect(() => {
-    if (!shopDomain || !accountCheckComplete || isRedirecting) return;
+    if (!accountCheckComplete || isRedirecting) return;
     const fetchCountries = async () => {
       try {
+        const token = await sessionToken.get();
         const res = await fetch(
-          `${API_URL}/api/proxy/shipping-zones?shop=${shopDomain}`,
-          { method: "GET", headers: { Accept: "application/json" } },
+          `${API_URL}/api/proxy/shipping-zones`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
         const { countries } = await res.json();
-        console.log(countries, "countries from API");
         setCountriesData(countries || []);
       } catch (err) {
         console.error("Countries fetch error:", err);
       }
     };
     fetchCountries();
-  }, [shopDomain, accountCheckComplete, isRedirecting]);
+  }, [accountCheckComplete, isRedirecting, sessionToken]);
 
   // =========================
   // HANDLE CHANGE
@@ -1104,12 +1120,9 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
         { method: "POST", body: form, headers: { Accept: "application/json" } },
       );
       const text = await res.text();
-      console.log(text, "text from registration API");
-
       let result;
       try {
         result = JSON.parse(text);
-        console.log(result, "result from registration API");
       } catch {
         throw new Error("Invalid JSON from server");
       }
@@ -1316,7 +1329,7 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
               <s-button
                 variant="primary"
                 onClick={handleSubmit}
-                disabled={loading}
+                disabled={loading || isEditor}
                 loading={loading}
               >
                 {loading ? "Submitting…" : "Register"}

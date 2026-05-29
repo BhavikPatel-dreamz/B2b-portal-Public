@@ -1,5 +1,6 @@
 import prisma from "app/db.server";
 import { LoaderFunctionArgs } from "react-router";
+import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
 import {
   deserializeConfig,
   type StoredConfig,
@@ -13,7 +14,7 @@ import {
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
   "Access-Control-Max-Age": "86400",
 };
  
@@ -36,14 +37,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
  
   try {
-    // await authenticate.public.appProxy(request);
-    
-    const url = new URL(request.url);
-    const shop = url.searchParams.get("shop");
-    const customerId = url.searchParams.get("customerId");
-    const customerGid = customerId
-      ? `gid://shopify/Customer/${customerId}`
-      : null;
+    const { shop, customerGid } =
+      await authenticateCustomerAccountSession(request, {
+        requireCustomer: false,
+      });
  
     if (!shop) {
       return json({ error: "Missing shop" }, { status: 400 });
@@ -59,66 +56,68 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return json({}, { status: 200 });
     }
  
-    if (!customerId) {
-      return json({ error: "Missing customerId" }, { status: 400 });
-    }
- 
-    const [customer, userData,companyData] = await Promise.all([
-      prisma.registrationSubmission.findFirst({
-        where: {
-          shopifyCustomerId: customerGid,
-          shopId: store.id,
-        },
-        select: { status: true, reviewNotes: true },
-      }),
-      prisma.user.findFirst({
-        where: {
-          shopifyCustomerId: customerGid,
-          shopId: store.id,
-        },
-        select: {
-          role: true,
-          shopifyCustomerId: true,
-        },
-      }),
-      prisma.companyAccount.findFirst({
-        where: {
-          shopId: store.id,
+    const [customerRecord, userData, companyData] = customerGid
+      ? await Promise.all([
+          prisma.registrationSubmission.findFirst({
+            where: {
+              shopifyCustomerId: customerGid,
+              shopId: store.id,
+            },
+            select: { status: true, reviewNotes: true },
+          }),
+          prisma.user.findFirst({
+            where: {
+              shopifyCustomerId: customerGid,
+              shopId: store.id,
+            },
+            select: {
+              role: true,
+              shopifyCustomerId: true,
+            },
+          }),
+          prisma.companyAccount.findFirst({
+            where: {
+              shopId: store.id,
 
-        },
-        select: {
-          id: true,
-          name: true,
-          isDisable: true,
-        }
-      })
-    ]);
+            },
+            select: {
+              id: true,
+              name: true,
+              isDisable: true,
+            }
+          })
+        ])
+      : [null, null, null];
 
-    if (customer?.status === "PENDING") {
+    if (customerRecord?.status === "PENDING") {
       return json({
         message: "Your account has already been submitted and is under review",
-        reviewNotes: customer.reviewNotes ?? null,
+        reviewNotes: customerRecord.reviewNotes ?? null,
       });
     }
 
-    if (userData?.shopifyCustomerId === customerGid && userData.role !== "STORE_ADMIN") {
+    if (
+      userData &&
+      userData.shopifyCustomerId === customerGid &&
+      userData.role !== "STORE_ADMIN"
+    ) {
       return json({
         message: "Your account is not a customer. Please contact the support team.",
         redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
       });
     }
  
-    if (customer?.status === "APPROVED") {
+    if (customerRecord?.status === "APPROVED") {
       return json({
         message: "Your account is approved, but B2B access is not yet configured in Shopify.",
         redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
       });
     }
  
-    if (customer?.status === "REJECTED") {
+    if (customerRecord?.status === "REJECTED") {
       return json({
         message: "Your account has been rejected. Please contact the support team.",
-        reviewNotes: customer.reviewNotes ?? null,
+        reviewNotes: customerRecord.reviewNotes ?? null,
       });
     }
     if(companyData?.isDisable == true){
@@ -128,7 +127,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         },
       )}
 
-    if (store.plan === "free" && !customer && !userData) {
+    if (customerGid && store.plan === "free" && !customerRecord && !userData) {
       const usage = await getFreePlanUsage(store.id);
 
       if (usage.registrationLimitReached) {
@@ -181,6 +180,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
  
   } catch (error) {
+    if (error instanceof Response) {
+      return json(
+        { error: error.statusText || "Unauthorized" },
+        { status: error.status || 401 }
+      );
+    }
+
     console.error("❌ Error validating customer", error);
  
     return json(
