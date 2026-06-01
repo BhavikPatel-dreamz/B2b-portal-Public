@@ -17,11 +17,7 @@ export type FieldType =
   | "link"
   | "divider";
 
-export type FieldCategory =
-  | "general"
-  | "shipping"
-  | "custom"
-  | "display";
+export type FieldCategory = "general" | "shipping" | "custom" | "display";
 
 export type FieldWidth = "full" | "half";
 type HeadingTag = "h1" | "h2" | "h3" | "h4";
@@ -142,34 +138,177 @@ export const PALETTE: Record<
   }>
 > = {
   general: [
-    { paletteKey: "companyName", label: "Business / Company Name", type: "text", key: "companyName", section: "company", required: true, width: "full" },
-    { paletteKey: "contactName", label: "Contact Person Name", type: "text", key: "contactName", section: "company",  width: "full" },
-    { paletteKey: "contactPhone", label: "Contact Person Number", type: "phone", key: "phone", section: "company",  width: "full" },
-    { paletteKey: "taxId", label: "Tax Registration Number", type: "text", key: "taxId", section: "company", width: "full" },
-    { paletteKey: "businessType", label: "Type of Business (Retailer, Distributor, Reseller, etc.)", type: "text", key: "businessType", section: "company", width: "full" },
-    { paletteKey: "website", label: "Company Website", type: "text", key: "website", section: "company", width: "full" },
-    { paletteKey: "referralSource", label: "Referral Source", type: "text", key: "how_did_you_hear_about_us", section: "company", width: "full" },
-    { paletteKey: "additionalNotes", label: "Tell us about your business", type: "textarea", key: "additionalInfo", section: "company", width: "full" },
+    {
+      paletteKey: "companyName",
+      label: "Business / Company Name",
+      type: "text",
+      key: "companyName",
+      section: "company",
+      required: true,
+      width: "full",
+    },
+    {
+      paletteKey: "contactName",
+      label: "Contact Person Name",
+      type: "text",
+      key: "contactName",
+      section: "company",
+      width: "full",
+    },
+    {
+      paletteKey: "contactPhone",
+      label: "Contact Person Number",
+      type: "phone",
+      key: "phone",
+      section: "company",
+      width: "full",
+    },
+    {
+      paletteKey: "taxId",
+      label: "Tax Registration Number",
+      type: "text",
+      key: "taxId",
+      section: "company",
+      width: "full",
+    },
+    {
+      paletteKey: "businessType",
+      label: "Type of Business (Retailer, Distributor, Reseller, etc.)",
+      type: "text",
+      key: "businessType",
+      section: "company",
+      width: "full",
+    },
+    {
+      paletteKey: "website",
+      label: "Company Website",
+      type: "text",
+      key: "website",
+      section: "company",
+      width: "full",
+    },
+    {
+      paletteKey: "additionalNotes",
+      label: "Tell us about your business",
+      type: "textarea",
+      key: "additionalInfo",
+      section: "company",
+      width: "full",
+    },
   ],
   shipping: [],
   custom: [
-    { paletteKey: "c_text", label: "Single-line text", type: "text", key: "custom_text", width: "full" },
-    { paletteKey: "c_textarea", label: "Multi-line text", type: "textarea", key: "custom_textarea", width: "full" },
-    { paletteKey: "c_number", label: "Number", type: "number", key: "custom_number", width: "full" },
-    { paletteKey: "c_dropdown", label: "Dropdown", type: "select", key: "custom_dropdown", width: "full" },
-    { paletteKey: "c_radio", label: "Radio choices", type: "radio", key: "custom_radio", width: "full" },
-    { paletteKey: "c_checkbox", label: "Checkbox", type: "checkbox", key: "custom_checkbox", width: "full" },
-    { paletteKey: "c_multicheck", label: "Multi-choice list", type: "multi-check", key: "custom_multicheck", width: "full" },
-    { paletteKey: "c_date", label: "Date", type: "date", key: "custom_date", width: "full" },
-    { paletteKey: "c_file", label: "File upload", type: "file", key: "custom_file", width: "full" },
-    { paletteKey: "c_email", label: "Email address", type: "email", key: "custom_email", width: "full" },
-    { paletteKey: "c_phone", label: "Phone number", type: "phone", key: "custom_phone", width: "full" },
+    {
+      paletteKey: "c_text",
+      label: "Single-line text",
+      type: "text",
+      key: "custom_text",
+      width: "full",
+    },
+    {
+      paletteKey: "c_textarea",
+      label: "Multi-line text",
+      type: "textarea",
+      key: "custom_textarea",
+      width: "full",
+    },
+    {
+      paletteKey: "c_number",
+      label: "Number",
+      type: "number",
+      key: "custom_number",
+      width: "full",
+    },
+    {
+      paletteKey: "c_dropdown",
+      label: "Dropdown",
+      type: "select",
+      key: "custom_dropdown",
+      width: "full",
+    },
+    {
+      paletteKey: "c_radio",
+      label: "Radio choices",
+      type: "radio",
+      key: "custom_radio",
+      width: "full",
+    },
+    {
+      paletteKey: "c_checkbox",
+      label: "Checkbox",
+      type: "checkbox",
+      key: "custom_checkbox",
+      width: "full",
+    },
+    {
+      paletteKey: "c_multicheck",
+      label: "Multi-choice list",
+      type: "multi-check",
+      key: "custom_multicheck",
+      width: "full",
+    },
+    {
+      paletteKey: "c_date",
+      label: "Date",
+      type: "date",
+      key: "custom_date",
+      width: "full",
+    },
+    {
+      paletteKey: "c_file",
+      label: "File upload",
+      type: "file",
+      key: "custom_file",
+      width: "full",
+    },
+    {
+      paletteKey: "c_email",
+      label: "Email address",
+      type: "email",
+      key: "custom_email",
+      width: "full",
+    },
+    {
+      paletteKey: "c_phone",
+      label: "Phone number",
+      type: "phone",
+      key: "custom_phone",
+      width: "full",
+    },
   ],
   display: [
-    { paletteKey: "d_heading", label: "Heading", type: "heading", key: "display_heading", isDisplay: true, width: "full" },
-    { paletteKey: "d_paragraph", label: "Paragraph", type: "paragraph", key: "display_paragraph", isDisplay: true, width: "full" },
-    { paletteKey: "d_link", label: "Link", type: "link", key: "display_link", isDisplay: true, width: "full" },
-    { paletteKey: "d_divider", label: "Divider", type: "divider", key: "display_divider", isDisplay: true, width: "full" },
+    {
+      paletteKey: "d_heading",
+      label: "Heading",
+      type: "heading",
+      key: "display_heading",
+      isDisplay: true,
+      width: "full",
+    },
+    {
+      paletteKey: "d_paragraph",
+      label: "Paragraph",
+      type: "paragraph",
+      key: "display_paragraph",
+      isDisplay: true,
+      width: "full",
+    },
+    {
+      paletteKey: "d_link",
+      label: "Link",
+      type: "link",
+      key: "display_link",
+      isDisplay: true,
+      width: "full",
+    },
+    {
+      paletteKey: "d_divider",
+      label: "Divider",
+      type: "divider",
+      key: "display_divider",
+      isDisplay: true,
+      width: "full",
+    },
   ],
 };
 
@@ -298,20 +437,6 @@ export const DEFAULT_CONFIG: FormConfig = {
       stepIndex: 0,
     },
     {
-      id: "f_referral",
-      paletteKey: "referralSource",
-      category: "general",
-      type: "text",
-      label: "Referral Source",
-      key: "how_did_you_hear_about_us",
-      order: 9,
-      width: "full",
-      section: "company",
-      required: false,
-      sectionLabel: "Company information",
-      stepIndex: 0,
-    },
-    {
       id: "f_additionalNotes",
       paletteKey: "additionalNotes",
       category: "general",
@@ -336,7 +461,9 @@ export function serializeConfig(config: FormConfig): StoredConfig {
     const { map: sectionMap } = groupBySection(stepFields);
 
     const storedFields = stepFields.map((field): StoredField => {
-      const sectionFields = field.section ? sectionMap[field.section] || [] : [];
+      const sectionFields = field.section
+        ? sectionMap[field.section] || []
+        : [];
       const sectionLabel =
         field.section && sectionFields.length > 0
           ? getSectionDisplayLabel(sectionFields, field.section)
@@ -352,21 +479,43 @@ export function serializeConfig(config: FormConfig): StoredConfig {
         label: field.label,
         ...(field.description ? { description: field.description } : {}),
         ...(field.defaultValue ? { defaultValue: field.defaultValue } : {}),
-        ...(field.validationMessage ? { validationMessage: field.validationMessage } : {}),
-        ...(field.hideTypedCharacters ? { hideTypedCharacters: field.hideTypedCharacters } : {}),
+        ...(field.validationMessage
+          ? { validationMessage: field.validationMessage }
+          : {}),
+        ...(field.hideTypedCharacters
+          ? { hideTypedCharacters: field.hideTypedCharacters }
+          : {}),
         ...(field.headingTag ? { headingTag: field.headingTag } : {}),
-        ...(field.headingAlignment ? { headingAlignment: field.headingAlignment } : {}),
-        ...(typeof field.headingWidth === "number" ? { headingWidth: field.headingWidth } : {}),
-        ...(typeof field.paragraphFontSize === "number" ? { paragraphFontSize: field.paragraphFontSize } : {}),
+        ...(field.headingAlignment
+          ? { headingAlignment: field.headingAlignment }
+          : {}),
+        ...(typeof field.headingWidth === "number"
+          ? { headingWidth: field.headingWidth }
+          : {}),
+        ...(typeof field.paragraphFontSize === "number"
+          ? { paragraphFontSize: field.paragraphFontSize }
+          : {}),
         ...(field.linkUrl ? { linkUrl: field.linkUrl } : {}),
-        ...(typeof field.linkOpenInNewTab === "boolean" ? { linkOpenInNewTab: field.linkOpenInNewTab } : {}),
+        ...(typeof field.linkOpenInNewTab === "boolean"
+          ? { linkOpenInNewTab: field.linkOpenInNewTab }
+          : {}),
         ...(field.linkAlignment ? { linkAlignment: field.linkAlignment } : {}),
         ...(sectionLabel ? { sectionLabel } : {}),
-        ...(sectionHeadingSettings?.label ? { sectionHeadingLabel: sectionHeadingSettings.label } : {}),
-        ...(sectionHeadingSettings?.headingTag ? { sectionHeadingTag: sectionHeadingSettings.headingTag } : {}),
-        ...(sectionHeadingSettings?.alignment ? { sectionHeadingAlignment: sectionHeadingSettings.alignment } : {}),
-        ...(typeof sectionHeadingSettings?.width === "number" ? { sectionHeadingWidth: sectionHeadingSettings.width } : {}),
-        ...(typeof sectionHeadingSettings?.hidden === "boolean" ? { sectionHeadingHidden: sectionHeadingSettings.hidden } : {}),
+        ...(sectionHeadingSettings?.label
+          ? { sectionHeadingLabel: sectionHeadingSettings.label }
+          : {}),
+        ...(sectionHeadingSettings?.headingTag
+          ? { sectionHeadingTag: sectionHeadingSettings.headingTag }
+          : {}),
+        ...(sectionHeadingSettings?.alignment
+          ? { sectionHeadingAlignment: sectionHeadingSettings.alignment }
+          : {}),
+        ...(typeof sectionHeadingSettings?.width === "number"
+          ? { sectionHeadingWidth: sectionHeadingSettings.width }
+          : {}),
+        ...(typeof sectionHeadingSettings?.hidden === "boolean"
+          ? { sectionHeadingHidden: sectionHeadingSettings.hidden }
+          : {}),
         type: field.type,
         order: field.order,
         ...(field.required ? { required: field.required } : {}),
@@ -375,9 +524,15 @@ export function serializeConfig(config: FormConfig): StoredConfig {
         ...(field.options ? { options: field.options } : {}),
         ...(field.placeholder ? { placeholder: field.placeholder } : {}),
         ...(field.content ? { content: field.content } : {}),
-        ...(field.metafieldTarget ? { metafieldTarget: field.metafieldTarget } : {}),
-        ...(field.metafieldDefinition ? { metafieldDefinition: field.metafieldDefinition } : {}),
-        ...(field.phoneDefaultCountry ? { phoneDefaultCountry: field.phoneDefaultCountry } : {}),
+        ...(field.metafieldTarget
+          ? { metafieldTarget: field.metafieldTarget }
+          : {}),
+        ...(field.metafieldDefinition
+          ? { metafieldDefinition: field.metafieldDefinition }
+          : {}),
+        ...(field.phoneDefaultCountry
+          ? { phoneDefaultCountry: field.phoneDefaultCountry }
+          : {}),
       };
     });
 
@@ -393,7 +548,8 @@ export function deserializeConfig(stored: StoredConfig): FormConfig {
   const inferCategory = (field: StoredField): FieldCategory => {
     if (displayTypes.includes(field.type)) return "display";
     if (field.section === "shipping") return "shipping";
-    if (field.section === "company" || field.section === "contact") return "general";
+    if (field.section === "company" || field.section === "contact")
+      return "general";
     return "custom";
   };
 
@@ -485,7 +641,9 @@ function groupBySection(fields: FieldDef[]) {
 }
 
 function getSectionDisplayLabel(fields: FieldDef[], section: string) {
-  const customLabel = fields.find((field) => field.sectionLabel?.trim())?.sectionLabel?.trim();
+  const customLabel = fields
+    .find((field) => field.sectionLabel?.trim())
+    ?.sectionLabel?.trim();
   return customLabel || SECTION_LABELS[section] || section;
 }
 

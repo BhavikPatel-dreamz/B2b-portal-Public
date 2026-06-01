@@ -195,7 +195,6 @@ export const PALETTE: Record<
     { paletteKey: "taxId", label: "Tax Registration Number", type: "text", key: "taxId", section: "company", width: "full" },
     { paletteKey: "businessType", label: "Type of Business (Retailer, Distributor, Reseller, etc.)", type: "text", key: "businessType", section: "company", width: "full" },
     { paletteKey: "website", label: "Company Website", type: "text", key: "website", section: "company", width: "full" },
-    { paletteKey: "referralSource", label: "Referral Source", type: "text", key: "how_did_you_hear_about_us", section: "company", width: "full" },
     { paletteKey: "additionalNotes", label: "Tell us about your business", type: "textarea", key: "additionalInfo", section: "company", width: "full" },
   ],
   shipping: [],
