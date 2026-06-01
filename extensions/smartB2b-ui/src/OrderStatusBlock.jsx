@@ -19,7 +19,6 @@ const API_URL = "https://smartb2b.dynamicdreamz.com";
 
 const SECTION_LABELS = {
   company: "Company information",
-  contact: "Contact information",
   shipping: "Company location",
   billing: "Billing address",
 };
@@ -117,6 +116,21 @@ const COUNTRY_PHONE_META = {
   // Switzerland
   CH: { dialCode: "+41", flagEmoji: "🇨🇭" },
   SWITZERLAND: { dialCode: "+41", flagEmoji: "🇨🇭" },
+  // Thailand
+  TH: { dialCode: "+66", flagEmoji: "🇹🇭" },
+  THAILAND: { dialCode: "+66", flagEmoji: "🇹🇭" },
+  // South Africa
+  ZA: { dialCode: "+27", flagEmoji: "🇿🇦" },
+  "SOUTH AFRICA": { dialCode: "+27", flagEmoji: "🇿🇦" },
+  // Brazil
+  BR: { dialCode: "+55", flagEmoji: "🇧🇷" },
+  BRAZIL: { dialCode: "+55", flagEmoji: "🇧🇷" },
+  // Mexico
+  MX: { dialCode: "+52", flagEmoji: "🇲🇽" },
+  MEXICO: { dialCode: "+52", flagEmoji: "🇲🇽" },
+  // Turkey
+  TR: { dialCode: "+90", flagEmoji: "🇹🇷" },
+  TURKEY: { dialCode: "+90", flagEmoji: "🇹🇷" },
 };
 
 const FORM_ROW_BREAKPOINT = 680;
@@ -227,19 +241,39 @@ function Extension() {
           setFields(config.fields);
           const initial = {};
           const processFields = (arr) => {
-            arr.forEach((f) => {
-              if (f.type === "group") {
-                processFields(f.fields);
-              } else if (f.type === "checkbox") {
-                initial[f.key] = f.key === "billSameAsShip";
-              } else if (f.type === "country") {
-                initial[f.key] = "IN";
-              } else if (f.type === "state") {
-                initial[f.key] = getProvinceOptions("IN")[0]?.value ?? "";
-              } else {
-                initial[f.key] = "";
-              }
-            });
+            const sectionDefaults = {};
+            const gatherDefaults = (fields) => {
+              fields.forEach((f) => {
+                if (f.type === "group") gatherDefaults(f.fields);
+                if (f.type === "phone" && f.phoneDefaultCountry) {
+                  sectionDefaults[f.section || "general"] = f.phoneDefaultCountry.toUpperCase();
+                }
+              });
+            };
+            gatherDefaults(arr);
+
+            const applyDefaults = (fields) => {
+              fields.forEach((f) => {
+                if (f.type === "group") {
+                  applyDefaults(f.fields);
+                } else if (f.type === "checkbox") {
+                  initial[f.key] = f.key === "billSameAsShip";
+                } else if (f.type === "country") {
+                  initial[f.key] = sectionDefaults[f.section || "general"] || "IN";
+                } else if (f.type === "state") {
+                  const countryCode = sectionDefaults[f.section || "general"] || "IN";
+                  initial[f.key] = getProvinceOptions(countryCode)[0]?.value ?? "";
+                } else if (f.type === "phone") {
+                  const defaultCountry = f.phoneDefaultCountry?.toUpperCase() || sectionDefaults[f.section || "general"] || "IN";
+                  initial[f.key + "_country"] = defaultCountry;
+                  const { dialCode } = getPhoneMetaForCountry(defaultCountry);
+                  initial[f.key] = dialCode;
+                } else {
+                  initial[f.key] = "";
+                }
+              });
+            };
+            applyDefaults(arr);
           };
           processFields(config.fields);
           setFormData(initial);
@@ -374,6 +408,16 @@ function Extension() {
 
   const getCountryOptions = () =>
     countriesData.map((c) => ({ value: c.value, label: c.label }));
+
+  const getPhoneCountryOptions = () => {
+    return Object.entries(COUNTRY_PHONE_META)
+      .filter(([code]) => code.length === 2)
+      .map(([code, meta]) => ({
+        value: code,
+        label: `${meta.flagEmoji} ${code} (${meta.dialCode})`,
+      }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+  };
 
   const getProvinceOptions = (countryCode) => {
     const normalizedCountry = normalizeCountryCode(countryCode);
@@ -871,9 +915,10 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
         const countryOptions = field.options?.length
           ? field.options
           : getCountryOptions();
+        const defaultCountry = field.phoneDefaultCountry?.toUpperCase() || "IN";
         const selectedCountry =
-          resolveOptionValue(countryOptions, formData[field.key] ?? "IN") ||
-          "IN";
+          resolveOptionValue(countryOptions, formData[field.key] ?? defaultCountry) ||
+          defaultCountry;
 
         return renderFieldWithMessage(
           field,
@@ -887,8 +932,8 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
               const previousCountry =
                 resolveOptionValue(
                   countryOptions,
-                  formData[field.key] ?? "IN",
-                ) || "IN";
+                  formData[field.key] ?? defaultCountry,
+                ) || defaultCountry;
 
               setFormData((prev) => {
                 const updated = { ...prev, [field.key]: nextCountry };
@@ -965,10 +1010,11 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
       case "state": {
         const countryKey = findPairedKey(field.key, "state", "country");
         const countryOptions = getCountryOptions();
+        const defaultCountry = field.phoneDefaultCountry?.toUpperCase() || "IN";
         const selectedCountry = countryKey
-          ? resolveOptionValue(countryOptions, formData[countryKey] ?? "IN") ||
-          "IN"
-          : "IN";
+          ? resolveOptionValue(countryOptions, formData[countryKey] ?? defaultCountry) ||
+          defaultCountry
+          : defaultCountry;
         const stateOptions = field.options?.length
           ? field.options
           : getProvinceOptions(selectedCountry);
@@ -1011,31 +1057,62 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
 
       case "phone": {
         const countryKey = findPairedKey(field.key, "phone", "country");
-        const selectedCountry = countryKey ? (formData[countryKey] ?? "IN") : "IN";
-        const { dialCode, flagEmoji } = getPhoneMetaForCountry(selectedCountry);
+        const phoneCountryKey = field.key + "_country";
+        const defaultCountry = field.phoneDefaultCountry?.toUpperCase() || "IN";
+        const selectedCountry = countryKey
+          ? resolveOptionValue(getCountryOptions(), formData[countryKey] ?? defaultCountry) || defaultCountry
+          : (formData[phoneCountryKey] ?? defaultCountry);
+        const { dialCode } = getPhoneMetaForCountry(selectedCountry);
         const currentDigits = getPhoneDigitsWithoutDialCode(
           formData[field.key],
           dialCode,
         );
+        const phoneCountryOptions = getPhoneCountryOptions();
 
         return renderFieldWithMessage(
           field,
-          <s-text-field
-            key={`phone-${selectedCountry}`}
-            label={`${getFieldLabel(field, "Phone")} ${flagEmoji} ${dialCode}`}
-            value={currentDigits}
-            type="tel"
-            inputMode="numeric"
-            placeholder="Number"
-            onChange={(val) => {
-              const typedValue = val?.target?.value ?? val?.value ?? val ?? "";
-              const digits = sanitizePhoneDigits(typedValue);
-              handleChange(
-                field.key,
-                digits ? `${dialCode} ${digits}` : dialCode,
-              );
-            }}
-          />,
+          <s-grid gridTemplateColumns="120px 1fr" gap="base">
+            <s-select
+              label="Code"
+              value={selectedCountry}
+              onChange={(val) => {
+                const nextCountry = getInputValue(val);
+                if (countryKey) {
+                  handleChange(countryKey, nextCountry);
+                } else {
+                  handleChange(phoneCountryKey, nextCountry);
+                }
+                const { dialCode: newDialCode } =
+                  getPhoneMetaForCountry(nextCountry);
+                handleChange(
+                  field.key,
+                  currentDigits ? `${newDialCode} ${currentDigits}` : newDialCode,
+                );
+              }}
+            >
+              {phoneCountryOptions.map((opt) => (
+                <s-option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </s-option>
+              ))}
+            </s-select>
+            <s-text-field
+              key={`phone-${selectedCountry}`}
+              label={getFieldLabel(field, "Phone")}
+              value={currentDigits}
+              type="tel"
+              inputMode="numeric"
+              placeholder="Number"
+              onChange={(val) => {
+                const typedValue = getInputValue(val);
+                const digits = sanitizePhoneDigits(typedValue);
+                handleChange(
+                  field.key,
+                  digits ? `${dialCode} ${digits}` : dialCode,
+                );
+              }}
+            />
+          </s-grid>,
         );
       }
 

@@ -1,5 +1,6 @@
 import { ActionFunctionArgs, LoaderFunction } from "react-router";
 import { getProxyParams } from "app/utils/proxy.server";
+import { authenticate } from "app/shopify.server";
 import {
   sendCustomerRegistrationApprovalEmail,
   sendRegistrationEmailForAdmin,
@@ -24,6 +25,7 @@ const CORE_FIELD_KEYS = [
   "email",
   "firstName",
   "lastName",
+  "contactName",
   "contactTitle",
   "shopifyCustomerId",
   "customerEmail",
@@ -68,22 +70,61 @@ type AdminGraphQLClient = {
 
 type StoreRecord = NonNullable<Awaited<ReturnType<typeof getStoreByDomain>>>;
 
+const COUNTRY_DIAL_CODES: Record<string, string> = {
+  IN: "+91",
+  US: "+1",
+  CA: "+1",
+  GB: "+44",
+  AU: "+61",
+  DE: "+49",
+  FR: "+33",
+  IT: "+39",
+  ES: "+34",
+  NL: "+31",
+  CH: "+41",
+  BE: "+32",
+  AT: "+43",
+  SE: "+46",
+  NO: "+47",
+  DK: "+45",
+  FI: "+358",
+  IE: "+353",
+  NZ: "+64",
+  SG: "+65",
+  HK: "+852",
+  JP: "+81",
+  KR: "+82",
+  MY: "+60",
+  TH: "+66",
+  AE: "+971",
+  SA: "+966",
+  ZA: "+27",
+  BR: "+55",
+  MX: "+52",
+  IL: "+972",
+  PL: "+48",
+  PT: "+351",
+  TR: "+90",
+};
+
 function formatPhone(phone?: string, countryCode?: string) {
   if (!phone) return undefined;
 
-  if (phone.startsWith("+")) return phone.replace(/[^\d+]/g, "");
+  const rawPhone = String(phone).trim();
+  if (rawPhone.startsWith("+")) return rawPhone.replace(/[^\d+]/g, "");
 
-  const cleaned = phone.replace(/\D/g, "");
+  const cleaned = rawPhone.replace(/\D/g, "");
   if (!cleaned) return undefined;
 
-  if (countryCode === "IN") {
-    if (cleaned.length === 10) return `+91${cleaned}`;
-    if (cleaned.length === 11 && cleaned.startsWith("0")) {
-      return `+91${cleaned.slice(1)}`;
-    }
-    if (cleaned.length === 12 && cleaned.startsWith("91")) {
+  const code = (countryCode || "IN").toUpperCase();
+  const dialCode = COUNTRY_DIAL_CODES[code];
+
+  if (dialCode) {
+    const dialDigits = dialCode.replace(/\D/g, "");
+    if (cleaned.startsWith(dialDigits) && cleaned.length > dialDigits.length) {
       return `+${cleaned}`;
     }
+    return `${dialCode}${cleaned}`;
   }
 
   return `+${cleaned}`;
@@ -798,6 +839,13 @@ async function assignLocationAddresses(
   fallbackFirstName: string,
   fallbackLastName: string,
 ) {
+  // ✅ Skip if no valid country code (prevents GraphQL error)
+  // Shopify requires a valid countryCode if the address input is provided.
+  if (!location.Country) {
+    console.log("⚠️ assignLocationAddresses: No country code provided, skipping address assignment.");
+    return;
+  }
+
   const locationAddress = buildAddress(
     location,
     fallbackFirstName,
@@ -997,14 +1045,25 @@ export const loader: LoaderFunction = async ({ request }) => {
 // ─── ACTION (POST) ─────────────────────────────────────────────────────────────
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("📝 Registration API called");
-
+  
   // ✅ Handle CORS preflight
   const preflight = handlePreflight(request);
   if (preflight) return preflight;
 
+  let authenticatedShop: string | null = null;
+  const authenticatedCustomerId: string | null = null;
+
+  try {
+    const { session } = await authenticate.public.appProxy(request);
+    authenticatedShop = session.shop;
+    // Note: session for App Proxy might contain more info depending on Shopify version
+  } catch (e) {
+    console.warn("⚠️ [Registration] App Proxy authentication failed or skipped:", e);
+  }
+
   try {
     const url = new URL(request.url);
-    const shop = url.searchParams.get("shop");
+    const shop = authenticatedShop || url.searchParams.get("shop");
 
     if (!shop) {
       return json({ success: false, error: "Store identification failed." }, { status: 400 });
@@ -1029,6 +1088,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     for (const [key, value] of formData.entries()) {
       allFields[key] = typeof value === "string" ? value : value.name;
     }
+    console.log("🔍 [Registration] All form fields:", JSON.stringify(allFields));
 
     // ✅ Extract main fields
     const companyName = getFieldValueByKeyMatch(allFields, "companyName", {
@@ -1036,7 +1096,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       endsWith: true,
       includes: true,
     });
-    const email =
+    let email =
       allFields.email ||
       allFields.customerEmail ||
       getFieldValueByKeyMatch(allFields, "email", {
@@ -1044,8 +1104,78 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         endsWith: true,
         includes: true,
       });
-    const firstName = getFieldValueByKeyMatch(allFields, "firstName");
-    const lastName = getFieldValueByKeyMatch(allFields, "lastName");
+
+    // ✅ Session-based Email Fallback ("directly get")
+    const loggedInCustomerId = 
+      url.searchParams.get("logged_in_customer_id") || 
+      request.headers.get("x-shopify-customer-id") ||
+      allFields.shopifyCustomerId || 
+      allFields.customerId ||
+      allFields.customer_id;
+    
+    console.log("🔍 [Registration] Attempting email fallback. Found customerId:", loggedInCustomerId);
+    
+    if (!email && loggedInCustomerId) {
+      try {
+        const customerResponse = await admin.graphql(
+          `#graphql
+          query GetCustomerEmail($id: ID!) {
+            customer(id: $id) {
+              email
+              firstName
+              lastName
+            }
+          }`,
+          {
+            variables: {
+              id: String(loggedInCustomerId).startsWith("gid://")
+                ? String(loggedInCustomerId)
+                : `gid://shopify/Customer/${loggedInCustomerId}`,
+            },
+          },
+        );
+        const customerPayload = (await customerResponse.json()) as any;
+        console.log("🔍 [Registration] Shopify customer payload:", JSON.stringify(customerPayload));
+        const customerData = customerPayload?.data?.customer;
+        if (customerData?.email) {
+          email = customerData.email;
+          console.log("🔍 [Registration] Found email from session:", email);
+          // Also fallback for names if missing
+          if (!allFields.firstName && customerData.firstName) allFields.firstName = customerData.firstName;
+          if (!allFields.lastName && customerData.lastName) allFields.lastName = customerData.lastName;
+        } else {
+          console.warn("⚠️ [Registration] Customer email not found in Shopify data for id:", loggedInCustomerId);
+        }
+      } catch (err) {
+        console.error("❌ [Registration] Failed to fetch session customer email:", err);
+      }
+    }
+
+    // ✅ Final Safety Net: Scan all fields for anything that looks like an email
+    if (!email) {
+      for (const value of Object.values(allFields)) {
+        if (typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+          email = value.trim();
+          console.log("🔍 [Registration] Found email-like string in unknown field:", email);
+          break;
+        }
+      }
+    }
+
+    if (!email) {
+      console.warn("⚠️ [Registration] No email in form, no customer ID found, and no email-like strings in form data.");
+    }
+
+    let firstName = getFieldValueByKeyMatch(allFields, "firstName");
+    let lastName = getFieldValueByKeyMatch(allFields, "lastName");
+    const contactName = getFieldValueByKeyMatch(allFields, "contactName");
+
+    if (contactName && !firstName && !lastName) {
+      const parts = contactName.trim().split(/\s+/);
+      firstName = parts[0] || "";
+      lastName = parts.slice(1).join(" ") || "";
+    }
+
     const contactTitle = getFieldValueByKeyMatch(allFields, "contactTitle");
 
     // ✅ Basic validation
@@ -1056,8 +1186,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
     if (!email) {
+      const errorMsg = loggedInCustomerId 
+        ? "Could not retrieve your account email. Please ensure you are logged in or contact support."
+        : "Email is required. Please log in to your account first.";
+      
       return json(
-        { success: false, error: "Email is required." },
+        { success: false, error: errorMsg },
         { status: 400 },
       );
     }
@@ -1078,13 +1212,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const { location, customFields } = parseFormFields(allFields);
+    const countryCode = (allFields.shipCountry || allFields.shCountry || allFields.phone_country || "IN") as string;
     const phone = formatPhone(
       allFields.phone || location.Phone,
-      location.Country,
+      countryCode,
     );
     const normalizedPhone = normalizePhoneForComparison(
       phone,
-      location.Country,
+      countryCode,
     );
 
     if (phone) {

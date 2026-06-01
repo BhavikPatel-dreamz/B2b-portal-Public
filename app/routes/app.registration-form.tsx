@@ -5,7 +5,7 @@ import {
   LoaderFunctionArgs,
   useFetcher,
   useLoaderData,
-} from "react-router";
+ Link } from "react-router";
 
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -13,7 +13,6 @@ import { APP_ADMIN_CONTENT_STYLE } from "app/utils/app-layout.shared";
 import prisma from "../db.server";
 import { authenticate } from "app/shopify.server";
 import { DEFAULT_CONFIG } from "app/utils/form-config.shared";
-import { Link } from "react-router";
 
 export type FieldType =
   | "text"
@@ -146,8 +145,6 @@ interface LoaderData {
 
 export const SECTION_LABELS: Record<string, string> = {
   company: "Company information",
-  contact: "Contact information",
-  shipping: "Company location",
 };
 
 const CATEGORY_INFO: Record<
@@ -160,11 +157,6 @@ const CATEGORY_INFO: Record<
     description:
       "Collect general information about the company, and who represents it as the main contact",
   },
-  shipping: {
-    label: "Location",
-    icon: "🚚",
-    description: "Collect the company's main location address",
-  },
   custom: {
     label: "Custom",
     icon: "✏️",
@@ -175,6 +167,11 @@ const CATEGORY_INFO: Record<
     label: "Display",
     icon: "🖼️",
     description: "Add elements that do not require customer input",
+  },
+  shipping: {
+    label: "Location",
+    icon: "🚚",
+    description: "Collect the company's main location address",
   },
 };
 
@@ -192,24 +189,16 @@ export const PALETTE: Record<
   }>
 > = {
   general: [
-    { paletteKey: "companyName", label: "Company name", type: "text", key: "companyName", section: "company", required: true, width: "full" },
-    { paletteKey: "taxId", label: "Tax ID", type: "text", key: "taxId", section: "company", width: "full" },
-    { paletteKey: "firstName", label: "Contact first name", type: "text", key: "firstName", section: "contact", required: true, width: "half" },
-    { paletteKey: "lastName", label: "Contact last name", type: "text", key: "lastName", section: "contact", width: "half" },
-    { paletteKey: "contactTitle", label: "Contact title", type: "text", key: "contactTitle", section: "contact", width: "full" },
-    { paletteKey: "locationName", label: "Main location name", type: "text", key: "locationName", section: "company", width: "full" },
-    { paletteKey: "email", label: "Email", type: "email", key: "email", section: "contact", required: true, width: "full" },
+    { paletteKey: "companyName", label: "Business / Company Name", type: "text", key: "companyName", section: "company", required: true, width: "full" },
+    { paletteKey: "contactName", label: "Contact Person Name", type: "text", key: "contactName", section: "company", required: true, width: "full" },
+    { paletteKey: "contactPhone", label: "Contact Person Number", type: "phone", key: "phone", section: "company", required: true, width: "full" },
+    { paletteKey: "taxId", label: "Tax Registration Number", type: "text", key: "taxId", section: "company", width: "full" },
+    { paletteKey: "businessType", label: "Type of Business (Retailer, Distributor, Reseller, etc.)", type: "text", key: "businessType", section: "company", width: "full" },
+    { paletteKey: "website", label: "Company Website", type: "text", key: "website", section: "company", width: "full" },
+    { paletteKey: "referralSource", label: "Referral Source", type: "text", key: "how_did_you_hear_about_us", section: "company", width: "full" },
+    { paletteKey: "additionalNotes", label: "Tell us about your business", type: "textarea", key: "additionalInfo", section: "company", width: "full" },
   ],
-  shipping: [
-    { paletteKey: "shipDept", label: "Department/attention", type: "text", key: "shipDept", section: "shipping", width: "full" },
-    { paletteKey: "shipPhone", label: "Phone", type: "phone", key: "shipPhone", section: "shipping", width: "full" },
-    { paletteKey: "shipAddr1", label: "Company location line 1", type: "text", key: "shipAddr1", section: "shipping", width: "full" },
-    { paletteKey: "shipAddr2", label: "Company location line 2", type: "text", key: "shipAddr2", section: "shipping", width: "full" },
-    { paletteKey: "shipCity", label: "City", type: "text", key: "shipCity", section: "shipping", width: "full" },
-    { paletteKey: "shipCountry", label: "Country", type: "country", key: "shipCountry", section: "shipping", width: "full" },
-    { paletteKey: "shipState", label: "State/province", type: "state", key: "shipState", section: "shipping", width: "full" },
-    { paletteKey: "shipZip", label: "ZIP/Postal code", type: "text", key: "shipZip", section: "shipping", width: "full" },
-  ],
+  shipping: [],
   custom: [
     { paletteKey: "c_text", label: "Single-line text", type: "text", key: "custom_text", width: "full" },
     { paletteKey: "c_textarea", label: "Multi-line text", type: "textarea", key: "custom_textarea", width: "full" },
@@ -491,15 +480,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function mapToRegistrationData(formData: Record<string, any>) {
-  const REGISTRATION_COLUMNS = ["companyName", "email", "firstName", "lastName", "contactTitle", "isPrivacyPolicy"];
+  const REGISTRATION_COLUMNS = ["companyName", "email", "firstName", "lastName", "contactName", "contactTitle", "isPrivacyPolicy"];
   const mainData: Record<string, any> = {};
   const customFields: Record<string, any> = {};
-  let shipping: Record<string, any> = {};
-  let billing: Record<string, any> = {};
+  const shipping: Record<string, any> = {};
+  const billing: Record<string, any> = {};
 
   for (const key in formData) {
     const value = formData[key];
-    if (REGISTRATION_COLUMNS.includes(key)) { mainData[key] = value; continue; }
+    if (REGISTRATION_COLUMNS.includes(key)) {
+      if (key === "contactName") {
+        const parts = String(value).trim().split(/\s+/);
+        mainData.firstName = parts[0] || "";
+        mainData.lastName = parts.slice(1).join(" ") || "";
+        continue;
+      }
+      mainData[key] = value;
+      continue;
+    }
     if (key.startsWith("ship")) { shipping[key] = value; continue; }
     if (key.startsWith("bill")) { billing[key] = value; continue; }
     if (key === "email" || key.startsWith("email")) { mainData.email = value; continue; }
@@ -813,9 +811,39 @@ function getMetafieldSupportedTypeLabel(type: FieldType) {
 
 const PHONE_COUNTRY_OPTIONS = [
   { value: "us", label: "United States (+1) 🇺🇸" },
-  { value: "in", label: "India (+91) 🇮🇳" },
+  { value: "ca", label: "Canada (+1) 🇨🇦" },
   { value: "gb", label: "United Kingdom (+44) 🇬🇧" },
   { value: "au", label: "Australia (+61) 🇦🇺" },
+  { value: "in", label: "India (+91) 🇮🇳" },
+  { value: "de", label: "Germany (+49) 🇩🇪" },
+  { value: "fr", label: "France (+33) 🇫🇷" },
+  { value: "it", label: "Italy (+39) 🇮🇹" },
+  { value: "es", label: "Spain (+34) 🇪🇸" },
+  { value: "nl", label: "Netherlands (+31) 🇳🇱" },
+  { value: "ch", label: "Switzerland (+41) 🇨🇭" },
+  { value: "be", label: "Belgium (+32) 🇧🇪" },
+  { value: "at", label: "Austria (+43) 🇦🇹" },
+  { value: "se", label: "Sweden (+46) 🇸🇪" },
+  { value: "no", label: "Norway (+47) 🇳🇴" },
+  { value: "dk", label: "Denmark (+45) 🇩🇰" },
+  { value: "fi", label: "Finland (+358) 🇫🇮" },
+  { value: "ie", label: "Ireland (+353) 🇮🇪" },
+  { value: "nz", label: "New Zealand (+64) 🇳🇿" },
+  { value: "sg", label: "Singapore (+65) 🇸🇬" },
+  { value: "hk", label: "Hong Kong (+852) 🇭🇰" },
+  { value: "jp", label: "Japan (+81) 🇯🇵" },
+  { value: "kr", label: "South Korea (+82) 🇰🇷" },
+  { value: "my", label: "Malaysia (+60) 🇲🇾" },
+  { value: "th", label: "Thailand (+66) 🇹🇭" },
+  { value: "ae", label: "United Arab Emirates (+971) 🇦🇪" },
+  { value: "sa", label: "Saudi Arabia (+966) 🇸🇦" },
+  { value: "za", label: "South Africa (+27) 🇿🇦" },
+  { value: "br", label: "Brazil (+55) 🇧🇷" },
+  { value: "mx", label: "Mexico (+52) 🇲🇽" },
+  { value: "il", label: "Israel (+972) 🇮🇱" },
+  { value: "pl", label: "Poland (+48) 🇵🇱" },
+  { value: "pt", label: "Portugal (+351) 🇵🇹" },
+  { value: "tr", label: "Turkey (+90) 🇹🇷" },
 ];
 
 function buildInitialMetafieldDefinitions() {
@@ -1043,6 +1071,16 @@ function FieldPreviewInput({ field }: { field: FieldDef }) {
       return <div style={{ ...previewInputStyle, color: previewValue ? "#6b7280" : "#c4c4c4" }}>{previewValue || "dd/mm/yyyy"}</div>;
     case "file":
       return <div style={{ ...previewInputStyle, fontSize: 14 }}>Choose file…</div>;
+    case "phone":
+      return (
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ ...previewInputStyle, flex: "0 0 100px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb" }}>
+            <span style={{ fontSize: 13 }}>+1 🇺🇸</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+          </div>
+          <div style={{ ...previewInputStyle, flex: 1, color: previewValue ? "#6b7280" : "#9ca3af" }}>{maskedPreviewValue || "Phone number"}</div>
+        </div>
+      );
     case "radio":
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "2px 0" }}>
@@ -2547,7 +2585,7 @@ export default function FormEditor() {
               <div style={{ padding: "0 12px 10px", fontSize: 12, fontWeight: 700, color: "#111827" }}>
                 Fields
               </div>
-              {(["general", "shipping", "custom"] as FieldCategory[]).map((cat) => (
+              {(["general", "custom"] as FieldCategory[]).map((cat) => (
                 <button
                   key={cat}
                   onClick={() => { setActiveCategory(cat); setEditingSteps(false); setActiveSection(null); setActiveFieldId(null); }}
@@ -3556,20 +3594,42 @@ export default function FormEditor() {
                     <div style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginTop: 16, marginBottom: 6 }}>
                       Default value
                     </div>
-                    <input
-                      value={fieldEditorDraft.defaultValue}
-                      onChange={(e) =>
-                        setFieldEditorDraft((prev) => ({ ...prev, defaultValue: e.target.value }))
-                      }
-                      style={{
-                        width: "100%",
-                        padding: "9px 12px",
-                        border: "1px solid #d1d5db",
-                        borderRadius: 8,
-                        fontSize: 13,
-                        boxSizing: "border-box",
-                      }}
-                    />
+                    {activeField.type === "phone" ? (
+                      <select
+                        value={fieldEditorDraft.phoneDefaultCountry}
+                        onChange={(e) =>
+                          setFieldEditorDraft((prev) => ({ ...prev, phoneDefaultCountry: e.target.value }))
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "9px 12px",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          boxSizing: "border-box",
+                          background: "#fff",
+                        }}
+                      >
+                        {PHONE_COUNTRY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={fieldEditorDraft.defaultValue}
+                        onChange={(e) =>
+                          setFieldEditorDraft((prev) => ({ ...prev, defaultValue: e.target.value }))
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "9px 12px",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    )}
                   </div>
 
                   <div style={{ display: "grid", gap: 16, paddingBottom: 20, borderBottom: "1px solid #e5e7eb" }}>
@@ -3878,7 +3938,7 @@ export default function FormEditor() {
                   );
                 })}
               </div>
-              {["general", "shipping"].includes(activeCategory) && (
+              {["general"].includes(activeCategory) && (
                 <button
                   onClick={() => palette.forEach((item) => addField(item))}
                   disabled={allCategoryFieldsUsed}

@@ -917,6 +917,7 @@ function parseFormFields(form: Record<string, any>) {
     "email",
     "firstName",
     "lastName",
+    "contactName",
     "contactTitle",
     "shopifyCustomerId",
     "paymentTerms",
@@ -927,7 +928,6 @@ function parseFormFields(form: Record<string, any>) {
     "phone",
     "intent",
     "billSameAsShip",
-    "taxId",
   ];
 
   Object.entries(form).forEach(([key, value]) => {
@@ -1001,14 +1001,23 @@ export async function assignLocationAddresses(
 
   // ── Location address ──
   if (location) {
+    const countryCode = location.Country || "";
+    
+    // ✅ Skip if no valid country code (prevents GraphQL error)
+    // Shopify requires a valid countryCode if the address input is provided.
+    if (!countryCode) {
+      console.log("⚠️ assignLocationAddresses: No country code provided, skipping address assignment.");
+      return;
+    }
+
     const locationAddress = {
       address1: location.Addr1 || "",
       address2: location.Addr2 || "",
       city: location.City || "",
       zip: location.Zip || "",
-      countryCode: location.Country || "",
+      countryCode: countryCode,
       zoneCode: location.State || "",
-      phone: formatPhone(location.Phone, location.Country),
+      phone: formatPhone(location.Phone, countryCode),
       firstName: location.FirstName || "",
       lastName: location.LastName || "",
       recipient:
@@ -1160,8 +1169,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       case "createCustomer": {
         const email = (form.email as string)?.trim();
-        const firstName = (form.firstName as string)?.trim();
-        const lastName = (form.lastName as string)?.trim();
+        let firstName = (form.firstName as string)?.trim();
+        let lastName = (form.lastName as string)?.trim();
+        const contactName = (form.contactName as string)?.trim();
+
+        if (contactName && !firstName && !lastName) {
+          const parts = contactName.split(/\s+/);
+          firstName = parts[0] || "";
+          lastName = parts.slice(1).join(" ") || "";
+        }
+
         const phone = (form.phone as string)?.trim() || undefined;
         const contactTitle = (form.contactTitle as string)?.trim() || "";
 
@@ -1304,8 +1321,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "updateCustomer": {
         const customerId = (form.customerId as string)?.trim();
         const email = (form.email as string)?.trim();
-        const firstName = (form.firstName as string)?.trim();
-        const lastName = (form.lastName as string)?.trim();
+        let firstName = (form.firstName as string)?.trim();
+        let lastName = (form.lastName as string)?.trim();
+        const contactName = (form.contactName as string)?.trim();
+
+        if (contactName && !firstName && !lastName) {
+          const parts = contactName.split(/\s+/);
+          firstName = parts[0] || "";
+          lastName = parts.slice(1).join(" ") || "";
+        }
+
         const phone = (form.phone as string)?.trim() || undefined;
         const contactTitle = (form.contactTitle as string)?.trim() || "";
 
@@ -1510,8 +1535,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const creditLimitInput = (form.creditLimit as string)?.trim() || null;
         const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
         const customerEmail = (form.customerEmail as string)?.trim();
-        const firstName = (form.firstName as string)?.trim();
-        const lastName = (form.lastName as string)?.trim();
+        let firstName = (form.firstName as string)?.trim();
+        let lastName = (form.lastName as string)?.trim();
+        const contactName = (form.contactName as string)?.trim();
+
+        if (contactName && !firstName && !lastName) {
+          const parts = contactName.split(/\s+/);
+          firstName = parts[0] || "";
+          lastName = parts.slice(1).join(" ") || "";
+        }
 
         // ── Fetch registration data for address ──
         const RegitrasionData = await prisma.registrationSubmission.findFirst({
@@ -2081,8 +2113,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const email = (form.email as string)?.trim();
         const companyName = (form.companyName as string)?.trim();
         const note = (form.reviewNotes as string)?.trim() || null;
+        
+        let firstName = (form.firstName as string)?.trim();
+        let lastName = (form.lastName as string)?.trim();
+        const contactNameInput = (form.contactName as string)?.trim();
+
+        if (contactNameInput && !firstName && !lastName) {
+          const parts = contactNameInput.split(/\s+/);
+          firstName = parts[0] || "";
+          lastName = parts.slice(1).join(" ") || "";
+        }
+
         const contactName =
-          (`${form?.firstName} ${form?.lastName}` as string)?.trim() ||
+          (`${firstName || ""} ${lastName || ""}`.trim()) ||
           "First Name";
 
         if (!email) {
@@ -2139,8 +2182,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const creditLimitInput = (form.creditLimit as string)?.trim() || null;
         const companyCreditLimit = resolveCompanyCreditLimit(creditLimitInput);
         const customerEmail = (form.customerEmail as string)?.trim();
-        const firstName = (form.firstName as string)?.trim();
-        const lastName = (form.lastName as string)?.trim();
+        let firstName = (form.firstName as string)?.trim();
+        let lastName = (form.lastName as string)?.trim();
+        const contactName = (form.contactName as string)?.trim();
+
+        if (contactName && !firstName && !lastName) {
+          const parts = contactName.split(/\s+/);
+          firstName = parts[0] || "";
+          lastName = parts.slice(1).join(" ") || "";
+        }
+
         const reviewNotes = (form.reviewNotes as string)?.trim() || null;
 
         if (!registrationId || !customerId || !companyName || !customerEmail) {
@@ -3411,6 +3462,64 @@ const COUNTRY_PHONE_META: Record<
   AUSTRALIA: { dialCode: "+61", flagEmoji: "🇦🇺" },
   CA: { dialCode: "+1", flagEmoji: "🇨🇦" },
   CANADA: { dialCode: "+1", flagEmoji: "🇨🇦" },
+  DE: { dialCode: "+49", flagEmoji: "🇩🇪" },
+  GERMANY: { dialCode: "+49", flagEmoji: "🇩🇪" },
+  FR: { dialCode: "+33", flagEmoji: "🇫🇷" },
+  FRANCE: { dialCode: "+33", flagEmoji: "🇫🇷" },
+  IT: { dialCode: "+39", flagEmoji: "🇮🇹" },
+  ITALY: { dialCode: "+39", flagEmoji: "🇮🇹" },
+  ES: { dialCode: "+34", flagEmoji: "🇪🇸" },
+  SPAIN: { dialCode: "+34", flagEmoji: "🇪🇸" },
+  NL: { dialCode: "+31", flagEmoji: "🇳🇱" },
+  NETHERLANDS: { dialCode: "+31", flagEmoji: "🇳🇱" },
+  CH: { dialCode: "+41", flagEmoji: "🇨🇭" },
+  SWITZERLAND: { dialCode: "+41", flagEmoji: "🇨🇭" },
+  BE: { dialCode: "+32", flagEmoji: "🇧🇪" },
+  BELGIUM: { dialCode: "+32", flagEmoji: "🇧🇪" },
+  AT: { dialCode: "+43", flagEmoji: "🇦🇹" },
+  AUSTRIA: { dialCode: "+43", flagEmoji: "🇦🇹" },
+  SE: { dialCode: "+46", flagEmoji: "🇸🇪" },
+  SWEDEN: { dialCode: "+46", flagEmoji: "🇸🇪" },
+  NO: { dialCode: "+47", flagEmoji: "🇳🇴" },
+  NORWAY: { dialCode: "+47", flagEmoji: "🇳🇴" },
+  DK: { dialCode: "+45", flagEmoji: "🇩🇰" },
+  DENMARK: { dialCode: "+45", flagEmoji: "🇩🇰" },
+  FI: { dialCode: "+358", flagEmoji: "🇫🇮" },
+  FINLAND: { dialCode: "+358", flagEmoji: "🇫🇮" },
+  IE: { dialCode: "+353", flagEmoji: "🇮🇪" },
+  IRELAND: { dialCode: "+353", flagEmoji: "🇮🇪" },
+  NZ: { dialCode: "+64", flagEmoji: "🇳🇿" },
+  "NEW ZEALAND": { dialCode: "+64", flagEmoji: "🇳🇿" },
+  SG: { dialCode: "+65", flagEmoji: "🇸🇬" },
+  SINGAPORE: { dialCode: "+65", flagEmoji: "🇸🇬" },
+  HK: { dialCode: "+852", flagEmoji: "🇭🇰" },
+  "HONG KONG": { dialCode: "+852", flagEmoji: "🇭🇰" },
+  JP: { dialCode: "+81", flagEmoji: "🇯🇵" },
+  JAPAN: { dialCode: "+81", flagEmoji: "🇯🇵" },
+  KR: { dialCode: "+82", flagEmoji: "🇰🇷" },
+  "SOUTH KOREA": { dialCode: "+82", flagEmoji: "🇰🇷" },
+  MY: { dialCode: "+60", flagEmoji: "🇲🇾" },
+  MALAYSIA: { dialCode: "+60", flagEmoji: "🇲🇾" },
+  TH: { dialCode: "+66", flagEmoji: "🇹🇭" },
+  THAILAND: { dialCode: "+66", flagEmoji: "🇹🇭" },
+  AE: { dialCode: "+971", flagEmoji: "🇦🇪" },
+  "UNITED ARAB EMIRATES": { dialCode: "+971", flagEmoji: "🇦🇪" },
+  SA: { dialCode: "+966", flagEmoji: "🇸🇦" },
+  "SAUDI ARABIA": { dialCode: "+966", flagEmoji: "🇸🇦" },
+  ZA: { dialCode: "+27", flagEmoji: "🇿🇦" },
+  "SOUTH AFRICA": { dialCode: "+27", flagEmoji: "🇿🇦" },
+  BR: { dialCode: "+55", flagEmoji: "🇧🇷" },
+  BRAZIL: { dialCode: "+55", flagEmoji: "🇧🇷" },
+  MX: { dialCode: "+52", flagEmoji: "🇲🇽" },
+  MEXICO: { dialCode: "+52", flagEmoji: "🇲🇽" },
+  IL: { dialCode: "+972", flagEmoji: "🇮🇱" },
+  ISRAEL: { dialCode: "+972", flagEmoji: "🇮🇱" },
+  PL: { dialCode: "+48", flagEmoji: "🇵🇱" },
+  POLAND: { dialCode: "+48", flagEmoji: "🇵🇱" },
+  PT: { dialCode: "+351", flagEmoji: "🇵🇹" },
+  PORTUGAL: { dialCode: "+351", flagEmoji: "🇵🇹" },
+  TR: { dialCode: "+90", flagEmoji: "🇹🇷" },
+  TURKEY: { dialCode: "+90", flagEmoji: "🇹🇷" },
 };
 
 const COUNTRY_CODE_ALIASES: Record<string, string> = {
@@ -3421,6 +3530,35 @@ const COUNTRY_CODE_ALIASES: Record<string, string> = {
   UK: "GB",
   AUSTRALIA: "AU",
   CANADA: "CA",
+  GERMANY: "DE",
+  FRANCE: "FR",
+  ITALY: "IT",
+  SPAIN: "ES",
+  NETHERLANDS: "NL",
+  SWITZERLAND: "CH",
+  BELGIUM: "BE",
+  AUSTRIA: "AT",
+  SWEDEN: "SE",
+  NORWAY: "NO",
+  DENMARK: "DK",
+  FINLAND: "FI",
+  IRELAND: "IE",
+  "NEW ZEALAND": "NZ",
+  SINGAPORE: "SG",
+  "HONG KONG": "HK",
+  JAPAN: "JP",
+  "SOUTH KOREA": "KR",
+  MALAYSIA: "MY",
+  THAILAND: "TH",
+  "UNITED ARAB EMIRATES": "AE",
+  "SAUDI ARABIA": "SA",
+  "SOUTH AFRICA": "ZA",
+  BRAZIL: "BR",
+  MEXICO: "MX",
+  ISRAEL: "IL",
+  POLAND: "PL",
+  PORTUGAL: "PT",
+  TURKEY: "TR",
 };
 
 function normalizeCountryCode(countryValue?: string | null) {
@@ -3539,15 +3677,15 @@ function getFieldSourcePath(field: FieldDef): string {
     case "companyName":
     case "firstName":
     case "lastName":
+    case "contactName":
+    case "contactTitle":
+      return `submission.${field.key}`;
     case "website":
     case "businessType":
     case "additionalInfo":
-    case "contactTitle":
-    case "locationName":
     case "phone":
-      return `submission.${field.key}`;
     case "taxId":
-      return "submission.customFields.taxId";
+      return `submission.customFields.${field.key}`;
     default:
       return `submission.customFields.${field.key}`;
   }
@@ -3698,6 +3836,9 @@ function resolveSourceValue(
     return customer?.[key] ?? "";
   }
   if (root === "submission") {
+    if (key === "contactName") {
+      return `${submission?.firstName || ""} ${submission?.lastName || ""}`.trim();
+    }
     if (key.startsWith("customFields.")) {
       const cfKey = key.replace("customFields.", "");
       if (cfKey === "taxId") {
@@ -3741,11 +3882,12 @@ export function buildInitialEditForm(
       "",
     firstName: submission.firstName || "",
     lastName: submission.lastName || "",
+    contactName: `${submission.firstName || ""} ${submission.lastName || ""}`.trim(),
     jobTitle:
       (submission as any)?.contactTitle ??
       (submission as any)?.customFields?.jobTitle ??
       "",
-    contactPhone:
+    phone:
       submission.phone ?? (submission as any)?.customFields?.phone ?? "",
     shDepartment: location?.Department || "",
     shFirstName: location?.FirstName || "",
@@ -5775,8 +5917,10 @@ export function RegistrationApprovalsPanel({
                     const phone =
                       [
                         submission.phone,
+                        (submission.customFields as any)?.phone,
                         submission.location?.Phone,
-                        submission.location?.phone,                      ].find(
+                        submission.location?.phone,
+                      ].find(
                         (value): value is string =>
                           typeof value === "string" && value.trim().length > 0,
                       ) || "-";

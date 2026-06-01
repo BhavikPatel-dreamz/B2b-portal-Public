@@ -3,12 +3,17 @@ import { LoaderFunctionArgs } from "react-router";
 import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
 import {
   deserializeConfig,
+  DEFAULT_CONFIG,
   type StoredConfig,
 } from "../../utils/form-config.shared";
 import {
   getFreePlanRegistrationsLimitMessage,
   getFreePlanUsage,
 } from "app/utils/free-plan-limits.server";
+import {
+  checkCustomerIsB2BInShopifyByREST,
+  getCustomerCompanyInfo,
+} from "app/utils/b2b-customer.server";
 
 
 const CORS_HEADERS = {
@@ -37,7 +42,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
  
   try {
-    const { shop, customerGid } =
+    const { shop, customerGid, customerId } =
       await authenticateCustomerAccountSession(request, {
         requireCustomer: false,
       });
@@ -48,7 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
  
     const store = await prisma.store.findUnique({
       where: { shopDomain: shop },
-      select: { id: true, shopDomain: true, plan: true },
+      select: { id: true, shopDomain: true, plan: true, accessToken: true },
     });
  
     // ❌ Store doesn't exist — return blank response (with CORS)
@@ -106,6 +111,38 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
       });
     }
+
+    if (customerGid && customerId && store.accessToken) {
+      try {
+        const customerCompanyInfo = await getCustomerCompanyInfo(
+          customerId,
+          shop,
+          store.accessToken,
+        );
+
+        if (customerCompanyInfo.hasCompany) {
+          return json({
+            message: "Your B2B account is already active.",
+            redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
+          });
+        }
+
+        const b2bCheck = await checkCustomerIsB2BInShopifyByREST(
+          shop,
+          customerId,
+          store.accessToken,
+        );
+
+        if (b2bCheck.success && b2bCheck.hasAccess) {
+          return json({
+            message: "Your B2B account is already active.",
+            redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
+          });
+        }
+      } catch (error) {
+        console.error("❌ Error checking Shopify B2B access:", error);
+      }
+    }
  
     if (customerRecord?.status === "APPROVED") {
       return json({
@@ -148,7 +185,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
     });
  
-    let config;
+    let config = DEFAULT_CONFIG;
  
     if (formFieldConfig?.fields) {
       try {
@@ -168,7 +205,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           config = deserializeConfig(stored);
         }
       } catch {
-        config = [];
+        config = DEFAULT_CONFIG;
       }
     }
   
