@@ -190,8 +190,8 @@ export const PALETTE: Record<
 > = {
   general: [
     { paletteKey: "companyName", label: "Business / Company Name", type: "text", key: "companyName", section: "company", required: true, width: "full" },
-    { paletteKey: "contactName", label: "Contact Person Name", type: "text", key: "contactName", section: "company", required: true, width: "full" },
-    { paletteKey: "contactPhone", label: "Contact Person Number", type: "phone", key: "phone", section: "company", required: true, width: "full" },
+    { paletteKey: "contactName", label: "Contact Person Name", type: "text", key: "contactName", section: "company",  width: "full" },
+    { paletteKey: "contactPhone", label: "Contact Person Number", type: "phone", key: "phone", section: "company",  width: "full" },
     { paletteKey: "taxId", label: "Tax Registration Number", type: "text", key: "taxId", section: "company", width: "full" },
     { paletteKey: "businessType", label: "Type of Business (Retailer, Distributor, Reseller, etc.)", type: "text", key: "businessType", section: "company", width: "full" },
     { paletteKey: "website", label: "Company Website", type: "text", key: "website", section: "company", width: "full" },
