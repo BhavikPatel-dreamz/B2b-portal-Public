@@ -127,6 +127,30 @@ function getPhoneMetaForCountry(countryValue?: string | null) {
   return COUNTRY_PHONE_META[normalized] || { dialCode: "+91", flagEmoji: "🇮🇳" };
 }
 
+function extractCountryFromPhoneNumber(phoneNumber?: string | null): string {
+  if (!phoneNumber) return "";
+  const digits = String(phoneNumber).replace(/\D/g, "");
+  
+  // Match common country code prefixes
+  if (digits.startsWith("91")) return "IN";
+  if (digits.startsWith("1")) return "US";
+  if (digits.startsWith("44")) return "GB";
+  if (digits.startsWith("61")) return "AU";
+  if (digits.startsWith("33")) return "FR";
+  if (digits.startsWith("49")) return "DE";
+  if (digits.startsWith("39")) return "IT";
+  if (digits.startsWith("34")) return "ES";
+  if (digits.startsWith("32")) return "BE";
+  if (digits.startsWith("31")) return "NL";
+  if (digits.startsWith("46")) return "SE";
+  if (digits.startsWith("47")) return "NO";
+  if (digits.startsWith("45")) return "DK";
+  if (digits.startsWith("43")) return "AT";
+  if (digits.startsWith("41")) return "CH";
+  
+  return "";
+}
+
 function getResolvedSectionCountryValue(
   field: FormField,
   editForm: Record<string, any>,
@@ -139,11 +163,17 @@ function getResolvedSectionCountryValue(
     field.section === "shipping"
         ? editForm.shCountry
         : undefined;
+  
+  // If no country configured, try to detect from phone number
+  const detectedCountryFromPhone = field.section === "shipping"
+    ? extractCountryFromPhoneNumber(editForm.shipPhone || editForm.shPhone)
+    : "";
 
   return (
     String(
       configuredCountryValue ??
         legacyCountryValue ??
+        detectedCountryFromPhone ??
         field.phoneDefaultCountry ??
         "",
     ).trim()

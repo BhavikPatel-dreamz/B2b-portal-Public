@@ -487,7 +487,6 @@ const mapShopifyAddressToRegistrationJson = (
 //   }
 // };
 
-
 export const syncShopifyCompanies = async (
   admin: ShopifyAdminClient,
   store: StoreRef,
@@ -603,7 +602,6 @@ export const syncShopifyCompanies = async (
           primaryLocation?.billingAddress,
         );
 
-     
         const effectiveContact = (() => {
           if (company.mainContact?.customer?.email) {
             return company.mainContact.customer;
@@ -688,10 +686,7 @@ export const syncShopifyCompanies = async (
             await prisma.registrationSubmission.findFirst({
               where: {
                 shopId: store.id,
-                OR: [
-                  { email: effectiveContact.email },
-                  { shopifyCustomerId },
-                ],
+                OR: [{ email: effectiveContact.email }, { shopifyCustomerId }],
               },
               select: { id: true, status: true },
             });
@@ -700,8 +695,8 @@ export const syncShopifyCompanies = async (
             existingRegistration &&
             existingRegistration.status !== UserStatus.APPROVED
           ) {
-            const existingLocalCompany =
-              await prisma.companyAccount.findUnique({
+            const existingLocalCompany = await prisma.companyAccount.findUnique(
+              {
                 where: {
                   shopId_shopifyCompanyId: {
                     shopId: store.id,
@@ -716,7 +711,8 @@ export const syncShopifyCompanies = async (
                     },
                   },
                 },
-              });
+              },
+            );
 
             if (
               existingLocalCompany &&
@@ -782,8 +778,10 @@ export const syncShopifyCompanies = async (
                     lastName: effectiveContact.lastName,
                   }),
                   shopifyCustomerId,
-                  shipping: shippingAddressJson,
-                  billing: billingAddressJson,
+                  location: {
+                    shipping: shippingAddressJson,
+                    billing: billingAddressJson,
+                  },
                   shopId: store.id,
                 },
               });
@@ -799,8 +797,10 @@ export const syncShopifyCompanies = async (
                 status: UserStatus.APPROVED,
                 shopId: store.id,
                 contactTitle: "",
-                shipping: shippingAddressJson,
-                billing: billingAddressJson,
+                location: {
+                  shipping: shippingAddressJson,
+                  billing: billingAddressJson,
+                },
                 workflowCompleted: true,
               },
             });
@@ -1172,6 +1172,7 @@ export const syncShopifyOrders = async (
       localCompanyId = localCompany.id;
     }
 
+    console.log(targetShopifyCompanyId, localCompanyId, "companyId11111");
     if (!targetShopifyCompanyId || !localCompanyId) {
       return {
         success: false,
@@ -1283,6 +1284,7 @@ export const syncShopifyOrders = async (
         // Map Shopify statuses → your local enums
         const paymentStatus = mapPaymentStatus(order.displayFinancialStatus);
         const orderStatus = mapOrderStatus(order.displayFulfillmentStatus);
+
         const isCreditOrder =
           ["pending", "partial"].includes(paymentStatus) &&
           orderStatus !== "cancelled";
@@ -1316,35 +1318,36 @@ export const syncShopifyOrders = async (
             orderStatus,
             remainingBalance,
             paidAmount,
-            createdAt: new Date(order.createdAt),
+            createdAt: order.createdAt ? new Date(order.createdAt) : new Date(),
           },
         });
 
         if (isCreditOrder) {
-          const [company, creditTotals, existingTransaction] = await Promise.all([
-            prisma.companyAccount.findUnique({
-              where: { id: localCompanyId },
-              select: { creditLimit: true },
-            }),
-            prisma.b2BOrder.aggregate({
-              where: {
-                companyId: localCompanyId,
-                id: { not: syncedOrder.id },
-                paymentStatus: { in: ["pending", "partial"] },
-                orderStatus: { notIn: ["cancelled"] },
-              },
-              _sum: {
-                remainingBalance: true,
-              },
-            }),
-            prisma.creditTransaction.findFirst({
-              where: {
-                companyId: localCompanyId,
-                orderId: syncedOrder.id,
-                transactionType: { in: ["order_created", "order_updated"] },
-              },
-            }),
-          ]);
+          const [company, creditTotals, existingTransaction] =
+            await Promise.all([
+              prisma.companyAccount.findUnique({
+                where: { id: localCompanyId },
+                select: { creditLimit: true },
+              }),
+              prisma.b2BOrder.aggregate({
+                where: {
+                  companyId: localCompanyId,
+                  id: { not: syncedOrder.id },
+                  paymentStatus: { in: ["pending", "partial"] },
+                  orderStatus: { notIn: ["cancelled"] },
+                },
+                _sum: {
+                  remainingBalance: true,
+                },
+              }),
+              prisma.creditTransaction.findFirst({
+                where: {
+                  companyId: localCompanyId,
+                  orderId: syncedOrder.id,
+                  transactionType: { in: ["order_created", "order_updated"] },
+                },
+              }),
+            ]);
 
           const previousBalance = new Decimal(company?.creditLimit ?? 0).minus(
             new Decimal(creditTotals._sum.remainingBalance ?? 0),

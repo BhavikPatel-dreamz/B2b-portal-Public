@@ -322,14 +322,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // }
 
     case "updatepaymentTerm": {
-  if (isFreePlan) {
-    return Response.json({
-      intent,
-      success: false,
-      errors: ["Payment terms are not available on the free plan"],
-    });
-  }
-
   const companyId = (form.id as string)?.trim();
   // Keep null to represent "remove payment terms"
   const paymentTermsTemplateId = (form.paymentTerm as string)?.trim() || null;
@@ -1223,7 +1215,7 @@ export default function CompanyDashboard() {
       </div>
 
       {/* Payment Terms Edit Modal */}
-      {!isFreePlan && isEditingPaymentTerms && (
+      {isEditingPaymentTerms && (
         <div
           style={{
             position: "fixed",
@@ -1443,7 +1435,6 @@ export default function CompanyDashboard() {
               </div>
             </div>
 
-            {!isFreePlan && (
               <div>
                 <div
                   style={{
@@ -1496,7 +1487,7 @@ export default function CompanyDashboard() {
                   </button>
                 </div>
               </div>
-            )}
+            
 
             {!isFreePlan && <div>
               <div

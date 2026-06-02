@@ -383,14 +383,14 @@ export default function CompaniesPage() {
         "Contact Name",
         "Contact Email",
         "Users",
-        ...(!isFreePlan ? ["Payment Terms"] : []),
+       "Payment Terms",
         "Updated At",
         "Status",
         ...(!isFreePlan
           ? ["Credit Limit", "Used Credit", "Available Credit"]
           : []),
       ],
-      ...companies.map((company) => [
+      ...companies.map((company:any) => [
         company.name,
         company.shopifyCompanyId?.replace(
           "gid://shopify/Company/",
@@ -399,7 +399,7 @@ export default function CompaniesPage() {
         company.contactName || "",
         company.contactEmail || "",
         String(company.userCount),
-        ...(!isFreePlan ? [company.paymentTerm || "No payment terms"] : []),
+         [company.paymentTerm || "No payment terms"],
         formatDisplayDate(company.updatedAt),
         company.isDisable ? "Inactive" : "Active",
         ...(!isFreePlan
