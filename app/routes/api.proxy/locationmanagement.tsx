@@ -131,7 +131,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                   includeRestOfWorld
                 }
               }
-              deliveryProfiles(first: 10) {
+              deliveryProfiles(first: 100) {
                 nodes {
                   profileLocationGroups {
                     locationGroupZones(first: 100) {

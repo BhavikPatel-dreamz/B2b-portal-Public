@@ -1355,11 +1355,28 @@ export async function getCustomerCompanyInfo(
 
     if (customerData.errors) {
       console.error("GraphQL Errors:", customerData.errors);
-      return { hasCompany: false, error: customerData.errors };
+      return { 
+        hasCompany: false, 
+        error: customerData.errors,
+        debugInfo: {
+          query: customerQuery,
+          errors: customerData.errors
+        }
+      };
     }
 
     const customer = customerData.data.customer;
     const companyProfiles = customer.companyContactProfiles || [];
+
+    // Debug logging
+    console.log(`[getCustomerCompanyInfo] Customer ${customerId}:`, {
+      email: customer?.email,
+      firstName: customer?.firstName,
+      lastName: customer?.lastName,
+      companyProfilesCount: companyProfiles.length,
+      companyProfilesData: JSON.stringify(companyProfiles, null, 2),
+      fullCustomerData: JSON.stringify(customer, null, 2),
+    });
 
     if (companyProfiles.length === 0) {
       return {
@@ -1367,6 +1384,11 @@ export async function getCustomerCompanyInfo(
         customerId,
         customerEmail: customer.email,
         message: "Customer has no company association",
+        debugInfo: {
+          reason: "companyContactProfiles is empty or null",
+          companyProfiles: companyProfiles,
+          customerData: customer,
+        },
       };
     }
 

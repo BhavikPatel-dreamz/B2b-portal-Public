@@ -491,35 +491,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  const [paymentTermsResponse, shippingCountriesResponse, allCatalogs, priceLists] =
+  const [paymentTermsResponse, allCatalogs, priceLists] =
     await Promise.all([
       admin.graphql(
         `#graphql
         query { paymentTermsTemplates { id name paymentTermsType dueInDays description translatedName } }`,
-      ),
-      admin.graphql(
-        `#graphql
-        query GetShippingCountriesWithProvinces {
-          deliveryProfiles(first: 1) {
-            nodes {
-              profileLocationGroups {
-                locationGroupZones(first: 50) {
-                  nodes {
-                    zone {
-                      countries {
-                        code { countryCode }
-                        provinces { code name }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-          shop {
-            countriesInShippingZones { countryCodes includeRestOfWorld }
-          }
-        }`,
       ),
       fetchAllCatalogs(admin),
       fetchPriceLists(admin),
@@ -528,43 +504,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const paymentTermsData = await paymentTermsResponse.json();
   const paymentTermsTemplates = paymentTermsData.data.paymentTermsTemplates;
 
-  const shippingCountriesPayload = await shippingCountriesResponse.json();
-  const validCountryCodes = new Set<string>(
-    shippingCountriesPayload?.data?.shop?.countriesInShippingZones?.countryCodes || [],
-  );
-
-  type ProvinceOption = { value: string; label: string };
-  const countryProvincesMap = new Map<string, ProvinceOption[]>();
-  const profiles = shippingCountriesPayload?.data?.deliveryProfiles?.nodes || [];
-  for (const profile of profiles) {
-    for (const group of profile.profileLocationGroups || []) {
-      for (const zoneNode of group.locationGroupZones?.nodes || []) {
-        for (const country of zoneNode.zone?.countries || []) {
-          const countryCode: string = country.code?.countryCode;
-          if (!countryCode || !validCountryCodes.has(countryCode)) continue;
-          const provinces: ProvinceOption[] = (country.provinces || []).map(
-            (p: { code: string; name: string }) => ({ value: p.code, label: p.name }),
-          );
-          if (countryProvincesMap.has(countryCode)) {
-            const existing = countryProvincesMap.get(countryCode)!;
-            const existingCodes = new Set(existing.map((e) => e.value));
-            for (const p of provinces) {
-              if (!existingCodes.has(p.value)) existing.push(p);
-            }
-          } else {
-            countryProvincesMap.set(countryCode, provinces);
-          }
-        }
-      }
-    }
-  }
-
-  const shippingCountryOptions = Array.from(validCountryCodes).map((countryCode: string) => ({
-    value: countryCode,
-    label: new Intl.DisplayNames(["en"], { type: "region" }).of(countryCode) || countryCode,
-  }));
-
-  const shippingProvincesByCountry = Object.fromEntries(countryProvincesMap);
+  // ── Removed GetShippingCountriesWithProvinces logic for performance ──
+  const shippingCountryOptions = DEFAULT_COUNTRY_OPTIONS;
+  const shippingProvincesByCountry = {};
 
   console.log(`🚀 Registration loader time: ${Date.now() - startTime}ms`);
 
@@ -579,10 +521,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       updatedAt:   company.updatedAt.toISOString(),
     })),
     formConfig,
-    shippingCountryOptions:
-      shippingCountryOptions.length > 0
-        ? [{ value: "", label: "Country" }, ...shippingCountryOptions]
-        : DEFAULT_COUNTRY_OPTIONS,
+    shippingCountryOptions,
     shippingProvincesByCountry,
     paymentTermsTemplates,
     allCatalogs,
@@ -1087,8 +1026,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await parseForm(request);
   const intent = (form.intent as string) || "";
   const isFreePlan = store.plan === "free";
-  const normalizePaymentTermsId = (value?: string | null) =>
-    isFreePlan ? null : value?.trim() || null;
+  const normalizePaymentTermsId = (value?: string | null) => value?.trim() || null;
 
   const resolveCompanyCreditLimit = (value?: string | null) => {
     const trimmed = value?.trim() || "";
@@ -2140,15 +2078,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           where: { email },
         });
 
-        await sendCompanyAssignmentEmail(
-          store.shopName || "Shop Name",
-          store.shopDomain || "shop-domain.myshopify.com",
-          store.storeOwnerName || "Store Owner",
-          email,
-          companyName,
-          `${RegistrationData?.firstName} ${RegistrationData?.lastName}` || "",
-          note,
-        );
+        // await sendCompanyAssignmentEmail(
+        //   store.shopName || "Shop Name",
+        //   store.shopDomain || "shop-domain.myshopify.com",
+        //   store.storeOwnerName || "Store Owner",
+        //   email,
+        //   companyName,
+        //   `${RegistrationData?.firstName} ${RegistrationData?.lastName}` || "",
+        //   note,
+        // );
 
         return Response.json({
           intent,
@@ -5007,8 +4945,7 @@ function ConfigureCompanyUI({
                 </div>
               )}
             </div>
- 
-            {!isFreePlan && (
+        
               <div
                 style={{
                   background: "white", borderRadius: 10,
@@ -5053,7 +4990,6 @@ function ConfigureCompanyUI({
                   Require deposit on orders created at checkout
                 </label>
               </div>
-            )}
  
             {/* Checkout */}
             <div

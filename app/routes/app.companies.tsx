@@ -326,7 +326,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             request: new Request(registrationUrl.toString(), request),
             params: {},
             context: undefined as never,
-          });
+          } as any);
 
           return (await registrationResponse.json()) as {
             submissions: RegistrationSubmission[];
@@ -426,9 +426,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return {
         ...company,
         contactName: company.contactName || "-",
-        paymentTerm: isFreePlan
-          ? null
-          : company.paymentTerm
+        paymentTerm: company.paymentTerm
             ? paymentTermsNameMap.get(company.paymentTerm) || company.paymentTerm
             : null,
         creditLimit: isFreePlan ? "0" : company.creditLimit.toString(),
@@ -536,7 +534,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     ].includes(intent)
   ) {
     const { action: registrationsAction } = await import("./app.registrations");
-    return registrationsAction({ request, params: {}, context: undefined as never });
+    return registrationsAction({ request, params: {}, context: undefined as never } as any);
   }
 
   const { admin, session } = await authenticate.admin(request);

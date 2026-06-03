@@ -315,29 +315,29 @@ function Extension() {
     fetchCustomerDetails();
   }, [shopDomain, customerId, accountCheckComplete, isRedirecting, sessionToken]);
 
-  useEffect(() => {
-    if (!accountCheckComplete || isRedirecting) return;
-    const fetchCountries = async () => {
-      try {
-        const token = await sessionToken.get();
-        const res = await fetch(
-          `${API_URL}/api/proxy/shipping-zones`,
-          {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        );
-        const { countries } = await res.json();
-        setCountriesData(countries || []);
-      } catch (err) {
-        console.error("Countries fetch error:", err);
-      }
-    };
-    fetchCountries();
-  }, [accountCheckComplete, isRedirecting, sessionToken]);
+  // useEffect(() => {
+  //   if (!accountCheckComplete || isRedirecting) return;
+  //   const fetchCountries = async () => {
+  //     try {
+  //       const token = await sessionToken.get();
+  //       const res = await fetch(
+  //         `${API_URL}/api/proxy/shipping-zones`,
+  //         {
+  //           method: "GET",
+  //           headers: {
+  //             Accept: "application/json",
+  //             Authorization: `Bearer ${token}`,
+  //           },
+  //         },
+  //       );
+  //       const { countries } = await res.json();
+  //       setCountriesData(countries || []);
+  //     } catch (err) {
+  //       console.error("Countries fetch error:", err);
+  //     }
+  //   };
+  //   fetchCountries();
+  // }, [accountCheckComplete, isRedirecting, sessionToken]);
 
   // =========================
   // HANDLE CHANGE

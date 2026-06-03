@@ -464,6 +464,7 @@ export async function uninstallStore(shopDomain: string) {
       prisma.notification.deleteMany({ where: { shopId: store.id } }),
       prisma.wishlist.deleteMany({ where: { shop: shopDomain } }),
       prisma.formFieldConfig.deleteMany({ where: { shopId: store.id } }),
+      prisma.b2BOrder.deleteMany({ where: { shopId: store.id } }),
       
       // Reset all email notification toggles
       prisma.emailTemplates.updateMany({
