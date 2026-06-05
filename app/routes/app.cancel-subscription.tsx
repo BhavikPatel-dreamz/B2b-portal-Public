@@ -11,11 +11,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { billing, session, admin } = await authenticate.admin(request);
 
   // eslint-disable-next-line no-undef
-  const isTest =
-    // eslint-disable-next-line no-undef
-    process.env.SHOPIFY_BILLING_TEST == "true" ||
-    // eslint-disable-next-line no-undef
-    process.env.NODE_ENV !== "production";
+  const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
 
   const billingCheck = await billing.check({
     plans: [PAID_PLAN],

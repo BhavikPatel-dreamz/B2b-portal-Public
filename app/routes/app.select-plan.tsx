@@ -75,9 +75,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const shop = session.shop;
 
-  const isTest =
-    process.env.SHOPIFY_BILLING_TEST == "true" ||
-    process.env.NODE_ENV !== "production";
+const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
+
 
   const isReturnFromBilling = url.searchParams.has("charge_id");
   const isPendingReturn = url.searchParams.has("charge_id_pending"); // ✅ NEW
@@ -200,11 +199,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("Running action for select-plan route111", requestUrl);
 
   // eslint-disable-next-line no-undef
-  const isTest =
-    // eslint-disable-next-line no-undef
-    process.env.SHOPIFY_BILLING_TEST == "true" ||
-    // eslint-disable-next-line no-undef
-    process.env.NODE_ENV !== "production";
+const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
+
 
   try {
     if (plan !== FREE_PLAN && plan !== PAID_PLAN) {
