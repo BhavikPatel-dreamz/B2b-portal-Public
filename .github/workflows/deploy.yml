@@ -11,7 +11,7 @@ env:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, smartb2b]
+    runs-on: [self-hosted]
     steps:
       - name: Sync Code
         run: |
