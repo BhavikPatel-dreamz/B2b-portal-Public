@@ -13,6 +13,7 @@ export interface CreateOrderInput {
   paymentStatus?: string;
   orderStatus?: string;
   notes?: string; // Add optional notes field
+  source?: string | null;
   userId?: string;
 }
 
@@ -27,6 +28,7 @@ export interface UpdateOrderInput {
   remainingBalance?: number | Prisma.Decimal;
   paidAt?: Date | null;
   notes?: string; // Add optional notes field
+  source?: string | null;
   updatedAt?: Date | null;
 }
 
@@ -83,6 +85,7 @@ export async function upsertOrder(data: CreateOrderInput) {
           paymentStatus: data.paymentStatus || "pending",
           orderStatus: data.orderStatus || "draft",
           notes: data.notes,
+          source: data.source,
         },
         include: {
           company: true,
@@ -114,6 +117,7 @@ export async function createOrder(data: CreateOrderInput) {
       paymentStatus: data.paymentStatus || "pending",
       orderStatus: data.orderStatus || "draft",
       notes: data.notes, // Add optional notes field
+      source: data.source,
     },
     include: {
       company: true,

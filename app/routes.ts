@@ -75,6 +75,7 @@ export default [
     route("registration-form", "routes/app.registration-form.tsx"),
     route("notifications", "routes/app.notification-form.tsx"),
     route("companies/:companyId", "routes/app.company-dashboard.tsx"),
+    route("reports", "routes/app.reports.tsx"),
     route(
       "companies/:companyId/orders",
       "routes/app.companies.$companyId.orders.tsx",

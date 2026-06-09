@@ -8,7 +8,7 @@ import {
   useNavigation,
   useRevalidator,
   Link,
-} from "react-router";
+ LoaderFunctionArgs } from "react-router";
 import { useEffect, useMemo } from "react";
 import { FREE_PLAN, PAID_PLAN } from "app/billing-plans.shared";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -19,7 +19,6 @@ import {
   getStorePlanValue,
 } from "app/services/store.server";
 import prisma from "app/db.server";
-import { LoaderFunctionArgs } from "react-router";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
 

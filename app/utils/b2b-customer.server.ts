@@ -6527,6 +6527,10 @@ export async function getAdvancedCompanyOrders(
                 zip
                 phone
               }
+              customAttributes {
+                key
+                value
+              }
             }
           }
         }
@@ -6578,10 +6582,13 @@ console.log("Fetched orders data", { queryString });
             order.billingAddress?.company || order.shippingAddress?.company;
         }
 
+        const source = (order as any).customAttributes?.find((attr: any) => attr.key === "_source")?.value || null;
+
         return {
           ...order,
           locationId,
           locationName,
+          source,
           companyLocation: {
             id: locationId,
             name: locationName,

@@ -2,6 +2,8 @@ import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
+import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
+import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
 import { APP_BILLING_PLANS, getIsTestBilling } from "app/utils/billing.server";
 import {
@@ -80,16 +82,19 @@ export default function App() {
 
   return (
     <AppProvider embedded apiKey={apiKey}>
-      <s-app-nav>
-        <s-link href="/app/home">Home</s-link>
-        <s-link href="/app/companies">B2B Companies</s-link>
-        {/* <s-link href="/app/companies?tab=pending">Registrations</s-link> */}
-        <s-link href="/app/registration-form">Registrations Form</s-link>
-        <s-link href="/app/settings">Settings</s-link>
-        <s-link href="/app/notifications">Notifications</s-link>
-      <s-link href="/app/select-plan">Select Plan</s-link>
-      </s-app-nav>
-      <Outlet />
+      <PolarisAppProvider i18n={enTranslations}>
+        <s-app-nav>
+          <s-link href="/app/home">Home</s-link>
+          <s-link href="/app/reports">Reports</s-link>
+          <s-link href="/app/companies">B2B Companies</s-link>
+          {/* <s-link href="/app/companies?tab=pending">Registrations</s-link> */}
+          <s-link href="/app/registration-form">Registrations Form</s-link>
+          <s-link href="/app/settings">Settings</s-link>
+          <s-link href="/app/notifications">Notifications</s-link>
+          <s-link href="/app/select-plan">Select Plan</s-link>
+        </s-app-nav>
+        <Outlet />
+      </PolarisAppProvider>
     </AppProvider>
   );
 }

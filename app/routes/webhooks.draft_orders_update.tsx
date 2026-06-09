@@ -23,6 +23,10 @@ interface ShopifyDraftOrder {
   customer?: {
     id: string;
   };
+  note_attributes?: {
+    name: string;
+    value: string;
+  }[];
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -31,13 +35,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const draftOrder = payload as ShopifyDraftOrder;
+
+    // Extract order source from note_attributes (e.g., 'quick_order')
+    const orderSource =
+      draftOrder.note_attributes?.find((attr: any) => attr.name === "_source")
+        ?.value || null;
+
     console.log(`Draft Order Update Details:`, {
       id: draftOrder.id,
       email: draftOrder.email,
       total_price: draftOrder.total_price,
       currency: draftOrder.currency,
       status: draftOrder.status,
-      line_items_count: draftOrder.line_items?.length
+      line_items_count: draftOrder.line_items?.length,
+      source: orderSource,
     });
 
     // Check if this is a B2B draft order
@@ -186,6 +197,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       paymentStatus: "pending",
       orderStatus: "draft", // Draft order status
       remainingBalance: newTotalAmount,
+      source: orderSource,
     });
 
     console.log(`📊 Draft order updated in B2B system:`, {

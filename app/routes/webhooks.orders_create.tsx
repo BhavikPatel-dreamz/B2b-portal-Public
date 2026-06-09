@@ -132,6 +132,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         paymentStatus === "paid" ? orderTotal : new Prisma.Decimal(0);
       const remainingBalance = orderTotal.minus(paidAmount);
 
+      // Extract order source from note_attributes (e.g., 'quick_order')
+      const orderSource =
+        (payload as any).note_attributes?.find(
+          (attr: any) => attr.name === "_source",
+        )?.value || null;
+
       console.log(`🎯 B2B Order Creation - Processing:`, {
         orderId: orderIdNum,
         companyId: user.companyId,
@@ -140,6 +146,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         orderTotal: orderTotal.toString(),
         paidAmount: paidAmount.toString(),
         remainingBalance: remainingBalance.toString(),
+        source: orderSource,
       });
 
       // For B2B orders with pending payment, we still need to reserve the credit
@@ -157,7 +164,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             user.companyId,
             user.id,
             orderTotal.toNumber(),
-            orderGid
+            orderGid,
           );
 
           if (!validation.canCreate) {
@@ -181,6 +188,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               orderStatus: "submitted",
               notes: `Credit validation failed: ${validation.message}. Order requires manual review.`,
               userId: user.id,
+              source: orderSource,
             });
 
             // Sync metafields even when validation fails
@@ -188,7 +196,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               const admin = await getAdminForShop(shop);
               await syncCompanyCreditMetafields(admin as any, user.companyId);
             } catch (syncError) {
-              console.error(`⚠️ Failed to sync metafields after order creation:`, syncError);
+              console.error(
+                `⚠️ Failed to sync metafields after order creation:`,
+                syncError,
+              );
             }
 
             console.log(`⚠️ B2B order created with credit validation warning`);
@@ -218,7 +229,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       // Create B2B order entry via service
-     await upsertOrder({
+      await upsertOrder({
         companyId: user.companyId,
         createdByUserId: user.id,
         shopId: store.id,
@@ -231,6 +242,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         paymentStatus,
         orderStatus,
         userId: user.id,
+        source: orderSource,
       });
 
       // Sync metafields after order creation to update creditUsed

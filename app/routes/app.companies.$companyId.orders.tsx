@@ -21,6 +21,7 @@ type LoaderData = {
     orderStatus: string;
     createdAt: string;
     createdBy: string;
+    source: string | null;
   }>;
 };
 
@@ -67,6 +68,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       paymentStatus: order.paymentStatus,
       orderStatus: order.orderStatus,
       createdAt: order.createdAt.toISOString(),
+      source: (order as any).source || null,
       createdBy:
         [order.createdByUser.firstName, order.createdByUser.lastName]
           .filter(Boolean)
@@ -300,6 +302,16 @@ export default function CompanyOrdersPage() {
                   >
                     Created By
                   </th>
+                  <th
+                    style={{
+                      padding: 12,
+                      textAlign: "left",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Source
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -361,6 +373,19 @@ export default function CompanyOrdersPage() {
                     </td>
                     <td style={{ padding: 12, fontSize: 13 }}>
                       {order.createdBy}
+                    </td>
+                    <td style={{ padding: 12, fontSize: 13 }}>
+                      {order.source ? (
+                        <span style={{ 
+                          textTransform: 'capitalize',
+                          padding: '2px 6px',
+                          backgroundColor: '#f4f6f8',
+                          borderRadius: '4px',
+                          fontSize: '11px'
+                        }}>
+                          {order.source.replace('_', ' ')}
+                        </span>
+                      ) : "—"}
                     </td>
                   </tr>
                 ))}

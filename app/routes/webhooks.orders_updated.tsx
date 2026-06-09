@@ -79,6 +79,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response(null, { status: 200 });
     }
 
+    // Extract order source from note_attributes (e.g., 'quick_order')
+    const orderSource =
+      (payload as any).note_attributes?.find(
+        (attr: any) => attr.name === "_source",
+      )?.value || null;
+
     console.log(`📝 Updating B2B order:`, {
       orderId: existingOrder.id,
       shopifyOrderId: orderGid,
@@ -94,6 +100,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       confirmed: confirmedStatus,
       updatedAt: updatedAt,
       refundsCount: refunds.length,
+      source: orderSource,
       paymentTerms: paymentTerms ? {
         dueInDays: paymentTerms.due_in_days,
         type: paymentTerms.payment_terms_type,

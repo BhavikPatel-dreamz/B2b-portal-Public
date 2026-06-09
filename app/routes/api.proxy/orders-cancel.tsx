@@ -16,6 +16,10 @@ interface CancelOrderRequest {
  * Cancel a draft order in Shopify
  */
 async function cancelShopifyDraftOrder(admin: AdminApiContext, draftOrderId: string) {
+  const gid = draftOrderId.startsWith("gid://")
+    ? draftOrderId
+    : `gid://shopify/DraftOrder/${draftOrderId}`;
+
   const mutation = `
     mutation draftOrderDelete($input: DraftOrderDeleteInput!) {
       draftOrderDelete(input: $input) {
@@ -32,7 +36,7 @@ async function cancelShopifyDraftOrder(admin: AdminApiContext, draftOrderId: str
     const response = await admin.graphql(mutation, {
       variables: {
         input: {
-          id: draftOrderId,
+          id: gid,
         },
       },
     });

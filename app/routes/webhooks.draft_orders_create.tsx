@@ -32,10 +32,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     customer?: {
       id: string;
     };
+    note_attributes?: {
+      name: string;
+      value: string;
+    }[];
   }
   
   try {
     const draftOrder = payload as ShopifyDraftOrder;
+
+    // Extract order source from note_attributes (e.g., 'quick_order')
+    const orderSource =
+      draftOrder.note_attributes?.find((attr: any) => attr.name === "_source")
+        ?.value || null;
 
     // Validate required fields from the payload
     if (!draftOrder.id || !draftOrder.total_price) {
@@ -51,7 +60,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       currency: draftOrder.currency,
       status: draftOrder.status,
       b2b: draftOrder["b2b?"],
-      line_items_count: draftOrder.line_items?.length
+      line_items_count: draftOrder.line_items?.length,
+      source: orderSource,
     });
 
     // Check if this is a B2B draft order
@@ -141,6 +151,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         paymentStatus: "pending",
         orderStatus: "draft", // Draft order status
         remainingBalance: totalAmount,
+        source: orderSource,
       });
 
       console.log(`📊 Upserted draft order in B2B system:`, {
