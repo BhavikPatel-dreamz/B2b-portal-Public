@@ -1675,7 +1675,7 @@ const {
                             Free plan limit reached
                           </div>
                           <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
-                            Companies: {freePlanCompanyCount}/{10}
+                            Companies: {freePlanCompanyCount}/10
                           </div>
                         </div>
                         <div

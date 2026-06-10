@@ -1,7 +1,7 @@
 import prisma from "app/db.server";
 
 export const FREE_PLAN_MAX_COMPANIES = 10;
-export const FREE_PLAN_MAX_REGISTRATIONS = 10;
+export const FREE_PLAN_MAX_REGISTRATIONS = Infinity;
 export const FREE_PLAN_MAX_ORDERS = 100;
 
 export function getSelectPlanPath(returnTo = "/app/companies") {
@@ -13,7 +13,7 @@ export function getFreePlanCompaniesLimitMessage() {
 }
 
 export function getFreePlanRegistrationsLimitMessage() {
-  return `Free plan allows up to ${FREE_PLAN_MAX_REGISTRATIONS} registrations. Please upgrade the plan to accept more registrations.`;
+  return `Free plan allows unlimited registrations. Upgrade your plan for additional features.`;
 }
 
 export function getFreePlanOrdersLimitMessage() {

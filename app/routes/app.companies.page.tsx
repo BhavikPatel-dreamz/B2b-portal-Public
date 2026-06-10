@@ -578,7 +578,7 @@ export default function CompaniesPage() {
                     Free plan limit reached
                   </div>
                   <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
-                    Companies: {freePlanCompanyCount}/{freePlanCompanyLimit} · Registrations: {freePlanRegistrationCount}/{freePlanRegistrationLimit}
+                    Companies: {freePlanCompanyCount}/10
                   </div>
                 </div>
                   <div

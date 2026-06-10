@@ -1307,7 +1307,7 @@ export default function SettingsPage() {
                             Free plan limit reached
                           </div>
                           <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
-                            Companies: {store.freePlanUsage?.companyCount ?? 0}/{10} · Registrations: {store.freePlanUsage?.registrationCount ?? 0}/{10}
+                            Companies: {store.freePlanUsage?.companyCount ?? 0}/10
                           </div>
                         </div>
                         <div

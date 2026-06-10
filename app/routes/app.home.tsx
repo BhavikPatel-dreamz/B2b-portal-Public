@@ -285,7 +285,7 @@ export default function Home() {
                             Free plan limit reached
                           </div>
                           <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
-                            Companies: {data.totalCompanies}/{10} · Registrations: {data.approvedRegistrations}/{10}
+                            Companies: {data.totalCompanies}/10
                           </div>
                         </div>
                         <div
