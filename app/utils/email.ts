@@ -760,14 +760,14 @@ export async function sendAppWelcomeEmail(
 </head>
 <body style="background-color: #f5f5f5; margin: 0; padding: 40px 16px; font-family: 'Helvetica Neue', Arial, sans-serif;">
   <div style="background-color: #ffffff; border-radius: 8px; max-width: 520px; width: 100%; margin: 0 auto; box-shadow: 0 2px 12px rgba(0,0,0,0.08); overflow: hidden;">
-    <div style="padding: 36px 40px 28px; text-align: center;">
+    <div style="padding: 36px 40px 28px; text-align: left;">
       <p style="font-size: 18px; font-weight: 600; color: #111; margin: 0 0 4px;">Hi,</p>
       <p style="font-size: 18px; font-weight: 700; color: #111; margin: 0 0 16px;">Thank you for installing SmartB2B</p>
       <p style="font-size: 14px; color: #444; line-height: 1.65; margin: 0 0 28px;">
         You now have a full-featured B2B wholesale portal on your Shopify store built to handle everything from customer onboarding and company management to credit control and quick orders.
       </p>
 
-      <p style="font-size: 11px; font-weight: 700; letter-spacing: 1.2px; color: #2563EB; text-transform: uppercase; margin: 0 0 20px; text-align: center;">Getting Started</p>
+      <p style="font-size: 11px; font-weight: 700; letter-spacing: 1.2px; color: #2563EB; text-transform: uppercase; margin: 0 0 20px; text-align: left;">Getting Started</p>
 
       <div style="text-align: left;">${stepsHtml}</div>
 
@@ -778,34 +778,52 @@ export async function sendAppWelcomeEmail(
       </div> -->
       </div>
 
-      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 0;" />
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 0;" />
 
-      <div style="padding: 36px 40px 32px; text-align: center;">
+    <div style="padding: 36px 40px 32px; text-align: left;">
       <p style="font-size: 20px; font-weight: 700; color: #111; margin: 0 0 10px;">Need help?</p>
       <p style="font-size: 14px; color: #444; line-height: 1.65; margin: 0 0 24px;">
         Our team is here to help with installation, configuration, and onboarding. We typically respond within one business day and are happy to assist with setup, configuration, and best practices.
       </p>
 
-      <div style="display: flex; gap: 16px; margin-bottom: 28px;">
-        <div style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
-          <div>
-            <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Email support</p>
-            <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
-              Have a question? Write to us at <a href="https://www.dreamzapps.com/support/" style="color: #2563EB; text-decoration: underline;">www.dreamzapps.com/support/</a>.
-            </p>
-          </div>
-          <a href="mailto:support@dreamzapps.com" style="display: inline-block; padding: 9px 12px; background-color: #fff; color: #2563EB; border: 1.5px solid #2563EB; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; text-align: center;">support@dreamzapps.com</a>
-        </div>
-        <div style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
-          <div>
-            <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Custom onboarding</p>
-            <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
-              Need hands-on help configuring SmartB2B for your workflow? Our Shopify experts can do it for you.
-            </p>
-          </div>
-          <a href="mailto:support@dreamzapps.com" style="display: inline-block; padding: 9px 12px; background-color: #fff; color: #2563EB; border: 1.5px solid #2563EB; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; text-align: center;">Request Service</a>
-        </div>
-      </div>
+     <table cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; width: 100%; margin-bottom: 28px;">
+        <tr>
+          <td style="width: 50%; padding-right: 8px; vertical-align: top;">
+            <table cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; width: 100%; height: 100%; border: 1px solid #e5e7eb; border-radius: 8px;">
+              <tr>
+                <td style="padding: 20px 16px 12px 16px; vertical-align: top;">
+                  <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Email support</p>
+                  <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
+                    Have a question? Write to us at <a href="https://www.dreamzapps.com/support/" style="color: #2563EB; text-decoration: underline;">www.dreamzapps.com/support/</a>.  We typically respond within a few hours.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 16px 20px 16px; vertical-align: bottom;">
+                  <a href="mailto:support@dreamzapps.com" style="display: inline-block; padding: 9px 12px; background-color: #fff; color: #2563EB; border: 1.5px solid #2563EB; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; text-align: center; white-space: nowrap;">support@dreamzapps.com</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td style="width: 50%; padding-left: 8px; vertical-align: top;">
+            <table cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; width: 100%; height: 100%; border: 1px solid #e5e7eb; border-radius: 8px;">
+              <tr>
+                <td style="padding: 20px 16px 12px 16px; vertical-align: top;">
+                  <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Custom onboarding</p>
+                  <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
+                    Need hands-on help configuring SmartB2B for your workflow? Our Shopify experts can do it for you.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 16px 20px 16px; vertical-align: bottom;">
+                  <a href="mailto:support@dreamzapps.com" style="display: inline-block; padding: 9px 12px; background-color: #fff; color: #2563EB; border: 1.5px solid #2563EB; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; text-align: center; white-space: nowrap;">Request Service</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
 
       <p style="text-align: center; font-size: 13px; color: #444; font-weight: 500; margin: 0 0 16px;">Thank you for choosing SmartB2B</p>
       <div style="text-align: center;">
@@ -839,7 +857,7 @@ Thank you for choosing SmartB2B.
 
   return sendEmail(
     {
-      to: storeData.contactEmail,
+      to: targetEmail,
       subject: "Welcome to SmartB2B - Let's get started",
       html,
       text,
