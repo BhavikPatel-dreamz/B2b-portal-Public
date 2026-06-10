@@ -15,6 +15,7 @@ import {
   USAGE_PLAN,
 } from "./billing-plans.shared";
 import { upsertStore } from "./services/store.server";
+import { sendAppWelcomeEmail } from "./utils/email";
 import { registerCartValidationFunction, debugListAllShopifyFunctions, unregisterAllCartValidations } from "./services/cartValidationRegistration.server";
 import {
   DEFAULT_CONFIG,
@@ -107,11 +108,21 @@ const shopify = shopifyApp({
               id
               name
               currencyCode
+              email
+              contactEmail
             }
           }`
         );
         const shopData = await response.json();
         const shop = shopData?.data?.shop;
+        console.log(`🔍 Shop data for ${session.shop}:`, JSON.stringify(shop));
+
+        const existingStore = await prisma.store.findUnique({
+          where: { shopDomain: session.shop },
+          select: { id: true, contactEmail: true }
+        });
+
+        const storeContactEmail = shop?.contactEmail || shop?.email;
 
         store = await upsertStore({
           shopDomain: session.shop,
@@ -119,7 +130,17 @@ const shopify = shopifyApp({
           scope: session.scope,
           shopName: shop?.name,
           currencyCode: shop?.currencyCode,
+          contactEmail: storeContactEmail,
         });
+
+        // Send welcome email if this is a new store or contact email was previously missing
+        if (!existingStore || !existingStore.contactEmail) {
+          console.log(`📧 Triggering welcome email to ${storeContactEmail} for ${session.shop}...`);
+          // Pass the email directly to avoid race conditions with uninstalls
+          sendAppWelcomeEmail(store.id, storeContactEmail || undefined).catch((err) => {
+            console.error(`❌ Background welcome email failed for ${session.shop}:`, err);
+          });
+        }
 
       
         const defaultStoredConfig = serializeConfig(DEFAULT_CONFIG);

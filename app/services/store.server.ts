@@ -9,6 +9,7 @@ export interface CreateStoreInput {
   accessToken?: string;
   scope?: string;
   currencyCode?: string;
+  contactEmail?: string;
 }
 
 export interface UpdateStoreInput {
@@ -38,6 +39,18 @@ export interface UpdateStoreInput {
  * Create or update a store (upsert on install)
  */
 export async function upsertStore(data: CreateStoreInput) {
+  const updateData: any = {
+    isActive: true,
+    uninstalledAt: null,
+    updatedAt: new Date(),
+  };
+
+  if (data.shopName !== undefined) updateData.shopName = data.shopName;
+  if (data.accessToken !== undefined) updateData.accessToken = data.accessToken;
+  if (data.scope !== undefined) updateData.scope = data.scope;
+  if (data.currencyCode !== undefined) updateData.currencyCode = data.currencyCode;
+  if (data.contactEmail !== undefined) updateData.contactEmail = data.contactEmail;
+
   return await prisma.store.upsert({
     where: { shopDomain: data.shopDomain },
     create: {
@@ -46,16 +59,10 @@ export async function upsertStore(data: CreateStoreInput) {
       accessToken: data.accessToken,
       scope: data.scope,
       currencyCode: data.currencyCode,
+      contactEmail: data.contactEmail,
       themeColor: "#0f172a",
     },
-    update: {
-      shopName: data.shopName,
-      accessToken: data.accessToken,
-      scope: data.scope,
-      currencyCode: data.currencyCode,
-      isActive: true,
-      uninstalledAt: null,
-    },
+    update: updateData,
   });
 }
 

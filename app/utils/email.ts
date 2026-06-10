@@ -36,7 +36,15 @@ async function sendEmail(
       },
       tls: {
         rejectUnauthorized: false,
+        minVersion: "TLSv1.2",
+        servername: resolvedConfig.host,
       },
+      name: resolvedConfig.host, // Identify itself to the SMTP server
+      debug: true,
+      logger: true,
+      connectionTimeout: 30000,
+      greetingTimeout: 20000,
+      socketTimeout: 45000,
     });
     
 
@@ -681,4 +689,161 @@ export async function sendCustomerRegistrationRejectedEmail({
     html,
     text,
   });
+}
+
+/**
+ * Send welcome email to the store owner after app installation
+ */
+export async function sendAppWelcomeEmail(
+  storeId: string,
+  providedEmail?: string,
+): Promise<RegistrationEmailResult> {
+  const storeData = await prisma.store.findUnique({
+    where: { id: storeId },
+  });
+
+  const targetEmail = providedEmail || storeData?.contactEmail;
+
+  if (!targetEmail) {
+    console.warn(
+      `⚠️ Cannot send welcome email for store ${storeId} - missing contact email`,
+    );
+    return { success: false, error: "Missing contact email" };
+  }
+
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
+
+  const steps = [
+    {
+      num: 1,
+      title: "Configure your registration form",
+      desc: "Customise the B2B registration fields and the information you want to collect from customers.",
+    },
+    {
+      num: 2,
+      title: "Enable the customer account extension",
+      desc: "Activate Company Connect from your Shopify Theme Editor and add the registration link to your customer account area.",
+    },
+    {
+      num: 3,
+      title: "Review and approve applications",
+      desc: "Manage incoming B2B registration requests and approve qualified companies.",
+    },
+    {
+      num: 5,
+      title: "Invite team members",
+      desc: "Allow your customers to manage company users, locations, and purchasing permissions.",
+    },
+    {
+      num: 6,
+      title: "Start selling B2B",
+      desc: "Your customers can now access their B2B portal and manage their business accounts efficiently.",
+    },
+  ];
+
+  const stepsHtml = steps
+    .map(
+      (step, idx) => `
+    <div style="border-top: ${idx === 0 ? "1px solid #e5e7eb" : "none"}; border-bottom: 1px solid #e5e7eb; padding: 16px 0;">
+      <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 4px;">${step.num}.&nbsp; ${step.title}</p>
+      <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">${step.desc}</p>
+    </div>
+  `,
+    )
+    .join("");
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+</head>
+<body style="background-color: #f5f5f5; margin: 0; padding: 40px 16px; font-family: 'Helvetica Neue', Arial, sans-serif;">
+  <div style="background-color: #ffffff; border-radius: 8px; max-width: 520px; width: 100%; margin: 0 auto; box-shadow: 0 2px 12px rgba(0,0,0,0.08); overflow: hidden;">
+    <div style="padding: 36px 40px 28px; text-align: center;">
+      <p style="font-size: 18px; font-weight: 600; color: #111; margin: 0 0 4px;">Hi,</p>
+      <p style="font-size: 18px; font-weight: 700; color: #111; margin: 0 0 16px;">Thank you for installing SmartB2B</p>
+      <p style="font-size: 14px; color: #444; line-height: 1.65; margin: 0 0 28px;">
+        You now have a full-featured B2B wholesale portal on your Shopify store built to handle everything from customer onboarding and company management to credit control and quick orders.
+      </p>
+
+      <p style="font-size: 11px; font-weight: 700; letter-spacing: 1.2px; color: #2563EB; text-transform: uppercase; margin: 0 0 20px; text-align: center;">Getting Started</p>
+
+      <div style="text-align: left;">${stepsHtml}</div>
+
+      <!-- <div style="margin-top: 28px;">
+        <a href="https://smartb2b.gitbook.io/smartb2b-documentation" style="display: block; width: 100%; padding: 14px 0; background-color: #2563EB; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600; text-align: center;">
+          View App Documentation
+        </a>
+      </div> -->
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 0;" />
+
+      <div style="padding: 36px 40px 32px; text-align: center;">
+      <p style="font-size: 20px; font-weight: 700; color: #111; margin: 0 0 10px;">Need help?</p>
+      <p style="font-size: 14px; color: #444; line-height: 1.65; margin: 0 0 24px;">
+        Our team is here to help with installation, configuration, and onboarding. We typically respond within one business day and are happy to assist with setup, configuration, and best practices.
+      </p>
+
+      <div style="display: flex; gap: 16px; margin-bottom: 28px;">
+        <div style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
+          <div>
+            <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Email support</p>
+            <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
+              Have a question? Write to us at <a href="https://www.dreamzapps.com/support/" style="color: #2563EB; text-decoration: underline;">www.dreamzapps.com/support/</a>.
+            </p>
+          </div>
+          <a href="mailto:support@dreamzapps.com" style="display: inline-block; padding: 9px 12px; background-color: #fff; color: #2563EB; border: 1.5px solid #2563EB; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; text-align: center;">support@dreamzapps.com</a>
+        </div>
+        <div style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
+          <div>
+            <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Custom onboarding</p>
+            <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
+              Need hands-on help configuring SmartB2B for your workflow? Our Shopify experts can do it for you.
+            </p>
+          </div>
+          <a href="mailto:support@dreamzapps.com" style="display: inline-block; padding: 9px 12px; background-color: #fff; color: #2563EB; border: 1.5px solid #2563EB; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; text-align: center;">Request Service</a>
+        </div>
+      </div>
+
+      <p style="text-align: center; font-size: 13px; color: #444; font-weight: 500; margin: 0 0 16px;">Thank you for choosing SmartB2B</p>
+      <div style="text-align: center;">
+        <a href="#" style="font-size: 12px; color: #6b7280; text-decoration: underline; margin: 0 10px;">Privacy Policy</a>
+        <a href="#" style="font-size: 12px; color: #6b7280; text-decoration: underline; margin: 0 10px;">Terms & Conditions</a>
+        <a href="#" style="font-size: 12px; color: #6b7280; text-decoration: underline; margin: 0 10px;">Unsubscribe</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+
+  const text = `
+Hi,
+Thank you for installing SmartB2B.
+You now have a full-featured B2B wholesale portal on your Shopify store.
+
+Getting Started:
+1. Configure your registration form
+2. Enable the customer account extension
+3. Review and approve applications
+5. Invite team members
+6. Start selling B2B
+
+Need help?
+Our team is here to help. Email us at support@dreamzapps.com or visit www.dreamzapps.com/support/
+
+Thank you for choosing SmartB2B.
+  `;
+
+  return sendEmail(
+    {
+      to: storeData.contactEmail,
+      subject: "Welcome to SmartB2B - Let's get started",
+      html,
+      text,
+    },
+    smtpConfig,
+  );
 }

@@ -76,12 +76,19 @@ export function resolveStoreSmtpConfig(
   const port = Number(
     store?.smtpPort ||
       process.env.SMTP_PORT ||
-      process.env.SMTP_PORT ||
       587,
   );
-  const secure =
-    store?.smtpSecure ??
-    (process.env.SMTP_SECURE === "true");
+  
+  // Default to secure:true for port 465, false otherwise, unless explicitly overridden
+  let secure = store?.smtpSecure;
+  if (secure === undefined || secure === null) {
+    if (process.env.SMTP_SECURE !== undefined) {
+      secure = process.env.SMTP_SECURE === "false";
+    } else {
+      secure = port === 465;
+    }
+  }
+
   const user = store?.smtpUser?.trim() || process.env.SMTP_USER || "";
   const pass =
     decryptSmtpSecret(store?.smtpPassEncrypted) ||
