@@ -124,6 +124,17 @@ const shopify = shopifyApp({
 
         const storeContactEmail = shop?.contactEmail || shop?.email;
 
+        let storeOwnerName: string | null = null;
+        try {
+          const shopRes = await fetch(`https://${session.shop}/admin/api/2026-01/shop.json`, {
+            headers: { "X-Shopify-Access-Token": session.accessToken ?? "" },
+          });
+          const shopJson = await shopRes.json();
+          storeOwnerName = shopJson?.shop?.shop_owner?.trim() || null;
+        } catch (e) {
+          console.warn("⚠️ Could not fetch shop_owner from REST API:", e);
+        }
+
         store = await upsertStore({
           shopDomain: session.shop,
           accessToken: session.accessToken ?? "",
@@ -131,6 +142,7 @@ const shopify = shopifyApp({
           shopName: shop?.name,
           currencyCode: shop?.currencyCode,
           contactEmail: storeContactEmail,
+          storeOwnerName,
         });
 
         // Send welcome email if this is a new store or contact email was previously missing

@@ -730,16 +730,13 @@ export async function sendAppWelcomeEmail(
       desc: "Manage incoming B2B registration requests and approve qualified companies.",
     },
     {
-      num: 5,
-      title: "Invite team members",
-      desc: "Allow your customers to manage company users, locations, and purchasing permissions.",
-    },
-    {
-      num: 6,
+      num: 4,
       title: "Start selling B2B",
       desc: "Your customers can now access their B2B portal and manage their business accounts efficiently.",
     },
   ];
+
+  const merchantName = storeData?.storeOwnerName || storeData?.shopName?.split(".")[0] || "there";
 
   const stepsHtml = steps
     .map(
@@ -761,7 +758,7 @@ export async function sendAppWelcomeEmail(
 <body style="background-color: #f5f5f5; margin: 0; padding: 40px 16px; font-family: 'Helvetica Neue', Arial, sans-serif;">
   <div style="background-color: #ffffff; border-radius: 8px; max-width: 520px; width: 100%; margin: 0 auto; box-shadow: 0 2px 12px rgba(0,0,0,0.08); overflow: hidden;">
     <div style="padding: 36px 40px 28px; text-align: left;">
-      <p style="font-size: 18px; font-weight: 600; color: #111; margin: 0 0 4px;">Hi,</p>
+      <p style="font-size: 18px; font-weight: 600; color: #111; margin: 0 0 4px;">Hi, ${merchantName}</p>
       <p style="font-size: 18px; font-weight: 700; color: #111; margin: 0 0 16px;">Thank you for installing SmartB2B</p>
       <p style="font-size: 14px; color: #444; line-height: 1.65; margin: 0 0 28px;">
         You now have a full-featured B2B wholesale portal on your Shopify store built to handle everything from customer onboarding and company management to credit control and quick orders.
@@ -793,9 +790,6 @@ export async function sendAppWelcomeEmail(
               <tr>
                 <td style="padding: 20px 16px 12px 16px; vertical-align: top;">
                   <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Email support</p>
-                  <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
-                    Have a question? Write to us at <a href="https://www.dreamzapps.com/support/" style="color: #2563EB; text-decoration: underline;">www.dreamzapps.com/support/</a>.  We typically respond within a few hours.
-                  </p>
                 </td>
               </tr>
               <tr>
@@ -810,9 +804,9 @@ export async function sendAppWelcomeEmail(
               <tr>
                 <td style="padding: 20px 16px 12px 16px; vertical-align: top;">
                   <p style="font-size: 14px; font-weight: 700; color: #111; margin: 0 0 8px;">Custom onboarding</p>
-                  <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
+                  <!-- <p style="font-size: 13px; color: #555; line-height: 1.6; margin: 0;">
                     Need hands-on help configuring SmartB2B for your workflow? Our Shopify experts can do it for you.
-                  </p>
+                  </p> -->
                 </td>
               </tr>
               <tr>
@@ -824,13 +818,6 @@ export async function sendAppWelcomeEmail(
           </td>
         </tr>
       </table>
-
-      <p style="text-align: center; font-size: 13px; color: #444; font-weight: 500; margin: 0 0 16px;">Thank you for choosing SmartB2B</p>
-      <div style="text-align: center;">
-        <a href="#" style="font-size: 12px; color: #6b7280; text-decoration: underline; margin: 0 10px;">Privacy Policy</a>
-        <a href="#" style="font-size: 12px; color: #6b7280; text-decoration: underline; margin: 0 10px;">Terms & Conditions</a>
-        <a href="#" style="font-size: 12px; color: #6b7280; text-decoration: underline; margin: 0 10px;">Unsubscribe</a>
-      </div>
     </div>
   </div>
 </body>
@@ -846,8 +833,7 @@ Getting Started:
 1. Configure your registration form
 2. Enable the customer account extension
 3. Review and approve applications
-5. Invite team members
-6. Start selling B2B
+4. Start selling B2B
 
 Need help?
 Our team is here to help. Email us at support@dreamzapps.com or visit www.dreamzapps.com/support/

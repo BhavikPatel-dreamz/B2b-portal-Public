@@ -10,6 +10,7 @@ export interface CreateStoreInput {
   scope?: string;
   currencyCode?: string;
   contactEmail?: string;
+  storeOwnerName?: string | null;
 }
 
 export interface UpdateStoreInput {
@@ -50,6 +51,7 @@ export async function upsertStore(data: CreateStoreInput) {
   if (data.scope !== undefined) updateData.scope = data.scope;
   if (data.currencyCode !== undefined) updateData.currencyCode = data.currencyCode;
   if (data.contactEmail !== undefined) updateData.contactEmail = data.contactEmail;
+  if (data.storeOwnerName !== undefined) updateData.storeOwnerName = data.storeOwnerName;
 
   return await prisma.store.upsert({
     where: { shopDomain: data.shopDomain },
@@ -60,6 +62,7 @@ export async function upsertStore(data: CreateStoreInput) {
       scope: data.scope,
       currencyCode: data.currencyCode,
       contactEmail: data.contactEmail,
+      storeOwnerName: data.storeOwnerName,
       themeColor: "#0f172a",
     },
     update: updateData,
