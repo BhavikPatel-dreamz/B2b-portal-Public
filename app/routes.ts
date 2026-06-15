@@ -33,7 +33,10 @@ export default [
     "routes/webhooks.draft_orders_delete.tsx",
   ),
   route("webhooks/shop/update", "routes/webhooks.shop.update.tsx"),
-  route("webhooks/customers/data_request", "routes/webhooks.customers.data_request.tsx"),
+  route(
+    "webhooks/customers/data_request",
+    "routes/webhooks.customers.data_request.tsx",
+  ),
   route("webhooks/customers/redact", "routes/webhooks.customers.redact.tsx"),
   route("webhooks/shop/redact", "routes/webhooks.shop.redact.tsx"),
 
@@ -83,6 +86,10 @@ export default [
     route(
       "companies/:companyId/users",
       "routes/app.companies.$companyId.users.tsx",
+    ),
+    route(
+      "companies/:companyId/credits",
+      "routes/app.companies.$companyId.credits.tsx",
     ),
     route("select-plan", "routes/app.select-plan.tsx"),
     route("cancel-subscription", "routes/app.cancel-subscription.tsx"),

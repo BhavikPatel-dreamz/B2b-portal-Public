@@ -201,16 +201,19 @@ export async function syncCompanyCreditMetafields(
     });
 
     const data = await response.json();
-    console.log(
-      "Company metafield sync response:",
-      data.data?.metafieldsSet?.metafields,
-    );
+    console.log("Company metafield sync response:", data);
 
-    if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
-      const error =
-        data.errors?.[0]?.message ||
-        data.data?.metafieldsSet?.userErrors?.[0]?.message;
-      throw new Error(`Failed to update company metafields: ${error}`);
+    const userErrors = data.data?.metafieldsSet?.userErrors;
+    const errorMessage =
+      data.errors?.[0]?.message ||
+      userErrors?.find((err: any) => err?.message)?.message ||
+      (userErrors?.length ? JSON.stringify(userErrors) : undefined) ||
+      (data.errors ? JSON.stringify(data.errors) : undefined);
+
+    if (data.errors || userErrors?.length > 0 || !data.data?.metafieldsSet) {
+      throw new Error(
+        `Failed to update company metafields: ${errorMessage || "Unknown metafieldsSet response"}`,
+      );
     }
 
     return { success: true, data: data.data?.metafieldsSet?.metafields };
@@ -248,10 +251,12 @@ export async function syncAllCreditMetafields(
     }
 
     // Update customer and company metafields using a single metafieldsSet mutation
-    const company = user.companyId ? await prisma.companyAccount.findUnique({
-      where: { id: user.companyId },
-      select: { creditLimit: true, shopifyCompanyId: true },
-    }) : null;
+    const company = user.companyId
+      ? await prisma.companyAccount.findUnique({
+          where: { id: user.companyId },
+          select: { creditLimit: true, shopifyCompanyId: true },
+        })
+      : null;
 
     let companyMetafields: MetafieldUpdate[] = [];
     if (company && company.shopifyCompanyId) {
@@ -307,7 +312,7 @@ export async function syncAllCreditMetafields(
         key: field.key,
         value: field.value,
         type: field.type,
-      }))
+      })),
     ];
 
     const response = await shopifyAdmin.graphql(mutation, {
@@ -325,8 +330,20 @@ export async function syncAllCreditMetafields(
 
     return {
       success: true,
-      customer: { success: true, data: data.data?.metafieldsSet?.metafields.filter((m: any) => m.ownerId === customerId) },
-      company: company ? { success: true, data: data.data?.metafieldsSet?.metafields.filter((m: any) => m.ownerId === company.shopifyCompanyId) } : { success: true }
+      customer: {
+        success: true,
+        data: data.data?.metafieldsSet?.metafields.filter(
+          (m: any) => m.ownerId === customerId,
+        ),
+      },
+      company: company
+        ? {
+            success: true,
+            data: data.data?.metafieldsSet?.metafields.filter(
+              (m: any) => m.ownerId === company.shopifyCompanyId,
+            ),
+          }
+        : { success: true },
     };
   } catch (error: unknown) {
     console.error("Error syncing all credit metafields:", error);
@@ -414,7 +431,10 @@ export async function autoSyncCreditMetafields(
 /**
  * Sync the store's plan to the Shop metafields
  */
-export async function syncStorePlanToShopMetafields(admin: any, shopDomain: string) {
+export async function syncStorePlanToShopMetafields(
+  admin: any,
+  shopDomain: string,
+) {
   try {
     const store = await prisma.store.findUnique({
       where: { shopDomain },
@@ -423,9 +443,15 @@ export async function syncStorePlanToShopMetafields(admin: any, shopDomain: stri
 
     // Map internal plan names to extension-expected values
     let planValue = "free";
-    if (store?.plan === "approved payment" || store?.plan === "Paid subscription") {
+    if (
+      store?.plan === "approved payment" ||
+      store?.plan === "Paid subscription"
+    ) {
       planValue = "approved payment";
-    } else if (store?.plan === "usage subscription" || store?.plan === "Usage subscription") {
+    } else if (
+      store?.plan === "usage subscription" ||
+      store?.plan === "Usage subscription"
+    ) {
       planValue = "usage subscription";
     }
 
@@ -477,10 +503,15 @@ export async function syncStorePlanToShopMetafields(admin: any, shopDomain: stri
     });
 
     const data = await response.json();
-    console.log("Shop plan metafield sync response:", data.data?.metafieldsSet?.metafields);
+    console.log(
+      "Shop plan metafield sync response:",
+      data.data?.metafieldsSet?.metafields,
+    );
 
     if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
-      const error = data.errors?.[0]?.message || data.data?.metafieldsSet?.userErrors?.[0]?.message;
+      const error =
+        data.errors?.[0]?.message ||
+        data.data?.metafieldsSet?.userErrors?.[0]?.message;
       throw new Error(`Failed to update shop plan metafield: ${error}`);
     }
 

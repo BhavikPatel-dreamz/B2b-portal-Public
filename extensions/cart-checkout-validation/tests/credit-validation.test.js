@@ -34,7 +34,7 @@ describe("Cart Validation Function", () => {
       };
 
       const result = cartValidationsGenerateRun(input);
-      expect(result.operations[0].validationAdd.errors).toHaveLength(0);
+      expect(result.operations).toHaveLength(0);
     });
 
     it("should block cart when insufficient credit", () => {
@@ -106,7 +106,7 @@ describe("Cart Validation Function", () => {
       };
 
       const result = cartValidationsGenerateRun(input);
-      expect(result.operations[0].validationAdd.errors).toHaveLength(0);
+      expect(result.operations).toHaveLength(0);
     });
   });
 
@@ -134,8 +134,7 @@ describe("Cart Validation Function", () => {
       };
 
       const result = cartValidationsGenerateRun(input);
-      const errors = result.operations[0].validationAdd.errors;
-      expect(errors).toHaveLength(0);
+      expect(result.operations).toHaveLength(0);
     });
 
     it("should block cart when company credit metafield is missing", () => {

@@ -873,15 +873,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     creditSummary.creditLimit.toNumber() - creditSummary.usedCredit.toNumber(),
   );
   const isFreePlan = store.plan === "free";
-  const RegistrationData =await prisma.registrationSubmission.findFirst({
-    where:{
-      email:dashboardData.company.contactEmail
-    }
-  })
+  const RegistrationData = dashboardData.company.contactEmail
+    ? await prisma.registrationSubmission.findFirst({
+        where: {
+          email: dashboardData.company.contactEmail,
+        },
+      })
+    : null;
 
   // Fetch credit transactions for the company with related metadata
   const creditTransactions = await getCreditTransactionsByCompany(companyId, {
-    take: 50,
+    take: 5,
   });
 
   return Response.json({
@@ -1855,7 +1857,27 @@ export default function CompanyDashboard() {
         </s-section>}
 
       {!isFreePlan && (
-        <s-section heading="Credit Transaction History">
+        <s-section>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Credit Transaction History</h2>
+            <Link 
+              to={`/app/companies/${data.company.id}/credits`}
+              style={{
+                display: "inline-block",
+                padding: "8px 16px",
+                backgroundColor: "#008060",
+                color: "#fff",
+                textDecoration: "none",
+                borderRadius: "4px",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                border: "none",
+              }}
+            >
+              View All Credit
+            </Link>
+          </div>
           {data.creditTransactions.length > 0 ? (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>

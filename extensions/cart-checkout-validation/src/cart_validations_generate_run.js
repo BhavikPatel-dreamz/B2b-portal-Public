@@ -68,11 +68,11 @@ export function cartValidationsGenerateRun(input) {
     const company = buyerIdentity.purchasingCompany.company;
 
     const companyCreditLimit = parseDecimal(company.creditLimit?.value);
-    
+
     // Handle inconsistent creditUsed data - sometimes present, sometimes missing
     const rawCreditUsed = company.creditUsed?.value;
     const companyCreditUsed = parseDecimal(rawCreditUsed) ?? 0;
-    
+
     // Log when creditUsed data is missing for debugging
     if (rawCreditUsed == null || rawCreditUsed === "") {
       console.warn("[Cart Validation] Company creditUsed is missing for company:", company);
@@ -99,16 +99,19 @@ export function cartValidationsGenerateRun(input) {
       else if (cartTotal > companyAvailableCredit) {
         if (blockOrdersWhenCreditUnavailable) {
           // 🔴 Hard block — order is stopped
+          // Suggest alternative payment methods
           errors.push({
-            message: `This order exceeds your company's available credit. Available credit: $${companyAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
+            message: `This order exceeds your company's available credit. Available credit: $${companyAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}. Please use credit card or cash on delivery to complete this order.`,
             target: "$.cart",
           });
         } else {
           // 🟡 Soft warning — order proceeds but admin is notified
-          errors.push({
-            message: `Insufficient user credit. Available credit: $${companyAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
-            target: "$.cart",
-          });
+          // Do not add a blocking validation error so the order is allowed.
+          // Customer can pay via credit card or cash on delivery
+          console.warn(
+            `[Cart Validation] Soft warning: company available credit $${companyAvailableCredit.toFixed(2)} is less than cart total $${cartTotal.toFixed(2)}. Order allowed - customer can use credit card or cash on delivery.`,
+            { company }
+          );
         }
       }
     }
@@ -134,10 +137,19 @@ export function cartValidationsGenerateRun(input) {
 
       // Cart exceeds user available credit
       else if (cartTotal > userAvailableCredit) {
-        errors.push({
-          message: `Insufficient user credit. Available credit: $${userAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}`,
-          target: "$.cart",
-        });
+        if (blockOrdersWhenCreditUnavailable) {
+          // 🔴 Hard block — order is stopped
+          errors.push({
+            message: `Insufficient user credit. Available credit: $${userAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}. Please use credit card or cash on delivery to complete this order.`,
+            target: "$.cart",
+          });
+        } else {
+          // 🟡 Soft warning — order proceeds but admin is notified
+          console.warn(
+            `[Cart Validation] Soft warning: user available credit $${userAvailableCredit.toFixed(2)} is less than cart total $${cartTotal.toFixed(2)}. Order allowed - customer can use credit card or cash on delivery.`,
+            { customer }
+          );
+        }
       }
     }
   }
@@ -146,11 +158,10 @@ export function cartValidationsGenerateRun(input) {
   // RETURN OPERATIONS
   // -----------------------------------
 
-  return {
-    operations: [
-      {
-        validationAdd: { errors },
-      },
-    ],
-  };
+  const operations = [];
+  if (errors.length > 0) {
+    operations.push({ validationAdd: { errors } });
+  }
+
+  return { operations };
 }
