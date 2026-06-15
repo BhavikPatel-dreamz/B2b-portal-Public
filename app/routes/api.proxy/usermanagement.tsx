@@ -322,7 +322,83 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // But we CAN run companyData + Shopify call in parallel, then storeAdmin after:
     // (This is actually the bigger win since Shopify is the slow call)
 
-    // Better structure:
+    // ── ACTION: all (Consolidated: users + roles + locations) ────────────
+    if (action === "all") {
+      if (!companyData) return Response.json({ success: false, error: "Company not found" }, { status: 404 });
+
+      const roles = [
+        { name: "Ordering only", value: "ordering_only" },
+        { name: "Location Admin", value: "location_admin" },
+      ];
+
+      const [customersData, storeAdmin2, locationsData] = await Promise.all([
+        getCompanyCustomers(companyId, shop, store.accessToken, {
+          first: 10,
+          after: after || undefined,
+          query,
+          sortKey: "NAME",
+          reverse: false,
+        }),
+        prisma.user.findFirst({
+          where: { companyId: companyData.id, role: "STORE_ADMIN" },
+          select: { email: true, role: true },
+        }),
+        getCompanyLocations(companyId, shop, store.accessToken),
+      ]);
+
+      const storeAdminEmail = storeAdmin2?.email ?? null;
+      companyIdCache.set(l1Key, { companyId, storeAdminEmail, timestamp: Date.now() });
+
+      if (customersData.error) {
+        return Response.json({ success: false, error: "Something went wrong" }, { status: 500 });
+      }
+
+      const customerIds = customersData.customers.map((c: any) => `${c.customer.id}`);
+      const registrations = await prisma.registrationSubmission.findMany({
+        where: { shopifyCustomerId: { in: customerIds } },
+        select: { shopifyCustomerId: true, firstName: true, lastName: true },
+      });
+
+      const registrationMap = new Map(
+        registrations.map((r) => [r.shopifyCustomerId, `${r.firstName || ""} ${r.lastName || ""}`])
+      );
+
+      const users = customersData.customers.map((c: any) => {
+        const firstName = c.customer.firstName?.trim();
+        const lastName  = c.customer.lastName?.trim();
+        const name = (firstName && lastName ? `${firstName} ${lastName}` : firstName) || registrationMap.get(`${c.customer.id}`) || "";
+        const isStoreAdmin = storeAdmin2?.role === "STORE_ADMIN" && c.customer.email === storeAdminEmail;
+        const locationRoles = c.customer.roleAssignments?.edges?.map((edge: any) => ({
+          roleName: isStoreAdmin ? "Company Admin" : (edge.node.role?.name ?? ""),
+          locationName: edge.node.companyLocation?.name || null,
+        })) || [];
+
+        return {
+          id: c.customer.id,
+          name,
+          email: c.customer.email,
+          company: customersData.companyName,
+          isGlobalAdmin: isStoreAdmin,
+          locationRoles,
+        };
+      });
+
+      const result = {
+        success: true,
+        users,
+        roles,
+        locations: locationsData.locations || [],
+        pageInfo: customersData.pageInfo,
+        companyName: customersData.companyName,
+      };
+
+      const cacheKey = buildCacheKey(shop, companyId, action, after, sortParam, query);
+      cache.set(cacheKey, { data: result, timestamp: Date.now() });
+      console.log(`✅ Cache SET (all) → ${cacheKey} (${Date.now() - startTime}ms)`);
+      return Response.json(result);
+    }
+
+    // ── ACTION: locations ───────────────────────────────────
     if (action === "locations") {
       // companyData needed for storeAdmin, but locations don't need storeAdmin
       if (!companyData) return Response.json({ success: false, error: "Company not found" }, { status: 404 });
