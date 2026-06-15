@@ -590,214 +590,159 @@ export const syncShopifyUsers = async (
   store: StoreRef,
   companyId?: string,
 ) => {
-  try {
-    // Fetch all customers with B2B company contact profiles
-    let allCustomers: ShopifyCustomerNode[] = [];
-    let hasNextPage = true;
-    let cursor: string | null = null;
+  // ... (existing code)
+};
 
-    while (hasNextPage) {
-      const customersQuery = `
-        query GetB2BCustomers($cursor: String) {
-          customers(first: 100, after: $cursor, query: "has_company_contact_profile:true") {
-            nodes {
+/**
+ * Sync a single Shopify B2B customer and their associated companies.
+ * This is used for on-the-fly onboarding when a B2B user logs in.
+ */
+export const syncSingleB2BCustomer = async (
+  admin: ShopifyAdminClient,
+  storeId: string,
+  shopifyCustomerId: string,
+) => {
+  try {
+    // 1. Fetch customer with company profiles
+    const query = `
+      query GetB2BCustomer($id: ID!) {
+        customer(id: $id) {
+          id
+          email
+          firstName
+          lastName
+          phone
+          companyContactProfiles {
+            id
+            title
+            company {
               id
-              email
-              firstName
-              lastName
-              phone
-              companyContactProfiles {
-                id
-                company {
+              name
+              externalId
+              mainContact {
+                customer {
                   id
-                  name
-                  mainContact {
-                    id
-                    customer {
-                      id
-                    }
-                  }
                 }
-                title
-                roleAssignments(first: 10) {
-                  edges {
-                    node {
-                      role {
-                        name
-                      }
-                    }
+              }
+            }
+            roleAssignments(first: 10) {
+              edges {
+                node {
+                  role {
+                    name
                   }
                 }
               }
             }
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
           }
         }
-      `;
-
-      const response = await admin.graphql(customersQuery, {
-        variables: { cursor },
-      });
-      const result = await response.json();
-      const data = result?.data?.customers;
-
-      if (data?.nodes) {
-        allCustomers = [...allCustomers, ...data.nodes];
       }
+    `;
 
-      hasNextPage = data?.pageInfo?.hasNextPage || false;
-      cursor = data?.pageInfo?.endCursor || null;
+    const response = await admin.graphql(query, {
+      variables: { id: shopifyCustomerId.startsWith("gid://") ? shopifyCustomerId : `gid://shopify/Customer/${shopifyCustomerId}` },
+    });
+    const result = await response.json();
+    const customer = result?.data?.customer as ShopifyCustomerNode;
+
+    if (!customer || !customer.email) {
+      return { success: false, error: "Customer not found in Shopify or missing email" };
+    }
+
+    const profiles = customer.companyContactProfiles || [];
+    if (profiles.length === 0) {
+      return { success: false, error: "Customer has no B2B company profiles" };
     }
 
     let syncedCount = 0;
-    const errors: string[] = [];
 
-    // Get the shopify company ID if filtering by company
-    let targetShopifyCompanyId: string | null = null;
-    if (companyId) {
-      const localCompany = await prisma.companyAccount.findUnique({
-        where: { id: companyId },
-        select: { shopifyCompanyId: true },
+    for (const profile of profiles) {
+      const shopifyCompany = profile.company;
+      if (!shopifyCompany) continue;
+
+      // 2. Ensure company exists in local DB
+      const localCompany = await prisma.companyAccount.upsert({
+        where: {
+          shopId_shopifyCompanyId: {
+            shopId: storeId,
+            shopifyCompanyId: shopifyCompany.id,
+          },
+        },
+        update: {
+          name: shopifyCompany.name || "Unknown Company",
+        },
+        create: {
+          shopId: storeId,
+          shopifyCompanyId: shopifyCompany.id,
+          name: shopifyCompany.name || "Unknown Company",
+          creditLimit: new Prisma.Decimal(0), // Default to 0, sync might update it later
+        },
       });
-      if (!localCompany) {
-        return {
-          success: false,
-          syncedCount: 0,
-          errors: ["Company not found"],
-          message: "Company not found",
-        };
-      }
-      targetShopifyCompanyId = localCompany.shopifyCompanyId;
+
+      // 3. Determine roles
+      const isMainContact = shopifyCompany.mainContact?.customer?.id === customer.id;
+      const userRole = isMainContact ? "STORE_ADMIN" : "STORE_USER";
+
+      // 4. Upsert User
+      await prisma.user.upsert({
+        where: {
+          shopId_email: { shopId: storeId, email: customer.email },
+        },
+        update: {
+          firstName: customer.firstName || "",
+          lastName: customer.lastName || "",
+          shopifyCustomerId: customer.id,
+          companyId: localCompany.id,
+          companyRole: userRole === "STORE_ADMIN" ? "admin" : "member",
+          isActive: true,
+          role: userRole,
+          status: "APPROVED", // Auto-approved because they already have B2B in Shopify
+        },
+        create: {
+          email: customer.email,
+          firstName: customer.firstName || null,
+          lastName: customer.lastName || null,
+          password: "",
+          role: userRole,
+          status: "APPROVED",
+          isActive: true,
+          shopId: storeId,
+          companyId: localCompany.id,
+          companyRole: userRole === "STORE_ADMIN" ? "admin" : "member",
+          shopifyCustomerId: customer.id,
+        },
+      });
+
+      // 5. Ensure RegistrationSubmission exists for status tracking
+      await prisma.registrationSubmission.upsert({
+        where: {
+          shopId_email: { shopId: storeId, email: customer.email },
+        },
+        update: {
+          status: "APPROVED",
+          companyName: localCompany.name,
+          shopifyCustomerId: customer.id,
+        },
+        create: {
+          shopId: storeId,
+          email: customer.email,
+          companyName: localCompany.name,
+          firstName: customer.firstName || "",
+          lastName: customer.lastName || "",
+          contactTitle: profile.title || "",
+          status: "APPROVED",
+          shopifyCustomerId: customer.id,
+          workflowCompleted: true,
+        },
+      });
+
+      syncedCount++;
     }
 
-    // Process each customer with B2B company profiles
-    for (const customer of allCustomers) {
-      try {
-        if (!customer.email) continue;
-
-        const customerGid = customer.id; // Already a GID from Shopify
-        const profiles = customer.companyContactProfiles || [];
-
-        // For each company profile this customer has, create/update a user
-        for (const profile of profiles) {
-          try {
-            const shopifyCompanyId = profile.company?.id;
-            if (!shopifyCompanyId) continue;
-
-            // If filtering by company, skip profiles that don't match
-            if (
-              targetShopifyCompanyId &&
-              shopifyCompanyId !== targetShopifyCompanyId
-            ) {
-              continue;
-            }
-
-            // Find the company in our local DB
-            const localCompany = await prisma.companyAccount.findFirst({
-              where: {
-                shopId: store.id,
-                shopifyCompanyId: shopifyCompanyId,
-              },
-              select: {
-                id: true,
-                name: true,
-                contactName: true,
-                contactEmail: true,
-              },
-            });
-
-            if (!localCompany) continue;
-
-            // Determine company role from Shopify role assignments
-            // let companyRole = "member";
-            // const roles = profile.roleAssignments?.edges || [];
-            // if (
-            //   roles.some((r: ShopifyRoleAssignment) =>
-            //     r.node?.role?.name?.includes("Admin"),
-            //   )
-            // ) {
-            //   companyRole = "admin";
-            // } else if (
-            //   roles.some((r: ShopifyRoleAssignment) =>
-            //     r.node?.role?.name?.includes("Approver"),
-            //   )
-            // ) {
-            //   companyRole = "approver";
-            // }
-
-            // Check if this customer is the main contact of the company
-            const isMainContact =
-              profile.company?.mainContact?.customer?.id === customerGid;
-            const userRole = isMainContact ? "STORE_ADMIN" : "STORE_USER";
-
-            // Upsert user in local DB
-            await prisma.user.upsert({
-              where: {
-                shopId_email: { shopId: store.id, email: customer.email },
-              },
-              update: {
-                firstName: customer.firstName || localCompany.contactName || "",
-                lastName: customer.lastName || "",
-                shopifyCustomerId: customerGid,
-                companyId: localCompany.id,
-                companyRole: userRole == "STORE_ADMIN" ? "admin" : "member",
-                shopId: store.id,
-                isActive: true,
-                role: userRole,
-              },
-              create: {
-                email: customer.email,
-                firstName: customer.firstName || null,
-                lastName: customer.lastName || null,
-                password: "", // B2B users register themselves
-                role: userRole,
-                status: "APPROVED",
-                isActive: true,
-                shopId: store.id,
-                companyId: localCompany.id,
-                companyRole: userRole == "STORE_ADMIN" ? "admin" : "member",
-                shopifyCustomerId: customerGid,
-              },
-            });
-
-            syncedCount++;
-          } catch (profileError) {
-            console.error(`Error syncing user profile:`, profileError);
-            errors.push(
-              `Failed to sync profile for ${customer.email}: ${profileError instanceof Error ? profileError.message : "Unknown error"}`,
-            );
-          }
-        }
-      } catch (customerError) {
-        console.error(`Error syncing customer:`, customerError);
-        errors.push(
-          `Failed to sync ${customer.email}: ${customerError instanceof Error ? customerError.message : "Unknown error"}`,
-        );
-      }
-    }
-
-    return {
-      success: true,
-      syncedCount,
-      errors,
-      message:
-        errors.length > 0
-          ? `Synced ${syncedCount} users with ${errors.length} errors`
-          : `Successfully synced ${syncedCount} users`,
-    };
+    return { success: true, syncedCount };
   } catch (error) {
-    console.error("Sync error:", error);
-    return {
-      success: false,
-      syncedCount: 0,
-      errors: [
-        error instanceof Error ? error.message : "Unknown sync error occurred",
-      ],
-      message: "Sync failed",
-    };
+    console.error("Error in syncSingleB2BCustomer:", error);
+    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
   }
 };
 

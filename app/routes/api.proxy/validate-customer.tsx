@@ -6,6 +6,7 @@ import {
   checkCustomerIsB2BInShopifyByREST,
 } from "app/utils/b2b-customer.server";
 import prisma from "app/db.server";
+import { syncSingleB2BCustomer } from "app/utils/company.server";
 
 /**
  * API endpoint to validate if a customer is logged in and has B2B/company access
@@ -213,6 +214,50 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.log(
         "⚠️ Customer has B2B in Shopify but not registered in our database",
       );
+
+      // AUTO-ONBOARD if they are already a B2B contact in Shopify
+      // We do this even if autoApproveB2BOnboarding is false because they are ALREADY B2B in Shopify
+      console.log("🚀 Auto-onboarding B2B customer:", loggedInCustomerId);
+      const admin = {
+        graphql: async (query: string, options?: { variables?: Record<string, unknown> }) => {
+          return fetch(`https://${shop}/admin/api/2025-01/graphql.json`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": store.accessToken!,
+            },
+            body: JSON.stringify({ query, variables: options?.variables }),
+          });
+        }
+      };
+
+      const syncResult = await syncSingleB2BCustomer(admin as any, store.id, loggedInCustomerId);
+      if (syncResult.success) {
+        console.log("✅ Auto-onboarding successful, re-granting access");
+        // Fetch the newly created user to return full data
+        const newUser = await prisma.user.findFirst({
+          where: { shopifyCustomerId: `gid://shopify/Customer/${loggedInCustomerId}`, shopId: store.id },
+          include: { company: true }
+        });
+
+        return Response.json({
+          isLoggedIn: true,
+          hasB2BAccess: true,
+          logo: store.logo,
+          email: store.contactEmail,
+          storeName: store.shopName,
+          themeColor: store.themeColor || "#0f172a",
+          customerId: loggedInCustomerId,
+          customerName: `${newUser?.firstName || ""} ${newUser?.lastName || ""}`.trim(),
+          customerStatus: "APPROVED",
+          accessMethod,
+          ...additionalInfo,
+          message: "Access granted (auto-onboarded)",
+        });
+      } else {
+        console.error("❌ Auto-onboarding failed:", syncResult.error);
+      }
+
       return Response.json({
         isLoggedIn: true,
         hasB2BAccess: false,
