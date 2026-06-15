@@ -2362,7 +2362,7 @@ export default function NotificationForm() {
       <>
         <div style={pageShellStyle}>
           <div style={pageHeroStyle}>
-            <h1 style={pageHeroTitleStyle}>Notification Templates</h1>
+            <h1 style={pageHeroTitleStyle}>Email Templates</h1>
             <p style={pageHeroTextStyle}>
               Configure branded email templates and preview customer
               communications.

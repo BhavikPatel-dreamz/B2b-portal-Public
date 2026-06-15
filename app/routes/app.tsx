@@ -90,7 +90,7 @@ export default function App() {
           {/* <s-link href="/app/companies?tab=pending">Registrations</s-link> */}
           <s-link href="/app/registration-form">Registrations Form</s-link>
           <s-link href="/app/settings">Settings</s-link>
-          <s-link href="/app/notifications">Notifications</s-link>
+          <s-link href="/app/notifications">Email Template</s-link>
           <s-link href="/app/select-plan">Select Plan</s-link>
         </s-app-nav>
         <Outlet />
