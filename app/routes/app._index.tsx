@@ -353,6 +353,7 @@ const {
       { method: "post" }
     );
     setShowSetupEssentials(false);
+    navigate("/app");
   };
   const openModal = (tutorial: Tutorial) => {
     setSelectedTutorial(tutorial);

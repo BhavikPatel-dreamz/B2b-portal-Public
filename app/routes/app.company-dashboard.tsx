@@ -6,6 +6,7 @@ import { getCreditSummary } from "../services/creditService";
 import {
   getCompanyDashboardData,
   updateCredit,
+  getCreditTransactionsByCompany,
 } from "../services/company.server";
 import {
   parseForm,
@@ -57,6 +58,14 @@ type LoaderData = {
     unpaid: number;
     pending: number;
   };
+  creditTransactions: Array<{
+    id: string;
+    companyId: string;
+    amount: number;
+    orderName: string;
+    createdAt: string;
+    createdBy: string;
+  }>;
   users: Array<{
     id: string;
     email: string;
@@ -870,6 +879,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
   })
 
+  // Fetch credit transactions for the company with related metadata
+  const creditTransactions = await getCreditTransactionsByCompany(companyId, {
+    take: 50,
+  });
+
   return Response.json({
     isFreePlan,
     company: {
@@ -904,7 +918,25 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           .join(" ") || order.createdByUser.email,
     })),
     orderStats: dashboardData.orderStats,
-    users: dashboardData.users.map((user) => ({
+      creditTransactions: creditTransactions.map((tx: any) => ({
+        id: tx.id,
+        companyId: tx.companyId,
+        amount:
+          typeof tx.creditAmount === "object" && tx.creditAmount?.toNumber
+            ? tx.creditAmount.toNumber()
+            : (tx.creditAmount as number),
+        orderName: tx.orderId
+          ? `Order ${tx.orderId}`
+          : tx.shopifyOrderId
+            ? `Order ${tx.shopifyOrderId}`
+            : "—",
+        createdAt: tx.createdAt.toISOString(),
+        createdBy:
+          tx.createdByName ||
+          (tx.createdBy && tx.createdBy.includes("@") ? tx.createdBy : "System") ||
+          "System",
+      })),
+      users: dashboardData.users.map((user) => ({
       id: user.id,
       email: user.email,
       firstName: user.firstName,
@@ -1212,29 +1244,35 @@ export default function CompanyDashboard() {
         >
           ← Back to Companies
         </Link>
-      </div>
-
-      {/* Payment Terms Edit Modal */}
-      {isEditingPaymentTerms && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => {
-            if (!isSavingPaymentTerms) {
-              handleCancelPaymentTermsEdit();
-            }
-          }}
-        >
+      {/* Credit Status - Full Width */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
+        {isEditingPaymentTerms && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+            }}
+            onClick={() => {
+              if (!isSavingPaymentTerms) {
+                handleCancelPaymentTermsEdit();
+              }
+            }}
+          >
           <section
             onClick={(e) => e.stopPropagation()} // ✅ VERY IMPORTANT
             style={{
@@ -1344,6 +1382,8 @@ export default function CompanyDashboard() {
           </section>
         </div>
       )}
+      </div>
+      </div>
 
       {/* Company Information Section */}
       <s-section heading="Company Information">
@@ -1674,11 +1714,11 @@ export default function CompanyDashboard() {
         )}
       </s-section>
 
-      {/* Top Row: Company Info, Credit Status, Order Summary */}
+      {/* Credit Status - Full Width */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: isFreePlan ? "1fr" : "repeat(2, 1fr)",
+          gridTemplateColumns: "1fr",
           gap: 10,
           marginBottom: 10,
         }}
@@ -1719,6 +1759,9 @@ export default function CompanyDashboard() {
               </div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>
                 {formatCurrency(data.usedCredit, data.currencyCode)}
+              </div>
+              <div style={{ fontSize: 11, color: "#5c5f62", marginTop: 4 }}>
+                Total credit used by company
               </div>
             </div>
             <div>
@@ -1811,37 +1854,90 @@ export default function CompanyDashboard() {
           </div>
         </s-section>}
 
-        {/* Order Statistics */}
-        <s-section heading="Order Summary">
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>Total Orders:</span>
-              <strong>{data.orderStats.total}</strong>
+      {!isFreePlan && (
+        <s-section heading="Credit Transaction History">
+          {data.creditTransactions.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                     Shopify OrderId 
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "right",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Amount
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Date
+                    </th>
+                    <th
+                      style={{
+                        padding: 12,
+                        textAlign: "left",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Created By
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.creditTransactions.map((tx) => (
+                    <tr key={tx.id} style={{ borderBottom: "1px solid #e0e0e0" }}>
+                      <td style={{ padding: 12, fontSize: 13 }}>
+                        {tx.orderName || "—"}
+                      </td>
+                      <td
+                        style={{
+                          padding: 12,
+                          textAlign: "right",
+                          fontSize: 13,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {formatCurrency(Math.abs(tx.amount), data.currencyCode)}
+                      </td>
+                      <td style={{ padding: 12, fontSize: 13 }}>
+                        {formatDate(tx.createdAt)}
+                      </td>
+                      <td style={{ padding: 12, fontSize: 13 }}>
+                        {tx.createdBy}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div style={{ borderTop: "1px solid #e0e0e0" }} />
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                color: "#008060",
-              }}
-            >
-              <span>Paid:</span>
-              <span>{data.orderStats.paid}</span>
+          ) : (
+            <div style={{ padding: 40, textAlign: "center", color: "#5c5f62" }}>
+              <p>No credit transactions yet.</p>
             </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                color: "#d72c0d",
-              }}
-            >
-              <span>Unpaid:</span>
-              <span>{data.orderStats.unpaid}</span>
-            </div>
-       
-          </div>
+          )}
         </s-section>
+      )}
+
       </div>
 
       <s-section>
@@ -1995,6 +2091,28 @@ export default function CompanyDashboard() {
             >
               View All Orders
             </Link>
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              color: "#008060",
+            }}
+          >
+            <span>Paid Orders:</span>
+            <span>{data.orderStats.paid}</span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              color: "#d72c0d",
+            }}
+          >
+            <span>Unpaid Orders:</span>
+            <span>{data.orderStats.unpaid}</span>
           </div>
         </div>
         {data.recentOrders.length > 0 ? (

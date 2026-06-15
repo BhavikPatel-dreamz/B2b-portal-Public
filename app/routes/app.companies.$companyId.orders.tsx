@@ -220,20 +220,10 @@ export default function CompanyOrdersPage() {
                       fontWeight: 600,
                     }}
                   >
-                    Order ID
+                    Shopify Order
                   </th>
                   <th
-                    style={{
-                      padding: 12,
-                      textAlign: "left",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Shopify Order ID
-                  </th>
-                  <th
-                    style={{
+                    style={{ 
                       padding: 12,
                       textAlign: "left",
                       fontSize: 12,
@@ -320,9 +310,6 @@ export default function CompanyOrdersPage() {
                     key={order.id}
                     style={{ borderBottom: "1px solid #e0e0e0" }}
                   >
-                    <td style={{ padding: 12, fontSize: 13, fontWeight: 500 }}>
-                      {order.id.substring(0, 8)}
-                    </td>
                     <td style={{ padding: 12, fontSize: 12, color: "#5c5f62" }}>
                       {order.shopifyOrderId ? (
                         <a
