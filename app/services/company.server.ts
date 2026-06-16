@@ -399,7 +399,6 @@ export async function getCompanyDashboardData(
   shop: string,
   accessToken: string,
 ) {
-  // Get company
   const company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
     select: {
@@ -425,9 +424,7 @@ export async function getCompanyDashboardData(
       shopifyOrderId: { startsWith: "gid://shopify/Order/" },
     },
     distinct: ["shopifyOrderId"],
-    orderBy: {
-      createdAt: "desc",
-    },
+    orderBy: { createdAt: "desc" },
     take: 20,
     include: {
       createdByUser: {
@@ -440,11 +437,62 @@ export async function getCompanyDashboardData(
     },
   });
 
-  // Fetch transactions to get the correct "New Balance" for each order
+  // Fetch order names from Shopify GraphQL
+  const orderGids = recentOrders
+    .map((o) => o.shopifyOrderId)
+    .filter(Boolean) as string[];
+
+  // Build a map of GID -> order name from Shopify
+  const orderNameMap = new Map<string, string>();
+
+  if (orderGids.length > 0) {
+    try {
+      // Shopify nodes query to fetch multiple orders by GID at once
+      const nodesQuery = `
+        query GetOrderNames($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Order {
+              id
+              name
+            }
+          }
+        }
+      `;
+
+      const response = await fetch(
+        `https://${shop}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query: nodesQuery,
+            variables: { ids: orderGids },
+          }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!data.errors && data.data?.nodes) {
+        for (const node of data.data.nodes) {
+          if (node?.id && node?.name) {
+            orderNameMap.set(node.id, node.name); // e.g. "gid://shopify/Order/123" -> "#1008"
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch order names from Shopify:", err);
+    }
+  }
+
+  // Fetch transactions
   const orderIds = recentOrders
     .map((o) => o.shopifyOrderId)
     .filter(Boolean) as string[];
-  
+
   const transactions = await prisma.creditTransaction.findMany({
     where: {
       companyId,
@@ -456,7 +504,6 @@ export async function getCompanyDashboardData(
   const orderToBalanceMap = new Map();
   const orderToNotesMap = new Map();
   transactions.forEach((tx) => {
-    // Store the latest balance and notes for each order ID
     if (tx.orderId && !orderToBalanceMap.has(tx.orderId)) {
       orderToBalanceMap.set(tx.orderId, tx.newBalance);
       orderToNotesMap.set(tx.orderId, tx.notes);
@@ -465,11 +512,18 @@ export async function getCompanyDashboardData(
 
   const recentOrdersWithBalance = recentOrders.map((order) => ({
     ...order,
+    // Use Shopify order name (#1008) if available, fallback to GID tail
+    shopifyOrderName: order.shopifyOrderId
+      ? (orderNameMap.get(order.shopifyOrderId) ?? order.shopifyOrderId.split("/").pop() ?? order.shopifyOrderId)
+      : null,
     newBalance: order.shopifyOrderId
       ? orderToBalanceMap.get(order.shopifyOrderId) || order.remainingBalance
       : order.remainingBalance,
-    notes: order.shopifyOrderId ? orderToNotesMap.get(order.shopifyOrderId) : null,
+    notes: order.shopifyOrderId
+      ? orderToNotesMap.get(order.shopifyOrderId)
+      : null,
   }));
+
 
   // Get order statistics
   const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
@@ -612,14 +666,13 @@ export async function getCompanyUsers(companyId: string, shopId: string) {
 }
 
 /**
- * Get all orders for a company
+ * Get all orders for a company via Shopify GraphQL
  */
 export async function getCompanyOrders(
   companyId: string,
   shopId: string,
   accessToken: string,
 ) {
-  // Verify company belongs to shop
   const company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
     select: { shopId: true, name: true, shopifyCompanyId: true },
@@ -633,125 +686,320 @@ export async function getCompanyOrders(
     where: { id: shopId },
   });
 
-  const companyData = await prisma.companyAccount.findUnique({
-    where: { id: companyId },
-    select: { shopifyCompanyId: true },
-  });
-  let ordersData;
-  if (companyData) {
-    ordersData = await getCompanyOrders(
-      companyData.shopifyCompanyId || "",
-      store?.shopDomain || "",
-      accessToken,
-    );
+  if (!store) {
+    return null;
   }
-  const uniqueOrders = await prisma.b2BOrder.groupBy({
-    by: ["shopifyOrderId"],
-    where: {
-      companyId,
-      orderStatus: { not: "cancelled" },
-    },
-    _max: {
-      createdAt: true,
-    },
-    orderBy: {
-      _max: {
-        createdAt: "desc",
-      },
-    },
-    take: 20,
-  });
-  console.log(uniqueOrders);
 
-  const orders = await prisma.b2BOrder.findMany({
-    where: {
-      companyId,
-      orderStatus: { notIn: ["cancelled"] },
-      shopifyOrderId: { startsWith: "gid://shopify/Order/" },
-    },
-    distinct: ["shopifyOrderId"],
-    orderBy: {
-      createdAt: "desc",
-    },
-    take: 20,
-    include: {
-      createdByUser: {
-        select: {
-          email: true,
-          firstName: true,
-          lastName: true,
+  const shopName = store.shopDomain;
+  const shopifyCompanyId = company.shopifyCompanyId || "";
+
+  if (!shopifyCompanyId) {
+    return {
+      company,
+      orders: [],
+    };
+  }
+
+  try {
+    const extractId = (id: string) => {
+      if (!id) return "";
+      return id.split("/").pop() || id;
+    };
+
+    const cleanCompanyId = extractId(shopifyCompanyId);
+
+    console.log("Querying company_id:", cleanCompanyId, "from:", shopifyCompanyId);
+
+    const query = `
+      query getCompanyOrders($query: String!) {
+        orders(query: $query, first: 250, sortKey: CREATED_AT, reverse: true) {
+          edges {
+            node {
+              id
+              name
+              createdAt
+              updatedAt
+              processedAt
+              cancelledAt
+              displayFinancialStatus
+              displayFulfillmentStatus
+              totalPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              currentTotalPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              totalRefundedSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              subtotalPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              totalTaxSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              totalShippingPriceSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              shippingLines(first: 10) {
+                edges {
+                  node {
+                    id
+                    title
+                    discountedPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    taxLines {
+                      priceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              customer {
+                id
+                firstName
+                lastName
+                email
+                phone
+              }
+              purchasingEntity {
+                ... on PurchasingCompany {
+                  company {
+                    id
+                    name
+                  }
+                  location {
+                    id
+                    name
+                  }
+                }
+              }
+              note
+              tags
+              lineItems(first: 250) {
+                edges {
+                  node {
+                    id
+                    name
+                    quantity
+                    currentQuantity
+                    originalUnitPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    discountedUnitPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    product {
+                      id
+                      title
+                      handle
+                    }
+                    variant {
+                      id
+                      title
+                      sku
+                    }
+                  }
+                }
+              }
+              shippingAddress {
+                firstName
+                lastName
+                company
+                address1
+                address2
+                city
+                province
+                country
+                zip
+                phone
+              }
+              billingAddress {
+                firstName
+                lastName
+                company
+                address1
+                address2
+                city
+                province
+                country
+                zip
+                phone
+              }
+              customAttributes {
+                key
+                value
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const queryString = `company_id:${cleanCompanyId}`;
+
+    const response = await fetch(
+      `https://${shopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
         },
+        body: JSON.stringify({
+          query,
+          variables: { query: queryString },
+        }),
       },
-    },
-  });
+    );
 
-  const existingShopifyOrderIds = new Set(
-    orders.map((order) => order.shopifyOrderId),
-  );
+    const data = await response.json();
 
-  const newOrders =
-    ordersData?.companyOrders.filter(
-      (shopifyOrder: ShopifyOrder) =>
-        !existingShopifyOrderIds.has(shopifyOrder.id),
-    ) || [];
+    if (data.errors) {
+      console.error("GraphQL Errors:", data.errors);
+      return {
+        company,
+        orders: [],
+        error: data.errors[0].message,
+      };
+    }
 
-  const userData = await prisma.user.findMany({
-    where: {
-      email: {
-        in: newOrders
-          .map((order: ShopifyOrder) => order.customer?.email || "")
-          .filter(Boolean),
-      },
-    },
-  });
+    const ordersData = data.data?.orders;
 
-  const emailToUserIdMap = new Map(
-    userData.map((user) => [user.email, user.id]),
-  );
+    const processedOrders =
+      ordersData?.edges
+        ?.map((edge: any) => {
+          const order = edge.node;
 
-  if (newOrders.length > 0) {
-    for (const shopifyOrder of newOrders) {
-      const customerEmail = shopifyOrder.customer?.email;
+          let locationId = "";
+          let locationName = "Company Order";
+
+          if (order.purchasingEntity?.location) {
+            locationId = order.purchasingEntity.location.id;
+            locationName = order.purchasingEntity.location.name;
+          } else if (
+            order.billingAddress?.company ||
+            order.shippingAddress?.company
+          ) {
+            locationName =
+              order.billingAddress?.company || order.shippingAddress?.company;
+          }
+
+          const source =
+            order.customAttributes?.find((attr: any) => attr.key === "_source")
+              ?.value || null;
+
+          return {
+            ...order,
+            locationId,
+            locationName,
+            source,
+            // Extract numeric ID from GID for admin URL
+            shopifyOrderNumericId: extractId(order.id),
+            companyLocation: {
+              id: locationId,
+              name: locationName,
+            },
+          };
+        })
+        // Filter to ensure only orders belonging to this specific company
+        .filter((order: any) => {
+          const purchasingCompanyId = order.purchasingEntity?.company?.id;
+          if (!purchasingCompanyId) return false;
+          return extractId(purchasingCompanyId) === cleanCompanyId;
+        }) || [];
+
+    // Sync new orders to local database
+    const userData = await prisma.user.findMany({
+      where: { companyId },
+      select: { id: true, email: true },
+    });
+
+    const emailToUserIdMap = new Map(
+      userData.map((user) => [user.email, user.id]),
+    );
+
+    for (const order of processedOrders) {
+      const shopifyOrderId = order.id;
+      const customerEmail = order.customer?.email;
       const userId = customerEmail
         ? emailToUserIdMap.get(customerEmail)
         : undefined;
 
       try {
-        await prisma.b2BOrder.create({
-          data: {
-            shopifyOrderId: shopifyOrder.id,
-            company: {
-              connect: { id: companyId },
-            },
-            shop: {
-              connect: { id: shopId },
-            },
-            orderStatus: shopifyOrder.displayFulfillmentStatus || "unfulfilled",
-            orderTotal: parseFloat(
-              shopifyOrder.totalPriceSet?.shopMoney?.amount || "0",
-            ),
-            createdAt: new Date(shopifyOrder.createdAt),
-            ...(userId && {
-              createdByUser: {
-                connect: { id: userId },
-              },
-            }),
-            creditUsed: 0,
-            userCreditUsed: 0,
-            remainingBalance: 0,
-          },
+        const existingOrder = await prisma.b2BOrder.findUnique({
+          where: { shopifyOrderId },
         });
+
+        if (!existingOrder) {
+          await prisma.b2BOrder.create({
+            data: {
+              shopifyOrderId,
+              company: { connect: { id: companyId } },
+              shop: { connect: { id: shopId } },
+              orderStatus: order.displayFulfillmentStatus || "unfulfilled",
+              orderTotal: parseFloat(
+                order.totalPriceSet?.shopMoney?.amount || "0",
+              ),
+              createdAt: new Date(order.createdAt),
+              ...(userId && {
+                createdByUser: { connect: { id: userId } },
+              }),
+              creditUsed: 0,
+              userCreditUsed: 0,
+              remainingBalance: 0,
+            },
+          });
+        }
       } catch (error) {
-        console.error(`Error creating order ${shopifyOrder.id}:`, error);
+        console.error(`Error syncing order ${shopifyOrderId}:`, error);
       }
     }
-    console.log(`${newOrders.length} new orders processed`);
-  }
 
-  return {
-    company,
-    orders,
-  };
+    return {
+      company,
+      orders: processedOrders,
+    };
+  } catch (error) {
+    console.error("Error fetching company orders:", error);
+    return {
+      company,
+      orders: [],
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
 }
 
 import { calculateAvailableCredit } from "./creditService";

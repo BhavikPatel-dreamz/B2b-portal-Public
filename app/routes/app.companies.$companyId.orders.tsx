@@ -59,21 +59,28 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
     shop: session.shop,
     currencyCode: store.currencyCode || "USD",
-    orders: data.orders.map((order) => ({
-      id: order.id,
-      shopifyOrderId: order.shopifyOrderId,
-      orderTotal: order.orderTotal.toNumber(),
-      paidAmount: order.paidAmount.toNumber(),
-      remainingBalance: order.remainingBalance.toNumber(),
-      paymentStatus: order.paymentStatus,
-      orderStatus: order.orderStatus,
-      createdAt: order.createdAt.toISOString(),
-      source: (order as any).source || null,
-      createdBy:
-        [order.createdByUser.firstName, order.createdByUser.lastName]
-          .filter(Boolean)
-          .join(" ") || order.createdByUser.email,
-    })),
+    orders: data.orders.map((order: any) => {
+      const orderTotal = parseFloat(order.totalPriceSet?.shopMoney?.amount || "0");
+      const currentTotal = parseFloat(order.currentTotalPriceSet?.shopMoney?.amount || "0");
+      const refunded = parseFloat(order.totalRefundedSet?.shopMoney?.amount || "0");
+      const paidAmount = currentTotal - refunded;
+      const remainingBalance = orderTotal - paidAmount;
+
+      return {
+        id: order.name,
+        shopifyOrderId: order.name,
+        orderTotal,
+        paidAmount,
+        remainingBalance,
+        paymentStatus: order.displayFinancialStatus || "unknown",
+        orderStatus: order.displayFulfillmentStatus || "unknown",
+        createdAt: order.createdAt,
+        source: order.source || null,
+        createdBy: order.customer?.firstName
+          ? `${order.customer.firstName} ${order.customer.lastName || ""}`.trim()
+          : order.customer?.email || "Unknown",
+      };
+    }),
   } satisfies LoaderData);
 };
 
@@ -220,7 +227,7 @@ export default function CompanyOrdersPage() {
                       fontWeight: 600,
                     }}
                   >
-                    Shopify Order
+                    Order Name
                   </th>
                   <th
                     style={{ 
@@ -251,16 +258,6 @@ export default function CompanyOrdersPage() {
                     }}
                   >
                     Paid
-                  </th>
-                  <th
-                    style={{
-                      padding: 12,
-                      textAlign: "right",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Balance
                   </th>
                   <th
                     style={{
@@ -346,11 +343,6 @@ export default function CompanyOrdersPage() {
                       style={{ padding: 12, textAlign: "right", fontSize: 13 }}
                     >
                       {formatCurrency(order.paidAmount, data.currencyCode)}
-                    </td>
-                    <td
-                      style={{ padding: 12, textAlign: "right", fontSize: 13 }}
-                    >
-                      {formatCurrency(order.remainingBalance, data.currencyCode)}
                     </td>
                     <td style={{ padding: 12 }}>
                       {getPaymentStatusBadge(order.paymentStatus)}
