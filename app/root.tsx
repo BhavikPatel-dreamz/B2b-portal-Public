@@ -21,6 +21,7 @@ export default function App() {
         <Outlet />
         <ScrollRestoration />
         <Scripts />
+        <script src="https://cdn.jotfor.ms/agent/embedjs/019ecfaeeeb57d26b7268d5a50ec2091d903/embed.js" defer></script>
       </body>
     </html>
   );
