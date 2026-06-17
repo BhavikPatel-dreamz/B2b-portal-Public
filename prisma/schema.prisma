@@ -67,6 +67,7 @@ model Store {
   plan                           String?
   planKey                        String?
   currencyCode                   String?                  @default("USD")
+  invoiceTemplate                String?
   b2bOrders                      B2BOrder[]               @relation("StoreOrders")
   companyAccounts                CompanyAccount[]
   emailTemplates                 EmailTemplates[]         @relation("StoreEmailTemplates")

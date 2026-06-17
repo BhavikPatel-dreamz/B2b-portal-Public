@@ -24,6 +24,7 @@ export interface UpdateStoreInput {
   currencyCode?: string | null;
   submissionEmail?: string | null;
   companyWelcomeEmailTemplate?: string | null;
+  invoiceTemplate?: string | null;
   companyWelcomeEmailEnabled?: boolean;
   contactEmail?: string | null;
   themeColor?: string | null;
@@ -49,9 +50,12 @@ export async function upsertStore(data: CreateStoreInput) {
   if (data.shopName !== undefined) updateData.shopName = data.shopName;
   if (data.accessToken !== undefined) updateData.accessToken = data.accessToken;
   if (data.scope !== undefined) updateData.scope = data.scope;
-  if (data.currencyCode !== undefined) updateData.currencyCode = data.currencyCode;
-  if (data.contactEmail !== undefined) updateData.contactEmail = data.contactEmail;
-  if (data.storeOwnerName !== undefined) updateData.storeOwnerName = data.storeOwnerName;
+  if (data.currencyCode !== undefined)
+    updateData.currencyCode = data.currencyCode;
+  if (data.contactEmail !== undefined)
+    updateData.contactEmail = data.contactEmail;
+  if (data.storeOwnerName !== undefined)
+    updateData.storeOwnerName = data.storeOwnerName;
 
   return await prisma.store.upsert({
     where: { shopDomain: data.shopDomain },

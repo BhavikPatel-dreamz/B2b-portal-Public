@@ -708,7 +708,7 @@ type SettingsTabId = "store" | "onboarding" | "company" | "theme";
 const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
   { id: "store", label: "Store Settings" },
   { id: "onboarding", label: "B2B Onboarding Setting" },
-  { id: "company", label: "Company Setting" },
+  { id: "company", label: "Order Setting" },
   { id: "theme", label: "Theme Setting" },
 ];
 
@@ -1215,10 +1215,30 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
-              </div>
 
- 
-              
+                     <div style={{ borderTop: "1px solid #e3e3e3", paddingTop: 16, marginTop: 8 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Invoice Template</h3>
+                  <p style={{ fontSize: 14, color: "#6d7175", marginBottom: 12 }}>
+                    Customize the look and feel of your B2B invoices.
+                  </p>
+                  <Link
+                    to="/app/invoice-template"
+                    style={{
+                      display: "inline-flex",
+                      padding: "10px 16px",
+                      background: "#fff",
+                      border: "1px solid #c9cccf",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "#303030",
+                      textDecoration: "none",
+                    }}
+                  >
+                    Edit Invoice Template
+                  </Link>
+                </div>
+              </div>
 
               {/* ── Theme Settings ──────────────────────────────────────── */}
               <div style={{ display: activeTab === "theme" ? "grid" : "none", gap: 16 }}>
@@ -1277,6 +1297,29 @@ export default function SettingsPage() {
                   </div>
                   <s-text tone="neutral">Primary accent color used across B2B dashboard surfaces.</s-text>
                 </div>
+
+                {/* <div style={{ borderTop: "1px solid #e3e3e3", paddingTop: 16, marginTop: 8 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Order Documents</h3>
+                  <p style={{ fontSize: 14, color: "#6d7175", marginBottom: 12 }}>
+                    Customize the look and feel of your B2B invoices.
+                  </p>
+                  <Link
+                    to="/app/invoice-template"
+                    style={{
+                      display: "inline-flex",
+                      padding: "10px 16px",
+                      background: "#fff",
+                      border: "1px solid #c9cccf",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "#303030",
+                      textDecoration: "none",
+                    }}
+                  >
+                    Edit Invoice Template
+                  </Link>
+                </div> */}
               </div>
 
                    {isFreePlan  ? (
