@@ -7,9 +7,14 @@ interface ShopifyVariantNode {
   id: string;
   title: string;
   price: string;
+  sku: string;
   inventoryQuantity: number;
   inventoryPolicy: string;
   availableForSale: boolean;
+  selectedOptions: {
+    name: string;
+    value: string;
+  }[];
 }
 
 interface ShopifyProductNode {
@@ -36,6 +41,8 @@ type FilterOptions = {
   vendors: string[];
   productTypes: string[];
   tags: string[];
+  colors: string[];
+  sizes: string[];
   priceRange: {
     min: number;
     max: number;
@@ -57,12 +64,17 @@ type ProductResponse = {
       id: string;
       title: string;
       price: string;
+      sku: string;
       currencyCode: string;
       currencySymbol: string;
       inventoryQuantity: number;
       inventoryPolicy: string;
       availableForSale: boolean;
       inStock: boolean;
+      selectedOptions: {
+        name: string;
+        value: string;
+      }[];
     }[];
   }[];
   pageInfo: {
@@ -80,6 +92,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const vendor = url.searchParams.get("vendor")?.trim();
   const productType = url.searchParams.get("product_type")?.trim();
   const tag = url.searchParams.get("tag")?.trim();
+  const color = url.searchParams.get("color")?.trim();
+  const size = url.searchParams.get("size")?.trim();
   const minPrice = url.searchParams.get("min_price")?.trim();
   const maxPrice = url.searchParams.get("max_price")?.trim();
   const available = url.searchParams.get("available")?.trim();
@@ -102,6 +116,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (tag) {
     queryFilters.push(`tag:${tag}`);
   }
+
+  // Note: Color and size filters are applied after fetching from Shopify
+  // as they are stored in variant options and require post-processing
 
   if (available?.toLowerCase() === "true") {
     queryFilters.push("available:true");
@@ -154,9 +171,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                       id
                       title
                       price
+                      sku
                       inventoryQuantity
                       inventoryPolicy
                       availableForSale
+                      selectedOptions {
+                        name
+                        value
+                      }
                     }
                   }
                 }
@@ -178,6 +200,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     node {
                       price
                       availableForSale
+                      selectedOptions {
+                        name
+                        value
+                      }
                     }
                   }
                 }
@@ -212,7 +238,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     .formatToParts(0)
     .find((part) => part.type === "currency")?.value || shopCurrency;
 
-  const products = data.data.products.edges.map((edge: ShopifyEdge) => ({
+  const products: ProductResponse["products"] = data.data.products.edges.map((edge: ShopifyEdge) => ({
     id: edge.node.id,
     title: edge.node.title,
     vendor: edge.node.vendor,
@@ -225,6 +251,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       id: v.id,
       title: v.title,
       price: v.price ?? "0",
+      sku: v.sku ?? "",
       currencyCode: shopCurrency,
       currencySymbol,
       inventoryQuantity: v.inventoryQuantity ?? 0,
@@ -233,12 +260,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       inStock:
         v.availableForSale &&
         (v.inventoryQuantity > 0 || v.inventoryPolicy === "CONTINUE"),
+      selectedOptions: v.selectedOptions ?? [],
     })),
   }));
 
   const vendorSet = new Set<string>();
   const productTypeSet = new Set<string>();
   const tagSet = new Set<string>();
+  const colorSet = new Set<string>();
+  const sizeSet = new Set<string>();
   let minPriceValue = Number.POSITIVE_INFINITY;
   let maxPriceValue = 0;
   let hasAvailableProducts = false;
@@ -269,6 +299,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (v.availableForSale) {
         hasAvailableProducts = true;
       }
+
+      // Extract color and size from variant options
+      v.selectedOptions?.forEach((option) => {
+        if (option.name.toLowerCase() === "color") {
+          colorSet.add(option.value);
+        }
+        if (option.name.toLowerCase() === "size") {
+          sizeSet.add(option.value);
+        }
+      });
     });
   });
 
@@ -276,6 +316,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     vendors: Array.from(vendorSet).sort(),
     productTypes: Array.from(productTypeSet).sort(),
     tags: Array.from(tagSet).sort(),
+    colors: Array.from(colorSet).sort(),
+    sizes: Array.from(sizeSet).sort(),
     priceRange: {
       min: minPriceValue === Number.POSITIVE_INFINITY ? 0 : minPriceValue,
       max: maxPriceValue,
@@ -283,8 +325,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     hasAvailableProducts,
   };
 
+  // Filter products by color and size if specified
+  let filteredProducts: ProductResponse["products"] = products;
+
+  if (color || size) {
+    filteredProducts = products
+      .map((product) => ({
+        ...product,
+        variants: product.variants.filter((variant) => {
+          let matchesColor = !color;
+          let matchesSize = !size;
+
+          variant.selectedOptions?.forEach((option) => {
+            if (color && option.name.toLowerCase() === "color" && option.value === color) {
+              matchesColor = true;
+            }
+            if (size && option.name.toLowerCase() === "size" && option.value === size) {
+              matchesSize = true;
+            }
+          });
+
+          return matchesColor && matchesSize;
+        }),
+      }))
+      .filter((product) => product.variants.length > 0);
+  }
+
   const result: ProductResponse = {
-    products,
+    products: filteredProducts,
     pageInfo: data.data.products.pageInfo,
     filters,
   };
