@@ -1289,6 +1289,9 @@ export async function getCustomerCompanyInfo(
     // ─── 1. Main customer + company query ───────────────────────────────────
     const customerQuery = `
       query {
+        shop {
+          id
+        }
         customer(id: "gid://shopify/Customer/${customerId}") {
           id
           email
@@ -1365,6 +1368,12 @@ export async function getCustomerCompanyInfo(
       };
     }
 
+    const extractId = (id?: string | null) => {
+      if (!id) return "";
+      return id.split("/").pop() || id;
+    };
+
+    const shopifyShopId = extractId(customerData.data.shop.id);
     const customer = customerData.data.customer;
     const companyProfiles = customer.companyContactProfiles || [];
 
@@ -1391,11 +1400,6 @@ export async function getCustomerCompanyInfo(
         },
       };
     }
-
-    const extractId = (id?: string | null) => {
-      if (!id) return "";
-      return id.split("/").pop() || id;
-    };
 
     const primaryProfile = companyProfiles[0];
     const primaryRoleAssignments: Array<{
@@ -1764,6 +1768,7 @@ export async function getCustomerCompanyInfo(
 
       // Company + access flags
       companies,
+      shopId: shopifyShopId,
       isAdmin: companies[0]?.hasAllLocationAccess ?? false,
       isMainContact:
         companies[0]?.mainContact?.id ===
