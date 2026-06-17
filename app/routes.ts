@@ -51,6 +51,7 @@ export default [
     route("order-invoice", "routes/api.proxy/order-invoice.tsx"),
     route("orders", "routes/api.proxy/orders.tsx"),
     route("product-search", "routes/api.proxy/product-search.tsx"),
+    route("product-filter", "routes/api.proxy/product-filter.tsx"),
     route("recommended-products", "routes/api.proxy/recommended-products.tsx"),
     route("registration", "routes/api.proxy/registration.tsx"),
     route("usermanagement", "routes/api.proxy/usermanagement.tsx"),
