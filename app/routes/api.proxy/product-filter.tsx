@@ -32,6 +32,17 @@ interface ShopifyEdge {
   node: ShopifyProductNode;
 }
 
+type FilterOptions = {
+  vendors: string[];
+  productTypes: string[];
+  tags: string[];
+  priceRange: {
+    min: number;
+    max: number;
+  };
+  hasAvailableProducts: boolean;
+};
+
 type ProductResponse = {
   products: {
     id: string;
@@ -58,6 +69,7 @@ type ProductResponse = {
     hasNextPage: boolean;
     endCursor: string | null;
   };
+  filters: FilterOptions;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -73,37 +85,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const available = url.searchParams.get("available")?.trim();
   const cursor = url.searchParams.get("cursor");
 
-  const filters = ["status:active", "published_status:published"];
+  const queryFilters = ["status:active", "published_status:published"];
 
   if (search) {
-    filters.push(`title:${search}*`);
+    queryFilters.push(`title:${search}*`);
   }
 
   if (vendor) {
-    filters.push(`vendor:${vendor}`);
+    queryFilters.push(`vendor:${vendor}`);
   }
 
   if (productType) {
-    filters.push(`product_type:${productType}`);
+    queryFilters.push(`product_type:${productType}`);
   }
 
   if (tag) {
-    filters.push(`tag:${tag}`);
+    queryFilters.push(`tag:${tag}`);
   }
 
   if (available?.toLowerCase() === "true") {
-    filters.push("available:true");
+    queryFilters.push("available:true");
   }
 
   if (minPrice && !Number.isNaN(Number(minPrice))) {
-    filters.push(`price:>=${minPrice}`);
+    queryFilters.push(`price:>=${minPrice}`);
   }
 
   if (maxPrice && !Number.isNaN(Number(maxPrice))) {
-    filters.push(`price:<=${maxPrice}`);
+    queryFilters.push(`price:<=${maxPrice}`);
   }
 
-  const shopifySearchQuery = filters.join(" ");
+  const shopifySearchQuery = queryFilters.join(" ");
 
   const store = await getStoreByDomain(shop);
   if (!store || !store.accessToken) {
@@ -153,6 +165,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             pageInfo {
               hasNextPage
               endCursor
+            }
+          }
+          filterProducts: products(first: 250, query: $query) {
+            edges {
+              node {
+                vendor
+                productType
+                tags
+                variants(first: 10) {
+                  edges {
+                    node {
+                      price
+                      availableForSale
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -207,9 +236,57 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
   }));
 
+  const vendorSet = new Set<string>();
+  const productTypeSet = new Set<string>();
+  const tagSet = new Set<string>();
+  let minPriceValue = Number.POSITIVE_INFINITY;
+  let maxPriceValue = 0;
+  let hasAvailableProducts = false;
+
+  data.data.filterProducts.edges.forEach((edge: { node: ShopifyProductNode }) => {
+    const node = edge.node;
+
+    if (node.vendor) {
+      vendorSet.add(node.vendor);
+    }
+
+    if (node.productType) {
+      productTypeSet.add(node.productType);
+    }
+
+    node.tags?.forEach((tagValue) => {
+      if (tagValue) {
+        tagSet.add(tagValue);
+      }
+    });
+
+    node.variants.edges.forEach(({ node: v }) => {
+      const priceNumber = Number(v.price);
+      if (!Number.isNaN(priceNumber)) {
+        minPriceValue = Math.min(minPriceValue, priceNumber);
+        maxPriceValue = Math.max(maxPriceValue, priceNumber);
+      }
+      if (v.availableForSale) {
+        hasAvailableProducts = true;
+      }
+    });
+  });
+
+  const filters: FilterOptions = {
+    vendors: Array.from(vendorSet).sort(),
+    productTypes: Array.from(productTypeSet).sort(),
+    tags: Array.from(tagSet).sort(),
+    priceRange: {
+      min: minPriceValue === Number.POSITIVE_INFINITY ? 0 : minPriceValue,
+      max: maxPriceValue,
+    },
+    hasAvailableProducts,
+  };
+
   const result: ProductResponse = {
     products,
     pageInfo: data.data.products.pageInfo,
+    filters,
   };
 
   return result;
