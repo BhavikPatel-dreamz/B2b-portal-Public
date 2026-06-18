@@ -1644,7 +1644,7 @@ const {
       <div className="setup-container">
         {/* Header */}
         <div style={pageHeroStyle}>
-          <h3 style={pageHeroTitleStyle}>Welcome to SmartB2B portal</h3>
+          <h3 style={pageHeroTitleStyle}>Welcome to SmartB2B portal ltd.</h3>
           <p style={pageHeroTextStyle}>
             Welcome to SmartB2B portal, where you can set up your B2B experience, manage company accounts, and streamline customer onboarding in one place.
           </p>

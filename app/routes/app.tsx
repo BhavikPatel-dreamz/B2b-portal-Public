@@ -91,7 +91,10 @@ export default function App() {
           <s-link href="/app/registration-form">Registrations Form</s-link>
           <s-link href="/app/settings">Settings</s-link>
           <s-link href="/app/notifications">Email Template</s-link>
+          <s-link href="/app/sales-users">Sales Users</s-link>
+          <s-link href="/app/sales-dashboard">Sales Dashboard</s-link>
           <s-link href="/app/select-plan">Select Plan</s-link>
+          {/* <s-link href="/support/test">test</s-link> */}
         </s-app-nav>
         <Outlet />
       </PolarisAppProvider>
