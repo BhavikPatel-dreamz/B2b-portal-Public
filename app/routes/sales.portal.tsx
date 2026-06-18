@@ -167,8 +167,6 @@ export default function SalesPortal() {
     allCompanies: Array<{ id: string; name: string }>;
   }>();
 
-  console.log("company",company)
-
   const formatDate = (iso: string) =>
     new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
 
@@ -225,15 +223,9 @@ export default function SalesPortal() {
           <a href="#overview" style={{ ...styles.navItem, ...styles.navItemActive }}>
             <span style={styles.navIcon}>📊</span> Overview
           </a>
-          <a href="#users" style={styles.navItem}>
-            <span style={styles.navIcon}>👥</span> Users ({company.users.length})
-          </a>
-          <a href="#orders" style={styles.navItem}>
+          <Link to={`/sales/portal/company/${company.id}/orders`} style={styles.navItem}>
             <span style={styles.navIcon}>📦</span> Orders ({recentOrders.length})
-          </a>
-          <a href="#credit" style={styles.navItem}>
-            <span style={styles.navIcon}>💳</span> Credit
-          </a>
+          </Link>
         </nav>
 
         {/* Other Companies */}
@@ -308,6 +300,38 @@ export default function SalesPortal() {
           </div>
         </header>
 
+        {/* Credit Limit Card */}
+        <div style={styles.creditCard}>
+          <div style={styles.creditHeader}>
+            <h2 style={styles.creditTitle}>Company Credit</h2>
+          </div>
+          <div style={styles.creditBody}>
+            <div style={styles.creditStatGroup}>
+              <div style={styles.creditStat}>
+                <span style={styles.creditStatLabel}>Credit Limit</span>
+                <span style={styles.creditStatValue}>{formatCurrency(company.creditLimit)}</span>
+              </div>
+              <div style={styles.creditStat}>
+                <span style={styles.creditStatLabel}>Credit Used</span>
+                <span style={styles.creditStatValue}>{formatCurrency(company.usedCredit)}</span>
+              </div>
+              <div style={styles.creditStat}>
+                <span style={styles.creditStatLabel}>Available Credit</span>
+                <span style={styles.creditStatValue}>{formatCurrency(company.availableCredit)}</span>
+              </div>
+            </div>
+            <div style={styles.progressBarBg}>
+              <div style={{
+                ...styles.progressBarFill,
+                width: `${creditPercent}%`,
+                backgroundColor: creditPercent > 90 ? "#ef4444" : creditPercent > 70 ? "#f97316" : "#E91E63"
+              }} />
+            </div>
+            <div style={styles.progressLabel}>
+              {creditPercent.toFixed(0)}% of limit utilized
+            </div>
+          </div>
+        </div>
 
         {/* Two columns: Users + Recent Orders */}
         <div style={styles.twoColGrid}>
