@@ -6,6 +6,8 @@ type SelectedOption = {
 type VariantNode = {
   price?: string;
   availableForSale?: boolean;
+  inventoryQuantity?: number;
+  inventoryPolicy?: string;
   selectedOptions?: SelectedOption[];
 };
 
@@ -36,6 +38,7 @@ export type FilterCriteria = {
   size?: string;
   minPrice?: number | null;
   maxPrice?: number | null;
+  available?: boolean;
 };
 
 export function filterEdgesByCriteria(
@@ -50,6 +53,15 @@ export function filterEdgesByCriteria(
           let matchesSize = !criteria.size;
           let matchesMinPrice = criteria.minPrice == null;
           let matchesMaxPrice = criteria.maxPrice == null;
+          
+          const inStock = variant.availableForSale && (
+            (variant.inventoryQuantity ?? 0) > 0 || 
+            variant.inventoryPolicy === "CONTINUE"
+          );
+          
+          let matchesAvailable = !criteria.available || inStock;
+
+          if (!matchesAvailable) return false;
 
           variant.selectedOptions?.forEach((option) => {
             if (

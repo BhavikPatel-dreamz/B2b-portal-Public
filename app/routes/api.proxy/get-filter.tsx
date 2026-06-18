@@ -33,13 +33,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (minPrice && !Number.isNaN(Number(minPrice))) queryFilters.push(`price:>=${minPrice}`);
   if (maxPrice && !Number.isNaN(Number(maxPrice))) queryFilters.push(`price:<=${maxPrice}`);
 
-  const criteria: FilterCriteria = {
-    color,
-    size,
-    minPrice: minPrice && !Number.isNaN(Number(minPrice)) ? Number(minPrice) : null,
-    maxPrice: maxPrice && !Number.isNaN(Number(maxPrice)) ? Number(maxPrice) : null,
-  };
-
   const shopifySearchQuery = queryFilters.join(" ");
 
   const store = await getStoreByDomain(shop);
@@ -63,11 +56,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 vendor
                 productType
                 tags
-                variants(first: 10) {
+                variants(first: 20) {
                   edges {
                     node {
                       price
                       availableForSale
+                      inventoryQuantity
+                      inventoryPolicy
                       selectedOptions { name value }
                     }
                   }
@@ -88,6 +83,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.error("Shopify API Error:", data.errors);
     return { filters: {} as FilterOptions };
   }
+
+  const criteria: FilterCriteria = {
+    color,
+    size,
+    minPrice: minPrice && !Number.isNaN(Number(minPrice)) ? Number(minPrice) : null,
+    maxPrice: maxPrice && !Number.isNaN(Number(maxPrice)) ? Number(maxPrice) : null,
+    available: available?.toLowerCase() === "true",
+  };
 
   const filters: FilterOptions = buildFiltersFromEdges(
     filterEdgesByCriteria(data.data.filterProducts.edges || [], criteria),

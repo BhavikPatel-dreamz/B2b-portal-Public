@@ -156,7 +156,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 featuredImage {
                   url
                 }
-                variants(first: 3) {
+                variants(first: 20) {
                   edges {
                     node {
                       id
@@ -186,11 +186,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 vendor
                 productType
                 tags
-                variants(first: 10) {
+                variants(first: 20) {
                   edges {
                     node {
                       price
                       availableForSale
+                      inventoryQuantity
+                      inventoryPolicy
                       selectedOptions {
                         name
                         value
@@ -260,16 +262,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     size,
     minPrice: minPrice && !Number.isNaN(Number(minPrice)) ? Number(minPrice) : null,
     maxPrice: maxPrice && !Number.isNaN(Number(maxPrice)) ? Number(maxPrice) : null,
+    available: available?.toLowerCase() === "true",
   };
 
   const filters: FilterOptions = buildFiltersFromEdges(
     filterEdgesByCriteria(data.data.filterProducts.edges || [], criteria),
   );
 
-  // Filter products by color/size and/or price if specified.
+  // Filter products by color/size, price and availability if specified.
   let filteredProducts: ProductResponse["products"] = products;
 
-  if (color || size || criteria.minPrice != null || criteria.maxPrice != null) {
+  if (color || size || criteria.minPrice != null || criteria.maxPrice != null || available?.toLowerCase() === "true") {
     filteredProducts = products
       .map((product) => ({
         ...product,
@@ -278,6 +281,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           let matchesSize = !size;
           let matchesMinPrice = criteria.minPrice == null;
           let matchesMaxPrice = criteria.maxPrice == null;
+          let matchesAvailable = available?.toLowerCase() !== "true" || variant.inStock;
+
+          if (!matchesAvailable) return false;
 
           variant.selectedOptions?.forEach((option) => {
             if (color && option.name.toLowerCase() === "color" && option.value === color) {
