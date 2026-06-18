@@ -851,3 +851,64 @@ Thank you for choosing SmartB2B.
     smtpConfig,
   );
 }
+
+export async function sendSalesUserInvitationEmail({
+  storeId,
+  email,
+  firstName,
+  inviteLink,
+}: {
+  storeId: string;
+  email: string;
+  firstName: string;
+  inviteLink: string;
+}): Promise<RegistrationEmailResult> {
+  const storeData = await prisma.store.findUnique({
+    where: { id: storeId },
+  });
+
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
+  const shopName = storeData?.shopName || storeData?.shopDomain || "Store Name";
+
+  const subject = "You've been invited as a Sales User";
+  
+  const content = `
+    <p>Hello ${firstName},</p>
+    <p>You have been invited to join <strong>${shopName}</strong> as a Sales User.</p>
+    <p>Please click the button below to set your password and activate your account. This link will expire in 7 days.</p>
+  `;
+
+  const html = convertToHtmlEmail(
+    content,
+    storeData?.shopDomain || "store.com",
+    subject,
+    {
+      logoUrl: storeData?.logo,
+      ctaLabel: "Set Password & Login",
+      ctaUrl: inviteLink,
+      footerText: "This email was sent to invite you to the Sales Portal.",
+    }
+  );
+
+  const text = `Hello ${firstName},
+
+You have been invited to join ${shopName} as a Sales User.
+
+Please copy and paste the following link into your browser to set your password and activate your account:
+${inviteLink}
+
+This link will expire in 7 days.
+
+Best regards,
+${shopName}`;
+
+  return sendEmail(
+    {
+      to: email,
+      subject,
+      html,
+      text,
+    },
+    smtpConfig,
+  );
+}

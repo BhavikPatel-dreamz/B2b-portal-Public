@@ -83,7 +83,7 @@ export function resolveStoreSmtpConfig(
   let secure = store?.smtpSecure;
   if (secure === undefined || secure === null) {
     if (process.env.SMTP_SECURE !== undefined) {
-      secure = process.env.SMTP_SECURE === "false";
+      secure = process.env.SMTP_SECURE === "true";
     } else {
       secure = port === 465;
     }

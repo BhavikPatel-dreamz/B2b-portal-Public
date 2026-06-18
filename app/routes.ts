@@ -80,6 +80,8 @@ export default [
     route("invoice-template", "routes/app.invoice-template.tsx"),
     route("registration-form", "routes/app.registration-form.tsx"),
     route("notifications", "routes/app.notification-form.tsx"),
+    route("sales-users", "routes/app.sales-users.tsx"),
+    route("sales-dashboard", "routes/app.sales-dashboard.tsx"),
     route("companies/:companyId", "routes/app.company-dashboard.tsx"),
     route("reports", "routes/app.reports.tsx"),
     route(
@@ -98,7 +100,19 @@ export default [
     route("cancel-subscription", "routes/app.cancel-subscription.tsx"),
     route("billing-example", "routes/app.billing-example.tsx"),
   ]),
+  
+  
+  // Unified Sales Portal (single login for all companies/stores)
+  route("sales/login", "routes/sales.login.tsx"),
+  route("sales/dashboard", "routes/sales.dashboard.tsx"),
+  route("sales/portal", "routes/sales.portal.tsx"),
+  route("sales/portal/company/:companyId/create-order", "routes/sales.portal.company.$companyId.create-order.tsx"),
+  route("sales/portal/company/:companyId/create-order/step2", "routes/sales.portal.company.$companyId.create-order.step2.tsx"),
 
+  // Legacy support routes (kept for backward compatibility with invitation links)
+  route("support/login", "routes/support.login.tsx"),
+  route("support/dashboard", "routes/support.dashboard.tsx"),
+  route("support/portal", "routes/support.portal.tsx"),
   // App Proxy routes (public, no auth required)
   route("smartb2b", "routes/smartb2b.tsx"),
 
