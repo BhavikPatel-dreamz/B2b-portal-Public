@@ -56,7 +56,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (activeTab === "quotes") {
     where.orderStatus = "draft";
   } else {
-    where.orderStatus = { not: "draft" };
+    where.orderStatus = { notIn: ["draft", "converted", "archived"] };
   }
 
   if (filterAgent) {
@@ -109,12 +109,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     pendingQuotes,
     revenueResult,
   ] = await Promise.all([
-    prisma.b2BOrder.count({ where: { ...metricsWhere, orderStatus: { not: "draft" } } }),
+    prisma.b2BOrder.count({ where: { ...metricsWhere, orderStatus: { notIn: ["draft", "converted", "archived"] } } }),
     prisma.b2BOrder.count({ where: { ...metricsWhere, orderStatus: "draft" } }),
-    prisma.b2BOrder.count({ where: { ...metricsWhere, orderStatus: { not: "draft" }, paymentStatus: "pending" } }),
+    prisma.b2BOrder.count({ where: { ...metricsWhere, orderStatus: { notIn: ["draft", "converted", "archived"] }, paymentStatus: "pending" } }),
     prisma.b2BOrder.count({ where: { ...metricsWhere, orderStatus: "draft" } }),
     prisma.b2BOrder.aggregate({
-      where: { ...metricsWhere, orderStatus: { not: "draft" } },
+      where: { ...metricsWhere, orderStatus: { notIn: ["draft", "converted", "archived"] } },
       _sum: { orderTotal: true },
     }),
   ]);

@@ -63,7 +63,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     where: {
       companyId: company.id,
       paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled"] },
+      orderStatus: { notIn: ["cancelled", "converted", "archived"] },
     },
     _sum: { remainingBalance: true },
   });

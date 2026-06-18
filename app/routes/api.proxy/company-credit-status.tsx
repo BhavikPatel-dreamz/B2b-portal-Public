@@ -77,7 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       prisma.b2BOrder.count({
         where: {
           companyId,
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
         },
       }),
       // Fully paid orders
@@ -85,7 +85,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: {
           companyId,
           paymentStatus: "paid",
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
         },
       }),
       // Unpaid or partially paid orders
@@ -93,7 +93,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: {
           companyId,
           paymentStatus: { in: ["pending", "partial"] },
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
         },
       }),
       // Pending orders (draft, submitted, processing)

@@ -40,6 +40,7 @@ interface LoaderData {
     orderConfirmationToMainAccount: boolean;
     allowQuickOrderForUser: boolean;
     blockOrderWhenCreditUnavailable: boolean;
+    defaultTaxRate: string;
     companyWelcomeEmailTemplate?: string;
     companyWelcomeEmailEnabled?: boolean;
     privacyPolicylink?: string;
@@ -116,6 +117,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         allowQuickOrderForUser: store.allowQuickOrderForUser ?? false,
         blockOrderWhenCreditUnavailable:
           store.blockOrderWhenCreditUnavailable ?? false,
+        defaultTaxRate: store.defaultTaxRate?.toString() || "8.00",
         companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
         companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
         privacyPolicylink: store.privacyPolicylink || "",
@@ -402,6 +404,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const companyWelcomeEmailEnabled =
     (formData.get("companyWelcomeEmailEnabled") as string | null) === "on";
 
+  const defaultTaxRateRaw = (formData.get("defaultTaxRate") as string | null)?.trim() || "8.00";
+  const defaultTaxRate = Number(defaultTaxRateRaw) || 8.00;
+
   const privacyPolicylink =
     (formData.get("privacyPolicylink") as string | null)?.trim() || null;
   const privacyPolicyContent =
@@ -454,6 +459,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     errors.push("Privacy policy link must be a valid URL.");
   }
 
+  if (Number.isNaN(defaultTaxRate) || defaultTaxRate < 0 || defaultTaxRate > 100) {
+    errors.push("Default tax rate must be a number between 0 and 100.");
+  }
+
   if (errors.length > 0) {
     return Response.json({ success: false, errors }, { status: 400 });
   }
@@ -473,6 +482,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     companyWelcomeEmailEnabled,
     privacyPolicylink,
     privacyPolicyContent,
+    defaultTaxRate,
   });
 
   await setShopValidationMetafields(admin, {

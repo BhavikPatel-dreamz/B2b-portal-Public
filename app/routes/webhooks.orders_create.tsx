@@ -93,6 +93,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response();
       }
 
+      // If this order was created from a draft order, convert it in our database first
+      const draftOrderId = (payload as any).draft_order_id as number | undefined;
+      if (draftOrderId) {
+        console.log(`Draft order ID found on order payload: ${draftOrderId}. Attempting conversion...`);
+        const { convertDraftOrderToFinal } = await import("../services/order.server");
+        try {
+          const admin = await getAdminForShop(shop);
+          await convertDraftOrderToFinal(draftOrderId.toString(), orderGid || orderIdNum?.toString() || "unknown", admin);
+        } catch (convErr) {
+          console.error("Failed to convert draft order in orders_create webhook:", convErr);
+        }
+      }
+
       // Map Shopify statuses to our local statuses
       let paymentStatus: string = "pending"; // pending, partial, paid, cancelled
       switch (financialStatus) {

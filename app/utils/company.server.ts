@@ -934,7 +934,7 @@ export const syncShopifyOrders = async (
                   companyId: localCompanyId,
                   id: { not: syncedOrder.id },
                   paymentStatus: { in: ["pending", "partial"] },
-                  orderStatus: { notIn: ["cancelled"] },
+                  orderStatus: { notIn: ["cancelled", "converted", "archived"] },
                 },
                 _sum: {
                   remainingBalance: true,

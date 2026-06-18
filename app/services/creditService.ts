@@ -42,7 +42,7 @@ export async function calculateAvailableCredit(
     where: {
       companyId,
       paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled"] }, // All unpaid orders except cancelled
+      orderStatus: { notIn: ["cancelled", "converted", "archived"] }, // All unpaid orders except cancelled, converted, or archived
       NOT: excludeOrderId ? { id: excludeOrderId } : undefined,
       shopifyOrderId: excludeOrderId ? { not: excludeOrderId } : undefined,
     },
@@ -298,7 +298,7 @@ export async function updatePendingCredit(companyId: string): Promise<{
     where: {
       companyId,
       paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled"] },
+      orderStatus: { notIn: ["cancelled", "converted", "archived"] },
     },
     select: {
       id: true,
@@ -342,7 +342,7 @@ export async function getCreditSummary(companyId: string) {
     where: {
       companyId,
       paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled"] },
+      orderStatus: { notIn: ["cancelled", "converted", "archived"] },
     },
     select: {
       id: true,

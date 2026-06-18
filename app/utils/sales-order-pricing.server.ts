@@ -8,12 +8,19 @@ export type SalesCartItem = {
 export type SalesDiscountType = "PERCENTAGE" | "FIXED_AMOUNT";
 
 export type SalesDraftLineItemInput = {
-  variantId: string;
+  variantId?: string;
+  title?: string;
   quantity: number;
-  priceOverride: {
+  priceOverride?: {
     amount: string;
     currencyCode: string;
   };
+  originalUnitPriceWithCurrency?: {
+    amount: string;
+    currencyCode: string;
+  };
+  taxable?: boolean;
+  requiresShipping?: boolean;
 };
 
 export type SalesDraftShippingLineInput = {
@@ -55,6 +62,31 @@ export function buildSalesDraftLineItems(cartData: SalesCartItem[], currencyCode
   }));
 }
 
+export function buildSalesDraftTaxLine(
+  taxAmount: string | number,
+  taxRate: string | number,
+  currencyCode: string,
+): SalesDraftLineItemInput | undefined {
+  const amount = Number(taxAmount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return undefined;
+  }
+
+  const rate = Number(taxRate);
+  const rateLabel = Number.isFinite(rate) ? Number(rate.toFixed(2)).toString() : "0";
+
+  return {
+    title: `Estimated Tax (${rateLabel}%)`,
+    quantity: 1,
+    originalUnitPriceWithCurrency: {
+      amount: normalizeMoneyAmount(amount),
+      currencyCode,
+    },
+    taxable: false,
+    requiresShipping: false,
+  };
+}
+
 export function buildSalesDraftShippingLine(
   shippingCost: string | number,
   currencyCode: string,
@@ -81,11 +113,15 @@ export function calculateSalesOrderTotals(
   taxRate = 0,
 ) {
   const subtotal = cartData.reduce((acc, item) => acc + Number(item.price) * item.quantity, 0);
-  const discountTotal =
-    discountType === "PERCENTAGE" ? subtotal * (discountAmount / 100) : discountAmount;
+  const safeDiscountAmount = Math.max(0, Number.isFinite(discountAmount) ? discountAmount : 0);
+  const rawDiscountTotal =
+    discountType === "PERCENTAGE" ? subtotal * (safeDiscountAmount / 100) : safeDiscountAmount;
+  const discountTotal = Math.min(subtotal, Math.max(0, rawDiscountTotal));
   const taxableAmount = Math.max(0, subtotal - discountTotal);
-  const estimatedTax = taxableAmount * (Math.max(0, taxRate) / 100);
-  const total = taxableAmount + Math.max(0, shippingCost) + estimatedTax;
+  const safeShippingCost = Math.max(0, Number.isFinite(shippingCost) ? shippingCost : 0);
+  const safeTaxRate = Math.max(0, Number.isFinite(taxRate) ? taxRate : 0);
+  const estimatedTax = taxableAmount * (safeTaxRate / 100);
+  const total = taxableAmount + safeShippingCost + estimatedTax;
 
   return {
     subtotal,

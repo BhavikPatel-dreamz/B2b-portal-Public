@@ -3,6 +3,41 @@ import { useLoaderData, Link, useSubmit, useNavigation } from "react-router";
 import { useState, useEffect } from "react";
 import prisma from "app/db.server";
 import { requireSalesSession, hasCompanyAccess } from "app/utils/sales-session.server";
+import {
+  buildSalesDraftLineItems,
+  buildSalesDraftShippingLine,
+  buildSalesDraftTaxLine,
+  calculateSalesOrderTotals,
+  getCartCurrency,
+  normalizeDiscountType,
+  type SalesCartItem,
+  type SalesDraftLineItemInput,
+  type SalesDraftShippingLineInput,
+} from "app/utils/sales-order-pricing.server";
+
+type DraftOrderInput = {
+  lineItems: SalesDraftLineItemInput[];
+  note: string;
+  customAttributes: Array<{
+    key: string;
+    value: string;
+  }>;
+  presentmentCurrencyCode: string;
+  purchasingEntity: {
+    purchasingCompany: {
+      companyId: string;
+      companyLocationId: string;
+      companyContactId: string;
+    };
+  };
+  appliedDiscount?: {
+    value: number;
+    valueType: "PERCENTAGE" | "FIXED_AMOUNT";
+    title: string;
+  };
+  shippingLine?: SalesDraftShippingLineInput;
+  taxExempt?: boolean;
+};
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
@@ -15,7 +50,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const internalNotes = formData.get("internalNotes") as string;
   const customerNotes = formData.get("customerNotes") as string;
   const discountAmount = Number(formData.get("discountAmount") || "0");
-  const discountType = formData.get("discountType") as string;
+  const discountType = normalizeDiscountType(formData.get("discountType") as string);
   const shippingCost = Number(formData.get("shippingCost") || "0");
   const taxRate = Number(formData.get("taxRate") || "0");
 
@@ -28,11 +63,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     },
   });
 
-  if (!company || !company.shop || !company.shop.accessToken) {
+  if (!company || !company.shop || !company.shop.accessToken || !company.shopifyCompanyId) {
     return Response.json({ error: "Company or shop credentials not found" }, { status: 400 });
   }
 
-  const cartData = JSON.parse(cartDataStr || "[]");
+  const cartData = JSON.parse(cartDataStr || "[]") as SalesCartItem[];
   if (cartData.length === 0) {
     return Response.json({ error: "Cart is empty" }, { status: 400 });
   }
@@ -90,26 +125,34 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return Response.json({ error: "B2B context missing. The selected customer is not correctly assigned as a contact for this company in Shopify." }, { status: 400 });
   }
 
-  // 2. Map line items with custom B2B contextual pricing overrides
-  const lineItems = cartData.map((item: any) => ({
-    variantId: item.variantId,
-    quantity: item.quantity,
-    appliedDiscount: {
-      value: Number(item.price),
-      valueType: "FIXED_AMOUNT",
-      title: "B2B Price List"
-    }
-  }));
+  // 2. Map line items with explicit B2B contextual price overrides.
+  const currencyCode = getCartCurrency(cartData);
+  const totals = calculateSalesOrderTotals(
+    cartData,
+    discountAmount,
+    discountType,
+    shippingCost,
+    taxRate,
+  );
+  const lineItems = buildSalesDraftLineItems(cartData, currencyCode);
+  const taxLine = buildSalesDraftTaxLine(totals.estimatedTax, taxRate, currencyCode);
+  if (taxLine) {
+    lineItems.push(taxLine);
+  }
+  const shippingLine = buildSalesDraftShippingLine(shippingCost, currencyCode);
 
-  const customAttributes = [];
+  const customAttributes = [{ key: "_source", value: "Sales Portal" }];
   if (internalNotes) {
     customAttributes.push({ key: "Internal Notes", value: internalNotes });
   }
+  if (taxRate > 0) {
+    customAttributes.push({ key: "Estimated Tax Rate", value: `${taxRate}%` });
+  }
 
-  const appliedDiscount = discountAmount > 0 ? {
-    value: discountAmount,
-    valueType: discountType === "PERCENTAGE" ? "PERCENTAGE" : "FIXED_AMOUNT",
-    title: "Custom Agent Discount"
+  const appliedDiscount = totals.discountTotal > 0 ? {
+    value: totals.discountTotal,
+    valueType: "FIXED_AMOUNT" as const,
+    title: discountType === "PERCENTAGE" ? `Custom Agent Discount (${discountAmount}%)` : "Custom Agent Discount"
   } : undefined;
 
   // 3. Create Draft Order Mutation
@@ -118,6 +161,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       draftOrderCreate(input: $input) {
         draftOrder {
           id
+          totalPriceSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
         }
         userErrors {
           field
@@ -127,10 +176,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
   `;
 
-  const draftInput: any = {
+  const draftInput: DraftOrderInput = {
     lineItems,
     note: customerNotes,
     customAttributes,
+    presentmentCurrencyCode: currencyCode,
+    taxExempt: true,
     purchasingEntity: {
       purchasingCompany: {
         companyId: company.shopifyCompanyId,
@@ -142,6 +193,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (appliedDiscount) {
     draftInput.appliedDiscount = appliedDiscount;
+  }
+  if (shippingLine) {
+    draftInput.shippingLine = shippingLine;
   }
 
   const draftRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
@@ -178,6 +232,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           order {
             id
             name
+            totalPriceSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
           }
         }
         userErrors {
@@ -219,10 +279,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   });
 
   if (dbUser) {
-    const subtotal = cartData.reduce((acc: number, item: any) => acc + Number(item.price) * item.quantity, 0);
-    const discountVal = discountType === "PERCENTAGE" ? (subtotal * (discountAmount / 100)) : discountAmount;
-    const taxVal = (subtotal - discountVal) * (taxRate / 100);
-    const orderTotal = subtotal - discountVal + taxVal + shippingCost;
+    const shopifyOrderTotal = Number(createdOrder.totalPriceSet?.shopMoney?.amount);
+    const orderTotal = Number.isFinite(shopifyOrderTotal) ? shopifyOrderTotal : totals.total;
 
     await prisma.b2BOrder.create({
       data: {
@@ -386,9 +444,21 @@ export default function ReviewOrder() {
   const taxableAmount = Math.max(0, subtotal - discountVal);
   const taxVal = taxableAmount * (taxRate / 100);
   const grandTotal = taxableAmount + taxVal + shippingCost;
+  const displayCurrencyCode =
+    (cartItems.find((item) => item.currencyCode)?.currencyCode || "USD").toUpperCase();
 
-  const formatCurrency = (val: string | number) =>
-    `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatCurrency = (val: string | number, currencyCode = displayCurrencyCode) => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: currencyCode,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(Number(val) || 0);
+    } catch {
+      return `${currencyCode} ${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+  };
 
   const isSubmitting = navigation.state === "submitting";
 

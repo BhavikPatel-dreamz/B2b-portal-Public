@@ -34,7 +34,7 @@ export async function getFreePlanUsage(storeId: string) {
     prisma.b2BOrder.count({
       where: {
         shopId: storeId,
-        orderStatus: { not: "cancelled" },
+        orderStatus: { notIn: ["cancelled", "converted", "archived"] },
       },
     }),
   ]);

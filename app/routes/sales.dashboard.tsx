@@ -31,17 +31,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Get aggregate stats across all assigned companies
   const [totalOrders, pendingOrders, revenueResult] = await Promise.all([
     prisma.b2BOrder.count({
-      where: { companyId: { in: companyIds }, orderStatus: { not: "draft" } },
+      where: { companyId: { in: companyIds }, orderStatus: { notIn: ["draft", "cancelled", "converted", "archived"] } },
     }),
     prisma.b2BOrder.count({
       where: {
         companyId: { in: companyIds },
         paymentStatus: "pending",
-        orderStatus: { not: "draft" },
+        orderStatus: { notIn: ["draft", "cancelled", "converted", "archived"] },
       },
     }),
     prisma.b2BOrder.aggregate({
-      where: { companyId: { in: companyIds }, orderStatus: { not: "draft" } },
+      where: { companyId: { in: companyIds }, orderStatus: { notIn: ["draft", "cancelled", "converted", "archived"] } },
       _sum: { orderTotal: true },
     }),
   ]);
