@@ -420,7 +420,7 @@ export async function getCompanyDashboardData(
   const recentOrders = await prisma.b2BOrder.findMany({
     where: {
       companyId,
-      orderStatus: { notIn: ["cancelled"] },
+      orderStatus: { notIn: ["cancelled", "converted", "archived"] },
       shopifyOrderId: { startsWith: "gid://shopify/Order/" },
     },
     distinct: ["shopifyOrderId"],
@@ -531,7 +531,7 @@ export async function getCompanyDashboardData(
       prisma.b2BOrder.count({
         where: {
           companyId,
-          orderStatus: { notIn: ["cancelled"] },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
           shopifyOrderId: { not: null },
         },
       }),
@@ -539,14 +539,14 @@ export async function getCompanyDashboardData(
         where: {
           companyId,
           paymentStatus: "paid",
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
         },
       }),
       prisma.b2BOrder.count({
         where: {
           companyId,
           paymentStatus: { in: ["pending", "partial"] },
-          orderStatus: { notIn: ["cancelled"] },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
           shopifyOrderId: { not: null },
         },
       }),

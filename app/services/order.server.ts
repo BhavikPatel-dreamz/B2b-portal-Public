@@ -473,3 +473,98 @@ export async function deleteOrderPayment(id: string) {
     where: { id },
   });
 }
+
+/**
+ * Convert a draft order into a final order by marking it as converted/archived
+ * and releasing its credit so it is not double counted.
+ */
+export async function convertDraftOrderToFinal(
+  draftShopifyOrderId: string,
+  finalShopifyOrderId: string,
+  admin?: any
+) {
+  console.log(`🔄 Converting draft order ${draftShopifyOrderId} to final order ${finalShopifyOrderId}`);
+
+  // 1. Find the draft order in database
+  const draftOrder = await prisma.b2BOrder.findFirst({
+    where: {
+      shopifyOrderId: {
+        in: [draftShopifyOrderId, `gid://shopify/DraftOrder/${draftShopifyOrderId}`],
+      },
+    },
+  });
+
+  if (!draftOrder) {
+    console.log(`⚠️ No local draft order found for shopifyOrderId: ${draftShopifyOrderId}`);
+    return null;
+  }
+
+  // 2. If it's already converted/archived, do nothing
+  if (draftOrder.orderStatus === "converted" || draftOrder.orderStatus === "archived") {
+    console.log(`⚠️ Draft order ${draftOrder.id} is already ${draftOrder.orderStatus}`);
+    return draftOrder;
+  }
+
+  // 3. Restore user credit if userCreditUsed was set on the draft order
+  if (draftOrder.userCreditUsed && parseFloat(draftOrder.userCreditUsed.toString()) > 0) {
+    console.log(`🏦 Restoring user credit: ${draftOrder.userCreditUsed} for converted draft order`);
+    await prisma.user.update({
+      where: { id: draftOrder.createdByUserId },
+      data: {
+        userCreditUsed: {
+          decrement: draftOrder.userCreditUsed,
+        },
+      },
+    });
+  }
+
+  // 4. Update all credit transactions associated with this draft order:
+  // - Mark transactionType as "order_converted"
+  // - Set creditAmount to 0 so it doesn't count in sums
+  // - Add a note indicating it was converted to the final order
+  const orderIdentifiers = [
+    draftOrder.id,
+    draftOrder.shopifyOrderId,
+  ].filter(Boolean) as string[];
+
+  await prisma.creditTransaction.updateMany({
+    where: {
+      companyId: draftOrder.companyId,
+      orderId: { in: orderIdentifiers },
+    },
+    data: {
+      transactionType: "order_converted",
+      creditAmount: new Prisma.Decimal(0),
+      notes: `Draft order converted to final order ${finalShopifyOrderId}`,
+    },
+  });
+
+  // 5. Update the B2BOrder itself
+  // - Mark orderStatus as "converted"
+  // - Zero out credit fields so they don't count towards company totals
+  const updatedDraftOrder = await prisma.b2BOrder.update({
+    where: { id: draftOrder.id },
+    data: {
+      orderStatus: "converted",
+      creditUsed: new Prisma.Decimal(0),
+      userCreditUsed: new Prisma.Decimal(0),
+      remainingBalance: new Prisma.Decimal(0),
+      notes: `Converted to final order ${finalShopifyOrderId}. Original total: ${draftOrder.orderTotal}`,
+    },
+  });
+
+  console.log(`✅ Successfully converted draft order ${draftOrder.id} to converted status`);
+
+  if (admin) {
+    try {
+      const { syncCompanyCreditMetafields } = await import("./metafieldSync.server");
+      await syncCompanyCreditMetafields(admin, draftOrder.companyId);
+      console.log(`✅ Synced metafields after converting draft order for company ${draftOrder.companyId}`);
+    } catch (syncError) {
+      console.error(`⚠️ Failed to sync metafields after converting draft order:`, syncError);
+    }
+  }
+
+  return updatedDraftOrder;
+}
+

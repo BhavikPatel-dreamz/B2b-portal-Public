@@ -137,7 +137,7 @@ export async function calculateTieredCreditAvailability(
     where: {
       companyId: internalCompanyId,
       paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled"] },
+      orderStatus: { notIn: ["cancelled", "converted", "archived"] },
       NOT: excludeOrderId ? { id: excludeOrderId } : undefined,
       shopifyOrderId: excludeOrderId ? { not: excludeOrderId } : undefined,
     },

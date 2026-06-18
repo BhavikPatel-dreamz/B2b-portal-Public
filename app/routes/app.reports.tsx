@@ -104,7 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const whereClause: Prisma.B2BOrderWhereInput = {
     shopId: store.id,
-    orderStatus: { not: "cancelled" },
+    orderStatus: { notIn: ["draft", "cancelled", "converted", "archived"] },
     shopifyOrderId: { not: null },
     ...(dateFilter ? { createdAt: dateFilter } : {}),
   };

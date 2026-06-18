@@ -399,7 +399,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           where: {
             companyId: { in: companies.map((c) => c.id) },
             paymentStatus: { in: ["pending", "partial"] },
-            orderStatus: { notIn: ["cancelled"] },
+            orderStatus: { notIn: ["draft", "cancelled", "converted", "archived"] },
           },
           _sum: { remainingBalance: true },
         });

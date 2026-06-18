@@ -73,7 +73,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ] = await Promise.all([
       prisma.b2BOrder.count({
         where: {
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["draft", "cancelled", "converted", "archived"] },
           shopId: store.id,
           shopifyOrderId: { not: null },
         },
@@ -91,7 +91,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
           shopId: store.id,
           paymentStatus: { in: ["pending", "partial"] },
-          orderStatus: { notIn: ["cancelled"] },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
         },
         _sum: { remainingBalance: true },
       }),
@@ -99,7 +99,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
           shopId: store.id,
           createdAt: { gte: monthStart },
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["cancelled", "converted", "archived"] },
         },
       }),
       prisma.b2BOrder.aggregate({
@@ -107,7 +107,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
           shopId: store.id,
           createdAt: { gte: monthStart },
-          orderStatus: { not: "cancelled" },
+          orderStatus: { notIn: ["draft", "cancelled", "converted", "archived"] },
         },
       }),
     ]);

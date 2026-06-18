@@ -35,6 +35,7 @@ export interface UpdateStoreInput {
   blockOrderWhenCreditUnavailable?: boolean;
   privacyPolicylink?: string | null;
   privacyPolicyContent?: string | null;
+  defaultTaxRate?: number | string | null;
 }
 
 /**

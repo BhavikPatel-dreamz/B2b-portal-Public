@@ -70,7 +70,7 @@ export async function recalculateCompanyCredit(
       where: {
         companyId: companyId,
         paymentStatus: { in: ["pending", "partial"] },
-        orderStatus: { notIn: ["cancelled"] },
+        orderStatus: { notIn: ["cancelled", "converted", "archived"] },
       },
     });
 
@@ -164,7 +164,7 @@ export async function previewCreditRecalculation(companyId: string) {
       where: {
         companyId: companyId,
         paymentStatus: { in: ["pending", "partial"] },
-        orderStatus: { notIn: ["cancelled"] }, // Exclude cancelled orders
+        orderStatus: { notIn: ["cancelled", "converted", "archived"] }, // Exclude cancelled, converted, or archived orders
       },
       select: {
         id: true,

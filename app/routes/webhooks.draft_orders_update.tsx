@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { deductCredit, restoreCredit } from "../services/tieredCreditService";
 import { getCompanyByUserId } from "../services/user.server";
-import { upsertOrder, getOrderByShopifyIdWithDetails, deleteOrder } from "../services/order.server";
+import { upsertOrder, getOrderByShopifyIdWithDetails, deleteOrder, convertDraftOrderToFinal } from "../services/order.server";
 import { getStoreByDomain } from "../services/store.server";
 
 interface ShopifyDraftOrder {
@@ -93,41 +93,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     console.log(`✅ Found B2B company: ${b2bUser.company.name} (ID: ${b2bUser.company.id})`);
 
-    // Check if the draft order status is "completed" - if so, delete the order
+    // Check if the draft order status is "completed" - if so, mark it as converted/archived in B2B system
     if (draftOrder.status === "completed") {
-      console.log(`🗑️ Draft order status is "completed" - deleting the order and restoring credit`);
+      console.log(`🔄 Draft order status is "completed" - marking as converted/archived in B2B system`);
 
-      // Restore any reserved credit before deleting
-      if (existingOrder.creditUsed && parseFloat(existingOrder.creditUsed.toString()) > 0) {
-        try {
-          console.log(`💰 Restoring ${existingOrder.creditUsed} credit for completed draft order`);
+      const finalOrderId = (draftOrder as any).order_id
+        ? (draftOrder as any).order_id.toString()
+        : "unknown";
 
-          await restoreCredit(
-            b2bUser.company.id,
-            existingOrder.id,
-            existingOrder.creditUsed,
-            b2bUser.id,
-            "cancelled", // Using cancelled as the reason since draft was completed/finalized
-            admin
-          );
-
-          console.log(`✅ Credit restored successfully`);
-        } catch (creditError: unknown) {
-          console.error(`❌ Failed to restore credit:`, {
-            error: (creditError as Error).message,
-            companyId: b2bUser.company.id,
-            orderAmount: existingOrder.creditUsed
-          });
-        }
-      }
-
-      // Delete the B2B order record
       try {
-        await deleteOrder(existingOrder.id);
-        console.log(`✅ Draft order deleted successfully from B2B system`);
-      } catch (deleteError: unknown) {
-        console.error(`❌ Failed to delete order:`, (deleteError as Error).message);
-        return new Response(`Failed to delete order: ${(deleteError as Error).message}`, { status: 500 });
+        await convertDraftOrderToFinal(draftOrder.id.toString(), finalOrderId, admin);
+      } catch (convError: unknown) {
+        console.error(`❌ Failed to convert draft order:`, (convError as Error).message);
+        return new Response(`Failed to convert draft order: ${(convError as Error).message}`, { status: 500 });
       }
 
       return new Response("OK", { status: 200 });
