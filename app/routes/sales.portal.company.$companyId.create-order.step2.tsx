@@ -1,20 +1,280 @@
 import { LoaderFunctionArgs, ActionFunctionArgs, redirect } from "react-router";
-import { useLoaderData, Link, useSubmit, useNavigation, useSearchParams } from "react-router";
+import { useLoaderData, Link, useSubmit, useNavigation, useSearchParams, useFetcher } from "react-router";
 import { useState, useEffect } from "react";
 import prisma from "app/db.server";
 import { requireSalesSession, hasCompanyAccess } from "app/utils/sales-session.server";
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const formData = await request.formData();
-  const customerId = formData.get("customerId") as string;
-  const companyId = params.companyId;
+type DraftCartItem = {
+  variantId: string;
+  quantity: number;
+  price: string | number;
+};
 
+type ShopifyCompanyContactEdge = {
+  node: {
+    id?: string;
+    customer?: {
+      id?: string | null;
+    } | null;
+    roleAssignments?: {
+      edges?: Array<{
+        node?: {
+          companyLocation?: {
+            id?: string | null;
+          } | null;
+        } | null;
+      }>;
+    } | null;
+  };
+};
+
+type DraftOrderInput = {
+  lineItems: Array<{
+    variantId: string;
+    quantity: number;
+  }>;
+  note: string;
+  customAttributes: Array<{
+    key: string;
+    value: string;
+  }>;
+  purchasingEntity: {
+    purchasingCompany: {
+      companyId: string;
+      companyLocationId: string;
+      companyContactId: string;
+    };
+  };
+  appliedDiscount?: {
+    value: number;
+    valueType: "PERCENTAGE" | "FIXED_AMOUNT";
+    title: string;
+  };
+};
+
+type SaveDraftResponse = {
+  success?: boolean;
+  error?: string;
+  name?: string;
+  id?: string;
+};
+
+export const action = async ({ request, params }: ActionFunctionArgs) => {
+  try {
+    const formData = await request.formData();
+    const actionType = formData.get("actionType") as string;
+    const companyId = params.companyId;
+
+  if (actionType === "save_draft") {
+    const { user } = await requireSalesSession(request);
+    const customerId = formData.get("customerId") as string;
+    const cartDataStr = formData.get("cartData") as string;
+    const internalNotes = formData.get("internalNotes") as string;
+    const customerNotes = formData.get("customerNotes") as string;
+    const discountAmount = Number(formData.get("discountAmount") || "0");
+    const discountType = formData.get("discountType") as string;
+
+    const company = await prisma.companyAccount.findUnique({
+      where: { id: companyId },
+      include: {
+        shop: {
+          select: { shopName: true, shopDomain: true, accessToken: true },
+        },
+      },
+    });
+
+    if (!company || !company.shop || !company.shop.accessToken || !company.shopifyCompanyId) {
+      return Response.json({ error: "Company or shop credentials not found" }, { status: 400 });
+    }
+
+    const cartData = JSON.parse(cartDataStr || "[]") as DraftCartItem[];
+    if (cartData.length === 0) {
+      return Response.json({ error: "Cart is empty" }, { status: 400 });
+    }
+
+    // Fetch B2B company, locations, and contacts to build purchasingEntity
+    const baseMetaQuery = `
+      query GetBaseMeta($companyId: ID!) {
+        company(id: $companyId) {
+          locations(first: 10) {
+            nodes {
+              id
+            }
+          }
+          contacts(first: 50) {
+            edges {
+              node {
+                id
+                customer {
+                  id
+                }
+                roleAssignments(first: 5) {
+                  edges {
+                    node {
+                      companyLocation {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const baseMetaRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": company.shop.accessToken,
+      },
+      body: JSON.stringify({ query: baseMetaQuery, variables: { companyId: company.shopifyCompanyId } }),
+    });
+    const baseMetaData = await baseMetaRes.json();
+    const contacts = (baseMetaData.data?.company?.contacts?.edges || []) as ShopifyCompanyContactEdge[];
+    const matchCustGid = `gid://shopify/Customer/${customerId}`;
+    const matchedContact = contacts.find((edge) => edge.node.customer?.id === matchCustGid);
+    
+    const companyLocationId = matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id || 
+                              baseMetaData.data?.company?.locations?.nodes?.[0]?.id || "";
+    const companyContactId = matchedContact?.node?.id || "";
+
+    if (!companyLocationId || !companyContactId) {
+      return Response.json({ error: "B2B context missing. The selected customer is not correctly assigned as a contact for this company in Shopify." }, { status: 400 });
+    }
+
+    const lineItems = cartData.map((item) => ({
+      variantId: item.variantId,
+      quantity: item.quantity,
+    }));
+
+    const customAttributes = [{ key: "_source", value: "Sales Portal" }];
+    if (internalNotes) {
+      customAttributes.push({ key: "Internal Notes", value: internalNotes });
+    }
+
+    const discountValueType: "PERCENTAGE" | "FIXED_AMOUNT" =
+      discountType === "PERCENTAGE" ? "PERCENTAGE" : "FIXED_AMOUNT";
+
+    const appliedDiscount = discountAmount > 0 ? {
+      value: discountAmount,
+      valueType: discountValueType,
+      title: "Custom Agent Discount"
+    } : undefined;
+
+    const draftOrderMutation = `
+      mutation CreateB2BDraft($input: DraftOrderInput!) {
+        draftOrderCreate(input: $input) {
+          draftOrder {
+            id
+            name
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const draftInput: DraftOrderInput = {
+      lineItems,
+      note: customerNotes,
+      customAttributes,
+      purchasingEntity: {
+        purchasingCompany: {
+          companyId: company.shopifyCompanyId,
+          companyLocationId,
+          companyContactId
+        }
+      }
+    };
+
+    if (appliedDiscount) {
+      draftInput.appliedDiscount = appliedDiscount;
+    }
+
+    const draftRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": company.shop.accessToken,
+      },
+      body: JSON.stringify({ query: draftOrderMutation, variables: { input: draftInput } }),
+    });
+
+    const draftData = await draftRes.json();
+    
+    if (draftData.errors && draftData.errors.length > 0) {
+      console.error("GraphQL Top-Level Errors:", draftData.errors);
+      return Response.json({ error: draftData.errors[0].message }, { status: 400 });
+    }
+
+    const errors = draftData.data?.draftOrderCreate?.userErrors || [];
+    if (errors.length > 0) {
+      return Response.json({ error: errors[0].message }, { status: 400 });
+    }
+
+    const createdDraft = draftData.data?.draftOrderCreate?.draftOrder;
+    if (!createdDraft || !createdDraft.id) {
+      return Response.json({ error: "Failed to create draft order. Invalid Shopify response." }, { status: 400 });
+    }
+
+    const dbUser = await prisma.user.findFirst({
+      where: { email: user.email }
+    });
+
+    if (dbUser) {
+      const subtotal = cartData.reduce((acc, item) => acc + Number(item.price) * item.quantity, 0);
+      const orderTotal = subtotal - (discountType === "PERCENTAGE" ? subtotal * (discountAmount / 100) : discountAmount);
+      
+      const shopifyDraftOrderId = createdDraft.id.replace("gid://shopify/DraftOrder/", "");
+
+      await prisma.b2BOrder.upsert({
+        where: { shopifyOrderId: shopifyDraftOrderId },
+        create: {
+          companyId: company.id,
+          createdByUserId: dbUser.id,
+          shopId: company.shopId,
+          shopifyOrderId: shopifyDraftOrderId,
+          orderTotal: orderTotal,
+          creditUsed: 0,
+          paymentStatus: "pending",
+          orderStatus: "draft",
+          remainingBalance: orderTotal,
+          userCreditUsed: 0,
+          notes: internalNotes,
+          source: "Sales Portal",
+        },
+        update: {
+          companyId: company.id,
+          createdByUserId: dbUser.id,
+          shopId: company.shopId,
+          orderTotal: orderTotal,
+          paymentStatus: "pending",
+          orderStatus: "draft",
+          notes: internalNotes,
+          source: "Sales Portal",
+        },
+      });
+    }
+
+    return Response.json({ success: true, name: createdDraft.name, id: createdDraft.id });
+  }
+
+  const customerId = formData.get("customerId") as string;
   if (!customerId) {
     return redirect(`/sales/portal/company/${companyId}/create-order`);
   }
 
-  // Redirect to GET request with customerId in searchParams to maintain state on refresh
-  return redirect(`/sales/portal/company/${companyId}/create-order/step2?customerId=${customerId}`);
+    return redirect(`/sales/portal/company/${companyId}/create-order/step2?customerId=${customerId}`);
+  } catch (err: any) {
+    if (err instanceof Response) throw err;
+    console.error("Action Crash Error:", err);
+    return Response.json({ error: `Server crash: ${err?.message || "Unknown error"}` }, { status: 500 });
+  }
 };
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -132,6 +392,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   // 1. Fetch Company Location ID to get B2B Contextual pricing
   let locationId = "";
+  let companyContactId = "";
   let collections: Array<{ id: string; title: string }> = [];
   let products: any[] = [];
   let pageInfo = { hasNextPage: false, endCursor: null };
@@ -142,14 +403,33 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     const token = company.shop.accessToken;
 
     try {
-      // Fetch Locations and Collections
+      // Fetch Locations, Collections and Company Contacts to map customer to location
       const baseMetaQuery = `
         query GetBaseMeta($companyId: ID!) {
           company(id: $companyId) {
-            locations(first: 1) {
+            locations(first: 10) {
               nodes {
                 id
                 name
+              }
+            }
+            contacts(first: 50) {
+              edges {
+                node {
+                  id
+                  customer {
+                    id
+                  }
+                  roleAssignments(first: 5) {
+                    edges {
+                      node {
+                        companyLocation {
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -171,8 +451,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         body: JSON.stringify({ query: baseMetaQuery, variables: { companyId: company.shopifyCompanyId } }),
       });
       const baseMetaData = await baseMetaRes.json();
-      locationId = baseMetaData.data?.company?.locations?.nodes?.[0]?.id || "";
+      
       collections = baseMetaData.data?.collections?.nodes || [];
+
+      // Resolve locationId based on customer location assignment, falling back to company's first location
+      const contacts = baseMetaData.data?.company?.contacts?.edges || [];
+      const matchCustGid = `gid://shopify/Customer/${selectedCustomer.shopifyCustomerId}`;
+      const matchedContact = contacts.find((edge: any) => edge.node.customer?.id === matchCustGid);
+      const matchedLocationId = matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id;
+      companyContactId = matchedContact?.node?.id || "";
+
+      locationId = matchedLocationId || baseMetaData.data?.company?.locations?.nodes?.[0]?.id || "";
 
       // If a collection is selected, we must fetch products from that specific collection connection.
       // Otherwise we use the global products search query.
@@ -274,28 +563,38 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         pageInfo = productPageInfo;
       }
 
-      products = productEdges.map((edge: any) => {
-        const node = edge.node;
-        return {
-          id: node.id,
-          title: node.title,
-          vendor: node.vendor,
-          productType: node.productType,
-          tags: node.tags || [],
-          image: node.featuredImage?.url || "",
-          variants: node.variants?.nodes?.map((v: any) => ({
-            id: v.id,
-            title: v.title,
-            sku: v.sku || "",
-            barcode: v.barcode || "",
-            price: v.contextualPricing?.price?.amount || "0",
-            currencyCode: v.contextualPricing?.price?.currencyCode || "USD",
-            inventoryQuantity: v.inventoryQuantity || 0,
-            availableForSale: v.availableForSale,
-            inStock: v.availableForSale && (v.inventoryQuantity > 0 || v.inventoryPolicy === "CONTINUE"),
-          })) || []
-        };
-      });
+      products = productEdges
+        .map((edge: any) => {
+          const node = edge.node;
+          const mappedVariants = node.variants?.nodes?.map((v: any) => {
+            const contextualPrice = v.contextualPricing?.price?.amount;
+            return {
+              id: v.id,
+              title: v.title,
+              sku: v.sku || "",
+              barcode: v.barcode || "",
+              price: contextualPrice ? contextualPrice : null,
+              currencyCode: v.contextualPricing?.price?.currencyCode || "USD",
+              inventoryQuantity: v.inventoryQuantity || 0,
+              availableForSale: v.availableForSale,
+              inStock: v.availableForSale && (v.inventoryQuantity > 0 || v.inventoryPolicy === "CONTINUE"),
+            };
+          }) || [];
+
+          return {
+            id: node.id,
+            title: node.title,
+            vendor: node.vendor,
+            productType: node.productType,
+            tags: node.tags || [],
+            image: node.featuredImage?.url || "",
+            variants: mappedVariants,
+          };
+        })
+        .filter((p: any) => {
+          // Filter out products that are restricted (not present in any catalog assigned to this company location)
+          return p.variants.some((v: any) => v.price !== null);
+        });
 
       // Build filters using a lightweight parallel query of first 250 products
       const filterMetaQuery = `
@@ -346,6 +645,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       id: company.id,
       name: company.name,
       creditLimit: company.creditLimit.toString(),
+      companyLocationId: locationId,
+      companyContactId: companyContactId,
     },
     selectedCustomer,
     products,
@@ -371,6 +672,7 @@ export default function CreateOrderProductCatalog() {
   const { company, selectedCustomer, products, collections, filterOptions, pageInfo, searchParams, user } = useLoaderData<any>();
   const submit = useSubmit();
   const navigation = useNavigation();
+  const draftFetcher = useFetcher<SaveDraftResponse>();
   const [urlParams, setUrlParams] = useSearchParams();
 
   // Local State for Search/Filters
@@ -384,6 +686,17 @@ export default function CreateOrderProductCatalog() {
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({}); // { productId: variantId }
   const [quantities, setQuantities] = useState<Record<string, number>>({}); // { variantId: quantity }
   const [cart, setCart] = useState<Record<string, any>>({});
+  const [internalNotes, setInternalNotes] = useState("");
+  const [customerNotes, setCustomerNotes] = useState("");
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [discountType, setDiscountType] = useState<"PERCENTAGE" | "FIXED_AMOUNT">("FIXED_AMOUNT");
+  const [estShipping, setEstShipping] = useState(45);
+  const [estTaxRate, setEstTaxRate] = useState(8); // 8% default tax rate
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+  const [lastRemovedItem, setLastRemovedItem] = useState<any>(null);
+  const [showUndoBanner, setShowUndoBanner] = useState(false);
+  const [draftSaveStatus, setDraftSaveStatus] = useState<{ success?: boolean; error?: string; name?: string } | null>(null);
+  const isSavingDraft = draftFetcher.state !== "idle";
 
   // Initialize selected variants and quantities
   useEffect(() => {
@@ -402,7 +715,7 @@ export default function CreateOrderProductCatalog() {
     setQuantities(prev => ({ ...initialQuantities, ...prev }));
   }, [products]);
 
-  // Load cart from localStorage
+  // Load cart and notes from localStorage
   useEffect(() => {
     const cartKey = `sales_cart_${company.id}_${selectedCustomer.id}`;
     const storedCart = localStorage.getItem(cartKey);
@@ -413,12 +726,60 @@ export default function CreateOrderProductCatalog() {
         console.error("Failed to load cart", e);
       }
     }
+
+    const intNotesKey = `sales_int_notes_${company.id}_${selectedCustomer.id}`;
+    const custNotesKey = `sales_cust_notes_${company.id}_${selectedCustomer.id}`;
+    const storedIntNotes = localStorage.getItem(intNotesKey);
+    const storedCustNotes = localStorage.getItem(custNotesKey);
+    if (storedIntNotes) setInternalNotes(storedIntNotes);
+    if (storedCustNotes) setCustomerNotes(storedCustNotes);
   }, [company.id, selectedCustomer.id]);
 
   const saveCart = (newCart: Record<string, any>) => {
     setCart(newCart);
     const cartKey = `sales_cart_${company.id}_${selectedCustomer.id}`;
     localStorage.setItem(cartKey, JSON.stringify(newCart));
+  };
+
+  const saveInternalNotes = (val: string) => {
+    setInternalNotes(val);
+    localStorage.setItem(`sales_int_notes_${company.id}_${selectedCustomer.id}`, val);
+  };
+
+  const saveCustomerNotes = (val: string) => {
+    setCustomerNotes(val);
+    localStorage.setItem(`sales_cust_notes_${company.id}_${selectedCustomer.id}`, val);
+  };
+
+  useEffect(() => {
+    if (!draftFetcher.data) {
+      return;
+    }
+
+    if (draftFetcher.data.success) {
+      setDraftSaveStatus({ success: true, name: draftFetcher.data.name });
+    } else {
+      setDraftSaveStatus({ error: draftFetcher.data.error || "Failed to save draft order" });
+    }
+
+  }, [draftFetcher.data]);
+
+  const saveDraftOrder = () => {
+    setDraftSaveStatus(null);
+
+    const formData = new FormData();
+    formData.append("actionType", "save_draft");
+    formData.append("customerId", selectedCustomer.shopifyCustomerId || selectedCustomer.id || "");
+    formData.append("cartData", JSON.stringify(Object.values(cart)));
+    formData.append("internalNotes", internalNotes);
+    formData.append("customerNotes", customerNotes);
+    formData.append("discountAmount", discountAmount.toString());
+    formData.append("discountType", discountType);
+
+    draftFetcher.submit(formData, {
+      method: "post",
+      action: `${window.location.pathname}${window.location.search}`,
+    });
   };
 
   const isLoading = navigation.state === "loading";
@@ -490,9 +851,25 @@ export default function CreateOrderProductCatalog() {
   };
 
   const removeFromCart = (variantId: string) => {
+    const item = cart[variantId];
+    if (item) {
+      setLastRemovedItem(item);
+      setShowUndoBanner(true);
+      // Auto-hide undo banner after 6 seconds
+      setTimeout(() => setShowUndoBanner(false), 6000);
+    }
     const newCart = { ...cart };
     delete newCart[variantId];
     saveCart(newCart);
+  };
+
+  const undoRemove = () => {
+    if (lastRemovedItem) {
+      const newCart = { ...cart, [lastRemovedItem.variantId]: lastRemovedItem };
+      saveCart(newCart);
+      setLastRemovedItem(null);
+      setShowUndoBanner(false);
+    }
   };
 
   const updateCartItemQty = (variantId: string, qty: number) => {
@@ -509,6 +886,372 @@ export default function CreateOrderProductCatalog() {
 
   const formatCurrency = (val: string | number) =>
     `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const totalUnits = cartItems.reduce((acc: number, item: any) => acc + item.quantity, 0);
+  const calculatedDiscount = discountType === "PERCENTAGE" 
+    ? (cartSubtotal * (discountAmount / 100)) 
+    : discountAmount;
+  const taxableAmount = Math.max(0, cartSubtotal - calculatedDiscount);
+  const calculatedTax = taxableAmount * (estTaxRate / 100);
+  const calculatedTotal = taxableAmount + calculatedTax + estShipping;
+
+  const renderCartContents = () => {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Undo Banner */}
+        {showUndoBanner && lastRemovedItem && (
+          <div style={{
+            backgroundColor: "#fffbeb",
+            border: "1px solid #fef3c7",
+            borderRadius: "8px",
+            padding: "10px 12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: "12px",
+            color: "#92400e",
+          }}>
+            <span>Removed <strong>{lastRemovedItem.productTitle}</strong></span>
+            <button 
+              onClick={undoRemove}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#b45309",
+                fontWeight: 700,
+                textDecoration: "underline",
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              Undo
+            </button>
+          </div>
+        )}
+
+        {/* Draft Save Status Banner */}
+        {draftSaveStatus && (
+          <div style={{
+            backgroundColor: draftSaveStatus.success ? "#ecfdf5" : "#fef2f2",
+            border: `1px solid ${draftSaveStatus.success ? "#a7f3d0" : "#fecaca"}`,
+            borderRadius: "8px",
+            padding: "12px",
+            fontSize: "12px",
+            color: draftSaveStatus.success ? "#065f46" : "#991b1b",
+            position: "relative",
+          }}>
+            <button 
+              onClick={() => setDraftSaveStatus(null)}
+              style={{
+                position: "absolute",
+                top: "6px",
+                right: "8px",
+                background: "none",
+                border: "none",
+                fontSize: "14px",
+                cursor: "pointer",
+                color: "inherit",
+              }}
+            >
+              ✕
+            </button>
+            {draftSaveStatus.success ? (
+              <div>
+                <strong>Success!</strong>
+                <p style={{ margin: "4px 0 0 0" }}>Order has been saved as draft successfully (Shopify Draft: <strong>{draftSaveStatus.name}</strong>).</p>
+              </div>
+            ) : (
+              <div>
+                <strong>Failed to Save Draft</strong>
+                <p style={{ margin: "4px 0 0 0" }}>{draftSaveStatus.error}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {cartItems.length > 0 ? (
+          <>
+            {/* Scrollable Line Items */}
+            <div style={{ ...styles.cartItemsList, maxHeight: "300px" }}>
+              {cartItems.map((item: any) => {
+                // Low stock warning check (if inventory tracking is enabled and quantity exceeds stock)
+                const isLowStock = item.inventoryQuantity !== undefined && 
+                                   item.inventoryQuantity > 0 && 
+                                   item.quantity > item.inventoryQuantity;
+                return (
+                  <div key={item.variantId} style={{ ...styles.cartItem, borderBottom: "1px solid #f3f4f6", paddingBottom: "12px" }}>
+                    <div style={{ display: "flex", gap: "10px", width: "100%" }}>
+                      {/* Image */}
+                      <div style={{ width: "48px", height: "48px", borderRadius: "6px", overflow: "hidden", backgroundColor: "#f3f4f6", flexShrink: 0 }}>
+                        {item.image ? (
+                          <img src={item.image} alt={item.productTitle} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontSize: "20px" }}>📦</div>
+                        )}
+                      </div>
+
+                      {/* Item Details */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: "13px", color: "#111827", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                          {item.productTitle}
+                        </div>
+                        {item.variantTitle !== "Default Title" && (
+                          <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>
+                            {item.variantTitle}
+                          </div>
+                        )}
+                        <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>
+                          SKU: {item.sku || "N/A"}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px" }}>
+                          <span style={{ fontWeight: 600, color: "#374151" }}>{formatCurrency(item.price)}</span>
+                          <span style={{ fontSize: "12px", color: "#9ca3af" }}>Total: {formatCurrency(Number(item.price) * item.quantity)}</span>
+                        </div>
+
+                        {/* Low stock warning */}
+                        {isLowStock && (
+                          <div style={{ fontSize: "10px", color: "#b45309", marginTop: "4px", fontWeight: 600 }}>
+                            ⚠️ Only {item.inventoryQuantity} units available in stock.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions & Qty Management */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", marginTop: "10px", paddingLeft: "58px" }}>
+                      <div style={styles.cartItemQty}>
+                        <button 
+                          type="button"
+                          onClick={() => updateCartItemQty(item.variantId, item.quantity - 1)}
+                          style={styles.cartItemQtyBtn}
+                        >
+                          -
+                        </button>
+                        <input 
+                          type="number"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (val >= 1) updateCartItemQty(item.variantId, val);
+                          }}
+                          style={{
+                            width: "30px",
+                            border: "none",
+                            textAlign: "center",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            outline: "none",
+                          }}
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => updateCartItemQty(item.variantId, item.quantity + 1)}
+                          style={styles.cartItemQtyBtn}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => removeFromCart(item.variantId)} 
+                        style={{ ...styles.cartRemoveBtn, color: "#ef4444", display: "flex", alignItems: "center", gap: "2px" }}
+                      >
+                        🗑️ <span style={{ fontSize: "11px" }}>Remove</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={styles.cartDivider} />
+
+            {/* Calculations & Pricing Fields */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "13px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#6b7280" }}>Subtotal:</span>
+                <span style={{ fontWeight: 600 }}>{formatCurrency(cartSubtotal)}</span>
+              </div>
+
+              {/* Agent Discount */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", fontWeight: 600, color: "#4b5563" }}>APPLY DISCOUNT</label>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input 
+                    type="number"
+                    min="0"
+                    placeholder="Amount"
+                    value={discountAmount || ""}
+                    onChange={(e) => setDiscountAmount(Math.max(0, Number(e.target.value)))}
+                    style={{ ...styles.select, flex: 1, height: "32px", fontSize: "12px" }}
+                  />
+                  <select 
+                    value={discountType}
+                    onChange={(e: any) => setDiscountType(e.target.value)}
+                    style={{ ...styles.select, width: "70px", height: "32px", fontSize: "11px", padding: "0 4px" }}
+                  >
+                    <option value="FIXED_AMOUNT">$ Fixed</option>
+                    <option value="PERCENTAGE">% Percent</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Shipping & Taxes rate input */}
+              <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "11px", fontWeight: 600, color: "#4b5563" }}>EST. SHIPPING ($)</label>
+                  <input 
+                    type="number"
+                    min="0"
+                    value={estShipping}
+                    onChange={(e) => setEstShipping(Math.max(0, Number(e.target.value)))}
+                    style={{ ...styles.select, height: "32px", fontSize: "12px" }}
+                  />
+                </div>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "11px", fontWeight: 600, color: "#4b5563" }}>EST. TAX RATE (%)</label>
+                  <input 
+                    type="number"
+                    min="0"
+                    value={estTaxRate}
+                    onChange={(e) => setEstTaxRate(Math.max(0, Number(e.target.value)))}
+                    style={{ ...styles.select, height: "32px", fontSize: "12px" }}
+                  />
+                </div>
+              </div>
+
+              {calculatedDiscount > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", color: "#10b981", fontWeight: 600 }}>
+                  <span>Discount:</span>
+                  <span>-{formatCurrency(calculatedDiscount)}</span>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#6b7280" }}>
+                <span>Est. Tax ({estTaxRate}%):</span>
+                <span>{formatCurrency(calculatedTax)}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#6b7280" }}>
+                <span>Est. Shipping:</span>
+                <span>{formatCurrency(estShipping)}</span>
+              </div>
+
+              <div style={{ ...styles.subtotalRow, margin: "8px 0 0 0", borderTop: "1px dashed #e5e7eb", paddingTop: "8px" }}>
+                <span>Estimated Total:</span>
+                <span style={styles.subtotalVal}>{formatCurrency(calculatedTotal)}</span>
+              </div>
+            </div>
+
+            <div style={styles.cartDivider} />
+
+            {/* Notes Section */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", fontWeight: 600, color: "#4b5563" }}>INTERNAL NOTES (AGENT/ADMIN)</label>
+                <textarea 
+                  value={internalNotes}
+                  onChange={(e) => saveInternalNotes(e.target.value)}
+                  placeholder="Expedited shipping approved, custom price match..."
+                  style={{
+                    width: "100%",
+                    height: "60px",
+                    borderRadius: "6px",
+                    border: "1px solid #d1d5db",
+                    padding: "6px 10px",
+                    fontSize: "12px",
+                    outline: "none",
+                    resize: "none",
+                    fontFamily: "inherit",
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "11px", fontWeight: 600, color: "#4b5563" }}>CUSTOMER NOTES (VISIBLE ON ORDER)</label>
+                <textarea 
+                  value={customerNotes}
+                  onChange={(e) => saveCustomerNotes(e.target.value)}
+                  placeholder="Delivery scheduled for Friday, delivery gate code..."
+                  style={{
+                    width: "100%",
+                    height: "60px",
+                    borderRadius: "6px",
+                    border: "1px solid #d1d5db",
+                    padding: "6px 10px",
+                    fontSize: "12px",
+                    outline: "none",
+                    resize: "none",
+                    fontFamily: "inherit",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={styles.cartDivider} />
+
+            {/* Actions Footer */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={saveDraftOrder}
+                disabled={isSavingDraft}
+                style={{
+                  ...styles.clearBtn,
+                  backgroundColor: isSavingDraft ? "#f3f4f6" : "#ffffff",
+                  border: "1px solid #d1d5db",
+                  color: "#374151",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                }}
+              >
+                {isSavingDraft ? (
+                  <>
+                    <span className="save-spinner" style={{
+                      width: "16px",
+                      height: "16px",
+                      border: "2px solid #d1d5db",
+                      borderTop: "2px solid #374151",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }}></span>
+                    Saving Draft...
+                  </>
+                ) : (
+                  "💾 Save Draft Order"
+                )}
+              </button>
+
+              <Link 
+                to={`/sales/portal/company/${company.id}/create-order/step3?customerId=${selectedCustomer.id}`}
+                style={styles.checkoutBtn}
+                onClick={(e) => {
+                  // Save all order details to sessionStorage to pass to Step 3
+                  sessionStorage.setItem(`sales_checkout_cart_${company.id}`, JSON.stringify(cartItems));
+                  sessionStorage.setItem(`sales_checkout_notes_int_${company.id}`, internalNotes);
+                  sessionStorage.setItem(`sales_checkout_notes_cust_${company.id}`, customerNotes);
+                  sessionStorage.setItem(`sales_checkout_discount_${company.id}`, discountAmount.toString());
+                  sessionStorage.setItem(`sales_checkout_discount_type_${company.id}`, discountType);
+                  sessionStorage.setItem(`sales_checkout_shipping_${company.id}`, estShipping.toString());
+                  sessionStorage.setItem(`sales_checkout_tax_rate_${company.id}`, estTaxRate.toString());
+                }}
+              >
+                Review Order →
+              </Link>
+            </div>
+          </>
+        ) : (
+          <div style={styles.emptyCart}>
+            <span style={{ fontSize: "36px", marginBottom: "8px" }}>🛒</span>
+            <p style={{ margin: 0, fontWeight: 500, color: "#4b5563" }}>Cart is empty</p>
+            <p style={{ margin: "4px 0 0 0", fontSize: "12px" }}>Select variants and add products above to start building the B2B order.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={styles.container}>
@@ -767,79 +1510,104 @@ export default function CreateOrderProductCatalog() {
             </div>
           </section>
 
-          {/* Column 3: Cart Summary */}
-          <aside style={styles.cartSidebar}>
-            <div style={styles.card}>
-              <h3 style={styles.sidebarTitle}>Cart Summary</h3>
+          {/* Floating Mobile Cart Button */}
+          <button 
+            type="button"
+            onClick={() => setIsMobileCartOpen(true)} 
+            className="mobile-cart-btn"
+            style={{
+              position: "fixed",
+              bottom: "24px",
+              right: "24px",
+              width: "60px",
+              height: "60px",
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, #E91E63 0%, #FF6B35 100%)",
+              color: "white",
+              border: "none",
+              boxShadow: "0 10px 15px -3px rgba(233, 30, 99, 0.3), 0 4px 6px -2px rgba(233, 30, 99, 0.05)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "24px",
+              cursor: "pointer",
+              zIndex: 9999,
+              transition: "transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+            }}
+            onMouseOver={(e) => e.currentTarget.style.transform = "scale(1.08)"}
+            onMouseOut={(e) => e.currentTarget.style.transform = "scale(1)"}
+          >
+            <span>🛒</span>
+            {cartItems.length > 0 && (
+              <span style={{
+                position: "absolute",
+                top: "-2px",
+                right: "-2px",
+                backgroundColor: "white",
+                color: "#E91E63",
+                borderRadius: "50%",
+                padding: "2px 6px",
+                fontSize: "12px",
+                fontWeight: 700,
+                border: "2px solid #E91E63",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}>
+                {totalUnits}
+              </span>
+            )}
+          </button>
 
-              {cartItems.length > 0 ? (
-                <>
-                  <div style={styles.cartItemsList}>
-                    {cartItems.map((item: any) => (
-                      <div key={item.variantId} style={styles.cartItem}>
-                        <div style={styles.cartItemDetails}>
-                          <div style={styles.cartItemTitle}>{item.productTitle}</div>
-                          {item.variantTitle !== "Default Title" && (
-                            <div style={styles.cartItemSub}>{item.variantTitle}</div>
-                          )}
-                          <div style={styles.cartItemMeta}>
-                            <span>{formatCurrency(item.price)}</span>
-                            <span> · </span>
-                            <span>SKU: {item.sku || "N/A"}</span>
-                          </div>
-                        </div>
-
-                        <div style={styles.cartItemActions}>
-                          <div style={styles.cartItemQty}>
-                            <button 
-                              onClick={() => updateCartItemQty(item.variantId, item.quantity - 1)}
-                              style={styles.cartItemQtyBtn}
-                            >
-                              -
-                            </button>
-                            <span style={styles.cartItemQtyVal}>{item.quantity}</span>
-                            <button 
-                              onClick={() => updateCartItemQty(item.variantId, item.quantity + 1)}
-                              style={styles.cartItemQtyBtn}
-                            >
-                              +
-                            </button>
-                          </div>
-                          <button 
-                            onClick={() => removeFromCart(item.variantId)} 
-                            style={styles.cartRemoveBtn}
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div style={styles.cartDivider} />
-
-                  <div style={styles.subtotalRow}>
-                    <span>Subtotal:</span>
-                    <span style={styles.subtotalVal}>{formatCurrency(cartSubtotal)}</span>
-                  </div>
-
-                  <Link 
-                    to={`/sales/portal/company/${company.id}/create-order/step3?customerId=${selectedCustomer.id}`}
-                    style={styles.checkoutBtn}
-                    onClick={(e) => {
-                      // Save the cart items to sessionStorage/cookie or query params to pass to Step 3
-                      sessionStorage.setItem(`sales_checkout_cart_${company.id}`, JSON.stringify(cartItems));
-                    }}
+          {/* Mobile Cart Drawer Overlay */}
+          {isMobileCartOpen && (
+            <div 
+              className="mobile-cart-drawer"
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: "rgba(0,0,0,0.5)",
+                backdropFilter: "blur(4px)",
+                zIndex: 10000,
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+              onClick={() => setIsMobileCartOpen(false)}
+            >
+              <div 
+                style={{
+                  width: "100%",
+                  maxWidth: "400px",
+                  height: "100%",
+                  backgroundColor: "white",
+                  display: "flex",
+                  flexDirection: "column",
+                  padding: "20px",
+                  boxShadow: "-10px 0 25px -5px rgba(0,0,0,0.1)",
+                  overflowY: "auto",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                  <h3 style={{ ...styles.sidebarTitle, borderBottom: "none", margin: 0, paddingBottom: 0 }}>Cart Summary</h3>
+                  <button 
+                    onClick={() => setIsMobileCartOpen(false)}
+                    style={{ background: "none", border: "none", fontSize: "24px", cursor: "pointer", color: "#6b7280" }}
                   >
-                    Proceed to Review
-                  </Link>
-                </>
-              ) : (
-                <div style={styles.emptyCart}>
-                  <span style={{ fontSize: "32px", marginBottom: "8px" }}>🛒</span>
-                  <p>Cart is empty. Add products to start building the order.</p>
+                    ✕
+                  </button>
                 </div>
-              )}
+                {renderCartContents()}
+              </div>
+            </div>
+          )}
+
+          {/* Column 3: Desktop Cart Sidebar */}
+          <aside className="desktop-cart-sidebar" style={styles.cartSidebar}>
+            <div style={{ ...styles.card, position: "sticky", top: "20px", maxHeight: "calc(100vh - 40px)", overflowY: "auto" }}>
+              <h3 style={styles.sidebarTitle}>Cart Summary</h3>
+              {renderCartContents()}
             </div>
           </aside>
 
@@ -860,6 +1628,34 @@ export default function CreateOrderProductCatalog() {
         /* Firefox */
         input[type=number] {
           -moz-appearance: textfield;
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 1024px) {
+          .desktop-cart-sidebar {
+            display: none !important;
+          }
+          .mobile-cart-btn {
+            display: flex !important;
+          }
+          /* Adjust layoutGrid to 2 columns on tablets */
+          div[style*="display: grid"] {
+            grid-template-columns: 240px 1fr !important;
+          }
+        }
+        @media (min-width: 1025px) {
+          .mobile-cart-btn {
+            display: none !important;
+          }
+          .mobile-cart-drawer {
+            display: none !important;
+          }
+        }
+        @media (max-width: 768px) {
+          /* Full single column layout on phones */
+          div[style*="display: grid"] {
+            grid-template-columns: 1fr !important;
+          }
         }
       `}</style>
     </div>

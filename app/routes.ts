@@ -108,6 +108,8 @@ export default [
   route("sales/portal", "routes/sales.portal.tsx"),
   route("sales/portal/company/:companyId/create-order", "routes/sales.portal.company.$companyId.create-order.tsx"),
   route("sales/portal/company/:companyId/create-order/step2", "routes/sales.portal.company.$companyId.create-order.step2.tsx"),
+  route("sales/portal/company/:companyId/create-order/step3", "routes/sales.portal.company.$companyId.create-order.step3.tsx"),
+  route("sales/portal/company/:companyId/orders", "routes/sales.portal.company.$companyId.orders.tsx"),
 
   // Legacy support routes (kept for backward compatibility with invitation links)
   route("support/login", "routes/support.login.tsx"),

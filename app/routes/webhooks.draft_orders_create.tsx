@@ -101,11 +101,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const totalAmount = parseFloat(draftOrder.total_price || "0");
     console.log(`💰 Draft order total: ${totalAmount} ${draftOrder.currency}`);
 
-    // PREVENT DOUBLE DEDUCTION: Check if this order was already processed by the app proxy
+    // PREVENT DOUBLE DEDUCTION: Check if this order was already processed by the app proxy or sales portal
     const existingB2bOrder = await prisma.b2BOrder.findFirst({
       where: {
         OR: [
           { shopifyOrderId: draftOrder.id.toString() },
+          { shopifyOrderId: `gid://shopify/DraftOrder/${draftOrder.id}` },
           { 
             companyId: b2bUser.company.id,
             orderTotal: new Decimal(totalAmount),
@@ -116,14 +117,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     });
 
-    if (existingB2bOrder && existingB2bOrder.creditUsed.greaterThan(0)) {
-      console.log(`ℹ️ Order ${draftOrder.id} already has credit deducted (${existingB2bOrder.creditUsed}). Skipping redundant deduction.`);
+    if (existingB2bOrder) {
+      console.log(`ℹ️ Order ${draftOrder.id} already exists in database (ID: ${existingB2bOrder.id}).`);
       
-      // Still update the shopifyOrderId if it was missing or generic
-      if (!existingB2bOrder.shopifyOrderId || existingB2bOrder.shopifyOrderId === "") {
+      // Normalize shopifyOrderId to numeric format
+      if (existingB2bOrder.shopifyOrderId === `gid://shopify/DraftOrder/${draftOrder.id}`) {
         await prisma.b2BOrder.update({
           where: { id: existingB2bOrder.id },
-          data: { shopifyOrderId: draftOrder.id.toString(), orderStatus: "submitted" }
+          data: { shopifyOrderId: draftOrder.id.toString() }
+        });
+      }
+
+      // If credit hasn't been reserved/deducted yet (i.e. creditUsed is 0) and we have a total price, reserve it now
+      if (existingB2bOrder.creditUsed.equals(0) && totalAmount > 0) {
+        console.log(`🏦 Reserving ${totalAmount} credit for existing order ${existingB2bOrder.id}`);
+        await deductCredit(
+          b2bUser.company.id,
+          existingB2bOrder.id,
+          totalAmount,
+          b2bUser.id,
+          admin
+        );
+        await prisma.b2BOrder.update({
+          where: { id: existingB2bOrder.id },
+          data: { creditUsed: new Decimal(totalAmount) }
         });
       }
       return new Response("OK", { status: 200 });
