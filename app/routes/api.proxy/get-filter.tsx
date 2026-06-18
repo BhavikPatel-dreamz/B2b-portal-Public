@@ -2,7 +2,12 @@ import { type LoaderFunctionArgs } from "react-router";
 import { validateB2BCustomerAccess } from "../../utils/proxy.server";
 import { getStoreByDomain } from "../../services/store.server";
 import { apiVersion } from "../../shopify.server";
-import { buildFiltersFromEdges, type FilterOptions } from "./product-filter.utils";
+import {
+  buildFiltersFromEdges,
+  filterEdgesByCriteria,
+  type FilterOptions,
+  type FilterCriteria,
+} from "./product-filter.utils";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop } = await validateB2BCustomerAccess(request);
@@ -12,6 +17,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const vendor = url.searchParams.get("vendor")?.trim();
   const productType = url.searchParams.get("product_type")?.trim();
   const tag = url.searchParams.get("tag")?.trim();
+  const color = url.searchParams.get("color")?.trim();
+  const size = url.searchParams.get("size")?.trim();
   const minPrice = url.searchParams.get("min_price")?.trim();
   const maxPrice = url.searchParams.get("max_price")?.trim();
   const available = url.searchParams.get("available")?.trim();
@@ -25,6 +32,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (available?.toLowerCase() === "true") queryFilters.push("available:true");
   if (minPrice && !Number.isNaN(Number(minPrice))) queryFilters.push(`price:>=${minPrice}`);
   if (maxPrice && !Number.isNaN(Number(maxPrice))) queryFilters.push(`price:<=${maxPrice}`);
+
+  const criteria: FilterCriteria = {
+    color,
+    size,
+    minPrice: minPrice && !Number.isNaN(Number(minPrice)) ? Number(minPrice) : null,
+    maxPrice: maxPrice && !Number.isNaN(Number(maxPrice)) ? Number(maxPrice) : null,
+  };
 
   const shopifySearchQuery = queryFilters.join(" ");
 
@@ -75,7 +89,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return { filters: {} as FilterOptions };
   }
 
-  const filters: FilterOptions = buildFiltersFromEdges(data.data.filterProducts.edges || []);
+  const filters: FilterOptions = buildFiltersFromEdges(
+    filterEdgesByCriteria(data.data.filterProducts.edges || [], criteria),
+  );
 
   return { filters };
 };

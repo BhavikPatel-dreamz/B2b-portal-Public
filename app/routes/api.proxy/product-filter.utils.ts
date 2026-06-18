@@ -31,6 +31,69 @@ export type FilterOptions = {
   hasAvailableProducts: boolean;
 };
 
+export type FilterCriteria = {
+  color?: string;
+  size?: string;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+};
+
+export function filterEdgesByCriteria(
+  edges: { node: ShopifyProductNode }[],
+  criteria: FilterCriteria,
+): { node: ShopifyProductNode }[] {
+  return edges
+    .map((edge) => {
+      const filteredVariants = edge.node.variants.edges.filter(
+        ({ node: variant }) => {
+          let matchesColor = !criteria.color;
+          let matchesSize = !criteria.size;
+          let matchesMinPrice = criteria.minPrice == null;
+          let matchesMaxPrice = criteria.maxPrice == null;
+
+          variant.selectedOptions?.forEach((option) => {
+            if (
+              criteria.color &&
+              option.name.toLowerCase() === "color" &&
+              option.value === criteria.color
+            ) {
+              matchesColor = true;
+            }
+            if (
+              criteria.size &&
+              option.name.toLowerCase() === "size" &&
+              option.value === criteria.size
+            ) {
+              matchesSize = true;
+            }
+          });
+
+          const priceNumber = Number(variant.price);
+          if (criteria.minPrice != null && !Number.isNaN(priceNumber)) {
+            matchesMinPrice = priceNumber >= criteria.minPrice;
+          }
+          if (criteria.maxPrice != null && !Number.isNaN(priceNumber)) {
+            matchesMaxPrice = priceNumber <= criteria.maxPrice;
+          }
+
+          return (
+            matchesColor && matchesSize && matchesMinPrice && matchesMaxPrice
+          );
+        },
+      );
+
+      return {
+        node: {
+          ...edge.node,
+          variants: {
+            edges: filteredVariants,
+          },
+        },
+      };
+    })
+    .filter((edge) => edge.node.variants.edges.length > 0);
+}
+
 export function buildFiltersFromEdges(
   edges: { node: ShopifyProductNode }[],
 ): FilterOptions {

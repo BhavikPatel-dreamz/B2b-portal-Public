@@ -2,7 +2,12 @@ import { type LoaderFunctionArgs } from "react-router";
 import { validateB2BCustomerAccess } from "../../utils/proxy.server";
 import { getStoreByDomain } from "../../services/store.server";
 import { apiVersion } from "../../shopify.server";
-import { buildFiltersFromEdges, FilterOptions } from "./product-filter.utils";
+import {
+  buildFiltersFromEdges,
+  filterEdgesByCriteria,
+  FilterOptions,
+  type FilterCriteria,
+} from "./product-filter.utils";
 
 interface ShopifyVariantNode {
   id: string;
@@ -105,8 +110,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     queryFilters.push(`tag:${tag}`);
   }
 
-  // Note: Color and size filters are applied after fetching from Shopify
-  // as they are stored in variant options and require post-processing
 
   if (available?.toLowerCase() === "true") {
     queryFilters.push("available:true");
@@ -252,18 +255,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
   }));
 
-  const filters: FilterOptions = buildFiltersFromEdges(data.data.filterProducts.edges || []);
+  const criteria: FilterCriteria = {
+    color,
+    size,
+    minPrice: minPrice && !Number.isNaN(Number(minPrice)) ? Number(minPrice) : null,
+    maxPrice: maxPrice && !Number.isNaN(Number(maxPrice)) ? Number(maxPrice) : null,
+  };
 
-  // Filter products by color and size if specified
+  const filters: FilterOptions = buildFiltersFromEdges(
+    filterEdgesByCriteria(data.data.filterProducts.edges || [], criteria),
+  );
+
+  // Filter products by color/size and/or price if specified.
   let filteredProducts: ProductResponse["products"] = products;
 
-  if (color || size) {
+  if (color || size || criteria.minPrice != null || criteria.maxPrice != null) {
     filteredProducts = products
       .map((product) => ({
         ...product,
         variants: product.variants.filter((variant) => {
           let matchesColor = !color;
           let matchesSize = !size;
+          let matchesMinPrice = criteria.minPrice == null;
+          let matchesMaxPrice = criteria.maxPrice == null;
 
           variant.selectedOptions?.forEach((option) => {
             if (color && option.name.toLowerCase() === "color" && option.value === color) {
@@ -274,7 +288,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             }
           });
 
-          return matchesColor && matchesSize;
+          const priceNumber = Number(variant.price);
+          if (criteria.minPrice != null && !Number.isNaN(priceNumber)) {
+            matchesMinPrice = priceNumber >= criteria.minPrice;
+          }
+          if (criteria.maxPrice != null && !Number.isNaN(priceNumber)) {
+            matchesMaxPrice = priceNumber <= criteria.maxPrice;
+          }
+
+          return matchesColor && matchesSize && matchesMinPrice && matchesMaxPrice;
         }),
       }))
       .filter((product) => product.variants.length > 0);

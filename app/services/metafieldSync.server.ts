@@ -201,7 +201,6 @@ export async function syncCompanyCreditMetafields(
     });
 
     const data = await response.json();
-    console.log("Company metafield sync response:", data);
 
     const userErrors = data.data?.metafieldsSet?.userErrors;
     const errorMessage =
