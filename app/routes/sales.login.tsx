@@ -1,5 +1,11 @@
 import { LoaderFunctionArgs, ActionFunctionArgs, redirect } from "react-router";
-import { Form, useLoaderData, useActionData, useNavigation, Link } from "react-router";
+import {
+  Form,
+  useLoaderData,
+  useActionData,
+  useNavigation,
+  Link,
+} from "react-router";
 import prisma from "app/db.server";
 import {
   getSessionTokenFromCookie,
@@ -76,7 +82,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SalesLogin() {
-  const loaderData = useLoaderData<{ error: string | null; success: string | null }>();
+  const loaderData = useLoaderData<{
+    error: string | null;
+    success: string | null;
+  }>();
   const actionData = useActionData<{ error?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
@@ -91,14 +100,21 @@ export default function SalesLogin() {
       <div style={styles.card}>
         {/* Logo / branding */}
         <div style={styles.logoRow}>
-          <div style={styles.logoIcon}>🎁</div>
+          <div style={styles.logoIcon}>
+            <img
+              src="https://cdn.shopify.com/s/files/applications/c6da0a0589e2c3c978aadf2afec07db7_200x200.png?v=1776950914"
+              alt="Logo"
+              style={styles.logoImage}
+            />
+          </div>
           <span style={styles.logoText}>SmartB2B</span>
         </div>
 
         <div style={styles.header}>
           <h1 style={styles.heroText}>Sales Portal</h1>
           <p style={styles.bodyText}>
-            Sign in with your email and password to manage your assigned companies.
+            Sign in with your email and password to manage your assigned
+            companies.
           </p>
         </div>
 
@@ -114,17 +130,20 @@ export default function SalesLogin() {
         {/* Error messages */}
         {(actionData?.error || loaderData?.error) && (
           <div style={styles.errorAlert}>
-            {actionData?.error || (loaderData?.error === "expired"
-              ? "Your session has expired. Please sign in again."
-              : loaderData?.error === "unauthorized"
-              ? "Please sign in to continue."
-              : loaderData?.error)}
+            {actionData?.error ||
+              (loaderData?.error === "expired"
+                ? "Your session has expired. Please sign in again."
+                : loaderData?.error === "unauthorized"
+                  ? "Please sign in to continue."
+                  : loaderData?.error)}
           </div>
         )}
 
         <Form method="post" style={styles.form}>
           <div style={styles.inputGroup}>
-            <label htmlFor="sales-email" style={styles.label}>Email Address</label>
+            <label htmlFor="sales-email" style={styles.label}>
+              Email Address
+            </label>
             <input
               id="sales-email"
               type="email"
@@ -137,7 +156,9 @@ export default function SalesLogin() {
           </div>
 
           <div style={styles.inputGroup}>
-            <label htmlFor="sales-password" style={styles.label}>Password</label>
+            <label htmlFor="sales-password" style={styles.label}>
+              Password
+            </label>
             <input
               id="sales-password"
               type="password"
@@ -208,7 +229,8 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "linear-gradient(135deg, #fdf4f7 0%, #fff7eb 50%, #f3e8ff 100%)",
+    background:
+      "linear-gradient(135deg, #fdf4f7 0%, #fff7eb 50%, #f3e8ff 100%)",
     fontFamily: "'Inter', system-ui, sans-serif",
     padding: "20px",
     position: "relative" as const,
@@ -221,7 +243,8 @@ const styles = {
     width: "400px",
     height: "400px",
     borderRadius: "50%",
-    background: "radial-gradient(circle, rgba(233,30,99,0.08) 0%, transparent 70%)",
+    background:
+      "radial-gradient(circle, rgba(233,30,99,0.08) 0%, transparent 70%)",
     animation: "blobFloat1 8s ease-in-out infinite",
     pointerEvents: "none" as const,
   },
@@ -232,7 +255,8 @@ const styles = {
     width: "500px",
     height: "500px",
     borderRadius: "50%",
-    background: "radial-gradient(circle, rgba(255,107,53,0.08) 0%, transparent 70%)",
+    background:
+      "radial-gradient(circle, rgba(255,107,53,0.08) 0%, transparent 70%)",
     animation: "blobFloat2 10s ease-in-out infinite",
     pointerEvents: "none" as const,
   },
@@ -243,7 +267,8 @@ const styles = {
     width: "300px",
     height: "300px",
     borderRadius: "50%",
-    background: "radial-gradient(circle, rgba(225,190,231,0.1) 0%, transparent 70%)",
+    background:
+      "radial-gradient(circle, rgba(225,190,231,0.1) 0%, transparent 70%)",
     animation: "blobFloat3 12s ease-in-out infinite",
     pointerEvents: "none" as const,
   },
@@ -267,7 +292,16 @@ const styles = {
     marginBottom: "28px",
   },
   logoIcon: {
-    fontSize: "28px",
+    width: "48px",
+    height: "48px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
   },
   logoText: {
     fontFamily: "'Poppins', sans-serif",

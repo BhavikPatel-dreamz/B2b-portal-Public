@@ -16,11 +16,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       user: {
         include: {
           salesCompanies: {
-            include: { company: true }
-          }
-        }
-      }
-    }
+            include: { company: true },
+          },
+        },
+      },
+    },
   });
 
   if (!session || new Date() > new Date(session.expiresAt)) {
@@ -30,7 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return Response.json({
     sessionToken,
     user: session.user,
-    companies: session.user.salesCompanies.map(sc => sc.company),
+    companies: session.user.salesCompanies.map((sc) => sc.company),
   });
 };
 
@@ -42,17 +42,29 @@ export default function SupportDashboard() {
       {/* Sidebar */}
       <aside style={styles.sidebar}>
         <div style={styles.logoContainer}>
-          <div style={styles.logoIcon}>🎁</div>
+          <div style={styles.logoIcon}>
+            <img
+              src="https://cdn.shopify.com/s/files/applications/c6da0a0589e2c3c978aadf2afec07db7_200x200.png?v=1776950914"
+              alt="Logo"
+              style={styles.logoImage}
+            />
+          </div>
           <span style={styles.logoText}>SmartB2B</span>
         </div>
-        
+
         <nav style={styles.nav}>
           <a href="#" style={{ ...styles.navItem, ...styles.navItemActive }}>
             Dashboard
           </a>
-          <a href="#" style={styles.navItem}>Assigned Companies</a>
-          <a href="#" style={styles.navItem}>Orders</a>
-          <a href="#" style={styles.navItem}>Settings</a>
+          <a href="#" style={styles.navItem}>
+            Assigned Companies
+          </a>
+          <a href="#" style={styles.navItem}>
+            Orders
+          </a>
+          <a href="#" style={styles.navItem}>
+            Settings
+          </a>
         </nav>
 
         <div style={styles.sidebarFooter}>
@@ -61,7 +73,9 @@ export default function SupportDashboard() {
               {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
             </div>
             <div style={styles.userInfo}>
-              <div style={styles.userName}>{user.firstName} {user.lastName}</div>
+              <div style={styles.userName}>
+                {user.firstName} {user.lastName}
+              </div>
               <div style={styles.userRole}>Sales Support</div>
             </div>
           </div>
@@ -73,7 +87,9 @@ export default function SupportDashboard() {
         <header style={styles.header}>
           <div>
             <h1 style={styles.heroTitle}>Welcome back, {user.firstName}! 👋</h1>
-            <p style={styles.subtitle}>Here is what's happening with your accounts today.</p>
+            <p style={styles.subtitle}>
+              Here is what's happening with your accounts today.
+            </p>
           </div>
         </header>
 
@@ -119,7 +135,7 @@ export default function SupportDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {companies.map(company => (
+                  {companies.map((company) => (
                     <tr key={company.id} style={styles.tr}>
                       <td style={styles.td}>
                         <strong>{company.name}</strong>
@@ -178,7 +194,16 @@ const styles = {
     marginBottom: "40px",
   },
   logoIcon: {
-    fontSize: "24px",
+    width: "48px",
+    height: "48px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
   },
   logoText: {
     fontFamily: "'Poppins', sans-serif",
@@ -377,5 +402,5 @@ const styles = {
     padding: "48px",
     color: "#5c5f62",
     textAlign: "center" as const,
-  }
+  },
 };
