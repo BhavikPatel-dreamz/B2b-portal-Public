@@ -100,20 +100,54 @@ export default [
     route("cancel-subscription", "routes/app.cancel-subscription.tsx"),
     route("billing-example", "routes/app.billing-example.tsx"),
   ]),
-  
-  
+
   // Unified Sales Portal (single login for all companies/stores)
   route("sales/login", "routes/sales.login.tsx"),
   route("sales/portal", "routes/sales.portal.tsx"),
-  route("sales/portal/company/:companyId/create-order", "routes/sales.portal.company.$companyId.create-order.tsx"),
-  route("sales/portal/company/:companyId/create-order/step2", "routes/sales.portal.company.$companyId.create-order.step2.tsx"),
-  route("sales/portal/company/:companyId/create-order/step3", "routes/sales.portal.company.$companyId.create-order.step3.tsx"),
-  route("sales/portal/company/:companyId/create-quote", "routes/sales.portal.company.$companyId.create-quote.tsx"),
-  route("sales/portal/company/:companyId/create-quote/step2", "routes/sales.portal.company.$companyId.create-quote.step2.tsx"),
-  route("sales/portal/company/:companyId/create-quote/step3", "routes/sales.portal.company.$companyId.create-quote.step3.tsx"),
-  route("sales/portal/company/:companyId/orders", "routes/sales.portal.company.$companyId.orders.tsx"),
-  route("sales/portal/company/:companyId/quotes", "routes/sales.portal.company.$companyId.quotes.tsx"),
-  route("sales/portal/company/:companyId/quotes/:quoteId", "routes/sales.portal.company.$companyId.quotes.$quoteId.tsx"),
+  route(
+    "sales/portal/company/:companyId/create-order",
+    "routes/sales.portal.company.$companyId.create-order.tsx",
+  ),
+  route(
+    "sales/portal/company/:companyId/create-order/step2",
+    "routes/sales.portal.company.$companyId.create-order.step2.tsx",
+  ),
+  route(
+    "sales/portal/company/:companyId/create-order/step3",
+    "routes/sales.portal.company.$companyId.create-order.step3.tsx",
+  ),
+  route(
+    "sales/portal/company/:companyId/create-quote",
+    "routes/sales.portal.company.$companyId.create-quote.tsx",
+  ),
+  route(
+    "sales/portal/company/:companyId/create-quote/step2",
+    "routes/sales.portal.company.$companyId.create-quote.step2.tsx",
+  ),
+  route(
+    "sales/portal/company/:companyId/create-quote/step3",
+    "routes/sales.portal.company.$companyId.create-quote.step3.tsx",
+  ),
+  route(
+    "sales/portal/company/:companyId/orders",
+    "routes/sales.portal.company.$companyId.orders.tsx",
+  ),
+  route("sales/portal/orders", "routes/support.orders.tsx"),
+  route("sales/portal/orders/:orderId", "routes/support.orders.$orderId.tsx"),
+  route(
+    "sales/portal/company/:companyId/quotes",
+    "routes/sales.portal.company.$companyId.quotes.tsx",
+  ),
+  route(
+    "sales/portal/company/:companyId/quotes/:quoteId",
+    "routes/sales.portal.company.$companyId.quotes.$quoteId.tsx",
+  ),
+
+  // Public payment request
+  route(
+    "pay/order/:orderId/:paymentToken",
+    "routes/pay.order.$orderId.$paymentToken.tsx",
+  ),
 
   // Legacy support routes (kept for backward compatibility with invitation links)
   route("support/login", "routes/support.login.tsx"),
@@ -121,7 +155,10 @@ export default [
   route("support/portal", "routes/support.portal.tsx"),
   // App Proxy routes (public, no auth required)
   route("smartb2b", "routes/smartb2b.tsx"),
-  route("quote/:quoteId/:secureToken", "routes/quote.$quoteId.$secureToken.tsx"),
+  route(
+    "quote/:quoteId/:secureToken",
+    "routes/quote.$quoteId.$secureToken.tsx",
+  ),
 
   // Index route
   index("routes/_index/route.tsx"),

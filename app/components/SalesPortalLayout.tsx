@@ -42,7 +42,7 @@ export function SalesPortalSidebar({
       label: "Orders",
       icon: "📦",
       count: orderCount,
-      to: `/sales/portal/company/${company.id}/orders`,
+      to: `/sales/portal/orders?company=${company.id}`,
     },
     {
       key: "quotes" as const,

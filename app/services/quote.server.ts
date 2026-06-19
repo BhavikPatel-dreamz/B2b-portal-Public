@@ -628,6 +628,38 @@ export async function convertQuoteToOrder({
       userCreditUsed: 0,
       notes: quote.internalNotes,
       source: "Sales Portal Quote",
+      orderNumber: createdOrder.name,
+      customerId: quote.customerUserId || quote.customerShopifyId,
+      customerName: [quote.customerFirstName, quote.customerLastName]
+        .filter(Boolean)
+        .join(" "),
+      customerEmail: quote.customerEmail,
+      currencyCode: quote.currencyCode,
+      subtotal: quote.subtotal,
+      discountTotal: quote.discountTotal,
+      taxAmount: quote.taxAmount,
+      shippingAmount: quote.shippingAmount,
+      items: {
+        create: quote.items.map((item) => ({
+          productId: item.productId,
+          productTitle: item.productTitle,
+          variantId: item.variantId,
+          variantTitle: item.variantTitle,
+          sku: item.sku,
+          image: item.image,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discount: item.discount,
+          lineTotal: item.totalPrice,
+        })),
+      },
+      activities: {
+        create: {
+          userId: salesAgentId,
+          action: "Order Created",
+          message: `Converted from quote ${quote.quoteNumber}.`,
+        },
+      },
     },
   });
 
