@@ -1,5 +1,6 @@
 import { redirect, useLoaderData, Link } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import {
   requireSalesSession,
@@ -11,6 +12,10 @@ import {
   SalesPortalLayout,
   salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
+import {
+  getOrderAccessWhere,
+  getOrderNumber,
+} from "app/services/sales-order-management.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -99,32 +104,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  // Get recent orders for this company
+  // Get recent orders for this company using the same access rules as the orders page
+  const recentOrderWhere: Prisma.B2BOrderWhereInput = {
+    AND: [getOrderAccessWhere(user), { companyId: company.id }],
+  };
   const recentOrders = await prisma.b2BOrder.findMany({
-    where: {
-      companyId: company.id,
-      orderStatus: { notIn: ["converted", "archived"] },
-    },
+    where: recentOrderWhere,
     orderBy: { createdAt: "desc" },
     take: 15,
-    select: {
-      id: true,
-      shopifyOrderId: true,
-      orderTotal: true,
-      paymentStatus: true,
-      orderStatus: true,
-      createdAt: true,
+    include: {
+      company: { select: { id: true, name: true } },
       createdByUser: {
-        select: { firstName: true, lastName: true, email: true },
+        select: { id: true, firstName: true, lastName: true, email: true },
       },
+      items: { select: { quantity: true } },
     },
   });
 
   const orderCount = await prisma.b2BOrder.count({
-    where: {
-      companyId: company.id,
-      orderStatus: { notIn: ["converted", "archived"] },
-    },
+    where: recentOrderWhere,
   });
 
   const quoteCount = await prisma.quote.count({
@@ -132,12 +130,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   // Get credit data
+  const creditOrderWhere: Prisma.B2BOrderWhereInput = {
+    AND: [
+      recentOrderWhere,
+      {
+        paymentStatus: { in: ["pending", "partial"] },
+        orderStatus: { notIn: ["cancelled", "converted", "archived"] },
+      },
+    ],
+  };
   const pendingCreditOrders = await prisma.b2BOrder.aggregate({
-    where: {
-      companyId: company.id,
-      paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled", "converted", "archived"] },
-    },
+    where: creditOrderWhere,
     _sum: { remainingBalance: true },
   });
 
@@ -161,9 +164,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       users: activeUsers,
     },
     recentOrders: recentOrders.map((o) => ({
-      ...o,
+      id: o.id,
+      orderNumber: getOrderNumber(o),
+      customerName: o.customerName,
+      customerEmail: o.customerEmail,
+      company: o.company,
+      salesAgent: o.createdByUser,
+      itemCount: o.items.length,
+      quantity: o.items.reduce((sum, item) => sum + item.quantity, 0),
       orderTotal: o.orderTotal?.toString() || "0",
+      currencyCode: o.currencyCode,
+      paymentStatus: o.paymentStatus,
+      orderStatus: o.orderStatus,
       createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString(),
     })),
     orderCount,
     quoteCount,
@@ -216,8 +230,9 @@ export default function SalesPortal() {
       };
       recentOrders: Array<{
         id: string;
-        shopifyOrderId: string | null;
+        orderNumber: string;
         orderTotal: string;
+        currencyCode: string;
         paymentStatus: string;
         orderStatus: string;
         createdAt: string;
@@ -234,8 +249,11 @@ export default function SalesPortal() {
       year: "numeric",
     }).format(new Date(iso));
 
-  const formatCurrency = (val: string | number) =>
-    `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const formatCurrency = (val: string | number, currency = "USD") =>
+    new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    }).format(Number(val) || 0);
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { bg: string; color: string }> = {
@@ -416,14 +434,12 @@ export default function SalesPortal() {
                       <tr key={order.id} style={styles.tr}>
                         <td style={styles.td}>
                           <strong style={{ color: "#2c6ecb" }}>
-                            {order.shopifyOrderId
-                              ? `#${order.shopifyOrderId.split("/").pop()}`
-                              : order.id.slice(0, 8)}
+                            {order.orderNumber}
                           </strong>
                         </td>
                         <td style={styles.td}>{formatDate(order.createdAt)}</td>
                         <td style={styles.td}>
-                          {formatCurrency(order.orderTotal)}
+                          {formatCurrency(order.orderTotal, order.currencyCode)}
                         </td>
                         <td style={styles.td}>
                           {getStatusBadge(order.paymentStatus)}

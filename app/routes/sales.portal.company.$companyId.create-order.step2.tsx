@@ -2,7 +2,16 @@ import { LoaderFunctionArgs, ActionFunctionArgs, redirect } from "react-router";
 import { useLoaderData, Link, useSubmit, useNavigation, useSearchParams, useFetcher } from "react-router";
 import { useState, useEffect } from "react";
 import prisma from "app/db.server";
-import { requireSalesSession, hasCompanyAccess } from "app/utils/sales-session.server";
+import {
+  buildClearSessionCookie,
+  requireSalesSession,
+  hasCompanyAccess,
+} from "app/utils/sales-session.server";
+import {
+  SalesPortalHeader,
+  SalesPortalLayout,
+  salesPortalButtonStyles,
+} from "app/components/SalesPortalLayout";
 import {
   buildSalesDraftLineItems,
   buildSalesDraftShippingLine,
@@ -94,6 +103,13 @@ type SaveDraftResponse = {
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     const formData = await request.formData();
+    const intent = formData.get("intent");
+    if (intent === "logout") {
+      return redirect("/sales/login", {
+        headers: { "Set-Cookie": buildClearSessionCookie() },
+      });
+    }
+
     const actionType = formData.get("actionType") as string;
     const companyId = params.companyId;
 
@@ -824,6 +840,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     company: {
       id: company.id,
       name: company.name,
+      storeName: company.shop.shopName || company.shop.shopDomain,
       creditLimit: company.creditLimit.toString(),
       companyLocationId: locationId,
       companyContactId: companyContactId,
@@ -1479,37 +1496,38 @@ export default function CreateOrderProductCatalog() {
   };
 
   return (
-    <div style={styles.container}>
-      {/* Top Header Navigation */}
-      <header style={styles.header}>
-        <div style={styles.headerContent}>
-          <div style={styles.breadcrumb}>
-            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>Dashboard</Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>{company.name}</Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <Link to={`/sales/portal/company/${company.id}/create-order`} style={styles.breadcrumbLink}>Create Order</Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <span style={styles.breadcrumbCurrent}>Product Catalog</span>
-          </div>
-          <div style={styles.headerUser}>
-            <div style={styles.avatar}>
-              {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
-            </div>
-            <span style={styles.userName}>{user.firstName} {user.lastName}</span>
-          </div>
-        </div>
-      </header>
-
+    <SalesPortalLayout
+      company={company}
+      user={user}
+      activePage={isQuoteMode ? "quotes" : "orders"}
+    >
+      <SalesPortalHeader
+        title={`${isQuoteMode ? "Create Quote" : "Create Order"}: ${company.name}`}
+        subtitle={
+          <>
+            Step 2: Add Products for{" "}
+            <strong style={{ color: "#E91E63" }}>
+              {selectedCustomer.firstName} {selectedCustomer.lastName}
+            </strong>
+          </>
+        }
+        companyId={company.id}
+        actions={
+          <Link to={flowBase} style={salesPortalButtonStyles.secondary}>
+            Back to Customer
+          </Link>
+        }
+      />
+      <div style={styles.container}>
       <main style={styles.mainContent}>
-        <div style={styles.pageHeader}>
+        {/* <div style={styles.pageHeader}>
           <div style={styles.headerInfo}>
             <h1 style={styles.pageTitle}>Create Order: {company.name}</h1>
             <p style={styles.pageSubtitle}>
               Step 2: Add Products for <strong style={{ color: "#E91E63" }}>{selectedCustomer.firstName} {selectedCustomer.lastName}</strong>
             </p>
           </div>
-        </div>
+        </div> */}
 
         {/* Three Column Layout: Filters (Left), Products (Center), Cart Summary (Right) */}
         <div style={styles.layoutGrid}>
@@ -1883,7 +1901,8 @@ export default function CreateOrderProductCatalog() {
           }
         }
       `}</style>
-    </div>
+      </div>
+    </SalesPortalLayout>
   );
 }
 

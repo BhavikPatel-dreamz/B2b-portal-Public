@@ -1,8 +1,16 @@
 import type React from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Form, Link, redirect, useLoaderData } from "react-router";
+import {
+  Form,
+  Link,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 import type { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
+import { getAdminForShop } from "app/shopify.server";
 import {
   SalesPortalHeader,
   SalesPortalLayout,
@@ -15,8 +23,14 @@ import {
 import {
   getOrderAccessWhere,
   getOrderNumber,
+  getAccessibleOrder,
   getSalesOrderAccessLevel,
 } from "app/services/sales-order-management.server";
+import { restoreCredit } from "app/services/creditService";
+import {
+  assertNoShopifyUserErrors,
+  shopifyOrderGraphql,
+} from "app/services/shopify-order-creation.server";
 
 const ORDER_STATUSES = [
   "draft",
@@ -47,6 +61,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const exportType = url.searchParams.get("export") || "";
   const createdOrder = url.searchParams.get("createdOrder") || "";
   const syncWarning = url.searchParams.get("syncWarning") === "1";
+  const deletedOrder = url.searchParams.get("deletedOrder") || "";
   const accessLevel = getSalesOrderAccessLevel(user);
   const accessWhere = getOrderAccessWhere(user);
 
@@ -202,6 +217,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     quoteCount,
     createdOrder,
     syncWarning,
+    deletedOrder,
     filters: {
       search,
       status,
@@ -246,18 +262,141 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await requireSalesSession(request);
+  const { user } = await requireSalesSession(request);
   const formData = await request.formData();
-  if (formData.get("intent") === "logout") {
+  const intent = String(formData.get("intent") || "");
+  if (intent === "logout") {
     return redirect("/sales/login", {
       headers: { "Set-Cookie": buildClearSessionCookie() },
     });
   }
+
+  if (intent === "delete_order") {
+  
+    const orderId = String(formData.get("orderId") || "");
+    if (!orderId) {
+      return Response.json({ error: "Order not found." }, { status: 404 });
+    }
+
+    const order = await getAccessibleOrder(user, orderId);
+    if (!order) {
+      return Response.json({ error: "Order not found." }, { status: 404 });
+    }
+
+    const deletedOrderNumber = getOrderNumber(order);
+
+    try {
+      const admin = order.company.shop.accessToken
+        ? await getAdminForShop(order.company.shop.shopDomain)
+        : undefined;
+
+      if (
+        order.orderStatus !== "cancelled" &&
+        ["pending", "partial"].includes(order.paymentStatus) &&
+        order.remainingBalance.greaterThan(0)
+      ) {
+        await restoreCredit(
+          order.companyId,
+          order.id,
+          order.remainingBalance,
+          user.id,
+          "cancelled",
+          admin as any,
+        );
+      }
+
+      if (
+        order.shopifyOrderId &&
+        admin &&
+        order.orderStatus === "draft" &&
+        !order.shopifyOrderId.includes("/Order/")
+      ) {
+        const draftOrderId = order.shopifyOrderId.startsWith("gid://")
+          ? order.shopifyOrderId
+          : `gid://shopify/DraftOrder/${order.shopifyOrderId}`;
+        const deleteData = await shopifyOrderGraphql<{
+          draftOrderDelete: {
+            deletedId: string | null;
+            userErrors: Array<{ field?: string[] | null; message: string }>;
+          };
+        }>({
+          admin,
+          operation: "DeleteSalesPortalDraftOrder",
+          query: `#graphql
+            mutation DeleteSalesPortalDraftOrder($input: DraftOrderDeleteInput!) {
+              draftOrderDelete(input: $input) {
+                deletedId
+                userErrors { field message }
+              }
+            }
+          `,
+          variables: { input: { id: draftOrderId } },
+        });
+        assertNoShopifyUserErrors(
+          "DeleteSalesPortalDraftOrder",
+          deleteData.draftOrderDelete.userErrors,
+        );
+      }
+
+      const orderIdentifiers = [
+        order.id,
+        order.shopifyOrderId,
+        order.shopifyOrderId?.split("/").pop(),
+      ].filter(Boolean) as string[];
+
+      await prisma.creditTransaction.deleteMany({
+        where: {
+          companyId: order.companyId,
+          orderId: { in: orderIdentifiers },
+        },
+      });
+
+      if (order.shopifyOrderId) {
+        const numericShopifyId = order.shopifyOrderId.split("/").pop();
+        await prisma.notification.deleteMany({
+          where: {
+            shopifyOrderId: {
+              in: [order.shopifyOrderId, numericShopifyId].filter(
+                Boolean,
+              ) as string[],
+            },
+          },
+        });
+      }
+
+      await prisma.b2BOrder.delete({ where: { id: order.id } });
+    } catch (error) {
+      console.error("[sales-order] delete failed", {
+        orderId: order.id,
+        shopifyOrderId: order.shopifyOrderId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return Response.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Order delete failed.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const redirectUrl = new URL(request.url);
+    redirectUrl.searchParams.delete("createdOrder");
+    redirectUrl.searchParams.delete("syncWarning");
+    redirectUrl.searchParams.set("deletedOrder", deletedOrderNumber);
+    return redirect(`${redirectUrl.pathname}${redirectUrl.search}`);
+  }
+
   return Response.json({ error: "Unknown action" }, { status: 400 });
 };
 
 export default function CentralOrderListPage() {
   const data = useLoaderData<any>();
+  const actionData = useActionData<any>();
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle";
   const params = new URLSearchParams();
   Object.entries(data.filters).forEach(([key, value]) => {
     if (value) params.set(key, String(value));
@@ -302,6 +441,14 @@ export default function CentralOrderListPage() {
             ? `${data.createdOrder} is verified in Shopify Orders. Its Sales Portal record is still synchronizing.`
             : `${data.createdOrder} was created and verified in Shopify Orders.`}
         </div>
+      )}
+      {data.deletedOrder && (
+        <div style={styles.successBanner}>
+          {data.deletedOrder} was deleted from the Sales Portal order list.
+        </div>
+      )}
+      {actionData?.error && (
+        <div style={styles.errorBanner}>{actionData.error}</div>
       )}
 
       <section
@@ -485,12 +632,39 @@ export default function CentralOrderListPage() {
                 <td style={styles.td}>{date(order.createdAt)}</td>
                 <td style={styles.td}>{date(order.updatedAt)}</td>
                 <td style={styles.td}>
-                  <Link
-                    to={`/sales/portal/orders/${order.id}`}
-                    style={styles.actionLink}
-                  >
-                    View Details
-                  </Link>
+                  <div style={styles.rowActions}>
+                    <Link
+                      to={`/sales/portal/orders/${order.id}`}
+                      style={styles.actionLink}
+                    >
+                      View Details
+                    </Link>
+                  
+                      <Form
+                        method="post"
+                        style={styles.inlineForm}
+                        onSubmit={(event) => {
+                          if (
+                            !confirm(
+                              `Delete ${order.orderNumber} from the Sales Portal order list?`,
+                            )
+                          ) {
+                            event.preventDefault();
+                          }
+                        }}
+                      >
+                        <input type="hidden" name="intent" value="delete_order" />
+                        <input type="hidden" name="orderId" value={order.id} />
+                        <button
+                          type="submit"
+                          disabled={busy}
+                          style={styles.deleteButton}
+                        >
+                          Delete
+                        </button>
+                      </Form>
+                
+                  </div>
                 </td>
               </tr>
             ))}
@@ -561,6 +735,7 @@ const responsiveCss = `
 const styles: Record<string, React.CSSProperties> = {
   successBanner: { marginBottom: 16, padding: 12, border: "1px solid #a7f3d0", borderRadius: 8, background: "#ecfdf5", color: "#065f46", fontSize: 13 },
   warningBanner: { marginBottom: 16, padding: 12, border: "1px solid #fde68a", borderRadius: 8, background: "#fffbeb", color: "#92400e", fontSize: 13 },
+  errorBanner: { marginBottom: 16, padding: 12, border: "1px solid #fecaca", borderRadius: 8, background: "#fef2f2", color: "#991b1b", fontSize: 13 },
   summaryGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
@@ -678,6 +853,23 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     textDecoration: "none",
     whiteSpace: "nowrap",
+  },
+  rowActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    whiteSpace: "nowrap",
+  },
+  inlineForm: { display: "inline-flex", margin: 0 },
+  deleteButton: {
+    border: 0,
+    padding: 0,
+    background: "transparent",
+    color: "#b42318",
+    font: "inherit",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
   },
   badge: {
     display: "inline-flex",

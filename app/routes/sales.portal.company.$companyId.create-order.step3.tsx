@@ -2,7 +2,16 @@ import { LoaderFunctionArgs, ActionFunctionArgs, redirect } from "react-router";
 import { useLoaderData, Link, useSubmit, useNavigation } from "react-router";
 import { useState, useEffect } from "react";
 import prisma from "app/db.server";
-import { requireSalesSession, hasCompanyAccess } from "app/utils/sales-session.server";
+import {
+  buildClearSessionCookie,
+  requireSalesSession,
+  hasCompanyAccess,
+} from "app/utils/sales-session.server";
+import {
+  SalesPortalHeader,
+  SalesPortalLayout,
+  salesPortalButtonStyles,
+} from "app/components/SalesPortalLayout";
 import {
   buildSalesDraftLineItems,
   buildSalesDraftShippingLine,
@@ -55,9 +64,16 @@ type DraftOrderInput = {
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
-    const { user } = await requireSalesSession(request);
     const companyId = params.companyId;
     const formData = await request.formData();
+    const intent = formData.get("intent");
+    if (intent === "logout") {
+      return redirect("/sales/login", {
+        headers: { "Set-Cookie": buildClearSessionCookie() },
+      });
+    }
+
+    const { user } = await requireSalesSession(request);
     const actionType = formData.get("actionType") as string | null;
 
     if (!["process_order", "save_quote_draft", "submit_quote"].includes(actionType || "")) {
@@ -548,6 +564,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     company: {
       id: company.id,
       name: company.name,
+      storeName: company.shop.shopName || company.shop.shopDomain,
       creditLimit: company.creditLimit.toString(),
     },
     selectedCustomer,
@@ -651,37 +668,38 @@ export default function ReviewOrder() {
   };
 
   return (
-    <div style={styles.container}>
-      {/* Top Header Navigation */}
-      <header style={styles.header}>
-        <div style={styles.headerContent}>
-          <div style={styles.breadcrumb}>
-            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>Dashboard</Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>{company.name}</Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <Link to={`${flowBase}/step2?customerId=${selectedCustomer.shopifyCustomerId}`} style={styles.breadcrumbLink}>Product Catalog</Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <span style={styles.breadcrumbCurrent}>{isQuoteMode ? "Review Quote" : "Review Order"}</span>
-          </div>
-          <div style={styles.headerUser}>
-            <div style={styles.avatar}>
-              {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
-            </div>
-            <span style={styles.userName}>{user.firstName} {user.lastName}</span>
-          </div>
-        </div>
-      </header>
-
+    <SalesPortalLayout
+      company={company}
+      user={user}
+      activePage={isQuoteMode ? "quotes" : "orders"}
+    >
+      <SalesPortalHeader
+        title={isQuoteMode ? "Review B2B Quote" : "Review B2B Order"}
+        subtitle={
+          isQuoteMode
+            ? "Verify pricing, expiration, and notes before saving or sending the quote."
+            : "Verify details and complete the purchasing flow for the company location."
+        }
+        companyId={company.id}
+        actions={
+          <Link
+            to={`${flowBase}/step2?customerId=${selectedCustomer.shopifyCustomerId}`}
+            style={salesPortalButtonStyles.secondary}
+          >
+            Back to Products
+          </Link>
+        }
+      />
+      <div style={styles.container}>
       <main style={styles.mainContent}>
-        <div style={styles.pageHeader}>
+        {/* <div style={styles.pageHeader}>
           <h1 style={styles.pageTitle}>{isQuoteMode ? "Review B2B Quote" : "Review B2B Order"}</h1>
           <p style={styles.pageSubtitle}>
             {isQuoteMode
               ? "Verify pricing, expiration, and notes before saving or sending the quote."
               : "Verify details and complete the purchasing flow for the company location."}
           </p>
-        </div>
+        </div> */}
 
         {errorMsg && (
           <div style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "12px 16px", color: "#991b1b", marginBottom: "20px", fontSize: "14px" }}>
@@ -851,7 +869,8 @@ export default function ReviewOrder() {
           </aside>
         </div>
       </main>
-    </div>
+      </div>
+    </SalesPortalLayout>
   );
 }
 
