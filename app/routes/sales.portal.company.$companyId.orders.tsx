@@ -24,6 +24,7 @@ import {
   SalesPortalLayout,
   salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
+import { getShopifyOrderWhere } from "app/services/sales-order-management.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -50,11 +51,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     return redirect("/sales/portal");
   }
 
-  // Fetch all orders for this company (both drafts and completed)
+  // Fetch only completed Shopify Orders for this company.
   const orders = await prisma.b2BOrder.findMany({
     where: {
-      companyId: company.id,
-      orderStatus: { notIn: ["converted", "archived"] },
+      AND: [
+        { companyId: company.id, orderStatus: { notIn: ["converted", "archived"] } },
+        getShopifyOrderWhere(),
+      ],
     },
     orderBy: { createdAt: "desc" },
     select: {

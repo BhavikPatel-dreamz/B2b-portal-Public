@@ -9,6 +9,7 @@ import {
 import {
   getOrderAccessWhere,
   getOrderNumber,
+  getShopifyOrderWhere,
 } from "app/services/sales-order-management.server";
 
 type LoaderData = {
@@ -107,7 +108,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Get recent orders for this company using the same access rules as the orders page
   const recentOrderWhere: Prisma.B2BOrderWhereInput = {
-    AND: [getOrderAccessWhere(user), { companyId: company.id }],
+    AND: [
+      getOrderAccessWhere(user),
+      getShopifyOrderWhere(),
+      { companyId: company.id },
+    ],
   };
   const recentOrders = await prisma.b2BOrder.findMany({
     where: recentOrderWhere,

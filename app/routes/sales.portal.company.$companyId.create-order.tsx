@@ -12,7 +12,10 @@ import {
   SalesPortalLayout,
   salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
-import { getOrderAccessWhere } from "app/services/sales-order-management.server";
+import {
+  getOrderAccessWhere,
+  getShopifyOrderWhere,
+} from "app/services/sales-order-management.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
@@ -101,7 +104,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   // Calculate available credit using the same visible-order scope as the orders page
   const visibleOrderWhere: Prisma.B2BOrderWhereInput = {
-    AND: [getOrderAccessWhere(user), { companyId: company.id }],
+    AND: [
+      getOrderAccessWhere(user),
+      getShopifyOrderWhere(),
+      { companyId: company.id },
+    ],
   };
   const creditOrderWhere: Prisma.B2BOrderWhereInput = {
     AND: [
