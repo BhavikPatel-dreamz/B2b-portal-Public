@@ -45,6 +45,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const dateFrom = url.searchParams.get("dateFrom") || "";
   const dateTo = url.searchParams.get("dateTo") || "";
   const exportType = url.searchParams.get("export") || "";
+  const createdOrder = url.searchParams.get("createdOrder") || "";
+  const syncWarning = url.searchParams.get("syncWarning") === "1";
   const accessLevel = getSalesOrderAccessLevel(user);
   const accessWhere = getOrderAccessWhere(user);
 
@@ -198,6 +200,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     agents,
     customers,
     quoteCount,
+    createdOrder,
+    syncWarning,
     filters: {
       search,
       status,
@@ -292,6 +296,13 @@ export default function CentralOrderListPage() {
           </Link>
         }
       />
+      {data.createdOrder && (
+        <div style={data.syncWarning ? styles.warningBanner : styles.successBanner}>
+          {data.syncWarning
+            ? `${data.createdOrder} is verified in Shopify Orders. Its Sales Portal record is still synchronizing.`
+            : `${data.createdOrder} was created and verified in Shopify Orders.`}
+        </div>
+      )}
 
       <section
         className="order-summary-grid"
@@ -548,6 +559,8 @@ const responsiveCss = `
   @media (max-width: 620px) { .order-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .order-filter-grid { grid-template-columns: minmax(0, 1fr) !important; } }
 `;
 const styles: Record<string, React.CSSProperties> = {
+  successBanner: { marginBottom: 16, padding: 12, border: "1px solid #a7f3d0", borderRadius: 8, background: "#ecfdf5", color: "#065f46", fontSize: 13 },
+  warningBanner: { marginBottom: 16, padding: 12, border: "1px solid #fde68a", borderRadius: 8, background: "#fffbeb", color: "#92400e", fontSize: 13 },
   summaryGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(6, minmax(0, 1fr))",

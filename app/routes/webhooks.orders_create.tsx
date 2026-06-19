@@ -6,6 +6,7 @@ import { getOrderByShopifyId, upsertOrder } from "../services/order.server";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { syncCompanyCreditMetafields } from "../services/metafieldSync.server";
 import { Prisma } from "@prisma/client";
+import prisma from "app/db.server";
 import {
   getFreePlanOrdersLimitMessage,
   getFreePlanUsage,
@@ -93,6 +94,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response();
       }
 
+      const noteAttributes = ((payload as any).note_attributes || []) as Array<{
+        name: string;
+        value: string;
+      }>;
+      const orderSource =
+        noteAttributes.find((attr) => attr.name === "_source")?.value || null;
+      const salesAgentUserId = noteAttributes.find(
+        (attr) => attr.name === "_sales_agent_user_id",
+      )?.value;
+      const salesAgent = salesAgentUserId
+        ? await prisma.user.findFirst({
+            where: {
+              id: salesAgentUserId,
+              role: "SALES_USER",
+              salesCompanies: { some: { companyId: user.companyId } },
+            },
+            select: { id: true },
+          })
+        : null;
+      const createdByUserId = salesAgent?.id || user.id;
+
       // If this order was created from a draft order, convert it in our database first
       const draftOrderId = (payload as any).draft_order_id as number | undefined;
       if (draftOrderId) {
@@ -107,7 +129,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             {
               shopId: store.id,
               companyId: user.companyId,
-              createdByUserId: user.id,
+              createdByUserId,
               orderTotal: totalPriceStr,
             },
           );
@@ -161,12 +183,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? new Prisma.Decimal(existingOrder.creditUsed)
         : new Prisma.Decimal(0);
 
-      // Extract order source from note_attributes (e.g., 'quick_order')
-      const orderSource =
-        (payload as any).note_attributes?.find(
-          (attr: any) => attr.name === "_source",
-        )?.value || null;
-
       console.log(`🎯 B2B Order Creation - Processing:`, {
         orderId: orderIdNum,
         companyId: user.companyId,
@@ -217,7 +233,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               // Still create the order but mark it as requiring attention
               await upsertOrder({
                 companyId: user.companyId,
-                createdByUserId: user.id,
+                createdByUserId,
                 shopId: store.id,
                 shopifyOrderId: orderGid,
                 orderTotal,
@@ -272,7 +288,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Create B2B order entry via service
       await upsertOrder({
         companyId: user.companyId,
-        createdByUserId: user.id,
+        createdByUserId,
         shopId: store.id,
         shopifyOrderId: orderGid,
         orderTotal,
@@ -299,8 +315,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response();
     } catch (err) {
       console.error("Failed to log B2B order from orders/create webhook", err);
-      // Return 200 so Shopify doesn't retry indefinitely; log for follow-up
-      return new Response();
+      return new Response("Order synchronization failed", { status: 500 });
     }
   } catch (verifyErr) {
     let headers: Record<string, string> | undefined;

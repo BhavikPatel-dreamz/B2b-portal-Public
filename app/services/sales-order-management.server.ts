@@ -25,6 +25,7 @@ export function getOrderAccessWhere(
   const accessLevel = getSalesOrderAccessLevel(user);
   return {
     companyId: { in: companyIds },
+    orderStatus: { notIn: ["converted", "archived"] },
     ...(accessLevel === "agent" ? { createdByUserId: user.id } : {}),
   };
 }
@@ -77,7 +78,9 @@ export function getOrderNumber(order: {
 }) {
   return (
     order.orderNumber ||
-    (order.shopifyOrderId ? `#${order.shopifyOrderId.split("/").pop()}` : null) ||
+    (order.shopifyOrderId
+      ? `#${order.shopifyOrderId.split("/").pop()}`
+      : null) ||
     `ORD-${order.id.slice(-8).toUpperCase()}`
   );
 }

@@ -18,6 +18,14 @@ import {
   getQuoteUrl,
   type QuoteCartItem,
 } from "app/services/quote.server";
+import { getAdminForShop } from "app/shopify.server";
+import {
+  assertNoShopifyUserErrors,
+  retryLocalOrderSync,
+  shopifyOrderGraphql,
+  ShopifyOrderCreationError,
+  verifyShopifyDraftOrder,
+} from "app/services/shopify-order-creation.server";
 
 type DraftCartItem = {
   variantId: string;
@@ -79,6 +87,8 @@ type SaveDraftResponse = {
   name?: string;
   id?: string;
   quoteUrl?: string;
+  message?: string;
+  warning?: string;
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -113,6 +123,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (!company || !company.shop || !company.shop.accessToken || !company.shopifyCompanyId) {
       return Response.json({ error: "Company or shop credentials not found" }, { status: 400 });
     }
+    const admin = await getAdminForShop(company.shop.shopDomain);
 
     const cartData = JSON.parse(cartDataStr || "[]") as DraftCartItem[];
     if (cartData.length === 0) {
@@ -175,21 +186,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
     `;
 
-    const baseMetaRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": company.shop.accessToken,
-      },
-      body: JSON.stringify({ query: baseMetaQuery, variables: { companyId: company.shopifyCompanyId } }),
+    const baseMetaData = await shopifyOrderGraphql<{
+      company: null | {
+        locations?: { nodes?: Array<{ id?: string }> };
+        contacts?: { edges?: ShopifyCompanyContactEdge[] };
+      };
+    }>({
+      admin,
+      operation: "LoadSalesPortalB2BContext",
+      query: baseMetaQuery,
+      variables: { companyId: company.shopifyCompanyId },
     });
-    const baseMetaData = await baseMetaRes.json();
-    const contacts = (baseMetaData.data?.company?.contacts?.edges || []) as ShopifyCompanyContactEdge[];
+    const contacts = baseMetaData.company?.contacts?.edges || [];
     const matchCustGid = `gid://shopify/Customer/${customerId}`;
     const matchedContact = contacts.find((edge) => edge.node.customer?.id === matchCustGid);
     
     const companyLocationId = matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id || 
-                              baseMetaData.data?.company?.locations?.nodes?.[0]?.id || "";
+                              baseMetaData.company?.locations?.nodes?.[0]?.id || "";
     const companyContactId = matchedContact?.node?.id || "";
 
     if (!companyLocationId || !companyContactId) {
@@ -211,7 +224,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
     const shippingLine = buildSalesDraftShippingLine(shippingCost, currencyCode);
 
-    const customAttributes = [{ key: "_source", value: "Sales Portal" }];
+    const customAttributes = [
+      { key: "_source", value: "Sales Portal" },
+      { key: "_sales_agent_user_id", value: user.id },
+    ];
     if (internalNotes) {
       customAttributes.push({ key: "Internal Notes", value: internalNotes });
     }
@@ -268,35 +284,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       draftInput.shippingLine = shippingLine;
     }
 
-    const draftRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": company.shop.accessToken,
-      },
-      body: JSON.stringify({ query: draftOrderMutation, variables: { input: draftInput } }),
+    const draftData = await shopifyOrderGraphql<{
+      draftOrderCreate: {
+        draftOrder: null | {
+          id: string;
+          name: string;
+          totalPriceSet?: { shopMoney?: { amount?: string; currencyCode?: string } };
+        };
+        userErrors: Array<{ field?: string[] | null; message: string }>;
+      };
+    }>({
+      admin,
+      operation: "CreateSalesPortalDraftOrder",
+      query: draftOrderMutation,
+      variables: { input: draftInput },
     });
-
-    const draftData = await draftRes.json();
-    
-    if (draftData.errors && draftData.errors.length > 0) {
-      console.error("GraphQL Top-Level Errors:", draftData.errors);
-      return Response.json({ error: draftData.errors[0].message }, { status: 400 });
-    }
-
-    const errors = draftData.data?.draftOrderCreate?.userErrors || [];
-    if (errors.length > 0) {
-      return Response.json({ error: errors[0].message }, { status: 400 });
-    }
-
-    const createdDraft = draftData.data?.draftOrderCreate?.draftOrder;
+    assertNoShopifyUserErrors("CreateSalesPortalDraftOrder", draftData.draftOrderCreate.userErrors);
+    const createdDraft = draftData.draftOrderCreate.draftOrder;
     if (!createdDraft || !createdDraft.id) {
       return Response.json({ error: "Failed to create draft order. Invalid Shopify response." }, { status: 400 });
     }
-
-    const dbUser = await prisma.user.findFirst({
-      where: { email: user.email }
+    const verifiedDraft = await verifyShopifyDraftOrder(admin, createdDraft.id);
+    console.info("[sales-order] draft verified in Shopify", {
+      id: verifiedDraft.id,
+      name: verifiedDraft.name,
+      status: verifiedDraft.status,
+      companyId: company.id,
+      salesAgentId: user.id,
     });
+
+    const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+    let localSyncWarning: string | undefined;
 
     if (dbUser) {
       const customer = await prisma.user.findFirst({
@@ -315,7 +333,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       
       const shopifyDraftOrderId = createdDraft.id.replace("gid://shopify/DraftOrder/", "");
 
-      await prisma.b2BOrder.upsert({
+      try {
+        await retryLocalOrderSync("persist sales portal draft order", () => prisma.b2BOrder.upsert({
         where: { shopifyOrderId: shopifyDraftOrderId },
         create: {
           companyId: company.id,
@@ -392,14 +411,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             })),
           },
         },
-      });
+        }));
+      } catch (syncError) {
+        localSyncWarning = "The draft is verified in Shopify, but the Sales Portal copy is still synchronizing.";
+        console.error("[sales-order] draft local sync incomplete", {
+          shopifyDraftOrderId: verifiedDraft.id,
+          companyId: company.id,
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      }
+    } else {
+      localSyncWarning = "The draft is verified in Shopify, but the Sales Portal user could not be resolved for local synchronization.";
     }
 
-    return Response.json({ success: true, name: createdDraft.name, id: createdDraft.id });
+    return Response.json({
+      success: true,
+      name: verifiedDraft.name,
+      id: verifiedDraft.id,
+      shopifyStatus: verifiedDraft.status,
+      message: `${verifiedDraft.name} was verified in Shopify Drafts.`,
+      warning: localSyncWarning,
+    });
   } catch (err: any) {
     if (err instanceof Response) throw err;
     console.error("Action Crash Error:", err);
-    return Response.json({ error: `Server crash: ${err?.message || "Unknown error"}` }, { status: 500 });
+    if (err instanceof ShopifyOrderCreationError) {
+      return Response.json(
+        { error: err.message, requestId: err.requestId || undefined },
+        { status: 502 },
+      );
+    }
+    return Response.json({ error: `Draft creation failed: ${err?.message || "Unknown error"}` }, { status: 500 });
   }
 };
 
@@ -835,7 +877,13 @@ export default function CreateOrderProductCatalog() {
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [lastRemovedItem, setLastRemovedItem] = useState<any>(null);
   const [showUndoBanner, setShowUndoBanner] = useState(false);
-  const [draftSaveStatus, setDraftSaveStatus] = useState<{ success?: boolean; error?: string; name?: string } | null>(null);
+  const [draftSaveStatus, setDraftSaveStatus] = useState<{
+    success?: boolean;
+    error?: string;
+    name?: string;
+    message?: string;
+    warning?: string;
+  } | null>(null);
   const isSavingDraft = draftFetcher.state !== "idle";
   const selectedCustomerShopifyId = selectedCustomer.shopifyCustomerId || selectedCustomer.id || "";
   const isQuoteMode = mode === "quote";
@@ -902,7 +950,12 @@ export default function CreateOrderProductCatalog() {
     }
 
     if (draftFetcher.data.success) {
-      setDraftSaveStatus({ success: true, name: draftFetcher.data.name });
+      setDraftSaveStatus({
+        success: true,
+        name: draftFetcher.data.name,
+        message: draftFetcher.data.message,
+        warning: draftFetcher.data.warning,
+      });
     } else {
       setDraftSaveStatus({
         error:
@@ -1124,8 +1177,13 @@ export default function CreateOrderProductCatalog() {
               <div>
                 <strong>Success!</strong>
                 <p style={{ margin: "4px 0 0 0" }}>
-                  {isQuoteMode ? "Quote" : "Order"} has been saved as draft successfully (<strong>{draftSaveStatus.name}</strong>).
+                  {draftSaveStatus.message || <>{isQuoteMode ? "Quote" : "Order"} has been saved as draft successfully (<strong>{draftSaveStatus.name}</strong>).</>}
                 </p>
+                {draftSaveStatus.warning && (
+                  <p style={{ margin: "6px 0 0", color: "#92400e" }}>
+                    {draftSaveStatus.warning}
+                  </p>
+                )}
               </div>
             ) : (
               <div>
