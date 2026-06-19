@@ -1,4 +1,4 @@
-import { redirect, useLoaderData, Link, Form } from "react-router";
+import { redirect, useLoaderData, Link } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "app/db.server";
 import {
@@ -6,6 +6,11 @@ import {
   hasCompanyAccess,
   buildClearSessionCookie,
 } from "app/utils/sales-session.server";
+import {
+  SalesPortalHeader,
+  SalesPortalLayout,
+  salesPortalButtonStyles,
+} from "app/components/SalesPortalLayout";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -115,6 +120,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
+  const orderCount = await prisma.b2BOrder.count({
+    where: {
+      companyId: company.id,
+      orderStatus: { notIn: ["converted", "archived"] },
+    },
+  });
+
   const quoteCount = await prisma.quote.count({
     where: { companyId: company.id },
   });
@@ -153,6 +165,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderTotal: o.orderTotal?.toString() || "0",
       createdAt: o.createdAt.toISOString(),
     })),
+    orderCount,
     quoteCount,
     allCompanies: user.salesCompanies.map((sc) => ({
       id: sc.company.id,
@@ -177,40 +190,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SalesPortal() {
-  const { user, company, recentOrders, quoteCount, allCompanies } = useLoaderData<{
-    user: {
-      id: string;
-      firstName: string | null;
-      lastName: string | null;
-      email: string;
-    };
-    company: {
-      id: string;
-      name: string;
-      contactEmail: string | null;
-      creditLimit: string;
-      usedCredit: string;
-      availableCredit: string;
-      storeName: string | null;
-      users: Array<{
+  const { user, company, recentOrders, orderCount, quoteCount, allCompanies } =
+    useLoaderData<{
+      user: {
         id: string;
-        email: string;
         firstName: string | null;
         lastName: string | null;
-        companyRole: string | null;
+        email: string;
+      };
+      company: {
+        id: string;
+        name: string;
+        contactEmail: string | null;
+        creditLimit: string;
+        usedCredit: string;
+        availableCredit: string;
+        storeName: string | null;
+        users: Array<{
+          id: string;
+          email: string;
+          firstName: string | null;
+          lastName: string | null;
+          companyRole: string | null;
+        }>;
+      };
+      recentOrders: Array<{
+        id: string;
+        shopifyOrderId: string | null;
+        orderTotal: string;
+        paymentStatus: string;
+        orderStatus: string;
+        createdAt: string;
       }>;
-    };
-    recentOrders: Array<{
-      id: string;
-      shopifyOrderId: string | null;
-      orderTotal: string;
-      paymentStatus: string;
-      orderStatus: string;
-      createdAt: string;
-    }>;
-    quoteCount: number;
-    allCompanies: Array<{ id: string; name: string }>;
-  }>();
+      orderCount: number;
+      quoteCount: number;
+      allCompanies: Array<{ id: string; name: string }>;
+    }>();
 
   const formatDate = (iso: string) =>
     new Intl.DateTimeFormat("en-IN", {
@@ -259,172 +274,36 @@ export default function SalesPortal() {
       : 0;
 
   return (
-    <div style={styles.container}>
-      {/* Sidebar */}
-      <aside style={styles.sidebar}>
-        <div style={styles.logoContainer}>
-          <div style={styles.logoIcon}>
-            <img
-              src="https://cdn.shopify.com/s/files/applications/c6da0a0589e2c3c978aadf2afec07db7_200x200.png?v=1776950914"
-              alt="Logo"
-              style={styles.logoImage}
-            />
-          </div>
-          <span style={styles.logoText}>SmartB2B</span>
-        </div>
-
-        {/* Company Switcher */}
-        <div style={styles.companySwitcher}>
-          <div style={styles.companySwitcherLabel}>Current Company</div>
-          <div style={styles.companySwitcherValue}>{company.name}</div>
-          <div style={styles.companySwitcherStore}>{company.storeName}</div>
-        </div>
-
-        <nav style={styles.nav}>
-          <a
-            href="#overview"
-            style={{ ...styles.navItem, ...styles.navItemActive }}
-          >
-            <span style={styles.navIcon}>📊</span> Overview
-          </a>
-          <Link
-            to={`/sales/portal/company/${company.id}/orders`}
-            style={styles.navItem}
-          >
-            <span style={styles.navIcon}>📦</span> Orders ({recentOrders.length}
-            )
-          </Link>
-          <Link
-            to={`/sales/portal/company/${company.id}/quotes`}
-            style={styles.navItem}
-          >
-            <span style={styles.navIcon}>📝</span> Quotes ({quoteCount})
-          </Link>
-        </nav>
-
-        {/* Other Companies */}
-       
-
-        <div style={styles.sidebarFooter}>
-          <div style={styles.userProfile}>
-            <div style={styles.avatar}>
-              {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
-            </div>
-            <div style={styles.userInfo}>
-              <div style={styles.userName}>
-                {user.firstName} {user.lastName}
-              </div>
-              <div style={styles.userRole}>Sales Agent</div>
-            </div>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              gap: "8px",
-              flexDirection: "column" as const,
-            }}
-          >
-            {/* <Link to="/sales/portal" style={styles.backLink}>
-              ← Back to Portal
-            </Link> */}
-            <Form method="post">
-              <input type="hidden" name="intent" value="logout" />
-              <button type="submit" style={styles.logoutBtn}>
-                Sign Out
-              </button>
-            </Form>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main style={styles.mainContent}>
-        {/* Header */}
-        <header
-          style={{
-            ...styles.header,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-          }}
-          id="overview"
-        >
-          <div>
-            <h1 style={styles.heroTitle}>{company.name}</h1>
-            <p style={styles.subtitle}>
-              {company.contactEmail
-                ? `Contact: ${company.contactEmail}`
-                : "Sales Portal"}{" "}
-              · {company.users.length} customer(s) · {company.storeName}
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-            {allCompanies.length > 1 && (
-              <select
-                value={company.id}
-                onChange={(e) => {
-                  const selectedCompanyId = e.target.value;
-                  if (selectedCompanyId !== company.id) {
-                    window.location.href = `/sales/portal?companyId=${selectedCompanyId}`;
-                  }
-                }}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: "8px",
-                  border: "1.5px solid #e5e7eb",
-                  fontSize: "13px",
-                  fontFamily: "'Inter', system-ui, sans-serif",
-                  backgroundColor: "#fff",
-                  color: "#202223",
-                  cursor: "pointer",
-                  minWidth: "160px",
-                }}
+    <SalesPortalLayout
+      company={company}
+      user={user}
+      activePage="overview"
+      orderCount={orderCount}
+      quoteCount={quoteCount}
+    >
+      <div id="overview">
+        <SalesPortalHeader
+          title={company.name}
+          subtitle={`${company.contactEmail ? `Contact: ${company.contactEmail}` : "Sales Portal"} · ${company.users.length} customer(s) · ${company.storeName}`}
+          companyId={company.id}
+          companies={allCompanies}
+          actions={
+            <>
+              <Link
+                to={`/sales/portal/company/${company.id}/create-order`}
+                style={salesPortalButtonStyles.primary}
               >
-                {allCompanies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <Link
-              to={`/sales/portal/company/${company.id}/create-order`}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "10px 18px",
-                backgroundColor: "#111827",
-                color: "#ffffff",
-                borderRadius: "8px",
-                textDecoration: "none",
-                fontWeight: 500,
-                fontSize: "14px",
-                transition: "background-color 0.2s",
-              }}
-            >
-              <span>+</span> Create Order
-            </Link>
-            <Link
-              to={`/sales/portal/company/${company.id}/create-quote`}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "10px 18px",
-                backgroundColor: "#ffffff",
-                color: "#111827",
-                border: "1px solid #d1d5db",
-                borderRadius: "8px",
-                textDecoration: "none",
-                fontWeight: 500,
-                fontSize: "14px",
-              }}
-            >
-              <span>+</span> Create Quote
-            </Link>
-          </div>
-        </header>
+                <span>+</span> Create Order
+              </Link>
+              <Link
+                to={`/sales/portal/company/${company.id}/create-quote`}
+                style={salesPortalButtonStyles.secondary}
+              >
+                <span>+</span> Create Quote
+              </Link>
+            </>
+          }
+        />
 
         {/* Credit Limit Card */}
         <div style={styles.creditCard}>
@@ -432,7 +311,10 @@ export default function SalesPortal() {
             <h2 style={styles.creditTitle}>Company Credit</h2>
           </div>
           <div style={styles.creditBody}>
-            <div style={styles.creditStatGroup}>
+            <div
+              className="sales-portal-credit-stats"
+              style={styles.creditStatGroup}
+            >
               <div style={styles.creditStat}>
                 <span style={styles.creditStatLabel}>Credit Limit</span>
                 <span style={styles.creditStatValue}>
@@ -473,7 +355,7 @@ export default function SalesPortal() {
         </div>
 
         {/* Two columns: Users + Recent Orders */}
-        <div style={styles.twoColGrid}>
+        <div className="sales-portal-overview-grid" style={styles.twoColGrid}>
           {/* Company Users */}
           <div style={styles.card} id="users">
             <h2 style={styles.cardTitle}>Company Users</h2>
@@ -562,203 +444,12 @@ export default function SalesPortal() {
             )}
           </div>
         </div>
-      </main>
-
-      <style>{`
-        a[style]:hover {
-          background-color: #f9fafb !important;
-        }
-      `}</style>
-    </div>
+      </div>
+    </SalesPortalLayout>
   );
 }
 
 const styles = {
-  container: {
-    display: "flex",
-    minHeight: "100vh",
-    backgroundColor: "#fafafa",
-    fontFamily: "'Inter', system-ui, sans-serif",
-  },
-  sidebar: {
-    width: "280px",
-    minWidth: "280px",
-    backgroundColor: "#ffffff",
-    borderRight: "1px solid #eaeaea",
-    display: "flex",
-    flexDirection: "column" as const,
-    padding: "24px 0",
-  },
-  logoContainer: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    padding: "0 24px",
-    marginBottom: "24px",
-  },
-  logoIcon: {
-    width: "48px",
-    height: "48px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoImage: {
-    width: "100%",
-    height: "100%",
-    objectFit: "contain",
-  },
-  logoText: {
-    fontFamily: "'Poppins', sans-serif",
-    fontSize: "20px",
-    fontWeight: 700,
-    background: "linear-gradient(135deg, #E91E63 0%, #FF6B35 100%)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-  },
-  companySwitcher: {
-    margin: "0 16px 24px",
-    padding: "14px 16px",
-    borderRadius: "12px",
-    background: "linear-gradient(135deg, #fdf4f7 0%, #fff7eb 100%)",
-    border: "1px solid #f8d7e3",
-  },
-  companySwitcherLabel: {
-    fontSize: "11px",
-    fontWeight: 600,
-    textTransform: "uppercase" as const,
-    color: "#8c9196",
-    letterSpacing: "0.06em",
-    marginBottom: "4px",
-  },
-  companySwitcherValue: {
-    fontSize: "15px",
-    fontWeight: 700,
-    color: "#E91E63",
-    fontFamily: "'Poppins', sans-serif",
-  },
-  companySwitcherStore: {
-    fontSize: "12px",
-    color: "#8c9196",
-    marginTop: "2px",
-  },
-  nav: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "4px",
-    padding: "0 12px",
-    flex: 1,
-  },
-  navItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    padding: "11px 16px",
-    textDecoration: "none",
-    color: "#5c5f62",
-    borderRadius: "10px",
-    fontWeight: 500,
-    fontSize: "14px",
-    transition: "all 0.2s ease",
-  },
-  navItemActive: {
-    backgroundColor: "#fff0f4",
-    color: "#E91E63",
-    fontWeight: 600,
-  },
-  navIcon: { fontSize: "16px" },
-  otherCompanies: {
-    padding: "16px 24px",
-    borderTop: "1px solid #eaeaea",
-    marginTop: "8px",
-  },
-  otherCompaniesLabel: {
-    fontSize: "11px",
-    fontWeight: 600,
-    textTransform: "uppercase" as const,
-    color: "#8c9196",
-    letterSpacing: "0.06em",
-    marginBottom: "12px",
-  },
-  companyLink: {
-    display: "block",
-    padding: "8px 12px",
-    borderRadius: "8px",
-    textDecoration: "none",
-    color: "#202223",
-    fontSize: "13px",
-    fontWeight: 500,
-    marginBottom: "4px",
-    transition: "background-color 0.2s",
-    backgroundColor: "#f9fafb",
-    border: "1px solid #eaeaea",
-  },
-  sidebarFooter: {
-    padding: "16px 24px",
-    borderTop: "1px solid #eaeaea",
-  },
-  userProfile: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    marginBottom: "12px",
-  },
-  avatar: {
-    width: "36px",
-    height: "36px",
-    borderRadius: "50%",
-    background: "linear-gradient(135deg, #E91E63 0%, #FF6B35 100%)",
-    color: "white",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: 600,
-    fontSize: "14px",
-    fontFamily: "'Poppins', sans-serif",
-  },
-  userInfo: { display: "flex", flexDirection: "column" as const },
-  userName: { fontWeight: 600, fontSize: "13px", color: "#202223" },
-  userRole: { fontSize: "11px", color: "#8c9196" },
-  backLink: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "4px",
-    fontSize: "13px",
-    color: "#2c6ecb",
-    textDecoration: "none",
-    fontWeight: 500,
-  },
-  logoutBtn: {
-    width: "100%",
-    padding: "8px 14px",
-    borderRadius: "8px",
-    border: "1px solid #e5e7eb",
-    backgroundColor: "#fff",
-    color: "#6b7280",
-    fontSize: "12px",
-    fontWeight: 500,
-    cursor: "pointer",
-    fontFamily: "'Inter', sans-serif",
-  },
-  mainContent: {
-    flex: 1,
-    padding: "32px 40px",
-    overflowY: "auto" as const,
-  },
-  header: { marginBottom: "28px" },
-  heroTitle: {
-    fontFamily: "'Poppins', sans-serif",
-    fontSize: "28px",
-    fontWeight: 700,
-    color: "#111",
-    margin: "0 0 6px 0",
-    letterSpacing: "-0.02em",
-  },
-  subtitle: {
-    fontSize: "15px",
-    color: "#5c5f62",
-    margin: 0,
-  },
   // Credit card styles
   creditCard: {
     backgroundColor: "white",
