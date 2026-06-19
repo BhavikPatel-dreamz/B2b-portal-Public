@@ -1,10 +1,33 @@
-import { LoaderFunctionArgs, redirect } from "react-router";
+import { ActionFunctionArgs, LoaderFunctionArgs, redirect } from "react-router";
 import { useLoaderData, Link } from "react-router";
+import type { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import {
   requireSalesSession,
   hasCompanyAccess,
+  buildClearSessionCookie,
 } from "app/utils/sales-session.server";
+import {
+  SalesPortalHeader,
+  SalesPortalLayout,
+  salesPortalButtonStyles,
+} from "app/components/SalesPortalLayout";
+import { getOrderAccessWhere } from "app/services/sales-order-management.server";
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "logout") {
+    return redirect("/sales/login", {
+      headers: {
+        "Set-Cookie": buildClearSessionCookie(),
+      },
+    });
+  }
+
+  return Response.json({ error: "Unknown intent" }, { status: 400 });
+};
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -76,13 +99,21 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
   }
 
-  // Calculate available credit
+  // Calculate available credit using the same visible-order scope as the orders page
+  const visibleOrderWhere: Prisma.B2BOrderWhereInput = {
+    AND: [getOrderAccessWhere(user), { companyId: company.id }],
+  };
+  const creditOrderWhere: Prisma.B2BOrderWhereInput = {
+    AND: [
+      visibleOrderWhere,
+      {
+        paymentStatus: { in: ["pending", "partial"] },
+        orderStatus: { notIn: ["cancelled", "converted", "archived"] },
+      },
+    ],
+  };
   const pendingCreditOrders = await prisma.b2BOrder.aggregate({
-    where: {
-      companyId: company.id,
-      paymentStatus: { in: ["pending", "partial"] },
-      orderStatus: { notIn: ["cancelled", "converted", "archived"] },
-    },
+    where: creditOrderWhere,
     _sum: { remainingBalance: true },
   });
 
@@ -174,6 +205,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     company: {
       id: company.id,
       name: company.name,
+      storeName: company.shop.shopName || company.shop.shopDomain,
       creditLimit: creditLimit.toString(),
       availableCredit: availableCredit.toString(),
       users: activeUsers,
@@ -194,6 +226,7 @@ export default function CreateOrderCustomerSelection() {
     company: {
       id: string;
       name: string;
+      storeName: string | null;
       creditLimit: string;
       availableCredit: string;
       users: Array<{
@@ -227,38 +260,25 @@ export default function CreateOrderCustomerSelection() {
     `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
   return (
-    <div style={styles.container}>
-      {/* Top Header Navigation */}
-      <header style={styles.header}>
-        <div style={styles.headerContent}>
-          <div style={styles.breadcrumb}>
-            <Link
-              to={`/sales/portal?companyId=${company.id}`}
-              style={styles.breadcrumbLink}
-            >
-              Dashboard
-            </Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <Link
-              to={`/sales/portal?companyId=${company.id}`}
-              style={styles.breadcrumbLink}
-            >
-              {company.name}
-            </Link>
-            <span style={styles.breadcrumbSeparator}>/</span>
-            <span style={styles.breadcrumbCurrent}>{flowLabel}</span>
-          </div>
-          <div style={styles.headerUser}>
-            <div style={styles.avatar}>
-              {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
-            </div>
-            <span style={styles.userName}>
-              {user.firstName} {user.lastName}
-            </span>
-          </div>
-        </div>
-      </header>
-
+    <SalesPortalLayout
+      company={company}
+      user={user}
+      activePage={mode === "quote" ? "quotes" : "orders"}
+    >
+      <SalesPortalHeader
+        title={`${flowLabel}: ${company.name}`}
+        subtitle="Step 1: Select Customer"
+        companyId={company.id}
+        actions={
+          <Link
+            to={`/sales/portal?companyId=${company.id}`}
+            style={salesPortalButtonStyles.secondary}
+          >
+            Back to Overview
+          </Link>
+        }
+      />
+      <div style={styles.container}>
       <main style={styles.mainContent}>
         <div style={styles.pageHeader}>
           <h1 style={styles.pageTitle}>{flowLabel}: {company.name}</h1>
@@ -402,7 +422,8 @@ export default function CreateOrderCustomerSelection() {
           background-color: #fff0f4 !important;
         }
       `}</style>
-    </div>
+      </div>
+    </SalesPortalLayout>
   );
 }
 
