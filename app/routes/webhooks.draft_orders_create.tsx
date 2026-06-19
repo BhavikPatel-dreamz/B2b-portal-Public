@@ -45,6 +45,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const orderSource =
       draftOrder.note_attributes?.find((attr) => attr.name === "_source")
         ?.value || null;
+    const salesAgentUserId =
+      draftOrder.note_attributes?.find(
+        (attr) => attr.name === "_sales_agent_user_id",
+      )?.value || null;
 
     // Validate required fields from the payload
     if (!draftOrder.id || !draftOrder.total_price) {
@@ -95,6 +99,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.log("❌ No B2B company found for customer - skipping B2B processing");
       return new Response("OK", { status: 200 });
     }
+
+    const salesAgent = salesAgentUserId
+      ? await prisma.user.findFirst({
+          where: {
+            id: salesAgentUserId,
+            role: "SALES_USER",
+            salesCompanies: { some: { companyId: b2bUser.company.id } },
+          },
+          select: { id: true },
+        })
+      : null;
+    const createdByUserId = salesAgent?.id || b2bUser.id;
 
     console.log(`✅ Found B2B company: ${b2bUser.company.name} (ID: ${b2bUser.company.id})`);
 
@@ -163,7 +179,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const draftOrderData = await upsertOrder({
         shopifyOrderId: draftOrder.id.toString(),
         companyId: b2bUser.company.id,
-        createdByUserId: b2bUser.id,
+        createdByUserId,
         shopId: store.id,
         orderTotal: totalAmount,
         creditUsed: totalAmount, // Use total amount since we deducted credit

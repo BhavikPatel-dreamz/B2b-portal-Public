@@ -19,6 +19,15 @@ import {
   getQuoteUrl,
   type QuoteCartItem,
 } from "app/services/quote.server";
+import { getAdminForShop } from "app/shopify.server";
+import {
+  assertNoShopifyUserErrors,
+  retryLocalOrderSync,
+  shopifyOrderGraphql,
+  ShopifyOrderCreationError,
+  verifyShopifyDraftOrder,
+  verifyShopifyOrder,
+} from "app/services/shopify-order-creation.server";
 
 type DraftOrderInput = {
   lineItems: SalesDraftLineItemInput[];
@@ -76,6 +85,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (!company || !company.shop || !company.shop.accessToken || !company.shopifyCompanyId) {
     return Response.json({ error: "Company or shop credentials not found" }, { status: 400 });
   }
+  const admin = await getAdminForShop(company.shop.shopDomain);
 
   const cartData = JSON.parse(cartDataStr || "[]") as SalesCartItem[];
   if (cartData.length === 0) {
@@ -139,21 +149,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
   `;
 
-  const baseMetaRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": company.shop.accessToken,
-    },
-    body: JSON.stringify({ query: baseMetaQuery, variables: { companyId: company.shopifyCompanyId } }),
+  const baseMetaData = await shopifyOrderGraphql<{
+    company: null | {
+      locations?: { nodes?: Array<{ id?: string }> };
+      contacts?: { edges?: Array<any> };
+    };
+  }>({
+    admin,
+    operation: "LoadSalesPortalB2BContext",
+    query: baseMetaQuery,
+    variables: { companyId: company.shopifyCompanyId },
   });
-  const baseMetaData = await baseMetaRes.json();
-  const contacts = baseMetaData.data?.company?.contacts?.edges || [];
+  const contacts = baseMetaData.company?.contacts?.edges || [];
   const matchCustGid = `gid://shopify/Customer/${customerId}`;
   const matchedContact = contacts.find((edge: any) => edge.node.customer?.id === matchCustGid);
   
   const companyLocationId = matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id || 
-                            baseMetaData.data?.company?.locations?.nodes?.[0]?.id || "";
+                            baseMetaData.company?.locations?.nodes?.[0]?.id || "";
   const companyContactId = matchedContact?.node?.id || "";
 
   if (!companyLocationId || !companyContactId) {
@@ -176,7 +188,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
   const shippingLine = buildSalesDraftShippingLine(shippingCost, currencyCode);
 
-  const customAttributes = [{ key: "_source", value: "Sales Portal" }];
+  const customAttributes = [
+    { key: "_source", value: "Sales Portal" },
+    { key: "_sales_agent_user_id", value: user.id },
+  ];
   if (internalNotes) {
     customAttributes.push({ key: "Internal Notes", value: internalNotes });
   }
@@ -233,36 +248,35 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     draftInput.shippingLine = shippingLine;
   }
 
-  const draftRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": company.shop.accessToken,
-    },
-    body: JSON.stringify({ query: draftOrderMutation, variables: { input: draftInput } }),
+  const draftData = await shopifyOrderGraphql<{
+    draftOrderCreate: {
+      draftOrder: null | { id: string };
+      userErrors: Array<{ field?: string[] | null; message: string }>;
+    };
+  }>({
+    admin,
+    operation: "CreateSalesPortalOrderDraft",
+    query: draftOrderMutation,
+    variables: { input: draftInput },
   });
-
-  const draftData = await draftRes.json();
-  
-  if (draftData.errors && draftData.errors.length > 0) {
-    console.error("GraphQL Top-Level Errors:", draftData.errors);
-    return Response.json({ error: draftData.errors[0].message }, { status: 400 });
-  }
-
-  const errors = draftData.data?.draftOrderCreate?.userErrors || [];
-  if (errors.length > 0) {
-    return Response.json({ error: errors[0].message }, { status: 400 });
-  }
-
-  const draftId = draftData.data?.draftOrderCreate?.draftOrder?.id;
+  assertNoShopifyUserErrors("CreateSalesPortalOrderDraft", draftData.draftOrderCreate.userErrors);
+  const draftId = draftData.draftOrderCreate.draftOrder?.id;
   if (!draftId) {
     return Response.json({ error: "Failed to create draft order. Invalid Shopify response." }, { status: 400 });
   }
+  const verifiedDraft = await verifyShopifyDraftOrder(admin, draftId);
+  console.info("[sales-order] completion draft verified in Shopify", {
+    id: verifiedDraft.id,
+    name: verifiedDraft.name,
+    status: verifiedDraft.status,
+    companyId: company.id,
+    salesAgentId: user.id,
+  });
 
   // 4. Complete Draft Order (Convert to Final Shopify Order)
   const completeMutation = `
-    mutation CompleteDraftOrder($id: ID!, $paymentPending: Boolean) {
-      draftOrderComplete(id: $id, paymentPending: $paymentPending) {
+    mutation CompleteDraftOrder($id: ID!) {
+      draftOrderComplete(id: $id) {
         draftOrder {
           order {
             id
@@ -282,36 +296,41 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
   `;
 
-  const completeRes = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": company.shop.accessToken,
-    },
-    body: JSON.stringify({ query: completeMutation, variables: { id: draftId, paymentPending: true } }),
+  const completeData = await shopifyOrderGraphql<{
+    draftOrderComplete: {
+      draftOrder: null | {
+        order: null | {
+          id: string;
+          name: string;
+          totalPriceSet?: { shopMoney?: { amount?: string; currencyCode?: string } };
+        };
+      };
+      userErrors: Array<{ field?: string[] | null; message: string }>;
+    };
+  }>({
+    admin,
+    operation: "CompleteSalesPortalDraftOrder",
+    query: completeMutation,
+    variables: { id: draftId },
   });
-
-  const completeData = await completeRes.json();
-  
-  if (completeData.errors && completeData.errors.length > 0) {
-    console.error("GraphQL Top-Level Errors (Complete):", completeData.errors);
-    return Response.json({ error: completeData.errors[0].message }, { status: 400 });
-  }
-
-  const completeErrors = completeData.data?.draftOrderComplete?.userErrors || [];
-  if (completeErrors.length > 0) {
-    return Response.json({ error: completeErrors[0].message }, { status: 400 });
-  }
-
-  const createdOrder = completeData.data?.draftOrderComplete?.draftOrder?.order;
+  assertNoShopifyUserErrors("CompleteSalesPortalDraftOrder", completeData.draftOrderComplete.userErrors);
+  const createdOrder = completeData.draftOrderComplete.draftOrder?.order;
   if (!createdOrder || !createdOrder.id) {
     return Response.json({ error: "Failed to complete draft order. Invalid Shopify response." }, { status: 400 });
   }
+  const verifiedOrder = await verifyShopifyOrder(admin, createdOrder.id);
+  console.info("[sales-order] final order verified in Shopify", {
+    id: verifiedOrder.id,
+    name: verifiedOrder.name,
+    financialStatus: verifiedOrder.displayFinancialStatus,
+    fulfillmentStatus: verifiedOrder.displayFulfillmentStatus,
+    companyId: company.id,
+    salesAgentId: user.id,
+  });
 
   // 5. Record final order details to the local database
-  const dbUser = await prisma.user.findFirst({
-    where: { email: user.email }
-  });
+  const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+  let localSyncWarning = false;
 
   if (dbUser) {
     const customer = await prisma.user.findFirst({
@@ -328,21 +347,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const shopifyOrderTotal = Number(createdOrder.totalPriceSet?.shopMoney?.amount);
     const orderTotal = Number.isFinite(shopifyOrderTotal) ? shopifyOrderTotal : totals.total;
 
-    await prisma.b2BOrder.create({
-      data: {
+    try {
+      await retryLocalOrderSync("persist completed sales portal order", () =>
+        prisma.b2BOrder.upsert({
+      where: { shopifyOrderId: verifiedOrder.id },
+      create: {
         companyId: company.id,
         createdByUserId: dbUser.id,
         shopId: company.shopId,
-        shopifyOrderId: createdOrder.id,
+        shopifyOrderId: verifiedOrder.id,
         orderTotal: orderTotal,
         creditUsed: 0,
         paymentStatus: "pending",
-        orderStatus: "completed",
+        orderStatus: "payment_pending",
         remainingBalance: orderTotal,
         userCreditUsed: 0,
         notes: internalNotes,
         source: "Sales Portal",
-        orderNumber: createdOrder.name,
+        orderNumber: verifiedOrder.name,
         customerId,
         customerName: customer ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") : null,
         customerEmail: customer?.email,
@@ -368,15 +390,69 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         activities: {
           create: { userId: dbUser.id, action: "Order Created", message: "Order submitted through the Sales Portal." },
         },
-      }
+      },
+      update: {
+        companyId: company.id,
+        createdByUserId: dbUser.id,
+        orderNumber: verifiedOrder.name,
+        orderTotal,
+        remainingBalance: orderTotal,
+        paymentStatus: "pending",
+        orderStatus: "payment_pending",
+        customerId,
+        customerName: customer ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") : null,
+        customerEmail: customer?.email,
+        currencyCode,
+        subtotal: totals.subtotal,
+        discountTotal: totals.discountTotal,
+        taxAmount: totals.estimatedTax,
+        shippingAmount: shippingCost,
+        notes: internalNotes,
+        source: "Sales Portal",
+        items: {
+          deleteMany: {},
+          create: cartData.map((item) => ({
+            productId: item.productId,
+            productTitle: item.productTitle || item.variantTitle || "Product",
+            variantId: item.variantId,
+            variantTitle: item.variantTitle,
+            sku: item.sku,
+            image: item.image,
+            quantity: item.quantity,
+            unitPrice: Number(item.price),
+            discount: 0,
+            lineTotal: Number(item.price) * item.quantity,
+          })),
+        },
+      },
+        }));
+    } catch (syncError) {
+      localSyncWarning = true;
+      console.error("[sales-order] final order local sync incomplete", {
+        shopifyOrderId: verifiedOrder.id,
+        companyId: company.id,
+        error: syncError instanceof Error ? syncError.message : String(syncError),
+      });
+    }
+  } else {
+    localSyncWarning = true;
+    console.error("[sales-order] final order local sync skipped: sales user not found", {
+      shopifyOrderId: verifiedOrder.id,
+      salesAgentId: user.id,
     });
   }
 
-    return redirect(`/sales/portal?companyId=${company.id}&successOrder=${createdOrder.name}`);
+    return redirect(`/sales/portal/orders?company=${company.id}&createdOrder=${encodeURIComponent(verifiedOrder.name)}${localSyncWarning ? "&syncWarning=1" : ""}`);
   } catch (err: any) {
     if (err instanceof Response) throw err;
     console.error("Action Crash Error (Complete Order):", err);
-    return Response.json({ error: `Server crash: ${err?.message || "Unknown error"}` }, { status: 500 });
+    if (err instanceof ShopifyOrderCreationError) {
+      return Response.json(
+        { error: err.message, requestId: err.requestId || undefined },
+        { status: 502 },
+      );
+    }
+    return Response.json({ error: `Order creation failed: ${err?.message || "Unknown error"}` }, { status: 500 });
   }
 };
 
