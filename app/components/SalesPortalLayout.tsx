@@ -13,19 +13,21 @@ export type SalesPortalUser = {
   email: string;
 };
 
-type ActivePage = "overview" | "orders" | "quotes";
+type ActivePage = "overview" | "orders" | "drafts" | "quotes";
 
 export function SalesPortalSidebar({
   company,
   user,
   activePage,
   orderCount,
+  draftCount,
   quoteCount,
 }: {
   company: SalesPortalCompany;
   user: SalesPortalUser;
   activePage: ActivePage;
   orderCount?: number;
+  draftCount?: number;
   quoteCount?: number;
 }) {
   const displayName =
@@ -43,6 +45,13 @@ export function SalesPortalSidebar({
       icon: "📦",
       count: orderCount,
       to: `/sales/portal/orders?company=${company.id}`,
+    },
+    {
+      key: "drafts" as const,
+      label: "Drafts",
+      icon: "🧾",
+      count: draftCount,
+      to: `/sales/portal/drafts?company=${company.id}`,
     },
     {
       key: "quotes" as const,
@@ -172,6 +181,7 @@ export function SalesPortalLayout({
   user,
   activePage,
   orderCount,
+  draftCount,
   quoteCount,
   children,
 }: {
@@ -179,6 +189,7 @@ export function SalesPortalLayout({
   user: SalesPortalUser;
   activePage: ActivePage;
   orderCount?: number;
+  draftCount?: number;
   quoteCount?: number;
   children: ReactNode;
 }) {
@@ -189,6 +200,7 @@ export function SalesPortalLayout({
         user={user}
         activePage={activePage}
         orderCount={orderCount}
+        draftCount={draftCount}
         quoteCount={quoteCount}
       />
       <main className="sales-portal-main" style={styles.main}>

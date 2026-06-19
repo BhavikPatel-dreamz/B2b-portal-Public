@@ -51,11 +51,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     return redirect("/sales/portal");
   }
 
-  // Fetch only completed Shopify Orders for this company.
+  // Fetch only real Shopify Orders for this company.
   const orders = await prisma.b2BOrder.findMany({
     where: {
       AND: [
-        { companyId: company.id, orderStatus: { notIn: ["converted", "archived"] } },
+        {
+          companyId: company.id,
+          orderStatus: { notIn: ["converted", "archived"] },
+        },
         getShopifyOrderWhere(),
       ],
     },

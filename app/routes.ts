@@ -134,6 +134,9 @@ export default [
   ),
   route("sales/portal/orders", "routes/support.orders.tsx"),
   route("sales/portal/orders/:orderId", "routes/support.orders.$orderId.tsx"),
+  route("sales/portal/drafts", "routes/support.drafts.tsx"),
+  route("sales/portal/drafts/:draftId", "routes/sales.portal.drafts.$draftId.tsx"),
+  route("support/drafts/:draftId", "routes/support.drafts.$draftId.tsx"),
   route(
     "sales/portal/company/:companyId/quotes",
     "routes/sales.portal.company.$companyId.quotes.tsx",
