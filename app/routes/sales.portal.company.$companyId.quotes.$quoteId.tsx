@@ -11,6 +11,7 @@ import {
 } from "react-router";
 import prisma from "app/db.server";
 import {
+  buildClearSessionCookie,
   hasCompanyAccess,
   requireSalesSession,
 } from "app/utils/sales-session.server";
@@ -21,6 +22,7 @@ import {
   sendQuoteToCustomer,
   serializeQuote,
 } from "app/services/quote.server";
+import { SalesPortalQuoteShell } from "app/components/SalesPortalQuoteShell";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -33,7 +35,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const quote = await prisma.quote.findFirst({
     where: { id: quoteId, companyId },
     include: {
-      company: { include: { shop: { select: { shopName: true, shopDomain: true } } } },
+      company: {
+        include: { shop: { select: { shopName: true, shopDomain: true } } },
+      },
       salesAgent: { select: { firstName: true, lastName: true, email: true } },
       items: { orderBy: { createdAt: "asc" } },
       activities: { orderBy: { createdAt: "desc" } },
@@ -56,6 +60,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   return Response.json({
     quote: serializeQuote(quote),
+    user: {
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+    },
+    allCompanies: user.salesCompanies.map((item) => ({
+      id: item.company.id,
+      name: item.company.name,
+    })),
+    quoteCount: await prisma.quote.count({ where: { companyId } }),
     quoteUrl: getQuoteUrl(request, quote),
     created: new URL(request.url).searchParams.get("created") === "1",
     passedQuoteUrl: new URL(request.url).searchParams.get("quoteUrl") || "",
@@ -72,6 +86,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "");
+  if (intent === "logout") {
+    return redirect("/sales/login", {
+      headers: { "Set-Cookie": buildClearSessionCookie() },
+    });
+  }
   const quote = await prisma.quote.findFirst({
     where: { id: quoteId, companyId },
     include: { items: true },
@@ -83,7 +102,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     if (intent === "update_quote") {
       if (quote.status !== "draft") {
-        return Response.json({ error: "Only draft quotes can be edited." }, { status: 400 });
+        return Response.json(
+          { error: "Only draft quotes can be edited." },
+          { status: 400 },
+        );
       }
       const title = String(formData.get("title") || "").trim();
       const customerNotes = String(formData.get("customerNotes") || "");
@@ -95,7 +117,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           title: title || quote.title,
           customerNotes,
           internalNotes,
-          expiresAt: expires ? new Date(`${expires}T23:59:59.999`) : quote.expiresAt,
+          expiresAt: expires
+            ? new Date(`${expires}T23:59:59.999`)
+            : quote.expiresAt,
         },
       });
       await logQuoteActivity({
@@ -109,8 +133,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     if (intent === "send_quote" || intent === "resend_quote") {
-      const result = await sendQuoteToCustomer({ quoteId: quote.id, request, userId: user.id });
-      return Response.json({ success: true, message: `Quote sent. Link: ${result.quoteUrl}` });
+      const result = await sendQuoteToCustomer({
+        quoteId: quote.id,
+        request,
+        userId: user.id,
+      });
+      return Response.json({
+        success: true,
+        message: `Quote sent. Link: ${result.quoteUrl}`,
+      });
     }
 
     if (intent === "cancel_quote") {
@@ -180,11 +211,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         action: "Quote Created",
         message: `Duplicated from ${quote.quoteNumber}.`,
       });
-      return redirect(`/sales/portal/company/${companyId}/quotes/${duplicate.id}`);
+      return redirect(
+        `/sales/portal/company/${companyId}/quotes/${duplicate.id}`,
+      );
     }
 
     if (intent === "convert_quote") {
-      const result = await convertQuoteToOrder({ quoteId: quote.id, salesAgentId: user.id });
+      const result = await convertQuoteToOrder({
+        quoteId: quote.id,
+        salesAgentId: user.id,
+      });
       return Response.json({
         success: true,
         message: `Quote converted to order ${result.shopifyOrder.name || result.shopifyOrder.id}.`,
@@ -201,7 +237,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function QuoteDetailPage() {
-  const { quote, quoteUrl, created, passedQuoteUrl } = useLoaderData<any>();
+  const {
+    quote,
+    quoteUrl,
+    created,
+    passedQuoteUrl,
+    user,
+    allCompanies,
+    quoteCount,
+  } = useLoaderData<any>();
   const actionData = useActionData<any>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state !== "idle";
@@ -224,69 +268,142 @@ export default function QuoteDetailPage() {
   const dateInput = quote.expiresAt.slice(0, 10);
 
   return (
-    <div style={styles.page}>
-      <header style={styles.header}>
+    <SalesPortalQuoteShell
+      company={{
+        id: quote.companyId,
+        name: quote.company.name,
+        storeName: quote.company.shop.shopName || quote.company.shop.shopDomain,
+      }}
+      user={user}
+      allCompanies={allCompanies}
+      quoteCount={quoteCount}
+    >
+      <header className="sales-quote-header" style={styles.header}>
         <div>
-          <Link to={`/sales/portal/company/${quote.companyId}/quotes`} style={styles.backLink}>Back to Quotes</Link>
+          <Link
+            to={`/sales/portal/company/${quote.companyId}/quotes`}
+            style={styles.backLink}
+          >
+            Back to Quotes
+          </Link>
           <h1 style={styles.title}>{quote.quoteNumber}</h1>
           <p style={styles.subtitle}>{quote.title}</p>
         </div>
-        <div style={styles.headerActions}>
-          <Form method="post"><input type="hidden" name="intent" value="send_quote" /><button disabled={isSubmitting} style={styles.primaryBtn}>{quote.status === "draft" ? "Send Quote" : "Resend Quote"}</button></Form>
-          <Form method="post"><input type="hidden" name="intent" value="duplicate_quote" /><button style={styles.secondaryBtn}>Duplicate</button></Form>
-          {quote.status === "approved" && <Form method="post"><input type="hidden" name="intent" value="convert_quote" /><button disabled={isSubmitting} style={styles.primaryBtn}>Convert To Order</button></Form>}
-          {["draft", "sent", "viewed"].includes(quote.status) && <Form method="post"><input type="hidden" name="intent" value="cancel_quote" /><button style={styles.secondaryBtn}>Cancel</button></Form>}
+        <div
+          className="sales-quote-header-actions"
+          style={styles.headerActions}
+        >
+          <Form method="post">
+            <input type="hidden" name="intent" value="send_quote" />
+            <button disabled={isSubmitting} style={styles.primaryBtn}>
+              {quote.status === "draft" ? "Send Quote" : "Resend Quote"}
+            </button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="intent" value="duplicate_quote" />
+            <button style={styles.secondaryBtn}>Duplicate</button>
+          </Form>
+          {quote.status === "approved" && (
+            <Form method="post">
+              <input type="hidden" name="intent" value="convert_quote" />
+              <button disabled={isSubmitting} style={styles.primaryBtn}>
+                Convert To Order
+              </button>
+            </Form>
+          )}
+          {["draft", "sent", "viewed"].includes(quote.status) && (
+            <Form method="post">
+              <input type="hidden" name="intent" value="cancel_quote" />
+              <button style={styles.secondaryBtn}>Cancel</button>
+            </Form>
+          )}
         </div>
       </header>
 
-      {created && <div style={styles.success}>Quote created. Secure link: {shareUrl}</div>}
+      {created && (
+        <div style={styles.success}>Quote created. Secure link: {shareUrl}</div>
+      )}
       {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
-      {actionData?.success && <div style={styles.success}>{actionData.message}</div>}
+      {actionData?.success && (
+        <div style={styles.success}>{actionData.message}</div>
+      )}
 
-      <div style={styles.grid}>
+      <div className="sales-quote-detail-grid" style={styles.grid}>
         <section style={styles.mainCol}>
-          <div style={styles.card}>
+          <div className="sales-quote-card" style={styles.card}>
             <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Customer Information</h2>
               <span style={styles.badge}>{quote.status}</span>
             </div>
             <div style={styles.infoGrid}>
               <Info label="Company" value={quote.company.name} />
-              <Info label="Customer" value={`${quote.customerFirstName || ""} ${quote.customerLastName || ""}`.trim() || quote.customerEmail} />
+              <Info
+                label="Customer"
+                value={
+                  `${quote.customerFirstName || ""} ${quote.customerLastName || ""}`.trim() ||
+                  quote.customerEmail
+                }
+              />
               <Info label="Email" value={quote.customerEmail} />
-              <Info label="Sales Agent" value={quote.salesAgent?.firstName || quote.salesAgent?.email || "Sales Agent"} />
+              <Info
+                label="Sales Agent"
+                value={
+                  quote.salesAgent?.firstName ||
+                  quote.salesAgent?.email ||
+                  "Sales Agent"
+                }
+              />
               <Info label="Created" value={fmtDate(quote.createdAt)} />
               <Info label="Expires" value={fmtDate(quote.expiresAt)} />
             </div>
           </div>
 
-          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Product Summary</h2>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Product</th>
-                  <th style={styles.th}>Variant</th>
-                  <th style={styles.th}>Qty</th>
-                  <th style={styles.th}>Unit</th>
-                  <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {quote.items.map((item: any) => (
-                  <tr key={item.id}>
-                    <td style={styles.td}>{item.productTitle}<br /><small>{item.sku || "No SKU"}</small></td>
-                    <td style={styles.td}>{item.variantTitle || "Default"}</td>
-                    <td style={styles.td}>{item.quantity}</td>
-                    <td style={styles.td}>{fmtMoney(item.unitPrice, item.currencyCode)}</td>
-                    <td style={{ ...styles.td, textAlign: "right" }}>{fmtMoney(item.totalPrice, item.currencyCode)}</td>
+          <div
+            className="sales-quote-card"
+            style={{ ...styles.card, padding: 0, overflow: "hidden" }}
+          >
+            <div style={styles.cardHeading}>
+              <h2 style={{ ...styles.cardTitle, margin: 0 }}>
+                Product Summary
+              </h2>
+            </div>
+            <div className="sales-quote-table-wrap">
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Product</th>
+                    <th style={styles.th}>Variant</th>
+                    <th style={styles.th}>Qty</th>
+                    <th style={styles.th}>Unit</th>
+                    <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {quote.items.map((item: any) => (
+                    <tr key={item.id}>
+                      <td style={styles.td}>
+                        {item.productTitle}
+                        <br />
+                        <small>{item.sku || "No SKU"}</small>
+                      </td>
+                      <td style={styles.td}>
+                        {item.variantTitle || "Default"}
+                      </td>
+                      <td style={styles.td}>{item.quantity}</td>
+                      <td style={styles.td}>
+                        {fmtMoney(item.unitPrice, item.currencyCode)}
+                      </td>
+                      <td style={{ ...styles.td, textAlign: "right" }}>
+                        {fmtMoney(item.totalPrice, item.currencyCode)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div style={styles.card}>
+          <div className="sales-quote-card" style={styles.card}>
             <h2 style={styles.cardTitle}>Activity History</h2>
             <div style={styles.timeline}>
               {quote.activities.map((activity: any) => (
@@ -296,81 +413,297 @@ export default function QuoteDetailPage() {
                   {activity.message && <p>{activity.message}</p>}
                 </div>
               ))}
-              {!quote.activities.length && <p style={styles.muted}>No activity yet.</p>}
+              {!quote.activities.length && (
+                <p style={styles.muted}>No activity yet.</p>
+              )}
             </div>
           </div>
         </section>
 
-        <aside style={styles.sideCol}>
-          <div style={styles.card}>
+        <aside className="sales-quote-side-column" style={styles.sideCol}>
+          <div className="sales-quote-card" style={styles.card}>
             <h2 style={styles.cardTitle}>Quote Sharing</h2>
-            <input readOnly value={shareUrl} style={styles.input} onFocus={(e) => e.currentTarget.select()} />
-            <p style={styles.muted}>Copy this secure quote link for the customer.</p>
+            <div style={styles.copyRow}>
+              <input
+                readOnly
+                value={shareUrl}
+                aria-label="Secure quote link"
+                style={styles.input}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button
+                type="button"
+                style={styles.copyBtn}
+                onClick={() => navigator.clipboard.writeText(shareUrl)}
+              >
+                Copy
+              </button>
+            </div>
+            <p style={styles.muted}>
+              Copy this secure quote link for the customer.
+            </p>
           </div>
 
-          <div style={styles.card}>
+          <div className="sales-quote-card" style={styles.card}>
             <h2 style={styles.cardTitle}>Grand Total</h2>
             <Summary label="Subtotal" value={fmtMoney(quote.subtotal)} />
-            <Summary label="Discount" value={`-${fmtMoney(quote.discountTotal)}`} />
-            <Summary label={`Tax (${quote.taxRate}%)`} value={fmtMoney(quote.taxAmount)} />
+            <Summary
+              label="Discount"
+              value={`-${fmtMoney(quote.discountTotal)}`}
+            />
+            <Summary
+              label={`Tax (${quote.taxRate}%)`}
+              value={fmtMoney(quote.taxAmount)}
+            />
             <Summary label="Shipping" value={fmtMoney(quote.shippingAmount)} />
-            <div style={styles.totalRow}><strong>Total</strong><strong>{fmtMoney(quote.totalAmount)}</strong></div>
+            <div style={styles.totalRow}>
+              <strong>Total</strong>
+              <strong>{fmtMoney(quote.totalAmount)}</strong>
+            </div>
           </div>
 
           {quote.status === "draft" && (
-            <Form method="post" style={styles.card}>
+            <Form
+              method="post"
+              className="sales-quote-card"
+              style={styles.card}
+            >
               <input type="hidden" name="intent" value="update_quote" />
               <h2 style={styles.cardTitle}>Edit Draft</h2>
-              <label style={styles.label}>Title<input name="title" defaultValue={quote.title} style={styles.input} /></label>
-              <label style={styles.label}>Expiration<input type="date" name="expiresAt" defaultValue={dateInput} style={styles.input} /></label>
-              <label style={styles.label}>Customer Notes<textarea name="customerNotes" defaultValue={quote.customerNotes || ""} style={styles.textarea} /></label>
-              <label style={styles.label}>Internal Notes<textarea name="internalNotes" defaultValue={quote.internalNotes || ""} style={styles.textarea} /></label>
-              <button disabled={isSubmitting} style={styles.primaryBtn}>Save Draft</button>
+              <label style={styles.label}>
+                Title
+                <input
+                  name="title"
+                  defaultValue={quote.title}
+                  style={styles.input}
+                />
+              </label>
+              <label style={styles.label}>
+                Expiration
+                <input
+                  type="date"
+                  name="expiresAt"
+                  defaultValue={dateInput}
+                  style={styles.input}
+                />
+              </label>
+              <label style={styles.label}>
+                Customer Notes
+                <textarea
+                  name="customerNotes"
+                  defaultValue={quote.customerNotes || ""}
+                  style={styles.textarea}
+                />
+              </label>
+              <label style={styles.label}>
+                Internal Notes
+                <textarea
+                  name="internalNotes"
+                  defaultValue={quote.internalNotes || ""}
+                  style={styles.textarea}
+                />
+              </label>
+              <button disabled={isSubmitting} style={styles.primaryBtn}>
+                Save Draft
+              </button>
             </Form>
           )}
         </aside>
       </div>
-    </div>
+    </SalesPortalQuoteShell>
   );
 }
 
 function Info({ label, value }: { label: string; value: string }) {
-  return <div><span style={styles.metaLabel}>{label}</span><strong>{value}</strong></div>;
+  return (
+    <div>
+      <span style={styles.metaLabel}>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 function Summary({ label, value }: { label: string; value: string }) {
-  return <div style={styles.summaryRow}><span>{label}</span><strong>{value}</strong></div>;
+  return (
+    <div style={styles.summaryRow}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#f8fafc", padding: 32, fontFamily: "'Inter', system-ui, sans-serif" },
-  header: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 24 },
-  headerActions: { display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" },
-  backLink: { color: "#2563eb", textDecoration: "none", fontWeight: 700 },
-  title: { margin: "8px 0 4px", fontSize: 32, color: "#111827" },
-  subtitle: { margin: 0, color: "#6b7280" },
-  grid: { display: "grid", gridTemplateColumns: "1fr 360px", gap: 24, alignItems: "start" },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 16,
+    alignItems: "flex-start",
+    marginBottom: 24,
+  },
+  headerActions: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  backLink: {
+    color: "#2c6ecb",
+    textDecoration: "none",
+    fontWeight: 600,
+    fontSize: 13,
+  },
+  title: {
+    margin: "8px 0 4px",
+    fontFamily: "'Poppins', sans-serif",
+    fontSize: 28,
+    color: "#202223",
+  },
+  subtitle: { margin: 0, color: "#6d7175", fontSize: 14 },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 360px",
+    gap: 24,
+    alignItems: "start",
+  },
   mainCol: { display: "flex", flexDirection: "column", gap: 20 },
-  sideCol: { display: "flex", flexDirection: "column", gap: 20, position: "sticky", top: 20 },
-  card: { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 20 },
-  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  sideCol: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 20,
+    position: "sticky",
+    top: 20,
+  },
+  card: {
+    background: "#fff",
+    border: "1px solid #e1e3e5",
+    borderRadius: 8,
+    padding: 20,
+  },
+  cardHeading: { padding: "18px 20px", borderBottom: "1px solid #e1e3e5" },
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
   cardTitle: { margin: "0 0 16px", fontSize: 18, color: "#111827" },
   infoGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 },
-  metaLabel: { display: "block", color: "#6b7280", fontSize: 12, marginBottom: 4 },
-  badge: { background: "#f3f4f6", color: "#374151", borderRadius: 999, padding: "5px 10px", fontWeight: 800, textTransform: "capitalize" },
+  metaLabel: {
+    display: "block",
+    color: "#6b7280",
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  badge: {
+    background: "#fff0f4",
+    color: "#b71950",
+    borderRadius: 8,
+    padding: "5px 10px",
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: "capitalize",
+  },
   table: { width: "100%", borderCollapse: "collapse" },
-  th: { textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", fontSize: 12 },
+  th: {
+    textAlign: "left",
+    padding: "10px 8px",
+    borderBottom: "1px solid #e5e7eb",
+    color: "#6b7280",
+    fontSize: 12,
+  },
   td: { padding: "12px 8px", borderBottom: "1px solid #f3f4f6", fontSize: 13 },
-  input: { width: "100%", boxSizing: "border-box", height: 40, border: "1px solid #d1d5db", borderRadius: 8, padding: "0 10px", font: "inherit" },
-  textarea: { width: "100%", boxSizing: "border-box", minHeight: 78, border: "1px solid #d1d5db", borderRadius: 8, padding: 10, font: "inherit" },
-  label: { display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "#374151", fontWeight: 700, marginBottom: 12 },
+  input: {
+    width: "100%",
+    boxSizing: "border-box",
+    height: 40,
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    padding: "0 10px",
+    font: "inherit",
+    fontSize: 13,
+  },
+  textarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    minHeight: 78,
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    padding: 10,
+    font: "inherit",
+    resize: "vertical",
+  },
+  label: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: 700,
+    marginBottom: 12,
+  },
   muted: { color: "#6b7280", fontSize: 13 },
-  primaryBtn: { background: "#111827", color: "#fff", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 800, cursor: "pointer" },
-  secondaryBtn: { background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 14px", fontWeight: 800, cursor: "pointer" },
-  summaryRow: { display: "flex", justifyContent: "space-between", padding: "8px 0", color: "#4b5563" },
-  totalRow: { display: "flex", justifyContent: "space-between", borderTop: "1px solid #e5e7eb", paddingTop: 14, marginTop: 8, fontSize: 18 },
+  primaryBtn: {
+    background: "#111827",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  secondaryBtn: {
+    background: "#fff",
+    color: "#374151",
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  copyRow: { display: "flex", gap: 8 },
+  copyBtn: {
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    background: "#fff",
+    color: "#2c6ecb",
+    padding: "0 13px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  summaryRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "8px 0",
+    color: "#4b5563",
+  },
+  totalRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    borderTop: "1px solid #e5e7eb",
+    paddingTop: 14,
+    marginTop: 8,
+    fontSize: 18,
+  },
   timeline: { display: "flex", flexDirection: "column", gap: 12 },
-  activity: { borderLeft: "3px solid #111827", paddingLeft: 12 },
-  success: { background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0", borderRadius: 8, padding: 12, marginBottom: 16 },
-  error: { background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", borderRadius: 8, padding: 12, marginBottom: 16 },
+  activity: {
+    borderLeft: "3px solid #e91e63",
+    paddingLeft: 12,
+    color: "#202223",
+  },
+  success: {
+    background: "#ecfdf5",
+    color: "#065f46",
+    border: "1px solid #a7f3d0",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  error: {
+    background: "#fef2f2",
+    color: "#991b1b",
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
 };
