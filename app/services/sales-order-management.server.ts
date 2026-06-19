@@ -30,6 +30,12 @@ export function getOrderAccessWhere(
   };
 }
 
+export function getShopifyOrderWhere(): Prisma.B2BOrderWhereInput {
+  return {
+    shopifyOrderId: { startsWith: "gid://shopify/Order/" },
+  };
+}
+
 export async function getAccessibleOrder(
   user: SalesSessionUser,
   orderId: string,

@@ -25,6 +25,7 @@ import {
   getOrderNumber,
   getAccessibleOrder,
   getSalesOrderAccessLevel,
+  getShopifyOrderWhere,
 } from "app/services/sales-order-management.server";
 import { restoreCredit } from "app/services/creditService";
 import {
@@ -64,6 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const deletedOrder = url.searchParams.get("deletedOrder") || "";
   const accessLevel = getSalesOrderAccessLevel(user);
   const accessWhere = getOrderAccessWhere(user);
+  const shopifyOrderWhere = getShopifyOrderWhere();
 
   const filters: Prisma.B2BOrderWhereInput[] = [];
   if (search) {
@@ -91,8 +93,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     filters.push({ createdAt });
   }
 
+  const baseWhere: Prisma.B2BOrderWhereInput = {
+    AND: [accessWhere, shopifyOrderWhere],
+  };
   const where: Prisma.B2BOrderWhereInput = {
-    AND: [accessWhere, ...filters],
+    AND: [baseWhere, ...filters],
   };
 
   const [orders, summaryRows, agents, quoteCount] = await Promise.all([
@@ -109,7 +114,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
     }),
     prisma.b2BOrder.findMany({
-      where: accessWhere,
+      where: baseWhere,
       select: { orderStatus: true, paymentStatus: true, orderTotal: true },
     }),
     prisma.user.findMany({
