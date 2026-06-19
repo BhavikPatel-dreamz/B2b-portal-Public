@@ -32,8 +32,8 @@ jobs:
           
       - name: Copy embed.js to public folder
         run: |
-          cp "${{ env.VPS_APP_PATH }}/../B2B-Portal-Front/dist/embe*" \
-             "${{ env.VPS_APP_PATH }}/public/."
+          cp "${{ env.VPS_APP_PATH }}/../B2B-Portal-Front/dist/"*embed* \
+          "${{ env.VPS_APP_PATH }}/public/"
              
       - name: Start App
         run: |
