@@ -1,7 +1,10 @@
 import { LoaderFunctionArgs, redirect } from "react-router";
 import { useLoaderData, Link } from "react-router";
 import prisma from "app/db.server";
-import { validateSalesSession, hasCompanyAccess } from "app/utils/sales-session.server";
+import {
+  validateSalesSession,
+  hasCompanyAccess,
+} from "app/utils/sales-session.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
@@ -18,7 +21,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Validate company access
   if (!companyId || !hasCompanyAccess(user, companyId)) {
-    return redirect(`/support/dashboard?session=${sessionToken}&error=access_denied`);
+    return redirect(
+      `/support/dashboard?session=${sessionToken}&error=access_denied`,
+    );
   }
 
   // Get full company data
@@ -41,7 +46,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!company) {
-    return redirect(`/support/dashboard?session=${sessionToken}&error=company_not_found`);
+    return redirect(
+      `/support/dashboard?session=${sessionToken}&error=company_not_found`,
+    );
   }
 
   // Get recent orders for this company
@@ -93,12 +100,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       usedCredit: usedCredit.toString(),
       availableCredit: availableCredit.toString(),
     },
-    recentOrders: recentOrders.map(o => ({
+    recentOrders: recentOrders.map((o) => ({
       ...o,
       orderTotal: o.orderTotal?.toString() || "0",
       createdAt: o.createdAt.toISOString(),
     })),
-    allCompanies: user.salesCompanies.map(sc => ({
+    allCompanies: user.salesCompanies.map((sc) => ({
       id: sc.company.id,
       name: sc.company.name,
     })),
@@ -106,10 +113,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function SalesPortal() {
-  const { user, sessionToken, company, recentOrders, allCompanies } = useLoaderData<typeof loader>();
+  const { user, sessionToken, company, recentOrders, allCompanies } =
+    useLoaderData<typeof loader>();
 
   const formatDate = (iso: string) =>
-    new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
+    new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(iso));
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { bg: string; color: string }> = {
@@ -122,15 +134,17 @@ export default function SalesPortal() {
     };
     const s = map[status?.toLowerCase()] || { bg: "#f3f4f6", color: "#374151" };
     return (
-      <span style={{
-        padding: "4px 10px",
-        borderRadius: "20px",
-        fontSize: "12px",
-        fontWeight: 600,
-        backgroundColor: s.bg,
-        color: s.color,
-        textTransform: "capitalize" as const,
-      }}>
+      <span
+        style={{
+          padding: "4px 10px",
+          borderRadius: "20px",
+          fontSize: "12px",
+          fontWeight: 600,
+          backgroundColor: s.bg,
+          color: s.color,
+          textTransform: "capitalize" as const,
+        }}
+      >
         {status || "N/A"}
       </span>
     );
@@ -141,7 +155,13 @@ export default function SalesPortal() {
       {/* Sidebar */}
       <aside style={styles.sidebar}>
         <div style={styles.logoContainer}>
-          <div style={styles.logoIcon}>🎁</div>
+          <div style={styles.logoIcon}>
+            <img
+              src="https://cdn.shopify.com/s/files/applications/c6da0a0589e2c3c978aadf2afec07db7_200x200.png?v=1776950914"
+              alt="Logo"
+              style={styles.logoImage}
+            />
+          </div>
           <span style={styles.logoText}>SmartB2B</span>
         </div>
 
@@ -171,8 +191,8 @@ export default function SalesPortal() {
           <div style={styles.otherCompanies}>
             <div style={styles.otherCompaniesLabel}>Switch Company</div>
             {allCompanies
-              .filter(c => c.id !== company.id)
-              .map(c => (
+              .filter((c) => c.id !== company.id)
+              .map((c) => (
                 <Link
                   key={c.id}
                   to={`/support/portal?session=${sessionToken}&companyId=${c.id}`}
@@ -190,11 +210,16 @@ export default function SalesPortal() {
               {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
             </div>
             <div style={styles.userInfo}>
-              <div style={styles.userName}>{user.firstName} {user.lastName}</div>
+              <div style={styles.userName}>
+                {user.firstName} {user.lastName}
+              </div>
               <div style={styles.userRole}>Sales Support</div>
             </div>
           </div>
-          <Link to={`/support/dashboard?session=${sessionToken}`} style={styles.backLink}>
+          <Link
+            to={`/support/dashboard?session=${sessionToken}`}
+            style={styles.backLink}
+          >
             ← Back to Dashboard
           </Link>
         </div>
@@ -207,11 +232,13 @@ export default function SalesPortal() {
           <div>
             <h1 style={styles.heroTitle}>{company.name}</h1>
             <p style={styles.subtitle}>
-              {company.contactEmail ? `Contact: ${company.contactEmail}` : "Sales Portal"} · {company.users.length} customer(s)
+              {company.contactEmail
+                ? `Contact: ${company.contactEmail}`
+                : "Sales Portal"}{" "}
+              · {company.users.length} customer(s)
             </p>
           </div>
         </header>
-
 
         {/* Two columns: Users + Recent Orders */}
         <div style={styles.twoColGrid}>
@@ -229,14 +256,18 @@ export default function SalesPortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {company.users.map(u => (
+                    {company.users.map((u) => (
                       <tr key={u.id} style={styles.tr}>
                         <td style={styles.td}>
-                          <strong>{u.firstName} {u.lastName}</strong>
+                          <strong>
+                            {u.firstName} {u.lastName}
+                          </strong>
                         </td>
                         <td style={styles.td}>{u.email}</td>
                         <td style={styles.td}>
-                          <span style={styles.roleBadge}>{u.companyRole || "User"}</span>
+                          <span style={styles.roleBadge}>
+                            {u.companyRole || "User"}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -267,7 +298,7 @@ export default function SalesPortal() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recentOrders.map(order => (
+                    {recentOrders.map((order) => (
                       <tr key={order.id} style={styles.tr}>
                         <td style={styles.td}>
                           <strong>
@@ -277,9 +308,15 @@ export default function SalesPortal() {
                           </strong>
                         </td>
                         <td style={styles.td}>{formatDate(order.createdAt)}</td>
-                        <td style={styles.td}>${Number(order.orderTotal).toLocaleString()}</td>
-                        <td style={styles.td}>{getStatusBadge(order.paymentStatus)}</td>
-                        <td style={styles.td}>{getStatusBadge(order.orderStatus)}</td>
+                        <td style={styles.td}>
+                          ${Number(order.orderTotal).toLocaleString()}
+                        </td>
+                        <td style={styles.td}>
+                          {getStatusBadge(order.paymentStatus)}
+                        </td>
+                        <td style={styles.td}>
+                          {getStatusBadge(order.orderStatus)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -321,7 +358,18 @@ const styles = {
     padding: "0 24px",
     marginBottom: "24px",
   },
-  logoIcon: { fontSize: "24px" },
+  logoIcon: {
+    width: "48px",
+    height: "48px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+  },
   logoText: {
     fontFamily: "'Poppins', sans-serif",
     fontSize: "20px",

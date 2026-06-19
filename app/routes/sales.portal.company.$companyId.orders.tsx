@@ -1,12 +1,21 @@
 import { LoaderFunctionArgs, redirect } from "react-router";
-import { useLoaderData, Link, Form, useNavigation, useActionData } from "react-router";
+import {
+  useLoaderData,
+  Link,
+  Form,
+  useNavigation,
+  useActionData,
+} from "react-router";
 import prisma from "app/db.server";
 import {
   requireSalesSession,
   hasCompanyAccess,
   buildClearSessionCookie,
 } from "app/utils/sales-session.server";
-import { restoreCredit, calculateAvailableCredit } from "app/services/creditService";
+import {
+  restoreCredit,
+  calculateAvailableCredit,
+} from "app/services/creditService";
 import { getAdminForShop } from "app/shopify.server";
 import type { ActionFunctionArgs } from "react-router";
 import { Decimal } from "@prisma/client/runtime/library";
@@ -125,30 +134,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     try {
       const shop = order.company.shop;
-      const admin = shop.accessToken ? await getAdminForShop(shop.shopDomain) : undefined;
+      const admin = shop.accessToken
+        ? await getAdminForShop(shop.shopDomain)
+        : undefined;
 
       // 1. Restore company/user credit if the order has remaining balance and was not already cancelled
       if (
         order.orderStatus !== "cancelled" &&
-        (order.paymentStatus === "pending" || order.paymentStatus === "partial") &&
+        (order.paymentStatus === "pending" ||
+          order.paymentStatus === "partial") &&
         order.remainingBalance.greaterThan(0)
       ) {
-        console.log(`🏦 Restoring credit: ${order.remainingBalance} for deleted order ${order.id}`);
+        console.log(
+          `🏦 Restoring credit: ${order.remainingBalance} for deleted order ${order.id}`,
+        );
         await restoreCredit(
           order.companyId,
           order.id,
           order.remainingBalance,
           user.id,
           "cancelled",
-          admin as any
+          admin as any,
         );
       }
 
       // 2. If it is a draft order, try to delete the draft in Shopify
       if (order.shopifyOrderId && admin) {
-        const isDraft = !order.shopifyOrderId.startsWith("gid://shopify/Order/") && 
-                        (order.orderStatus === "draft" || !order.shopifyOrderId.includes("/Order/"));
-        
+        const isDraft =
+          !order.shopifyOrderId.startsWith("gid://shopify/Order/") &&
+          (order.orderStatus === "draft" ||
+            !order.shopifyOrderId.includes("/Order/"));
+
         if (isDraft) {
           const gid = order.shopifyOrderId.startsWith("gid://")
             ? order.shopifyOrderId
@@ -176,7 +192,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               console.error("Shopify DraftOrder delete errors:", errors);
             }
           } catch (shopifyErr) {
-            console.error("Failed to delete draft order on Shopify:", shopifyErr);
+            console.error(
+              "Failed to delete draft order on Shopify:",
+              shopifyErr,
+            );
           }
         }
       }
@@ -185,14 +204,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const orderIdentifiers = [
         order.id,
         order.shopifyOrderId,
-        order.shopifyOrderId?.split("/").pop()
+        order.shopifyOrderId?.split("/").pop(),
       ].filter(Boolean) as string[];
 
       await prisma.creditTransaction.deleteMany({
         where: {
           companyId: order.companyId,
-          orderId: { in: orderIdentifiers }
-        }
+          orderId: { in: orderIdentifiers },
+        },
       });
 
       if (order.shopifyOrderId) {
@@ -200,22 +219,32 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         await prisma.notification.deleteMany({
           where: {
             shopifyOrderId: {
-              in: [order.shopifyOrderId, numericShopifyId].filter(Boolean) as string[]
-            }
-          }
+              in: [order.shopifyOrderId, numericShopifyId].filter(
+                Boolean,
+              ) as string[],
+            },
+          },
         });
       }
 
       // 4. Delete the B2BOrder itself (cascade deletes payments)
       await prisma.b2BOrder.delete({
-        where: { id: order.id }
+        where: { id: order.id },
       });
 
-      console.log(`✅ Successfully deleted order ${order.id} from local database`);
-      return Response.json({ success: true, message: "Order deleted successfully" });
+      console.log(
+        `✅ Successfully deleted order ${order.id} from local database`,
+      );
+      return Response.json({
+        success: true,
+        message: "Order deleted successfully",
+      });
     } catch (err: any) {
       console.error("Error deleting order:", err);
-      return Response.json({ error: `Failed to delete order: ${err.message}` }, { status: 500 });
+      return Response.json(
+        { error: `Failed to delete order: ${err.message}` },
+        { status: 500 },
+      );
     }
   }
 
@@ -224,7 +253,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export default function OrderManageScreen() {
   const { user, company, orders, allCompanies } = useLoaderData<{
-    user: { id: string; firstName: string | null; lastName: string | null; email: string };
+    user: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    };
     company: {
       id: string;
       name: string;
@@ -239,16 +273,32 @@ export default function OrderManageScreen() {
       orderStatus: string;
       createdAt: string;
       remainingBalance: string;
-      createdByUser: { firstName: string | null; lastName: string | null; email: string } | null;
+      createdByUser: {
+        firstName: string | null;
+        lastName: string | null;
+        email: string;
+      } | null;
     }>;
     allCompanies: Array<{ id: string; name: string }>;
   }>();
   const navigation = useNavigation();
-  const actionData = useActionData<{ success?: boolean; error?: string; message?: string }>();
-  const isDeleting = navigation.state === "submitting" && navigation.formData?.get("intent") === "delete_order";
+  const actionData = useActionData<{
+    success?: boolean;
+    error?: string;
+    message?: string;
+  }>();
+  const isDeleting =
+    navigation.state === "submitting" &&
+    navigation.formData?.get("intent") === "delete_order";
 
   const formatDate = (iso: string) =>
-    new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+    new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(iso));
 
   const formatCurrency = (val: string | number) =>
     `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -267,15 +317,17 @@ export default function OrderManageScreen() {
     };
     const s = map[status?.toLowerCase()] || { bg: "#f3f4f6", color: "#374151" };
     return (
-      <span style={{
-        padding: "4px 10px",
-        borderRadius: "20px",
-        fontSize: "12px",
-        fontWeight: 600,
-        backgroundColor: s.bg,
-        color: s.color,
-        textTransform: "capitalize",
-      }}>
+      <span
+        style={{
+          padding: "4px 10px",
+          borderRadius: "20px",
+          fontSize: "12px",
+          fontWeight: 600,
+          backgroundColor: s.bg,
+          color: s.color,
+          textTransform: "capitalize",
+        }}
+      >
         {status || "N/A"}
       </span>
     );
@@ -286,7 +338,13 @@ export default function OrderManageScreen() {
       {/* Sidebar */}
       <aside style={styles.sidebar}>
         <div style={styles.logoContainer}>
-          <div style={styles.logoIcon}>🎁</div>
+          <div style={styles.logoIcon}>
+            <img
+              src="https://cdn.shopify.com/s/files/applications/c6da0a0589e2c3c978aadf2afec07db7_200x200.png?v=1776950914"
+              alt="Logo"
+              style={styles.logoImage}
+            />
+          </div>
           <span style={styles.logoText}>SmartB2B</span>
         </div>
 
@@ -298,10 +356,16 @@ export default function OrderManageScreen() {
         </div>
 
         <nav style={styles.nav}>
-          <Link to={`/sales/portal?companyId=${company.id}`} style={styles.navItem}>
+          <Link
+            to={`/sales/portal?companyId=${company.id}`}
+            style={styles.navItem}
+          >
             <span style={styles.navIcon}>📊</span> Overview
           </Link>
-          <Link to={`/sales/portal/company/${company.id}/orders`} style={{ ...styles.navItem, ...styles.navItemActive }}>
+          <Link
+            to={`/sales/portal/company/${company.id}/orders`}
+            style={{ ...styles.navItem, ...styles.navItemActive }}
+          >
             <span style={styles.navIcon}>📦</span> Orders ({orders.length})
           </Link>
         </nav>
@@ -330,17 +394,24 @@ export default function OrderManageScreen() {
               {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
             </div>
             <div style={styles.userInfo}>
-              <div style={styles.userName}>{user.firstName} {user.lastName}</div>
+              <div style={styles.userName}>
+                {user.firstName} {user.lastName}
+              </div>
               <div style={styles.userRole}>Sales Agent</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px", flexDirection: "column" }}>
-            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.backLink}>
+            <Link
+              to={`/sales/portal?companyId=${company.id}`}
+              style={styles.backLink}
+            >
               ← Back to Portal
             </Link>
             <Form method="post">
               <input type="hidden" name="intent" value="logout" />
-              <button type="submit" style={styles.logoutBtn}>Sign Out</button>
+              <button type="submit" style={styles.logoutBtn}>
+                Sign Out
+              </button>
             </Form>
           </div>
         </div>
@@ -348,14 +419,23 @@ export default function OrderManageScreen() {
 
       {/* Main Content */}
       <main style={styles.mainContent}>
-        <header style={{ ...styles.header, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <header
+          style={{
+            ...styles.header,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
           <div>
             <h1 style={styles.heroTitle}>Manage Orders</h1>
-            <p style={styles.subtitle}>List, review, and manage B2B orders for {company.name}</p>
+            <p style={styles.subtitle}>
+              List, review, and manage B2B orders for {company.name}
+            </p>
           </div>
           <div>
-            <Link 
-              to={`/sales/portal/company/${company.id}/create-order`} 
+            <Link
+              to={`/sales/portal/company/${company.id}/create-order`}
               style={styles.createOrderBtn}
             >
               + Create Order
@@ -364,9 +444,7 @@ export default function OrderManageScreen() {
         </header>
 
         {actionData?.error && (
-          <div style={styles.errorBanner}>
-            ⚠️ {actionData.error}
-          </div>
+          <div style={styles.errorBanner}>⚠️ {actionData.error}</div>
         )}
 
         {actionData?.success && (
@@ -390,18 +468,26 @@ export default function OrderManageScreen() {
                     <th style={styles.th}>Total</th>
                     <th style={styles.th}>Payment Status</th>
                     <th style={styles.th}>Order Status</th>
-                    <th style={{ ...styles.th, textAlign: "right" }}>Actions</th>
+                    <th style={{ ...styles.th, textAlign: "right" }}>
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {orders.map((order) => {
-                    const isOrderDeleting = isDeleting && navigation.formData?.get("orderId") === order.id;
-                    const canDelete = order.orderStatus !== "shipped" && order.orderStatus !== "delivered";
+                    const isOrderDeleting =
+                      isDeleting &&
+                      navigation.formData?.get("orderId") === order.id;
+                    const canDelete =
+                      order.orderStatus !== "shipped" &&
+                      order.orderStatus !== "delivered";
 
                     return (
                       <tr key={order.id} style={styles.tr}>
                         <td style={styles.td}>
-                          <span style={styles.orderIdBadge}>{order.id.slice(-8).toUpperCase()}</span>
+                          <span style={styles.orderIdBadge}>
+                            {order.id.slice(-8).toUpperCase()}
+                          </span>
                         </td>
                         <td style={styles.td}>
                           <strong style={{ color: "#2c6ecb" }}>
@@ -416,24 +502,42 @@ export default function OrderManageScreen() {
                             : "System"}
                         </td>
                         <td style={styles.td}>{formatDate(order.createdAt)}</td>
-                        <td style={styles.td}><strong>{formatCurrency(order.orderTotal)}</strong></td>
-                        <td style={styles.td}>{getStatusBadge(order.paymentStatus)}</td>
-                        <td style={styles.td}>{getStatusBadge(order.orderStatus)}</td>
+                        <td style={styles.td}>
+                          <strong>{formatCurrency(order.orderTotal)}</strong>
+                        </td>
+                        <td style={styles.td}>
+                          {getStatusBadge(order.paymentStatus)}
+                        </td>
+                        <td style={styles.td}>
+                          {getStatusBadge(order.orderStatus)}
+                        </td>
                         <td style={{ ...styles.td, textAlign: "right" }}>
                           {canDelete ? (
-                            <Form 
-                              method="post" 
+                            <Form
+                              method="post"
                               style={{ display: "inline" }}
                               onSubmit={(e) => {
-                                if (!confirm("Are you sure you want to delete this order? This will restore company credit and remove the order record permanently.")) {
+                                if (
+                                  !confirm(
+                                    "Are you sure you want to delete this order? This will restore company credit and remove the order record permanently.",
+                                  )
+                                ) {
                                   e.preventDefault();
                                 }
                               }}
                             >
-                              <input type="hidden" name="intent" value="delete_order" />
-                              <input type="hidden" name="orderId" value={order.id} />
-                              <button 
-                                type="submit" 
+                              <input
+                                type="hidden"
+                                name="intent"
+                                value="delete_order"
+                              />
+                              <input
+                                type="hidden"
+                                name="orderId"
+                                value={order.id}
+                              />
+                              <button
+                                type="submit"
                                 disabled={isOrderDeleting}
                                 style={{
                                   ...styles.deleteBtn,
@@ -444,7 +548,11 @@ export default function OrderManageScreen() {
                               </button>
                             </Form>
                           ) : (
-                            <span style={{ fontSize: "12px", color: "#8c9196" }}>Non-deletable</span>
+                            <span
+                              style={{ fontSize: "12px", color: "#8c9196" }}
+                            >
+                              Non-deletable
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -456,8 +564,16 @@ export default function OrderManageScreen() {
           ) : (
             <div style={styles.emptyState}>
               <span style={{ fontSize: "48px", marginBottom: "16px" }}>📦</span>
-              <p style={{ margin: 0, fontWeight: 500, fontSize: "16px" }}>No orders found.</p>
-              <p style={{ margin: "8px 0 0", fontSize: "13px", color: "#9ca3af" }}>
+              <p style={{ margin: 0, fontWeight: 500, fontSize: "16px" }}>
+                No orders found.
+              </p>
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: "13px",
+                  color: "#9ca3af",
+                }}
+              >
                 There are no orders logged for this company yet.
               </p>
             </div>
@@ -491,7 +607,18 @@ const styles = {
     padding: "0 24px",
     marginBottom: "24px",
   },
-  logoIcon: { fontSize: "24px" },
+  logoIcon: {
+    width: "48px",
+    height: "48px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+  },
   logoText: {
     fontFamily: "'Poppins', sans-serif",
     fontSize: "20px",

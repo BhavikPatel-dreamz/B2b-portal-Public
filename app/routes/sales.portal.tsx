@@ -257,7 +257,13 @@ export default function SalesPortal() {
       {/* Sidebar */}
       <aside style={styles.sidebar}>
         <div style={styles.logoContainer}>
-          <div style={styles.logoIcon}>🎁</div>
+          <div style={styles.logoIcon}>
+            <img
+              src="https://cdn.shopify.com/s/files/applications/c6da0a0589e2c3c978aadf2afec07db7_200x200.png?v=1776950914"
+              alt="Logo"
+              style={styles.logoImage}
+            />
+          </div>
           <span style={styles.logoText}>SmartB2B</span>
         </div>
 
@@ -575,7 +581,18 @@ const styles = {
     padding: "0 24px",
     marginBottom: "24px",
   },
-  logoIcon: { fontSize: "24px" },
+  logoIcon: {
+    width: "48px",
+    height: "48px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+  },
   logoText: {
     fontFamily: "'Poppins', sans-serif",
     fontSize: "20px",
