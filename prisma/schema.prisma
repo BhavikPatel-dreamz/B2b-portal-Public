@@ -76,6 +76,7 @@ model Store {
   registrationSubmissions        RegistrationSubmission[]
   users                          User[]
   invitations                    Invitation[]
+  quotes                         Quote[]                  @relation("StoreQuotes")
 
   @@index([shopDomain])
 }
@@ -98,6 +99,7 @@ model User {
   userCreditLimit   Decimal?        @db.Decimal(14, 2)
   userCreditUsed    Decimal         @default(0) @db.Decimal(14, 2)
   ordersCreated     B2BOrder[]      @relation("UserCreatedOrders")
+  quotesCreated     Quote[]         @relation("SalesAgentQuotes")
   company           CompanyAccount? @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: Cascade)
   shop              Store?          @relation(fields: [shopId], references: [id], onDelete: Cascade)
   sessions          UserSession[]
@@ -165,6 +167,8 @@ model CompanyAccount {
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   orders             B2BOrder[]          @relation("CompanyAccountOrders")
+  quotes             Quote[]             @relation("CompanyAccountQuotes")
+  quoteActivities    QuoteActivity[]
   shop               Store               @relation(fields: [shopId], references: [id], onDelete: Cascade)
   creditTransactions CreditTransaction[]
   users              User[]              @relation("CompanyUsers")
@@ -280,6 +284,96 @@ model B2BOrder {
   @@index([createdByUserId])
   @@index([shopId, createdAt])
   @@index([createdAt])
+}
+
+model Quote {
+  id                String          @id @default(cuid())
+  quoteNumber       String          @unique
+  shopId            String
+  companyId         String
+  salesAgentId      String
+  title             String
+  status            String          @default("draft")
+  secureToken       String          @unique
+  customerUserId    String?
+  customerShopifyId String?
+  customerEmail     String
+  customerFirstName String?
+  customerLastName  String?
+  currencyCode      String          @default("USD")
+  subtotal          Decimal         @default(0) @db.Decimal(14, 2)
+  discountAmount    Decimal         @default(0) @db.Decimal(14, 2)
+  discountType      String          @default("FIXED_AMOUNT")
+  discountTotal     Decimal         @default(0) @db.Decimal(14, 2)
+  shippingAmount    Decimal         @default(0) @db.Decimal(14, 2)
+  taxRate           Decimal         @default(0) @db.Decimal(5, 2)
+  taxAmount         Decimal         @default(0) @db.Decimal(14, 2)
+  totalAmount       Decimal         @default(0) @db.Decimal(14, 2)
+  customerNotes     String?
+  internalNotes     String?
+  customerComments  String?
+  expiresAt         DateTime
+  sentAt            DateTime?
+  viewedAt          DateTime?
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+  cancelledAt       DateTime?
+  convertedAt       DateTime?
+  convertedOrderId  String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  shop              Store           @relation("StoreQuotes", fields: [shopId], references: [id], onDelete: Cascade)
+  company           CompanyAccount  @relation("CompanyAccountQuotes", fields: [companyId], references: [id], onDelete: Cascade)
+  salesAgent        User            @relation("SalesAgentQuotes", fields: [salesAgentId], references: [id])
+  items             QuoteItem[]
+  activities        QuoteActivity[]
+
+  @@index([shopId, createdAt])
+  @@index([companyId, status])
+  @@index([salesAgentId])
+  @@index([customerEmail])
+  @@index([expiresAt])
+}
+
+model QuoteItem {
+  id           String   @id @default(cuid())
+  quoteId      String
+  productId    String?
+  productTitle String
+  variantId    String
+  variantTitle String?
+  sku          String?
+  image        String?
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(14, 2)
+  discount     Decimal  @default(0) @db.Decimal(14, 2)
+  totalPrice   Decimal  @db.Decimal(14, 2)
+  currencyCode String   @default("USD")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  quote        Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+  @@index([variantId])
+}
+
+model QuoteActivity {
+  id             String         @id @default(cuid())
+  quoteId        String
+  userId         String?
+  companyId      String
+  customerEmail  String?
+  action         String
+  message        String?
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  quote          Quote          @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  company        CompanyAccount @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([userId])
+  @@index([action])
 }
 
 model CreditTransaction {

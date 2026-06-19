@@ -115,6 +115,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
+  const quoteCount = await prisma.quote.count({
+    where: { companyId: company.id },
+  });
+
   // Get credit data
   const pendingCreditOrders = await prisma.b2BOrder.aggregate({
     where: {
@@ -149,6 +153,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderTotal: o.orderTotal?.toString() || "0",
       createdAt: o.createdAt.toISOString(),
     })),
+    quoteCount,
     allCompanies: user.salesCompanies.map((sc) => ({
       id: sc.company.id,
       name: sc.company.name,
@@ -172,7 +177,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SalesPortal() {
-  const { user, company, recentOrders, allCompanies } = useLoaderData<{
+  const { user, company, recentOrders, quoteCount, allCompanies } = useLoaderData<{
     user: {
       id: string;
       firstName: string | null;
@@ -203,6 +208,7 @@ export default function SalesPortal() {
       orderStatus: string;
       createdAt: string;
     }>;
+    quoteCount: number;
     allCompanies: Array<{ id: string; name: string }>;
   }>();
 
@@ -288,25 +294,16 @@ export default function SalesPortal() {
             <span style={styles.navIcon}>📦</span> Orders ({recentOrders.length}
             )
           </Link>
+          <Link
+            to={`/sales/portal/company/${company.id}/quotes`}
+            style={styles.navItem}
+          >
+            <span style={styles.navIcon}>📝</span> Quotes ({quoteCount})
+          </Link>
         </nav>
 
         {/* Other Companies */}
-        {allCompanies.length > 1 && (
-          <div style={styles.otherCompanies}>
-            <div style={styles.otherCompaniesLabel}>Switch Company</div>
-            {allCompanies
-              .filter((c) => c.id !== company.id)
-              .map((c) => (
-                <Link
-                  key={c.id}
-                  to={`/sales/portal?companyId=${c.id}`}
-                  style={styles.companyLink}
-                >
-                  🏢 {c.name}
-                </Link>
-              ))}
-          </div>
-        )}
+       
 
         <div style={styles.sidebarFooter}>
           <div style={styles.userProfile}>
@@ -327,9 +324,9 @@ export default function SalesPortal() {
               flexDirection: "column" as const,
             }}
           >
-            <Link to="/sales/portal" style={styles.backLink}>
+            {/* <Link to="/sales/portal" style={styles.backLink}>
               ← Back to Portal
-            </Link>
+            </Link> */}
             <Form method="post">
               <input type="hidden" name="intent" value="logout" />
               <button type="submit" style={styles.logoutBtn}>
@@ -407,6 +404,24 @@ export default function SalesPortal() {
               }}
             >
               <span>+</span> Create Order
+            </Link>
+            <Link
+              to={`/sales/portal/company/${company.id}/create-quote`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "10px 18px",
+                backgroundColor: "#ffffff",
+                color: "#111827",
+                border: "1px solid #d1d5db",
+                borderRadius: "8px",
+                textDecoration: "none",
+                fontWeight: 500,
+                fontSize: "14px",
+              }}
+            >
+              <span>+</span> Create Quote
             </Link>
           </div>
         </header>

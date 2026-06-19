@@ -13,6 +13,11 @@ import {
   type SalesDraftLineItemInput,
   type SalesDraftShippingLineInput,
 } from "app/utils/sales-order-pricing.server";
+import {
+  createQuoteFromCart,
+  getQuoteUrl,
+  type QuoteCartItem,
+} from "app/services/quote.server";
 
 type DraftCartItem = {
   variantId: string;
@@ -68,6 +73,7 @@ type SaveDraftResponse = {
   error?: string;
   name?: string;
   id?: string;
+  quoteUrl?: string;
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -76,7 +82,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const actionType = formData.get("actionType") as string;
     const companyId = params.companyId;
 
-    if (actionType !== "save_draft") {
+    if (!["save_draft", "save_quote_draft"].includes(actionType)) {
       return Response.json({ error: "Invalid order action" }, { status: 400 });
     }
 
@@ -106,6 +112,30 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const cartData = JSON.parse(cartDataStr || "[]") as DraftCartItem[];
     if (cartData.length === 0) {
       return Response.json({ error: "Cart is empty" }, { status: 400 });
+    }
+
+    if (actionType === "save_quote_draft") {
+      const quote = await createQuoteFromCart({
+        companyId: company.id,
+        salesAgentId: user.id,
+        customerId,
+        cartData: cartData as QuoteCartItem[],
+        title: null,
+        internalNotes,
+        customerNotes,
+        discountAmount,
+        discountType,
+        shippingCost,
+        taxRate,
+        submit: false,
+      });
+
+      return Response.json({
+        success: true,
+        name: quote.quoteNumber,
+        id: quote.id,
+        quoteUrl: getQuoteUrl(request, quote),
+      });
     }
 
     // Fetch B2B company, locations, and contacts to build purchasingEntity
@@ -310,6 +340,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
+  const isQuoteMode = new URL(request.url).pathname.includes("create-quote");
 
   if (!companyId) {
     return redirect("/sales/portal");
@@ -706,12 +737,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
-    }
+    },
+    mode: isQuoteMode ? "quote" : "order",
   });
 };
 
 export default function CreateOrderProductCatalog() {
-  const { company, selectedCustomer, products, collections, filterOptions, pageInfo, searchParams, user } = useLoaderData<any>();
+  const { company, selectedCustomer, products, collections, filterOptions, pageInfo, searchParams, user, mode } = useLoaderData<any>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const draftFetcher = useFetcher<SaveDraftResponse>();
@@ -740,6 +772,10 @@ export default function CreateOrderProductCatalog() {
   const [draftSaveStatus, setDraftSaveStatus] = useState<{ success?: boolean; error?: string; name?: string } | null>(null);
   const isSavingDraft = draftFetcher.state !== "idle";
   const selectedCustomerShopifyId = selectedCustomer.shopifyCustomerId || selectedCustomer.id || "";
+  const isQuoteMode = mode === "quote";
+  const flowBase = isQuoteMode
+    ? `/sales/portal/company/${company.id}/create-quote`
+    : `/sales/portal/company/${company.id}/create-order`;
 
   // Initialize selected variants and quantities
   useEffect(() => {
@@ -802,16 +838,20 @@ export default function CreateOrderProductCatalog() {
     if (draftFetcher.data.success) {
       setDraftSaveStatus({ success: true, name: draftFetcher.data.name });
     } else {
-      setDraftSaveStatus({ error: draftFetcher.data.error || "Failed to save draft order" });
+      setDraftSaveStatus({
+        error:
+          draftFetcher.data.error ||
+          `Failed to save draft ${isQuoteMode ? "quote" : "order"}`,
+      });
     }
 
-  }, [draftFetcher.data]);
+  }, [draftFetcher.data, isQuoteMode]);
 
   const saveDraftOrder = () => {
     setDraftSaveStatus(null);
 
     const formData = new FormData();
-    formData.append("actionType", "save_draft");
+    formData.append("actionType", isQuoteMode ? "save_quote_draft" : "save_draft");
     formData.append("customerId", selectedCustomerShopifyId);
     formData.append("cartData", JSON.stringify(Object.values(cart)));
     formData.append("internalNotes", internalNotes);
@@ -1017,7 +1057,9 @@ export default function CreateOrderProductCatalog() {
             {draftSaveStatus.success ? (
               <div>
                 <strong>Success!</strong>
-                <p style={{ margin: "4px 0 0 0" }}>Order has been saved as draft successfully (Shopify Draft: <strong>{draftSaveStatus.name}</strong>).</p>
+                <p style={{ margin: "4px 0 0 0" }}>
+                  {isQuoteMode ? "Quote" : "Order"} has been saved as draft successfully (<strong>{draftSaveStatus.name}</strong>).
+                </p>
               </div>
             ) : (
               <div>
@@ -1279,12 +1321,12 @@ export default function CreateOrderProductCatalog() {
                     Saving Draft...
                   </>
                 ) : (
-                  "💾 Save Draft Order"
+                  isQuoteMode ? "Save Draft Quote" : "Save Draft Order"
                 )}
               </button>
 
               <Link 
-                to={`/sales/portal/company/${company.id}/create-order/step3?customerId=${selectedCustomerShopifyId}`}
+                to={`${flowBase}/step3?customerId=${selectedCustomerShopifyId}`}
                 style={styles.checkoutBtn}
                 onClick={() => {
                   // Save all order details to sessionStorage to pass to Step 3
@@ -1297,7 +1339,7 @@ export default function CreateOrderProductCatalog() {
                   sessionStorage.setItem(`sales_checkout_tax_rate_${company.id}`, estTaxRate.toString());
                 }}
               >
-                Review Order →
+                {isQuoteMode ? "Review Quote" : "Review Order"} →
               </Link>
             </div>
           </>

@@ -65,6 +65,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       },
     },
   });
+  const quoteCount = await prisma.quote.count({
+    where: { companyId: company.id },
+  });
 
   return Response.json({
     user: {
@@ -85,6 +88,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       remainingBalance: o.remainingBalance?.toString() || "0",
       createdAt: o.createdAt.toISOString(),
     })),
+    quoteCount,
     allCompanies: user.salesCompanies.map((sc) => ({
       id: sc.company.id,
       name: sc.company.name,
@@ -252,7 +256,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function OrderManageScreen() {
-  const { user, company, orders, allCompanies } = useLoaderData<{
+  const { user, company, orders, quoteCount, allCompanies } = useLoaderData<{
     user: {
       id: string;
       firstName: string | null;
@@ -279,6 +283,7 @@ export default function OrderManageScreen() {
         email: string;
       } | null;
     }>;
+    quoteCount: number;
     allCompanies: Array<{ id: string; name: string }>;
   }>();
   const navigation = useNavigation();
@@ -368,25 +373,16 @@ export default function OrderManageScreen() {
           >
             <span style={styles.navIcon}>📦</span> Orders ({orders.length})
           </Link>
+          <Link
+            to={`/sales/portal/company/${company.id}/quotes`}
+            style={styles.navItem}
+          >
+            <span style={styles.navIcon}>📝</span> Quotes ({quoteCount})
+          </Link>
         </nav>
 
         {/* Other Companies */}
-        {allCompanies.length > 1 && (
-          <div style={styles.otherCompanies}>
-            <div style={styles.otherCompaniesLabel}>Switch Company</div>
-            {allCompanies
-              .filter((c) => c.id !== company.id)
-              .map((c) => (
-                <Link
-                  key={c.id}
-                  to={`/sales/portal?companyId=${c.id}`}
-                  style={styles.companyLink}
-                >
-                  🏢 {c.name}
-                </Link>
-              ))}
-          </div>
-        )}
+       
 
         <div style={styles.sidebarFooter}>
           <div style={styles.userProfile}>
@@ -401,12 +397,12 @@ export default function OrderManageScreen() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px", flexDirection: "column" }}>
-            <Link
+            {/* <Link
               to={`/sales/portal?companyId=${company.id}`}
               style={styles.backLink}
             >
               ← Back to Portal
-            </Link>
+            </Link> */}
             <Form method="post">
               <input type="hidden" name="intent" value="logout" />
               <button type="submit" style={styles.logoutBtn}>
@@ -439,6 +435,12 @@ export default function OrderManageScreen() {
               style={styles.createOrderBtn}
             >
               + Create Order
+            </Link>
+            <Link
+              to={`/sales/portal/company/${company.id}/create-quote`}
+              style={{ ...styles.createOrderBtn, backgroundColor: "#ffffff", color: "#111827", border: "1px solid #d1d5db" }}
+            >
+              + Create Quote
             </Link>
           </div>
         </header>
