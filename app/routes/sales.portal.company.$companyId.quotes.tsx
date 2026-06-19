@@ -20,6 +20,7 @@ import {
   logQuoteActivity,
   sendQuoteToCustomer,
 } from "app/services/quote.server";
+import { SalesPortalQuoteShell } from "app/components/SalesPortalQuoteShell";
 
 const editableStatuses = ["draft"];
 
@@ -74,12 +75,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
   }
 
-  const [quotes, agents] = await Promise.all([
+  const [quotes, agents, quoteCount] = await Promise.all([
     prisma.quote.findMany({
       where,
       orderBy: { createdAt: "desc" },
       include: {
-        salesAgent: { select: { id: true, firstName: true, lastName: true, email: true } },
+        salesAgent: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
       },
     }),
     prisma.user.findMany({
@@ -90,6 +93,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       select: { id: true, firstName: true, lastName: true, email: true },
       orderBy: { firstName: "asc" },
     }),
+    prisma.quote.count({ where: { companyId } }),
   ]);
 
   return Response.json({
@@ -109,6 +113,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       name: sc.company.name,
     })),
     agents,
+    quoteCount,
     filters: { status, customer, agent, dateFrom, dateTo },
     quotes: quotes.map((quote) => ({
       ...quote,
@@ -149,7 +154,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   try {
     if (intent === "send_quote" || intent === "resend_quote") {
-      const result = await sendQuoteToCustomer({ quoteId, request, userId: user.id });
+      const result = await sendQuoteToCustomer({
+        quoteId,
+        request,
+        userId: user.id,
+      });
       return Response.json({
         success: true,
         message: `Quote sent. Link: ${result.quoteUrl}`,
@@ -228,11 +237,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         action: "Quote Created",
         message: `Duplicated from ${quote.quoteNumber}.`,
       });
-      return redirect(`/sales/portal/company/${companyId}/quotes/${duplicate.id}`);
+      return redirect(
+        `/sales/portal/company/${companyId}/quotes/${duplicate.id}`,
+      );
     }
 
     if (intent === "convert_quote") {
-      const result = await convertQuoteToOrder({ quoteId, salesAgentId: user.id });
+      const result = await convertQuoteToOrder({
+        quoteId,
+        salesAgentId: user.id,
+      });
       return Response.json({
         success: true,
         message: `Quote converted to order ${result.shopifyOrder.name || result.shopifyOrder.id}.`,
@@ -249,7 +263,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function QuoteListingPage() {
-  const { company, user, allCompanies, agents, filters, quotes } =
+  const { company, user, allCompanies, agents, filters, quotes, quoteCount } =
     useLoaderData<any>();
   const actionData = useActionData<any>();
   const navigation = useNavigation();
@@ -285,112 +299,200 @@ export default function QuoteListingPage() {
   };
 
   return (
-    <div style={styles.shell}>
-      <aside style={styles.sidebar}>
-        <div style={styles.logo}>SmartB2B</div>
-        <div style={styles.companyBox}>
-          <span style={styles.kicker}>Current Company</span>
-          <strong>{company.name}</strong>
-          <small>{company.storeName}</small>
+    <SalesPortalQuoteShell
+      company={company}
+      user={user}
+      allCompanies={allCompanies}
+      quoteCount={quoteCount}
+    >
+      <header className="sales-quote-header" style={styles.header}>
+        <div>
+          <h1 style={styles.title}>Quotes</h1>
+          <p style={styles.subtitle}>
+            Create, send, track, and convert customer quotes for {company.name}.
+          </p>
         </div>
-        <nav style={styles.nav}>
-          <Link to={`/sales/portal?companyId=${company.id}`} style={styles.navItem}>Overview</Link>
-          <Link to={`/sales/portal/company/${company.id}/orders`} style={styles.navItem}>Orders</Link>
-          <Link to={`/sales/portal/company/${company.id}/quotes`} style={{ ...styles.navItem, ...styles.activeNav }}>Quotes</Link>
-        </nav>
-        {allCompanies.length > 1 && (
-          <div style={styles.switcher}>
-            {allCompanies.filter((c: any) => c.id !== company.id).map((c: any) => (
-              <Link key={c.id} to={`/sales/portal?companyId=${c.id}`} style={styles.companyLink}>{c.name}</Link>
-            ))}
-          </div>
+        <div
+          className="sales-quote-header-actions"
+          style={styles.headerActions}
+        >
+          <Link
+            to={`/sales/portal/company/${company.id}/create-quote`}
+            style={styles.primaryBtn}
+          >
+            + Create Quote
+          </Link>
+        </div>
+      </header>
+
+      {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
+      {actionData?.success && (
+        <div style={styles.success}>{actionData.message}</div>
+      )}
+
+      <Form method="get" className="sales-quote-filters" style={styles.filters}>
+        <input
+          name="customer"
+          placeholder="Customer"
+          defaultValue={filters.customer}
+          style={styles.input}
+        />
+        <select
+          name="status"
+          defaultValue={filters.status}
+          style={styles.input}
+        >
+          <option value="">All statuses</option>
+          {[
+            "draft",
+            "sent",
+            "viewed",
+            "approved",
+            "rejected",
+            "expired",
+            "converted",
+            "cancelled",
+          ].map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <select name="agent" defaultValue={filters.agent} style={styles.input}>
+          <option value="">All agents</option>
+          {agents.map((agent: any) => (
+            <option key={agent.id} value={agent.id}>
+              {agent.firstName || agent.email} {agent.lastName || ""}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          name="dateFrom"
+          defaultValue={filters.dateFrom}
+          style={styles.input}
+        />
+        <input
+          type="date"
+          name="dateTo"
+          defaultValue={filters.dateTo}
+          style={styles.input}
+        />
+        <button style={styles.secondaryBtn}>Filter</button>
+        {(filters.customer ||
+          filters.status ||
+          filters.agent ||
+          filters.dateFrom ||
+          filters.dateTo) && (
+          <Link
+            to={`/sales/portal/company/${company.id}/quotes`}
+            style={styles.clearBtn}
+          >
+            Clear
+          </Link>
         )}
-        <div style={styles.sidebarFooter}>
-          <span>{user.firstName || user.email}</span>
-          <Form method="post">
-            <input type="hidden" name="intent" value="logout" />
-            <button style={styles.secondaryBtn}>Sign Out</button>
-          </Form>
-        </div>
-      </aside>
+      </Form>
 
-      <main style={styles.main}>
-        <header style={styles.header}>
-          <div>
-            <h1 style={styles.title}>Quotes</h1>
-            <p style={styles.subtitle}>Create, send, track, and convert customer quotes for {company.name}.</p>
-          </div>
-          <Link to={`/sales/portal/company/${company.id}/create-quote`} style={styles.primaryBtn}>Create Quote</Link>
-        </header>
-
-        {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
-        {actionData?.success && <div style={styles.success}>{actionData.message}</div>}
-
-        <Form method="get" style={styles.filters}>
-          <input name="customer" placeholder="Customer" defaultValue={filters.customer} style={styles.input} />
-          <select name="status" defaultValue={filters.status} style={styles.input}>
-            <option value="">All statuses</option>
-            {["draft", "sent", "viewed", "approved", "rejected", "expired", "converted", "cancelled"].map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-          <select name="agent" defaultValue={filters.agent} style={styles.input}>
-            <option value="">All agents</option>
-            {agents.map((agent: any) => (
-              <option key={agent.id} value={agent.id}>{agent.firstName || agent.email} {agent.lastName || ""}</option>
-            ))}
-          </select>
-          <input type="date" name="dateFrom" defaultValue={filters.dateFrom} style={styles.input} />
-          <input type="date" name="dateTo" defaultValue={filters.dateTo} style={styles.input} />
-          <button style={styles.secondaryBtn}>Filter</button>
-        </Form>
-
-        <div style={styles.card}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Quote Number</th>
-                <th style={styles.th}>Customer</th>
-                <th style={styles.th}>Company</th>
-                <th style={styles.th}>Total</th>
-                <th style={styles.th}>Status</th>
-                <th style={styles.th}>Created</th>
-                <th style={styles.th}>Expiration</th>
-                <th style={styles.th}>Sales Agent</th>
-                <th style={{ ...styles.th, textAlign: "right" }}>Actions</th>
+      <div
+        className="sales-quote-card sales-quote-table-wrap"
+        style={styles.card}
+      >
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              <th style={styles.th}>Quote Number</th>
+              <th style={styles.th}>Customer</th>
+              <th style={styles.th}>Company</th>
+              <th style={styles.th}>Total</th>
+              <th style={styles.th}>Status</th>
+              <th style={styles.th}>Created</th>
+              <th style={styles.th}>Expiration</th>
+              <th style={styles.th}>Sales Agent</th>
+              <th style={{ ...styles.th, textAlign: "right" }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {quotes.map((quote: any) => (
+              <tr key={quote.id} className="sales-quote-row">
+                <td style={styles.td}>
+                  <Link
+                    to={`/sales/portal/company/${company.id}/quotes/${quote.id}`}
+                    style={styles.link}
+                  >
+                    {quote.quoteNumber}
+                  </Link>
+                </td>
+                <td style={styles.td}>
+                  {quote.customerFirstName || ""} {quote.customerLastName || ""}
+                  <br />
+                  <small>{quote.customerEmail}</small>
+                </td>
+                <td style={styles.td}>{company.name}</td>
+                <td style={styles.td}>
+                  <strong>
+                    {fmtMoney(quote.totalAmount, quote.currencyCode)}
+                  </strong>
+                </td>
+                <td style={styles.td}>{badge(quote.status)}</td>
+                <td style={styles.td}>{fmtDate(quote.createdAt)}</td>
+                <td style={styles.td}>{fmtDate(quote.expiresAt)}</td>
+                <td style={styles.td}>
+                  {quote.salesAgent?.firstName || quote.salesAgent?.email}
+                </td>
+                <td style={{ ...styles.td, textAlign: "right" }}>
+                  <div style={styles.actions}>
+                    <Link
+                      to={`/sales/portal/company/${company.id}/quotes/${quote.id}`}
+                      style={styles.smallLink}
+                    >
+                      View
+                    </Link>
+                    <QuoteAction
+                      quoteId={quote.id}
+                      intent="send_quote"
+                      label={quote.status === "draft" ? "Send" : "Resend"}
+                      disabled={navigation.state !== "idle"}
+                    />
+                    <QuoteAction
+                      quoteId={quote.id}
+                      intent="duplicate_quote"
+                      label="Duplicate"
+                    />
+                    {quote.status === "approved" && (
+                      <QuoteAction
+                        quoteId={quote.id}
+                        intent="convert_quote"
+                        label="Convert"
+                      />
+                    )}
+                    {editableStatuses.includes(quote.status) && (
+                      <QuoteAction
+                        quoteId={quote.id}
+                        intent="cancel_quote"
+                        label="Cancel"
+                      />
+                    )}
+                    <QuoteAction
+                      quoteId={quote.id}
+                      intent="delete_quote"
+                      label="Delete"
+                      danger
+                    />
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {quotes.map((quote: any) => (
-                <tr key={quote.id}>
-                  <td style={styles.td}><Link to={`/sales/portal/company/${company.id}/quotes/${quote.id}`} style={styles.link}>{quote.quoteNumber}</Link></td>
-                  <td style={styles.td}>{quote.customerFirstName || ""} {quote.customerLastName || ""}<br /><small>{quote.customerEmail}</small></td>
-                  <td style={styles.td}>{company.name}</td>
-                  <td style={styles.td}><strong>{fmtMoney(quote.totalAmount, quote.currencyCode)}</strong></td>
-                  <td style={styles.td}>{badge(quote.status)}</td>
-                  <td style={styles.td}>{fmtDate(quote.createdAt)}</td>
-                  <td style={styles.td}>{fmtDate(quote.expiresAt)}</td>
-                  <td style={styles.td}>{quote.salesAgent?.firstName || quote.salesAgent?.email}</td>
-                  <td style={{ ...styles.td, textAlign: "right" }}>
-                    <div style={styles.actions}>
-                      <Link to={`/sales/portal/company/${company.id}/quotes/${quote.id}`} style={styles.smallLink}>View</Link>
-                      <QuoteAction quoteId={quote.id} intent="send_quote" label={quote.status === "draft" ? "Send" : "Resend"} disabled={navigation.state !== "idle"} />
-                      <QuoteAction quoteId={quote.id} intent="duplicate_quote" label="Duplicate" />
-                      {quote.status === "approved" && <QuoteAction quoteId={quote.id} intent="convert_quote" label="Convert" />}
-                      {editableStatuses.includes(quote.status) && <QuoteAction quoteId={quote.id} intent="cancel_quote" label="Cancel" />}
-                      <QuoteAction quoteId={quote.id} intent="delete_quote" label="Delete" danger />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!quotes.length && (
-                <tr><td colSpan={9} style={styles.empty}>No quotes found.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </main>
-    </div>
+            ))}
+            {!quotes.length && (
+              <tr>
+                <td colSpan={9} style={styles.empty}>
+                  No quotes found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </SalesPortalQuoteShell>
   );
 }
 
@@ -411,7 +513,10 @@ function QuoteAction({
     <Form method="post" style={{ display: "inline" }}>
       <input type="hidden" name="intent" value={intent} />
       <input type="hidden" name="quoteId" value={quoteId} />
-      <button disabled={disabled} style={{ ...styles.actionBtn, color: danger ? "#b91c1c" : "#2563eb" }}>
+      <button
+        disabled={disabled}
+        style={{ ...styles.actionBtn, color: danger ? "#b91c1c" : "#2563eb" }}
+      >
         {label}
       </button>
     </Form>
@@ -419,35 +524,134 @@ function QuoteAction({
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  shell: { display: "flex", minHeight: "100vh", background: "#f8fafc", fontFamily: "'Inter', system-ui, sans-serif" },
-  sidebar: { width: 270, background: "#fff", borderRight: "1px solid #e5e7eb", padding: 24, display: "flex", flexDirection: "column", gap: 20 },
-  logo: { fontWeight: 800, fontSize: 22, color: "#111827" },
-  companyBox: { display: "flex", flexDirection: "column", gap: 4, padding: 14, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fafafa" },
-  kicker: { fontSize: 11, textTransform: "uppercase", color: "#6b7280", fontWeight: 700 },
-  nav: { display: "flex", flexDirection: "column", gap: 8 },
-  navItem: { padding: "10px 12px", color: "#374151", textDecoration: "none", borderRadius: 8, fontWeight: 600 },
-  activeNav: { background: "#111827", color: "#fff" },
-  switcher: { display: "flex", flexDirection: "column", gap: 6 },
-  companyLink: { color: "#2563eb", textDecoration: "none", fontSize: 13 },
-  sidebarFooter: { marginTop: "auto", display: "flex", flexDirection: "column", gap: 10 },
-  main: { flex: 1, padding: 32, minWidth: 0 },
-  header: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", marginBottom: 24 },
-  title: { margin: 0, fontSize: 30, color: "#111827" },
-  subtitle: { margin: "6px 0 0", color: "#6b7280" },
-  primaryBtn: { background: "#111827", color: "#fff", padding: "11px 16px", borderRadius: 8, textDecoration: "none", fontWeight: 700, border: "none" },
-  secondaryBtn: { background: "#fff", color: "#374151", padding: "9px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontWeight: 700, cursor: "pointer" },
-  filters: { display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 150px 150px auto", gap: 10, marginBottom: 18 },
-  input: { height: 40, border: "1px solid #d1d5db", borderRadius: 8, padding: "0 10px", background: "#fff" },
-  card: { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "auto" },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 16,
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  headerActions: { display: "flex", gap: 10, alignItems: "center" },
+  title: {
+    margin: 0,
+    fontFamily: "'Poppins', sans-serif",
+    fontSize: 28,
+    fontWeight: 700,
+    color: "#202223",
+  },
+  subtitle: { margin: "6px 0 0", color: "#6d7175", fontSize: 14 },
+  primaryBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    background: "#111827",
+    color: "#fff",
+    padding: "10px 18px",
+    borderRadius: 8,
+    textDecoration: "none",
+    fontWeight: 600,
+    fontSize: 14,
+    border: "none",
+    cursor: "pointer",
+  },
+  secondaryBtn: {
+    background: "#fff",
+    color: "#374151",
+    padding: "9px 12px",
+    borderRadius: 8,
+    border: "1px solid #d1d5db",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  clearBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#6d7175",
+    textDecoration: "none",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  filters: {
+    display: "grid",
+    gridTemplateColumns:
+      "minmax(180px, 1.2fr) minmax(140px, 1fr) minmax(140px, 1fr) 150px 150px auto auto",
+    gap: 10,
+    marginBottom: 18,
+    padding: 16,
+    background: "#fff",
+    border: "1px solid #eaeaea",
+    borderRadius: 8,
+  },
+  input: {
+    width: "100%",
+    height: 40,
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    padding: "0 11px",
+    background: "#fff",
+    color: "#202223",
+    font: "inherit",
+    fontSize: 13,
+  },
+  card: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 8,
+    overflow: "auto",
+  },
   table: { width: "100%", borderCollapse: "collapse" },
-  th: { textAlign: "left", fontSize: 12, color: "#6b7280", padding: "12px 14px", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" },
-  td: { padding: "12px 14px", borderBottom: "1px solid #f3f4f6", fontSize: 13, verticalAlign: "middle" },
-  link: { color: "#2563eb", fontWeight: 800, textDecoration: "none" },
-  smallLink: { color: "#2563eb", textDecoration: "none", fontWeight: 700 },
-  badge: { background: "#f3f4f6", borderRadius: 999, padding: "4px 9px", fontSize: 12, fontWeight: 800, textTransform: "capitalize" },
-  actions: { display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" },
-  actionBtn: { border: "none", background: "transparent", cursor: "pointer", fontWeight: 700, padding: 0 },
-  error: { background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", borderRadius: 8, padding: 12, marginBottom: 16 },
-  success: { background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0", borderRadius: 8, padding: 12, marginBottom: 16 },
+  th: {
+    textAlign: "left",
+    fontSize: 12,
+    color: "#6b7280",
+    padding: "12px 14px",
+    borderBottom: "1px solid #e5e7eb",
+    whiteSpace: "nowrap",
+  },
+  td: {
+    padding: "12px 14px",
+    borderBottom: "1px solid #f3f4f6",
+    fontSize: 13,
+    verticalAlign: "middle",
+  },
+  link: { color: "#2c6ecb", fontWeight: 700, textDecoration: "none" },
+  smallLink: { color: "#2c6ecb", textDecoration: "none", fontWeight: 600 },
+  badge: {
+    background: "#f4f6f8",
+    borderRadius: 8,
+    padding: "4px 9px",
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: "capitalize",
+  },
+  actions: {
+    display: "flex",
+    gap: 8,
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+  },
+  actionBtn: {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontWeight: 700,
+    padding: 0,
+  },
+  error: {
+    background: "#fef2f2",
+    color: "#991b1b",
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  success: {
+    background: "#ecfdf5",
+    color: "#065f46",
+    border: "1px solid #a7f3d0",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
   empty: { padding: 28, color: "#6b7280", textAlign: "center" },
 };

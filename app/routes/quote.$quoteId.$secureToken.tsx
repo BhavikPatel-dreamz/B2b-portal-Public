@@ -14,7 +14,11 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
   const quote = await prisma.quote.findFirst({
     where: { id: quoteId, secureToken },
     include: {
-      company: { include: { shop: { select: { shopName: true, shopDomain: true, logo: true } } } },
+      company: {
+        include: {
+          shop: { select: { shopName: true, shopDomain: true, logo: true } },
+        },
+      },
       items: { orderBy: { createdAt: "asc" } },
       activities: { orderBy: { createdAt: "desc" } },
     },
@@ -72,8 +76,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
     return Response.json({ error: "This quote has expired." }, { status: 400 });
   }
-  if (["approved", "rejected", "converted", "cancelled"].includes(quote.status)) {
-    return Response.json({ error: "This quote has already been finalized." }, { status: 400 });
+  if (
+    ["approved", "rejected", "converted", "cancelled"].includes(quote.status)
+  ) {
+    return Response.json(
+      { error: "This quote has already been finalized." },
+      { status: 400 },
+    );
   }
 
   if (intent === "approve_quote" || intent === "reject_quote") {
@@ -96,7 +105,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
     return Response.json({
       success: true,
-      message: approved ? "Quote approved. Your sales agent will follow up." : "Quote rejected. Thank you for the feedback.",
+      message: approved
+        ? "Quote approved. Your sales agent will follow up."
+        : "Quote rejected. Thank you for the feedback.",
     });
   }
 
@@ -138,24 +149,43 @@ export default function PublicQuotePage() {
 
   return (
     <main style={styles.page}>
-      <section style={styles.header}>
-        <div>
-          <p style={styles.kicker}>{quote.company.shop.shopName || quote.company.shop.shopDomain}</p>
-          <h1 style={styles.title}>{quote.quoteNumber}</h1>
-          <p style={styles.subtitle}>{quote.title}</p>
+      <section className="public-quote-header" style={styles.header}>
+        <div style={styles.brandBlock}>
+          {quote.company.shop.logo && (
+            <img
+              src={quote.company.shop.logo}
+              alt=""
+              style={styles.brandLogo}
+            />
+          )}
+          <div>
+            <p style={styles.kicker}>
+              {quote.company.shop.shopName || quote.company.shop.shopDomain}
+            </p>
+            <h1 style={styles.title}>{quote.quoteNumber}</h1>
+            <p style={styles.subtitle}>{quote.title}</p>
+          </div>
         </div>
         <span style={styles.badge}>{quote.status}</span>
       </section>
 
       {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
-      {actionData?.success && <div style={styles.success}>{actionData.message}</div>}
+      {actionData?.success && (
+        <div style={styles.success}>{actionData.message}</div>
+      )}
 
-      <div style={styles.grid}>
-        <section style={styles.card}>
+      <div className="public-quote-grid" style={styles.grid}>
+        <section className="public-quote-card" style={styles.card}>
           <h2 style={styles.cardTitle}>Quote Details</h2>
           <div style={styles.infoGrid}>
             <Info label="Company" value={quote.company.name} />
-            <Info label="Customer" value={`${quote.customerFirstName || ""} ${quote.customerLastName || ""}`.trim() || quote.customerEmail} />
+            <Info
+              label="Customer"
+              value={
+                `${quote.customerFirstName || ""} ${quote.customerLastName || ""}`.trim() ||
+                quote.customerEmail
+              }
+            />
             <Info label="Email" value={quote.customerEmail} />
             <Info label="Expiration Date" value={fmtDate(quote.expiresAt)} />
           </div>
@@ -167,90 +197,320 @@ export default function PublicQuotePage() {
             </div>
           )}
 
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Product</th>
-                <th style={styles.th}>Variant</th>
-                <th style={styles.th}>Qty</th>
-                <th style={styles.th}>Unit Price</th>
-                <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {quote.items.map((item: any) => (
-                <tr key={item.id}>
-                  <td style={styles.td}>{item.productTitle}<br /><small>{item.sku || "No SKU"}</small></td>
-                  <td style={styles.td}>{item.variantTitle || "Default"}</td>
-                  <td style={styles.td}>{item.quantity}</td>
-                  <td style={styles.td}>{fmtMoney(item.unitPrice, item.currencyCode)}</td>
-                  <td style={{ ...styles.td, textAlign: "right" }}>{fmtMoney(item.totalPrice, item.currencyCode)}</td>
+          <div className="public-quote-table">
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Product</th>
+                  <th style={styles.th}>Variant</th>
+                  <th style={styles.th}>Qty</th>
+                  <th style={styles.th}>Unit Price</th>
+                  <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {quote.items.map((item: any) => (
+                  <tr key={item.id}>
+                    <td style={styles.td}>
+                      {item.productTitle}
+                      <br />
+                      <small>{item.sku || "No SKU"}</small>
+                    </td>
+                    <td style={styles.td}>{item.variantTitle || "Default"}</td>
+                    <td style={styles.td}>{item.quantity}</td>
+                    <td style={styles.td}>
+                      {fmtMoney(item.unitPrice, item.currencyCode)}
+                    </td>
+                    <td style={{ ...styles.td, textAlign: "right" }}>
+                      {fmtMoney(item.totalPrice, item.currencyCode)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <aside style={styles.side}>
-          <div style={styles.card}>
+        <aside className="public-quote-side" style={styles.side}>
+          <div className="public-quote-card" style={styles.card}>
             <h2 style={styles.cardTitle}>Summary</h2>
             <Summary label="Subtotal" value={fmtMoney(quote.subtotal)} />
-            <Summary label="Discount" value={`-${fmtMoney(quote.discountTotal)}`} />
-            <Summary label={`Tax (${quote.taxRate}%)`} value={fmtMoney(quote.taxAmount)} />
+            <Summary
+              label="Discount"
+              value={`-${fmtMoney(quote.discountTotal)}`}
+            />
+            <Summary
+              label={`Tax (${quote.taxRate}%)`}
+              value={fmtMoney(quote.taxAmount)}
+            />
             <Summary label="Shipping" value={fmtMoney(quote.shippingAmount)} />
-            <div style={styles.total}><strong>Total</strong><strong>{fmtMoney(quote.totalAmount)}</strong></div>
+            <div style={styles.total}>
+              <strong>Total</strong>
+              <strong>{fmtMoney(quote.totalAmount)}</strong>
+            </div>
           </div>
 
-          <Form method="post" style={styles.card}>
+          <Form
+            method="post"
+            className="public-quote-card public-quote-response"
+            style={styles.card}
+          >
             <h2 style={styles.cardTitle}>Customer Response</h2>
-            <textarea name="comments" defaultValue={quote.customerComments || ""} placeholder="Leave comments for the sales agent" style={styles.textarea} />
+            <textarea
+              name="comments"
+              defaultValue={quote.customerComments || ""}
+              placeholder="Leave comments for the sales agent"
+              style={styles.textarea}
+            />
             <div style={styles.actions}>
-              <button type="submit" name="intent" value="leave_comment" style={styles.secondaryBtn}>Save Comment</button>
-              <button type="button" onClick={() => window.print()} style={styles.secondaryBtn}>Download PDF</button>
+              <button
+                type="submit"
+                name="intent"
+                value="leave_comment"
+                style={styles.secondaryBtn}
+              >
+                Save Comment
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                style={styles.secondaryBtn}
+              >
+                Download PDF
+              </button>
             </div>
             <div style={styles.actions}>
-              <button disabled={!canAct} type="submit" name="intent" value="reject_quote" style={styles.rejectBtn}>Reject Quote</button>
-              <button disabled={!canAct} type="submit" name="intent" value="approve_quote" style={styles.primaryBtn}>Approve Quote</button>
+              <button
+                disabled={!canAct}
+                type="submit"
+                name="intent"
+                value="reject_quote"
+                style={styles.rejectBtn}
+              >
+                Reject Quote
+              </button>
+              <button
+                disabled={!canAct}
+                type="submit"
+                name="intent"
+                value="approve_quote"
+                style={styles.primaryBtn}
+              >
+                Approve Quote
+              </button>
             </div>
           </Form>
         </aside>
       </div>
+      <style>{`
+        main * { box-sizing: border-box; }
+        .public-quote-table { overflow-x: auto; }
+        textarea:focus { outline: none; border-color: #e91e63 !important; box-shadow: 0 0 0 3px rgba(233, 30, 99, 0.1); }
+        @media (max-width: 860px) {
+          .public-quote-grid { grid-template-columns: minmax(0, 1fr) !important; }
+          .public-quote-side { position: static !important; }
+        }
+        @media (max-width: 600px) {
+          main { padding: 20px 14px !important; }
+          .public-quote-header { align-items: flex-start !important; }
+          .public-quote-card { padding: 16px !important; }
+          .public-quote-card > div[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
+          .public-quote-response div[style*="display: flex"] { flex-direction: column; }
+          .public-quote-response button { width: 100%; }
+        }
+        @media print {
+          main { padding: 0 !important; background: #fff !important; }
+          .public-quote-response { display: none !important; }
+          .public-quote-grid { display: block !important; }
+          .public-quote-side { position: static !important; margin-top: 20px; }
+        }
+      `}</style>
     </main>
   );
 }
 
 function Info({ label, value }: { label: string; value: string }) {
-  return <div><span style={styles.metaLabel}>{label}</span><strong>{value}</strong></div>;
+  return (
+    <div>
+      <span style={styles.metaLabel}>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 function Summary({ label, value }: { label: string; value: string }) {
-  return <div style={styles.summaryRow}><span>{label}</span><strong>{value}</strong></div>;
+  return (
+    <div style={styles.summaryRow}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#f8fafc", padding: 32, fontFamily: "'Inter', system-ui, sans-serif", color: "#111827" },
-  header: { maxWidth: 1180, margin: "0 auto 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 },
-  kicker: { margin: 0, color: "#6b7280", fontWeight: 800, textTransform: "uppercase", fontSize: 12 },
-  title: { margin: "8px 0 4px", fontSize: 34 },
-  subtitle: { margin: 0, color: "#6b7280" },
-  badge: { background: "#f3f4f6", borderRadius: 999, padding: "6px 12px", fontWeight: 800, textTransform: "capitalize" },
-  grid: { maxWidth: 1180, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 340px", gap: 24, alignItems: "start" },
-  card: { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, padding: 20 },
-  side: { display: "flex", flexDirection: "column", gap: 20, position: "sticky", top: 20 },
+  page: {
+    minHeight: "100vh",
+    background: "#fafafa",
+    padding: 32,
+    fontFamily: "'Inter', system-ui, sans-serif",
+    color: "#202223",
+  },
+  header: {
+    maxWidth: 1180,
+    margin: "0 auto 24px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  brandBlock: { display: "flex", alignItems: "flex-start", gap: 14 },
+  brandLogo: { width: 48, height: 48, objectFit: "contain", borderRadius: 8 },
+  kicker: {
+    margin: 0,
+    color: "#6d7175",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    fontSize: 11,
+  },
+  title: {
+    margin: "6px 0 2px",
+    fontFamily: "'Poppins', sans-serif",
+    fontSize: 30,
+  },
+  subtitle: { margin: 0, color: "#6d7175", fontSize: 14 },
+  badge: {
+    background: "#fff0f4",
+    color: "#b71950",
+    borderRadius: 8,
+    padding: "6px 12px",
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: "capitalize",
+  },
+  grid: {
+    maxWidth: 1180,
+    margin: "0 auto",
+    display: "grid",
+    gridTemplateColumns: "1fr 340px",
+    gap: 24,
+    alignItems: "start",
+  },
+  card: {
+    background: "#fff",
+    border: "1px solid #e1e3e5",
+    borderRadius: 8,
+    padding: 20,
+  },
+  side: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 20,
+    position: "sticky",
+    top: 20,
+  },
   cardTitle: { margin: "0 0 16px", fontSize: 18 },
-  infoGrid: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 20 },
-  metaLabel: { display: "block", color: "#6b7280", fontSize: 12, marginBottom: 4 },
-  note: { background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 8, padding: 14, marginBottom: 20 },
+  infoGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: 16,
+    marginBottom: 20,
+  },
+  metaLabel: {
+    display: "block",
+    color: "#6b7280",
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  note: {
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    borderRadius: 8,
+    padding: 14,
+    marginBottom: 20,
+  },
   table: { width: "100%", borderCollapse: "collapse" },
-  th: { textAlign: "left", borderBottom: "1px solid #e5e7eb", padding: "10px 8px", color: "#6b7280", fontSize: 12 },
+  th: {
+    textAlign: "left",
+    borderBottom: "1px solid #e5e7eb",
+    padding: "10px 8px",
+    color: "#6b7280",
+    fontSize: 12,
+  },
   td: { borderBottom: "1px solid #f3f4f6", padding: "12px 8px", fontSize: 13 },
-  summaryRow: { display: "flex", justifyContent: "space-between", padding: "8px 0", color: "#4b5563" },
-  total: { display: "flex", justifyContent: "space-between", borderTop: "1px solid #e5e7eb", paddingTop: 14, marginTop: 8, fontSize: 18 },
-  textarea: { width: "100%", boxSizing: "border-box", minHeight: 96, border: "1px solid #d1d5db", borderRadius: 8, padding: 10, font: "inherit", marginBottom: 12 },
-  actions: { display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 10 },
-  primaryBtn: { background: "#111827", color: "#fff", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 800, cursor: "pointer" },
-  secondaryBtn: { background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, padding: "10px 14px", fontWeight: 800, cursor: "pointer" },
-  rejectBtn: { background: "#fff", color: "#b91c1c", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontWeight: 800, cursor: "pointer" },
-  success: { maxWidth: 1180, margin: "0 auto 16px", background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0", borderRadius: 8, padding: 12 },
-  error: { maxWidth: 1180, margin: "0 auto 16px", background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca", borderRadius: 8, padding: 12 },
+  summaryRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "8px 0",
+    color: "#4b5563",
+  },
+  total: {
+    display: "flex",
+    justifyContent: "space-between",
+    borderTop: "1px solid #e5e7eb",
+    paddingTop: 14,
+    marginTop: 8,
+    fontSize: 18,
+  },
+  textarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    minHeight: 96,
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    padding: 10,
+    font: "inherit",
+    marginBottom: 12,
+    resize: "vertical",
+  },
+  actions: {
+    display: "flex",
+    gap: 10,
+    justifyContent: "flex-end",
+    marginTop: 10,
+  },
+  primaryBtn: {
+    background: "#111827",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  secondaryBtn: {
+    background: "#fff",
+    color: "#374151",
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  rejectBtn: {
+    background: "#fff",
+    color: "#b91c1c",
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    padding: "10px 14px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  success: {
+    maxWidth: 1180,
+    margin: "0 auto 16px",
+    background: "#ecfdf5",
+    color: "#065f46",
+    border: "1px solid #a7f3d0",
+    borderRadius: 8,
+    padding: 12,
+  },
+  error: {
+    maxWidth: 1180,
+    margin: "0 auto 16px",
+    background: "#fef2f2",
+    color: "#991b1b",
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    padding: 12,
+  },
 };
