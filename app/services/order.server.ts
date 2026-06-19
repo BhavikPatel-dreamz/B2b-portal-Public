@@ -47,6 +47,49 @@ export interface UpdateOrderPaymentInput {
   receivedAt?: Date | null;
 }
 
+interface ConvertDraftOrderOptions {
+  shopId?: string;
+  companyId?: string;
+  createdByUserId?: string;
+  orderTotal?: number | string | Prisma.Decimal;
+}
+
+interface CreditSyncAdmin {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, string> },
+  ) => Promise<Response>;
+}
+
+function uniqueOrderIds(ids: Array<string | null | undefined>) {
+  return [...new Set(ids.filter(Boolean) as string[])];
+}
+
+function shopifyIdTail(id: string) {
+  return id.split("/").pop() || id;
+}
+
+function draftOrderIdCandidates(shopifyOrderId: string) {
+  const numericId = shopifyIdTail(shopifyOrderId);
+
+  return uniqueOrderIds([
+    shopifyOrderId,
+    numericId,
+    `gid://shopify/DraftOrder/${numericId}`,
+  ]);
+}
+
+function shopifyOrderIdCandidates(shopifyOrderId: string) {
+  const numericId = shopifyIdTail(shopifyOrderId);
+
+  return uniqueOrderIds([
+    shopifyOrderId,
+    numericId,
+    `gid://shopify/Order/${numericId}`,
+    `gid://shopify/DraftOrder/${numericId}`,
+  ]);
+}
+
 /**
  * Create or update B2B order (upsert functionality)
  * If order exists with same shopifyOrderId and companyId, update it
@@ -55,6 +98,38 @@ export interface UpdateOrderPaymentInput {
 export async function upsertOrder(data: CreateOrderInput) {
   if (!data.shopifyOrderId) {
     return await createOrder(data);
+  }
+
+  const existingOrder = await prisma.b2BOrder.findFirst({
+    where: {
+      shopId: data.shopId,
+      shopifyOrderId: { in: shopifyOrderIdCandidates(data.shopifyOrderId) },
+    },
+  });
+
+  if (existingOrder) {
+    return await prisma.b2BOrder.update({
+      where: { id: existingOrder.id },
+      data: {
+        companyId: data.companyId,
+        createdByUserId: data.createdByUserId,
+        shopId: data.shopId,
+        shopifyOrderId: data.shopifyOrderId,
+        orderTotal: new Prisma.Decimal(data.orderTotal.toString()),
+        creditUsed: new Prisma.Decimal(data.creditUsed.toString()),
+        userCreditUsed: new Prisma.Decimal(data.userCreditUsed.toString()),
+        remainingBalance: new Prisma.Decimal(data.remainingBalance.toString()),
+        paymentStatus: data.paymentStatus || "pending",
+        orderStatus: data.orderStatus || "draft",
+        notes: data.notes,
+        source: data.source,
+      },
+      include: {
+        company: true,
+        createdByUser: true,
+        payments: true,
+      },
+    });
   }
 
   try {
@@ -196,7 +271,10 @@ export async function getOrderByShopifyId(
   shopifyOrderId: string,
 ) {
   return await prisma.b2BOrder.findFirst({
-    where: { shopId, shopifyOrderId },
+    where: {
+      shopId,
+      shopifyOrderId: { in: shopifyOrderIdCandidates(shopifyOrderId) },
+    },
     select: {
       id: true,
       orderTotal: true,
@@ -220,7 +298,10 @@ export async function getOrderByShopifyIdWithDetails(
   shopifyOrderId: string,
 ) {
   return await prisma.b2BOrder.findFirst({
-    where: { shopId, shopifyOrderId },
+    where: {
+      shopId,
+      shopifyOrderId: { in: shopifyOrderIdCandidates(shopifyOrderId) },
+    },
     include: {
       company: {},
       createdByUser: {
@@ -481,18 +562,45 @@ export async function deleteOrderPayment(id: string) {
 export async function convertDraftOrderToFinal(
   draftShopifyOrderId: string,
   finalShopifyOrderId: string,
-  admin?: any
+  admin?: CreditSyncAdmin,
+  options: ConvertDraftOrderOptions = {},
 ) {
   console.log(`🔄 Converting draft order ${draftShopifyOrderId} to final order ${finalShopifyOrderId}`);
 
   // 1. Find the draft order in database
-  const draftOrder = await prisma.b2BOrder.findFirst({
+  let draftOrder = await prisma.b2BOrder.findFirst({
     where: {
-      shopifyOrderId: {
-        in: [draftShopifyOrderId, `gid://shopify/DraftOrder/${draftShopifyOrderId}`],
-      },
+      shopifyOrderId: { in: draftOrderIdCandidates(draftShopifyOrderId) },
     },
   });
+
+  if (!draftOrder && options.shopId && options.companyId) {
+    const fallbackWhere: Prisma.B2BOrderWhereInput = {
+      shopId: options.shopId,
+      companyId: options.companyId,
+      createdByUserId: options.createdByUserId,
+      paymentStatus: { in: ["pending", "partial"] },
+      orderStatus: { in: ["draft", "submitted", "processing"] },
+      OR: [
+        { shopifyOrderId: null },
+        { shopifyOrderId: { notIn: shopifyOrderIdCandidates(finalShopifyOrderId) } },
+      ],
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    };
+
+    if (options.orderTotal !== undefined) {
+      fallbackWhere.orderTotal = new Prisma.Decimal(options.orderTotal.toString());
+    }
+
+    draftOrder = await prisma.b2BOrder.findFirst({
+      where: fallbackWhere,
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (draftOrder) {
+      console.log(`✅ Matched draft order by recent company/order total fallback: ${draftOrder.id}`);
+    }
+  }
 
   if (!draftOrder) {
     console.log(`⚠️ No local draft order found for shopifyOrderId: ${draftShopifyOrderId}`);
@@ -525,6 +633,7 @@ export async function convertDraftOrderToFinal(
   const orderIdentifiers = [
     draftOrder.id,
     draftOrder.shopifyOrderId,
+    ...draftOrderIdCandidates(draftShopifyOrderId),
   ].filter(Boolean) as string[];
 
   await prisma.creditTransaction.updateMany({
@@ -546,6 +655,7 @@ export async function convertDraftOrderToFinal(
     where: { id: draftOrder.id },
     data: {
       orderStatus: "converted",
+      orderTotal: new Prisma.Decimal(0),
       creditUsed: new Prisma.Decimal(0),
       userCreditUsed: new Prisma.Decimal(0),
       remainingBalance: new Prisma.Decimal(0),
@@ -567,4 +677,3 @@ export async function convertDraftOrderToFinal(
 
   return updatedDraftOrder;
 }
-

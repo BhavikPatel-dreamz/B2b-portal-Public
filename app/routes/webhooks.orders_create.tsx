@@ -2,7 +2,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate, getAdminForShop } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
-import { upsertOrder } from "../services/order.server";
+import { getOrderByShopifyId, upsertOrder } from "../services/order.server";
 import { getUserByShopifyCustomerId } from "../services/user.server";
 import { syncCompanyCreditMetafields } from "../services/metafieldSync.server";
 import { Prisma } from "@prisma/client";
@@ -100,7 +100,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const { convertDraftOrderToFinal } = await import("../services/order.server");
         try {
           const admin = await getAdminForShop(shop);
-          await convertDraftOrderToFinal(draftOrderId.toString(), orderGid || orderIdNum?.toString() || "unknown", admin);
+          await convertDraftOrderToFinal(
+            draftOrderId.toString(),
+            orderGid || orderIdNum?.toString() || "unknown",
+            admin,
+            {
+              shopId: store.id,
+              companyId: user.companyId,
+              createdByUserId: user.id,
+              orderTotal: totalPriceStr,
+            },
+          );
         } catch (convErr) {
           console.error("Failed to convert draft order in orders_create webhook:", convErr);
         }
@@ -144,6 +154,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const paidAmount =
         paymentStatus === "paid" ? orderTotal : new Prisma.Decimal(0);
       const remainingBalance = orderTotal.minus(paidAmount);
+      const existingOrder = orderGid
+        ? await getOrderByShopifyId(store.id, orderGid)
+        : null;
+      const existingCreditUsed = existingOrder?.creditUsed
+        ? new Prisma.Decimal(existingOrder.creditUsed)
+        : new Prisma.Decimal(0);
 
       // Extract order source from note_attributes (e.g., 'quick_order')
       const orderSource =
@@ -165,79 +181,91 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // For B2B orders with pending payment, we still need to reserve the credit
       // and validate against company limits
       if (paymentStatus === "pending") {
-        console.log(`🔄 B2B Order with pending payment - reserving credit`);
+        const creditAlreadyReserved =
+          existingCreditUsed.greaterThanOrEqualTo(remainingBalance);
 
-        // Import credit validation service
-        const { validateTieredCreditForOrder, deductTieredCredit } =
-          await import("../services/tieredCreditService");
+        if (creditAlreadyReserved) {
+          console.log(`ℹ️ Credit already reserved for B2B order - skipping duplicate deduction`, {
+            orderId: orderIdNum,
+            existingOrderId: existingOrder?.id,
+            existingCreditUsed: existingCreditUsed.toString(),
+            remainingBalance: remainingBalance.toString(),
+          });
+        } else {
+          console.log(`🔄 B2B Order with pending payment - reserving credit`);
 
-        try {
-          // Validate credit availability for the order
-          const validation = await validateTieredCreditForOrder(
-            user.companyId,
-            user.id,
-            orderTotal.toNumber(),
-            orderGid,
-          );
+          // Import credit validation service
+          const { validateTieredCreditForOrder, deductTieredCredit } =
+            await import("../services/tieredCreditService");
 
-          if (!validation.canCreate) {
-            console.warn(`❌ Credit validation failed for pending B2B order:`, {
-              orderId: orderIdNum,
-              companyId: user.companyId,
-              reason: validation.message,
-            });
+          try {
+            // Validate credit availability for the order
+            const validation = await validateTieredCreditForOrder(
+              user.companyId,
+              user.id,
+              remainingBalance.toNumber(),
+              orderGid,
+            );
 
-            // Still create the order but mark it as requiring attention
-            await upsertOrder({
-              companyId: user.companyId,
-              createdByUserId: user.id,
-              shopId: store.id,
-              shopifyOrderId: orderGid,
-              orderTotal,
-              creditUsed: new Prisma.Decimal(0), // No credit used yet since payment is pending
-              userCreditUsed: new Prisma.Decimal(0), // No user credit used yet
-              remainingBalance,
-              paymentStatus: "pending",
-              orderStatus: "submitted",
-              notes: `Credit validation failed: ${validation.message}. Order requires manual review.`,
-              userId: user.id,
-              source: orderSource,
-            });
+            if (!validation.canCreate) {
+              console.warn(`❌ Credit validation failed for pending B2B order:`, {
+                orderId: orderIdNum,
+                companyId: user.companyId,
+                reason: validation.message,
+              });
 
-            // Sync metafields even when validation fails
-            try {
-              const admin = await getAdminForShop(shop);
-              await syncCompanyCreditMetafields(admin as any, user.companyId);
-            } catch (syncError) {
-              console.error(
-                `⚠️ Failed to sync metafields after order creation:`,
-                syncError,
-              );
+              // Still create the order but mark it as requiring attention
+              await upsertOrder({
+                companyId: user.companyId,
+                createdByUserId: user.id,
+                shopId: store.id,
+                shopifyOrderId: orderGid,
+                orderTotal,
+                creditUsed: new Prisma.Decimal(0), // No credit used yet since payment is pending
+                userCreditUsed: new Prisma.Decimal(0), // No user credit used yet
+                remainingBalance,
+                paymentStatus: "pending",
+                orderStatus: "submitted",
+                notes: `Credit validation failed: ${validation.message}. Order requires manual review.`,
+                userId: user.id,
+                source: orderSource,
+              });
+
+              // Sync metafields even when validation fails
+              try {
+                const admin = await getAdminForShop(shop);
+                await syncCompanyCreditMetafields(admin as any, user.companyId);
+              } catch (syncError) {
+                console.error(
+                  `⚠️ Failed to sync metafields after order creation:`,
+                  syncError,
+                );
+              }
+
+              console.log(`⚠️ B2B order created with credit validation warning`);
+              return new Response();
             }
 
-            console.log(`⚠️ B2B order created with credit validation warning`);
-            return new Response();
+            // Validation passed - reserve credit for pending payment
+            await deductTieredCredit(
+              user.companyId,
+              user.id,
+              orderGid!,
+              remainingBalance.toNumber(),
+              `Credit reserved for pending order ${orderIdNum}`,
+            );
+
+            console.log(`✅ Credit reserved for pending B2B order:`, {
+              orderId: orderIdNum,
+              creditReserved: remainingBalance.toString(),
+            });
+          } catch (creditError) {
+            console.error(
+              `Failed to process credit for pending B2B order:`,
+              creditError,
+            );
+            // Continue with order creation but log the error
           }
-
-          // Validation passed - reserve credit for pending payment
-          await deductTieredCredit(
-            user.companyId,
-            user.id,
-            orderGid!,
-            orderTotal.toNumber(),
-            `Credit reserved for pending order ${orderIdNum}`,
-          );
-
-          console.log(`✅ Credit reserved for pending B2B order:`, {
-            orderId: orderIdNum,
-            creditReserved: orderTotal.toString(),
-          });
-        } catch (creditError) {
-          console.error(
-            `Failed to process credit for pending B2B order:`,
-            creditError,
-          );
-          // Continue with order creation but log the error
         }
       }
 

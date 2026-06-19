@@ -46,7 +46,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Get recent orders for this company
   const recentOrders = await prisma.b2BOrder.findMany({
-    where: { companyId: company.id },
+    where: {
+      companyId: company.id,
+      orderStatus: { notIn: ["converted", "archived"] },
+    },
     orderBy: { createdAt: "desc" },
     take: 10,
     select: {

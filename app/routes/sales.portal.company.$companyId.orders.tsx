@@ -34,7 +34,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   // Fetch all orders for this company (both drafts and completed)
   const orders = await prisma.b2BOrder.findMany({
-    where: { companyId: company.id },
+    where: {
+      companyId: company.id,
+      orderStatus: { notIn: ["converted", "archived"] },
+    },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,

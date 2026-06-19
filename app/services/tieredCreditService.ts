@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
+import type { Prisma } from "@prisma/client";
 import { autoSyncCreditMetafields } from "./metafieldSync.server";
 
 interface UserCreditInfo {
@@ -308,17 +309,26 @@ export async function deductTieredCredit(
     });
   }
 
+  const orderIdMatches: Prisma.CreditTransactionWhereInput[] = [
+    { orderId },
+    ...(order ? [{ orderId: order.id }] : []),
+    ...(order?.shopifyOrderId ? [{ orderId: order.shopifyOrderId }] : []),
+  ];
+
   // Create company credit transaction
   const orderTransactions = await prisma.creditTransaction.findFirst({
     where: {
       companyId: internalCompanyId,
-      OR: [
-        { orderId: orderId },
-        order ? { orderId: order.id } : {},
-        order?.shopifyOrderId ? { orderId: order.shopifyOrderId } : {}
-      ].filter(item => Object.keys(item).length > 0) as any,
+      OR: orderIdMatches,
     },
   });
+
+  const previousUserCreditForOrder =
+    order && order.userCreditUsed
+      ? new Decimal(order.userCreditUsed)
+      : orderTransactions?.userId === userId
+        ? new Decimal(orderTransactions.creditAmount).abs()
+        : new Decimal(0);
 
   if (orderTransactions) {
     const updatedTx = await prisma.creditTransaction.update({
@@ -364,16 +374,21 @@ export async function deductTieredCredit(
   }
  
 
-  // Update user credit usage if they have a limit
+  // Update user credit usage only by the delta for this order. This keeps
+  // retries/webhooks idempotent instead of adding the full amount again.
   if (creditInfo.user.hasUserLimit) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        userCreditUsed: {
-          increment: amountDecimal,
+    const userCreditDelta = amountDecimal.minus(previousUserCreditForOrder);
+
+    if (!userCreditDelta.equals(0)) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          userCreditUsed: userCreditDelta.greaterThan(0)
+            ? { increment: userCreditDelta }
+            : { decrement: userCreditDelta.abs() },
         },
-      },
-    });
+      });
+    }
   }
 
   // Update order with credit tracking
