@@ -317,8 +317,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
 
-  if (!companyId || !hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/dashboard");
+  if (!companyId) {
+    return redirect("/sales/portal");
+  }
+
+  if (!hasCompanyAccess(user, companyId)) {
+    return redirect("/sales/portal");
   }
 
   const url = new URL(request.url);
@@ -338,7 +342,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 
   if (!company || !company.shop) {
-    return redirect("/sales/dashboard");
+    return redirect("/sales/portal");
   }
 
   let selectedCustomer = await prisma.user.findFirst({
@@ -492,7 +496,7 @@ export default function ReviewOrder() {
       <header style={styles.header}>
         <div style={styles.headerContent}>
           <div style={styles.breadcrumb}>
-            <Link to="/sales/dashboard" style={styles.breadcrumbLink}>Dashboard</Link>
+            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>Dashboard</Link>
             <span style={styles.breadcrumbSeparator}>/</span>
             <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>{company.name}</Link>
             <span style={styles.breadcrumbSeparator}>/</span>

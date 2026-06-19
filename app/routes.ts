@@ -104,7 +104,6 @@ export default [
   
   // Unified Sales Portal (single login for all companies/stores)
   route("sales/login", "routes/sales.login.tsx"),
-  route("sales/dashboard", "routes/sales.dashboard.tsx"),
   route("sales/portal", "routes/sales.portal.tsx"),
   route("sales/portal/company/:companyId/create-order", "routes/sales.portal.company.$companyId.create-order.tsx"),
   route("sales/portal/company/:companyId/create-order/step2", "routes/sales.portal.company.$companyId.create-order.step2.tsx"),
