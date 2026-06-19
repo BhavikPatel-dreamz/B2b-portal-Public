@@ -22,7 +22,10 @@ import {
   sendQuoteToCustomer,
   serializeQuote,
 } from "app/services/quote.server";
-import { SalesPortalQuoteShell } from "app/components/SalesPortalQuoteShell";
+import {
+  SalesPortalHeader,
+  SalesPortalLayout,
+} from "app/components/SalesPortalLayout";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -70,6 +73,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       name: item.company.name,
     })),
     quoteCount: await prisma.quote.count({ where: { companyId } }),
+    orderCount: await prisma.b2BOrder.count({
+      where: {
+        companyId,
+        orderStatus: { notIn: ["converted", "archived"] },
+      },
+    }),
     quoteUrl: getQuoteUrl(request, quote),
     created: new URL(request.url).searchParams.get("created") === "1",
     passedQuoteUrl: new URL(request.url).searchParams.get("quoteUrl") || "",
@@ -245,6 +254,7 @@ export default function QuoteDetailPage() {
     user,
     allCompanies,
     quoteCount,
+    orderCount,
   } = useLoaderData<any>();
   const actionData = useActionData<any>();
   const navigation = useNavigation();
@@ -268,57 +278,57 @@ export default function QuoteDetailPage() {
   const dateInput = quote.expiresAt.slice(0, 10);
 
   return (
-    <SalesPortalQuoteShell
+    <SalesPortalLayout
       company={{
         id: quote.companyId,
         name: quote.company.name,
         storeName: quote.company.shop.shopName || quote.company.shop.shopDomain,
       }}
       user={user}
-      allCompanies={allCompanies}
+      activePage="quotes"
+      orderCount={orderCount}
       quoteCount={quoteCount}
     >
-      <header className="sales-quote-header" style={styles.header}>
-        <div>
-          <Link
-            to={`/sales/portal/company/${quote.companyId}/quotes`}
-            style={styles.backLink}
-          >
-            Back to Quotes
-          </Link>
-          <h1 style={styles.title}>{quote.quoteNumber}</h1>
-          <p style={styles.subtitle}>{quote.title}</p>
-        </div>
-        <div
-          className="sales-quote-header-actions"
-          style={styles.headerActions}
-        >
-          <Form method="post">
-            <input type="hidden" name="intent" value="send_quote" />
-            <button disabled={isSubmitting} style={styles.primaryBtn}>
-              {quote.status === "draft" ? "Send Quote" : "Resend Quote"}
-            </button>
-          </Form>
-          <Form method="post">
-            <input type="hidden" name="intent" value="duplicate_quote" />
-            <button style={styles.secondaryBtn}>Duplicate</button>
-          </Form>
-          {quote.status === "approved" && (
+      <Link
+        to={`/sales/portal/company/${quote.companyId}/quotes`}
+        style={styles.backLink}
+      >
+        Back to Quotes
+      </Link>
+      <SalesPortalHeader
+        title={quote.quoteNumber}
+        subtitle={quote.title}
+        companyId={quote.companyId}
+        companies={allCompanies}
+        actions={
+          <>
             <Form method="post">
-              <input type="hidden" name="intent" value="convert_quote" />
+              <input type="hidden" name="intent" value="send_quote" />
               <button disabled={isSubmitting} style={styles.primaryBtn}>
-                Convert To Order
+                {quote.status === "draft" ? "Send Quote" : "Resend Quote"}
               </button>
             </Form>
-          )}
-          {["draft", "sent", "viewed"].includes(quote.status) && (
             <Form method="post">
-              <input type="hidden" name="intent" value="cancel_quote" />
-              <button style={styles.secondaryBtn}>Cancel</button>
+              <input type="hidden" name="intent" value="duplicate_quote" />
+              <button style={styles.secondaryBtn}>Duplicate</button>
             </Form>
-          )}
-        </div>
-      </header>
+            {quote.status === "approved" && (
+              <Form method="post">
+                <input type="hidden" name="intent" value="convert_quote" />
+                <button disabled={isSubmitting} style={styles.primaryBtn}>
+                  Convert To Order
+                </button>
+              </Form>
+            )}
+            {["draft", "sent", "viewed"].includes(quote.status) && (
+              <Form method="post">
+                <input type="hidden" name="intent" value="cancel_quote" />
+                <button style={styles.secondaryBtn}>Cancel</button>
+              </Form>
+            )}
+          </>
+        }
+      />
 
       {created && (
         <div style={styles.success}>Quote created. Secure link: {shareUrl}</div>
@@ -510,7 +520,7 @@ export default function QuoteDetailPage() {
           )}
         </aside>
       </div>
-    </SalesPortalQuoteShell>
+    </SalesPortalLayout>
   );
 }
 
@@ -533,32 +543,12 @@ function Summary({ label, value }: { label: string; value: string }) {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 16,
-    alignItems: "flex-start",
-    marginBottom: 24,
-  },
-  headerActions: {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
-  },
   backLink: {
     color: "#2c6ecb",
     textDecoration: "none",
     fontWeight: 600,
     fontSize: 13,
   },
-  title: {
-    margin: "8px 0 4px",
-    fontFamily: "'Poppins', sans-serif",
-    fontSize: 28,
-    color: "#202223",
-  },
-  subtitle: { margin: 0, color: "#6d7175", fontSize: 14 },
   grid: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 360px",

@@ -20,7 +20,11 @@ import {
   logQuoteActivity,
   sendQuoteToCustomer,
 } from "app/services/quote.server";
-import { SalesPortalQuoteShell } from "app/components/SalesPortalQuoteShell";
+import {
+  SalesPortalHeader,
+  SalesPortalLayout,
+  salesPortalButtonStyles,
+} from "app/components/SalesPortalLayout";
 
 const editableStatuses = ["draft"];
 
@@ -75,7 +79,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
   }
 
-  const [quotes, agents, quoteCount] = await Promise.all([
+  const [quotes, agents, quoteCount, orderCount] = await Promise.all([
     prisma.quote.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -94,6 +98,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       orderBy: { firstName: "asc" },
     }),
     prisma.quote.count({ where: { companyId } }),
+    prisma.b2BOrder.count({
+      where: {
+        companyId,
+        orderStatus: { notIn: ["converted", "archived"] },
+      },
+    }),
   ]);
 
   return Response.json({
@@ -114,6 +124,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     })),
     agents,
     quoteCount,
+    orderCount,
     filters: { status, customer, agent, dateFrom, dateTo },
     quotes: quotes.map((quote) => ({
       ...quote,
@@ -263,8 +274,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function QuoteListingPage() {
-  const { company, user, allCompanies, agents, filters, quotes, quoteCount } =
-    useLoaderData<any>();
+  const {
+    company,
+    user,
+    allCompanies,
+    agents,
+    filters,
+    quotes,
+    quoteCount,
+    orderCount,
+  } = useLoaderData<any>();
   const actionData = useActionData<any>();
   const navigation = useNavigation();
 
@@ -299,31 +318,27 @@ export default function QuoteListingPage() {
   };
 
   return (
-    <SalesPortalQuoteShell
+    <SalesPortalLayout
       company={company}
       user={user}
-      allCompanies={allCompanies}
+      activePage="quotes"
+      orderCount={orderCount}
       quoteCount={quoteCount}
     >
-      <header className="sales-quote-header" style={styles.header}>
-        <div>
-          <h1 style={styles.title}>Quotes</h1>
-          <p style={styles.subtitle}>
-            Create, send, track, and convert customer quotes for {company.name}.
-          </p>
-        </div>
-        <div
-          className="sales-quote-header-actions"
-          style={styles.headerActions}
-        >
+      <SalesPortalHeader
+        title="Quotes"
+        subtitle={`Create, send, track, and convert customer quotes for ${company.name}.`}
+        companyId={company.id}
+        companies={allCompanies}
+        actions={
           <Link
             to={`/sales/portal/company/${company.id}/create-quote`}
-            style={styles.primaryBtn}
+            style={salesPortalButtonStyles.primary}
           >
             + Create Quote
           </Link>
-        </div>
-      </header>
+        }
+      />
 
       {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
       {actionData?.success && (
@@ -492,7 +507,7 @@ export default function QuoteListingPage() {
           </tbody>
         </table>
       </div>
-    </SalesPortalQuoteShell>
+    </SalesPortalLayout>
   );
 }
 
@@ -524,22 +539,6 @@ function QuoteAction({
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 16,
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  headerActions: { display: "flex", gap: 10, alignItems: "center" },
-  title: {
-    margin: 0,
-    fontFamily: "'Poppins', sans-serif",
-    fontSize: 28,
-    fontWeight: 700,
-    color: "#202223",
-  },
-  subtitle: { margin: "6px 0 0", color: "#6d7175", fontSize: 14 },
   primaryBtn: {
     display: "inline-flex",
     alignItems: "center",
