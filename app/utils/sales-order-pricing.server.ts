@@ -3,6 +3,11 @@ export type SalesCartItem = {
   quantity: number;
   price: string | number;
   currencyCode?: string | null;
+  productId?: string;
+  productTitle?: string;
+  variantTitle?: string;
+  sku?: string;
+  image?: string;
 };
 
 export type SalesDiscountType = "PERCENTAGE" | "FIXED_AMOUNT";

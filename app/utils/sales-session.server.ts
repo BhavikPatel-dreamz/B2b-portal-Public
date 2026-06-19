@@ -6,6 +6,7 @@ export type SalesSessionUser = {
   firstName: string | null;
   lastName: string | null;
   role: string;
+  companyRole: string | null;
   shopId: string | null;
   salesCompanies: Array<{
     companyId: string;
@@ -36,7 +37,7 @@ export function getSessionTokenFromCookie(request: Request): string | null {
 export function buildSessionCookie(token: string): string {
   const maxAge = Math.floor(SESSION_DURATION_MS / 1000);
   const isProd = process.env.NODE_ENV === "production";
-  return `${COOKIE_NAME}=${token}; Path=/sales; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${isProd ? "; Secure" : ""}`;
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${isProd ? "; Secure" : ""}`;
 }
 
 /**
@@ -44,7 +45,7 @@ export function buildSessionCookie(token: string): string {
  */
 export function buildClearSessionCookie(): string {
   const isProd = process.env.NODE_ENV === "production";
-  return `${COOKIE_NAME}=; Path=/sales; HttpOnly; SameSite=Lax; Max-Age=0${isProd ? "; Secure" : ""}`;
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isProd ? "; Secure" : ""}`;
 }
 
 /**

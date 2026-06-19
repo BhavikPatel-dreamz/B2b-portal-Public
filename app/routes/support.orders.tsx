@@ -1,0 +1,678 @@
+import type React from "react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { Form, Link, redirect, useLoaderData } from "react-router";
+import type { Prisma } from "@prisma/client";
+import prisma from "app/db.server";
+import {
+  SalesPortalHeader,
+  SalesPortalLayout,
+  salesPortalButtonStyles,
+} from "app/components/SalesPortalLayout";
+import {
+  buildClearSessionCookie,
+  requireSalesSession,
+} from "app/utils/sales-session.server";
+import {
+  getOrderAccessWhere,
+  getOrderNumber,
+  getSalesOrderAccessLevel,
+} from "app/services/sales-order-management.server";
+
+const ORDER_STATUSES = [
+  "draft",
+  "payment_pending",
+  "paid",
+  "processing",
+  "completed",
+  "cancelled",
+  "refunded",
+];
+const PAYMENT_STATUSES = ["pending", "partial", "paid", "failed", "expired"];
+
+function csvCell(value: unknown) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { user } = await requireSalesSession(request);
+  const url = new URL(request.url);
+  const search = (url.searchParams.get("search") || "").trim();
+  const status = url.searchParams.get("status") || "";
+  const paymentStatus = url.searchParams.get("paymentStatus") || "";
+  const companyId = url.searchParams.get("company") || "";
+  const customer = url.searchParams.get("customer") || "";
+  const agentId = url.searchParams.get("agent") || "";
+  const dateFrom = url.searchParams.get("dateFrom") || "";
+  const dateTo = url.searchParams.get("dateTo") || "";
+  const exportType = url.searchParams.get("export") || "";
+  const accessLevel = getSalesOrderAccessLevel(user);
+  const accessWhere = getOrderAccessWhere(user);
+
+  const filters: Prisma.B2BOrderWhereInput[] = [];
+  if (search) {
+    filters.push({
+      OR: [
+        { orderNumber: { contains: search, mode: "insensitive" } },
+        { shopifyOrderId: { contains: search, mode: "insensitive" } },
+        { customerName: { contains: search, mode: "insensitive" } },
+        { customerEmail: { contains: search, mode: "insensitive" } },
+        { poNumber: { contains: search, mode: "insensitive" } },
+        { company: { name: { contains: search, mode: "insensitive" } } },
+      ],
+    });
+  }
+  if (status) filters.push({ orderStatus: status });
+  if (paymentStatus) filters.push({ paymentStatus });
+  if (companyId) filters.push({ companyId });
+  if (customer) filters.push({ customerEmail: customer });
+  if (agentId && accessLevel !== "agent")
+    filters.push({ createdByUserId: agentId });
+  if (dateFrom || dateTo) {
+    const createdAt: Prisma.DateTimeFilter = {};
+    if (dateFrom) createdAt.gte = new Date(`${dateFrom}T00:00:00.000`);
+    if (dateTo) createdAt.lte = new Date(`${dateTo}T23:59:59.999`);
+    filters.push({ createdAt });
+  }
+
+  const where: Prisma.B2BOrderWhereInput = {
+    AND: [accessWhere, ...filters],
+  };
+
+  const [orders, summaryRows, agents, quoteCount] = await Promise.all([
+    prisma.b2BOrder.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: exportType ? undefined : 250,
+      include: {
+        company: { select: { id: true, name: true } },
+        createdByUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        items: { select: { quantity: true } },
+      },
+    }),
+    prisma.b2BOrder.findMany({
+      where: accessWhere,
+      select: { orderStatus: true, paymentStatus: true, orderTotal: true },
+    }),
+    prisma.user.findMany({
+      where: {
+        role: "SALES_USER",
+        salesCompanies: {
+          some: {
+            companyId: {
+              in: user.salesCompanies.map((item) => item.companyId),
+            },
+          },
+        },
+      },
+      select: { id: true, firstName: true, lastName: true, email: true },
+      orderBy: { firstName: "asc" },
+    }),
+    prisma.quote.count({
+      where: {
+        companyId: { in: user.salesCompanies.map((item) => item.companyId) },
+        ...(accessLevel === "agent" ? { salesAgentId: user.id } : {}),
+      },
+    }),
+  ]);
+
+  if (exportType === "csv" || exportType === "excel") {
+    const headings = [
+      "Order Number",
+      "Customer",
+      "Email",
+      "Company",
+      "Sales Agent",
+      "Items",
+      "Quantity",
+      "Order Total",
+      "Payment Status",
+      "Order Status",
+      "PO Number",
+      "Created Date",
+      "Last Updated",
+    ];
+    const separator = exportType === "excel" ? "\t" : ",";
+    const rows = orders.map((order) => [
+      getOrderNumber(order),
+      order.customerName,
+      order.customerEmail,
+      order.company.name,
+      [order.createdByUser.firstName, order.createdByUser.lastName]
+        .filter(Boolean)
+        .join(" ") || order.createdByUser.email,
+      order.items.length,
+      order.items.reduce((sum, item) => sum + item.quantity, 0),
+      order.orderTotal.toString(),
+      order.paymentStatus,
+      order.orderStatus,
+      order.poNumber,
+      order.createdAt.toISOString(),
+      order.updatedAt.toISOString(),
+    ]);
+    const content = [headings, ...rows]
+      .map((row) => row.map(csvCell).join(separator))
+      .join("\n");
+    return new Response(content, {
+      headers: {
+        "Content-Type":
+          exportType === "excel"
+            ? "application/vnd.ms-excel"
+            : "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="sales-orders.${exportType === "excel" ? "xls" : "csv"}"`,
+      },
+    });
+  }
+
+  const companies = user.salesCompanies.map((item) => ({
+    id: item.company.id,
+    name: item.company.name,
+  }));
+  if (!companies.length) return redirect("/sales/portal");
+  const currentCompany =
+    companies.find((item) => item.id === companyId) || companies[0];
+  const customers = Array.from(
+    new Map(
+      orders
+        .filter((order) => order.customerEmail)
+        .map((order) => [
+          order.customerEmail,
+          { email: order.customerEmail, name: order.customerName },
+        ]),
+    ).values(),
+  );
+  const totalRevenue = summaryRows
+    .filter((order) => order.paymentStatus === "paid")
+    .reduce((sum, order) => sum + Number(order.orderTotal), 0);
+
+  return Response.json({
+    user: {
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+    },
+    accessLevel,
+    currentCompany,
+    companies,
+    agents,
+    customers,
+    quoteCount,
+    filters: {
+      search,
+      status,
+      paymentStatus,
+      companyId,
+      customer,
+      agentId,
+      dateFrom,
+      dateTo,
+    },
+    summary: {
+      total: summaryRows.length,
+      draft: summaryRows.filter((order) => order.orderStatus === "draft")
+        .length,
+      pending: summaryRows.filter((order) => order.paymentStatus === "pending")
+        .length,
+      paid: summaryRows.filter((order) => order.paymentStatus === "paid")
+        .length,
+      cancelled: summaryRows.filter(
+        (order) => order.orderStatus === "cancelled",
+      ).length,
+      revenue: totalRevenue,
+    },
+    orders: orders.map((order) => ({
+      id: order.id,
+      orderNumber: getOrderNumber(order),
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      company: order.company,
+      salesAgent: order.createdByUser,
+      itemCount: order.items.length,
+      quantity: order.items.reduce((sum, item) => sum + item.quantity, 0),
+      orderTotal: order.orderTotal.toString(),
+      currencyCode: order.currencyCode,
+      paymentStatus: order.paymentStatus,
+      orderStatus: order.orderStatus,
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+      paymentLink: order.paymentLink,
+    })),
+  });
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  await requireSalesSession(request);
+  const formData = await request.formData();
+  if (formData.get("intent") === "logout") {
+    return redirect("/sales/login", {
+      headers: { "Set-Cookie": buildClearSessionCookie() },
+    });
+  }
+  return Response.json({ error: "Unknown action" }, { status: 400 });
+};
+
+export default function CentralOrderListPage() {
+  const data = useLoaderData<any>();
+  const params = new URLSearchParams();
+  Object.entries(data.filters).forEach(([key, value]) => {
+    if (value) params.set(key, String(value));
+  });
+
+  const money = (amount: string | number, currency = "USD") =>
+    new Intl.NumberFormat(undefined, { style: "currency", currency }).format(
+      Number(amount) || 0,
+    );
+  const date = (value: string) =>
+    new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(value));
+
+  return (
+    <SalesPortalLayout
+      company={data.currentCompany}
+      user={data.user}
+      activePage="orders"
+      orderCount={data.summary.total}
+      quoteCount={data.quoteCount}
+    >
+      <SalesPortalHeader
+        title="Orders"
+        subtitle="View, track, and manage orders across your assigned companies."
+        companyId={data.currentCompany.id}
+        companies={data.companies}
+        actions={
+          <Link
+            to={`/sales/portal/company/${data.currentCompany.id}/create-order`}
+            style={salesPortalButtonStyles.primary}
+          >
+            + Create Order
+          </Link>
+        }
+      />
+
+      <section
+        className="order-summary-grid"
+        style={styles.summaryGrid}
+        aria-label="Order summary"
+      >
+        <Summary label="Total Orders" value={data.summary.total} />
+        <Summary label="Draft Orders" value={data.summary.draft} />
+        <Summary label="Payment Pending" value={data.summary.pending} />
+        <Summary label="Paid Orders" value={data.summary.paid} />
+        <Summary label="Cancelled" value={data.summary.cancelled} />
+        <Summary label="Total Revenue" value={money(data.summary.revenue)} />
+      </section>
+
+      <Form method="get" className="order-filter-grid" style={styles.filters}>
+        <input
+          name="search"
+          defaultValue={data.filters.search}
+          placeholder="Search order, customer, company, email or PO"
+          style={styles.input}
+        />
+        <select
+          name="status"
+          defaultValue={data.filters.status}
+          style={styles.input}
+        >
+          <option value="">All order statuses</option>
+          {ORDER_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {label(status)}
+            </option>
+          ))}
+        </select>
+        <select
+          name="paymentStatus"
+          defaultValue={data.filters.paymentStatus}
+          style={styles.input}
+        >
+          <option value="">All payment statuses</option>
+          {PAYMENT_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {paymentLabel(status)}
+            </option>
+          ))}
+        </select>
+        <select
+          name="company"
+          defaultValue={data.filters.companyId}
+          style={styles.input}
+        >
+          <option value="">All companies</option>
+          {data.companies.map((company: any) => (
+            <option key={company.id} value={company.id}>
+              {company.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="customer"
+          defaultValue={data.filters.customer}
+          style={styles.input}
+        >
+          <option value="">All customers</option>
+          {data.customers.map((customer: any) => (
+            <option key={customer.email} value={customer.email}>
+              {customer.name || customer.email}
+            </option>
+          ))}
+        </select>
+        {data.accessLevel !== "agent" && (
+          <select
+            name="agent"
+            defaultValue={data.filters.agentId}
+            style={styles.input}
+          >
+            <option value="">All sales agents</option>
+            {data.agents.map((agent: any) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.firstName || agent.email} {agent.lastName || ""}
+              </option>
+            ))}
+          </select>
+        )}
+        <input
+          type="date"
+          name="dateFrom"
+          defaultValue={data.filters.dateFrom}
+          aria-label="Created from"
+          style={styles.input}
+        />
+        <input
+          type="date"
+          name="dateTo"
+          defaultValue={data.filters.dateTo}
+          aria-label="Created to"
+          style={styles.input}
+        />
+        <button style={styles.filterButton}>Apply Filters</button>
+        <Link to="/sales/portal/orders" style={styles.clearButton}>
+          Clear
+        </Link>
+      </Form>
+
+      <div style={styles.toolbar}>
+        <strong>{data.orders.length} orders</strong>
+        <div style={styles.exportActions}>
+          <a
+            href={`/sales/portal/orders?${params}&export=csv`}
+            style={styles.exportButton}
+          >
+            Export CSV
+          </a>
+          <a
+            href={`/sales/portal/orders?${params}&export=excel`}
+            style={styles.exportButton}
+          >
+            Export Excel
+          </a>
+        </div>
+      </div>
+
+      <div className="sales-order-table-wrap" style={styles.tableCard}>
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              {[
+                "Order Number",
+                "Customer",
+                "Company",
+                "Sales Agent",
+                "Items",
+                "Quantity",
+                "Order Total",
+                "Payment Status",
+                "Order Status",
+                "Created Date",
+                "Last Updated",
+                "Actions",
+              ].map((heading) => (
+                <th key={heading} style={styles.th}>
+                  {heading}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.orders.map((order: any) => (
+              <tr key={order.id} style={styles.tr}>
+                <td style={styles.td}>
+                  <Link
+                    to={`/sales/portal/orders/${order.id}`}
+                    style={styles.orderLink}
+                  >
+                    {order.orderNumber}
+                  </Link>
+                </td>
+                <td style={styles.td}>
+                  <strong>{order.customerName || "Not captured"}</strong>
+                  <small style={styles.secondaryText}>
+                    {order.customerEmail || "No email"}
+                  </small>
+                </td>
+                <td style={styles.td}>{order.company.name}</td>
+                <td style={styles.td}>
+                  {[order.salesAgent.firstName, order.salesAgent.lastName]
+                    .filter(Boolean)
+                    .join(" ") || order.salesAgent.email}
+                </td>
+                <td style={styles.td}>{order.itemCount}</td>
+                <td style={styles.td}>{order.quantity}</td>
+                <td style={styles.td}>
+                  <strong>{money(order.orderTotal, order.currencyCode)}</strong>
+                </td>
+                <td style={styles.td}>
+                  <Status value={order.paymentStatus} kind="payment" />
+                </td>
+                <td style={styles.td}>
+                  <Status value={order.orderStatus} />
+                </td>
+                <td style={styles.td}>{date(order.createdAt)}</td>
+                <td style={styles.td}>{date(order.updatedAt)}</td>
+                <td style={styles.td}>
+                  <Link
+                    to={`/sales/portal/orders/${order.id}`}
+                    style={styles.actionLink}
+                  >
+                    View Details
+                  </Link>
+                </td>
+              </tr>
+            ))}
+            {!data.orders.length && (
+              <tr>
+                <td colSpan={12} style={styles.empty}>
+                  No orders match the selected filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <style>{responsiveCss}</style>
+    </SalesPortalLayout>
+  );
+}
+
+function label(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+function paymentLabel(value: string) {
+  return value === "partial" ? "Partially Paid" : label(value);
+}
+function Summary({
+  label: title,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div style={styles.summaryCard}>
+      <span style={styles.summaryLabel}>{title}</span>
+      <strong style={styles.summaryValue}>{value}</strong>
+    </div>
+  );
+}
+function Status({
+  value,
+  kind = "order",
+}: {
+  value: string;
+  kind?: "order" | "payment";
+}) {
+  const good = ["paid", "completed"].includes(value);
+  const bad = ["cancelled", "refunded", "failed", "expired"].includes(value);
+  return (
+    <span
+      style={{
+        ...styles.badge,
+        background: good ? "#dcfce7" : bad ? "#fee2e2" : "#fef3c7",
+        color: good ? "#166534" : bad ? "#991b1b" : "#854d0e",
+      }}
+    >
+      {kind === "payment" ? paymentLabel(value) : label(value)}
+    </span>
+  );
+}
+
+const responsiveCss = `
+  .sales-order-table-wrap { overflow-x: auto; }
+  @media (max-width: 1180px) { .order-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } .order-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+  @media (max-width: 620px) { .order-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .order-filter-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+`;
+const styles: Record<string, React.CSSProperties> = {
+  summaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+    gap: 12,
+    marginBottom: 20,
+  },
+  summaryCard: {
+    background: "#fff",
+    border: "1px solid #e1e3e5",
+    borderRadius: 8,
+    padding: 16,
+    minWidth: 0,
+  },
+  summaryLabel: {
+    display: "block",
+    color: "#6d7175",
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  summaryValue: {
+    display: "block",
+    color: "#202223",
+    fontSize: 22,
+    fontFamily: "'Poppins', sans-serif",
+  },
+  filters: {
+    display: "grid",
+    gridTemplateColumns: "minmax(240px, 2fr) repeat(5, minmax(140px, 1fr))",
+    gap: 10,
+    padding: 16,
+    marginBottom: 18,
+    background: "#fff",
+    border: "1px solid #e1e3e5",
+    borderRadius: 8,
+  },
+  input: {
+    width: "100%",
+    height: 40,
+    padding: "0 11px",
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    background: "#fff",
+    color: "#202223",
+    font: "inherit",
+    fontSize: 13,
+  },
+  filterButton: {
+    height: 40,
+    border: 0,
+    borderRadius: 8,
+    background: "#111827",
+    color: "#fff",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  clearButton: {
+    height: 40,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#6d7175",
+    textDecoration: "none",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  toolbar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
+  exportActions: { display: "flex", gap: 8 },
+  exportButton: {
+    padding: "8px 11px",
+    border: "1px solid #c9cccf",
+    borderRadius: 8,
+    background: "#fff",
+    color: "#374151",
+    textDecoration: "none",
+    fontSize: 12,
+    fontWeight: 600,
+  },
+  tableCard: {
+    background: "#fff",
+    border: "1px solid #e1e3e5",
+    borderRadius: 8,
+  },
+  table: { width: "100%", minWidth: 1500, borderCollapse: "collapse" },
+  th: {
+    padding: "12px 14px",
+    borderBottom: "1px solid #e1e3e5",
+    color: "#6d7175",
+    textAlign: "left",
+    fontSize: 12,
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+  },
+  tr: { borderBottom: "1px solid #f1f2f3" },
+  td: {
+    padding: "13px 14px",
+    color: "#202223",
+    fontSize: 13,
+    verticalAlign: "middle",
+  },
+  secondaryText: { display: "block", color: "#8c9196", marginTop: 3 },
+  orderLink: {
+    color: "#2c6ecb",
+    fontWeight: 700,
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+  },
+  actionLink: {
+    color: "#2c6ecb",
+    fontWeight: 600,
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+  },
+  badge: {
+    display: "inline-flex",
+    padding: "4px 9px",
+    borderRadius: 8,
+    fontSize: 12,
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+  },
+  empty: { padding: 40, color: "#6d7175", textAlign: "center" },
+};

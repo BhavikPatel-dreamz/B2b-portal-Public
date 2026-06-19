@@ -99,6 +99,7 @@ model User {
   userCreditLimit   Decimal?        @db.Decimal(14, 2)
   userCreditUsed    Decimal         @default(0) @db.Decimal(14, 2)
   ordersCreated     B2BOrder[]      @relation("UserCreatedOrders")
+  orderActivities   OrderActivity[] @relation("OrderActivityUser")
   quotesCreated     Quote[]         @relation("SalesAgentQuotes")
   company           CompanyAccount? @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: Cascade)
   shop              Store?          @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -272,18 +273,71 @@ model B2BOrder {
   userCreditUsed   Decimal        @db.Decimal(14, 2)
   notes            String?
   source           String?
+  orderNumber      String?
+  customerName     String?
+  customerEmail    String?
+  customerId       String?
+  poNumber         String?
+  currencyCode     String         @default("USD")
+  subtotal         Decimal        @default(0) @db.Decimal(14, 2)
+  discountTotal    Decimal        @default(0) @db.Decimal(14, 2)
+  taxAmount        Decimal        @default(0) @db.Decimal(14, 2)
+  shippingAmount   Decimal        @default(0) @db.Decimal(14, 2)
+  paymentLink      String?
+  paymentLinkToken String?        @unique
+  paymentLinkAt    DateTime?
+  paymentLinkSentAt DateTime?
   company          CompanyAccount @relation("CompanyAccountOrders", fields: [companyId], references: [id], onDelete: Cascade)
   createdByUser    User           @relation("UserCreatedOrders", fields: [createdByUserId], references: [id])
   shop             Store          @relation("StoreOrders", fields: [shopId], references: [id], onDelete: Cascade)
   payments         OrderPayment[]
+  items            B2BOrderItem[]
+  activities       OrderActivity[]
 
   @@index([companyId, paymentStatus, orderStatus])
   @@index([companyId])
   @@index([shopId])
   @@index([paymentStatus])
   @@index([createdByUserId])
+  @@index([customerEmail])
+  @@index([orderNumber])
   @@index([shopId, createdAt])
   @@index([createdAt])
+}
+
+model B2BOrderItem {
+  id           String   @id @default(cuid())
+  orderId      String
+  productId    String?
+  productTitle String
+  variantId    String?
+  variantTitle String?
+  sku          String?
+  image        String?
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(14, 2)
+  discount     Decimal  @default(0) @db.Decimal(14, 2)
+  lineTotal    Decimal  @db.Decimal(14, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  order        B2BOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model OrderActivity {
+  id        String   @id @default(cuid())
+  orderId   String
+  userId    String?
+  action    String
+  message   String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  order     B2BOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user      User?    @relation("OrderActivityUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([userId])
 }
 
 model Quote {

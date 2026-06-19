@@ -975,3 +975,54 @@ export async function sendQuoteEmail({
     smtpConfig,
   );
 }
+
+export async function sendOrderPaymentLinkEmail({
+  storeId,
+  to,
+  customerName,
+  orderNumber,
+  companyName,
+  totalAmount,
+  currencyCode,
+  paymentUrl,
+}: {
+  storeId: string;
+  to: string;
+  customerName?: string | null;
+  orderNumber: string;
+  companyName: string;
+  totalAmount: string;
+  currencyCode: string;
+  paymentUrl: string;
+}) {
+  const storeData = await prisma.store.findUnique({ where: { id: storeId } });
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
+  const shopName = storeData?.shopName || storeData?.shopDomain || "SmartB2B";
+  const subject = `Payment requested for order ${orderNumber}`;
+  const body = `
+    Hello ${customerName || "there"},<br /><br />
+    ${companyName} has requested payment for order <strong>${orderNumber}</strong>.<br /><br />
+    <strong>Amount due:</strong> ${currencyCode} ${totalAmount}<br /><br />
+    Use the secure link below to review the payment request.
+  `;
+  const html = convertToHtmlEmail(
+    body,
+    storeData?.shopDomain || "store.com",
+    subject,
+    {
+      logoUrl: storeData?.logo,
+      ctaLabel: "View Payment Request",
+      ctaUrl: paymentUrl,
+      footerText: `This payment request was sent by ${shopName}.`,
+    },
+  );
+  return sendEmail(
+    {
+      to,
+      subject,
+      html,
+      text: stripHtmlTags(`${body}\n\nPayment link: ${paymentUrl}`),
+    },
+    smtpConfig,
+  );
+}

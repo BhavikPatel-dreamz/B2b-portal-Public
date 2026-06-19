@@ -314,6 +314,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   });
 
   if (dbUser) {
+    const customer = await prisma.user.findFirst({
+      where: {
+        companyId: company.id,
+        OR: [
+          { id: customerId },
+          { shopifyCustomerId: customerId },
+          { shopifyCustomerId: `gid://shopify/Customer/${customerId}` },
+        ],
+      },
+      select: { firstName: true, lastName: true, email: true },
+    });
     const shopifyOrderTotal = Number(createdOrder.totalPriceSet?.shopMoney?.amount);
     const orderTotal = Number.isFinite(shopifyOrderTotal) ? shopifyOrderTotal : totals.total;
 
@@ -331,6 +342,32 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         userCreditUsed: 0,
         notes: internalNotes,
         source: "Sales Portal",
+        orderNumber: createdOrder.name,
+        customerId,
+        customerName: customer ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") : null,
+        customerEmail: customer?.email,
+        currencyCode,
+        subtotal: totals.subtotal,
+        discountTotal: totals.discountTotal,
+        taxAmount: totals.estimatedTax,
+        shippingAmount: shippingCost,
+        items: {
+          create: cartData.map((item) => ({
+            productId: item.productId,
+            productTitle: item.productTitle || item.variantTitle || "Product",
+            variantId: item.variantId,
+            variantTitle: item.variantTitle,
+            sku: item.sku,
+            image: item.image,
+            quantity: item.quantity,
+            unitPrice: Number(item.price),
+            discount: 0,
+            lineTotal: Number(item.price) * item.quantity,
+          })),
+        },
+        activities: {
+          create: { userId: dbUser.id, action: "Order Created", message: "Order submitted through the Sales Portal." },
+        },
       }
     });
   }
