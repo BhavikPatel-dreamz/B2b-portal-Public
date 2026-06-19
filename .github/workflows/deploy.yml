@@ -29,7 +29,12 @@ jobs:
           cd "${{ env.VPS_APP_PATH }}"
           npm install
           npm run build
-
+          
+      - name: Copy embed.js to public folder
+        run: |
+          cp "${{ env.VPS_APP_PATH }}/../B2B-Portal-Front/dist/embed.js" \
+             "${{ env.VPS_APP_PATH }}/public/embed.js"
+             
       - name: Start App
         run: |
           cd "${{ env.VPS_APP_PATH }}"
