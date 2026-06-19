@@ -15,8 +15,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
 
-  if (!companyId || !hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/dashboard");
+  if (!companyId) {
+    return redirect("/sales/portal");
+  }
+
+  if (!hasCompanyAccess(user, companyId)) {
+    return redirect("/sales/portal");
   }
 
   const company = await prisma.companyAccount.findUnique({
@@ -29,7 +33,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 
   if (!company) {
-    return redirect("/sales/dashboard");
+    return redirect("/sales/portal");
   }
 
   // Fetch all orders for this company (both drafts and completed)
@@ -331,8 +335,8 @@ export default function OrderManageScreen() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px", flexDirection: "column" }}>
-            <Link to="/sales/dashboard" style={styles.backLink}>
-              ← Back to Dashboard
+            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.backLink}>
+              ← Back to Portal
             </Link>
             <Form method="post">
               <input type="hidden" name="intent" value="logout" />

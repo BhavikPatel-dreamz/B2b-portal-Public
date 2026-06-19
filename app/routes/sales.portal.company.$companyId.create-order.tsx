@@ -1,14 +1,21 @@
 import { LoaderFunctionArgs, redirect } from "react-router";
 import { useLoaderData, Link } from "react-router";
 import prisma from "app/db.server";
-import { requireSalesSession, hasCompanyAccess } from "app/utils/sales-session.server";
+import {
+  requireSalesSession,
+  hasCompanyAccess,
+} from "app/utils/sales-session.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
 
-  if (!companyId || !hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/dashboard");
+  if (!companyId) {
+    return redirect("/sales/portal");
+  }
+
+  if (!hasCompanyAccess(user, companyId)) {
+    return redirect("/sales/portal");
   }
 
   // Get full company data including active users and shop to fetch GraphQL
@@ -22,7 +29,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 
   if (!company || !company.shop) {
-    return redirect("/sales/dashboard");
+    return redirect("/sales/portal");
   }
 
   // Fetch real-time users directly from Shopify (fixes the issue where Shopify users aren't synced locally)
@@ -36,25 +43,35 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }> = [];
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
-    const { getCompanyCustomers } = await import("app/utils/b2b-customer.server");
-    const customersData = await getCompanyCustomers(company.shopifyCompanyId, company.shop.shopDomain, company.shop.accessToken, { first: 50 });
-    
+    const { getCompanyCustomers } =
+      await import("app/utils/b2b-customer.server");
+    const customersData = await getCompanyCustomers(
+      company.shopifyCompanyId,
+      company.shop.shopDomain,
+      company.shop.accessToken,
+      { first: 50 },
+    );
+
     if (!customersData.error && customersData.customers) {
-      activeUsers = customersData.customers.map((c: any) => {
-        const firstName = c.customer.firstName?.trim() || null;
-        const lastName = c.customer.lastName?.trim() || null;
-        const companyRole = c.customer.roleAssignments?.edges?.[0]?.node?.role?.name || "Customer";
-        const customerId = c.customer.id.split("/").pop();
-        
-        return {
-          id: customerId,
-          email: c.customer.email,
-          firstName,
-          lastName,
-          shopifyCustomerId: customerId,
-          companyRole
-        };
-      });
+      activeUsers = customersData.customers
+        .map((c: any) => {
+          const firstName = c.customer.firstName?.trim() || null;
+          const lastName = c.customer.lastName?.trim() || null;
+          const companyRole =
+            c.customer.roleAssignments?.edges?.[0]?.node?.role?.name ||
+            "Ordering only";
+          const customerId = c.customer.id.split("/").pop();
+
+          return {
+            id: customerId,
+            email: c.customer.email,
+            firstName,
+            lastName,
+            shopifyCustomerId: customerId,
+            companyRole,
+          };
+        })
+        .filter((u: any) => u.companyRole?.toLowerCase() === "location admin");
     }
   }
 
@@ -73,7 +90,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const availableCredit = creditLimit - usedCredit;
 
   // Fetch catalogs and price lists assigned to the company locations via Shopify GraphQL
-  let catalogs: Array<{ id: string; title: string; priceList: { name: string; currency: string } | null }> = [];
+  let catalogs: Array<{
+    id: string;
+    title: string;
+    priceList: { name: string; currency: string } | null;
+  }> = [];
   let priceLists: Array<{ name: string; currency: string }> = [];
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
@@ -101,20 +122,23 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     `;
 
     try {
-      const response = await fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": company.shop.accessToken,
+      const response = await fetch(
+        `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": company.shop.accessToken,
+          },
+          body: JSON.stringify({
+            query,
+            variables: { companyId: company.shopifyCompanyId },
+          }),
         },
-        body: JSON.stringify({
-          query,
-          variables: { companyId: company.shopifyCompanyId },
-        }),
-      });
+      );
 
       const data = await response.json();
-      
+
       if (!data.errors && data.data?.company?.locations?.nodes) {
         const uniqueCatalogs = new Map();
         const uniquePriceLists = new Map();
@@ -159,7 +183,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
-    }
+    },
   });
 };
 
@@ -178,7 +202,11 @@ export default function CreateOrderCustomerSelection() {
         shopifyCustomerId: string | null;
         companyRole: string | null;
       }>;
-      catalogs: Array<{ id: string; title: string; priceList: { name: string; currency: string } | null }>;
+      catalogs: Array<{
+        id: string;
+        title: string;
+        priceList: { name: string; currency: string } | null;
+      }>;
       priceLists: Array<{ name: string; currency: string }>;
     };
     user: {
@@ -196,9 +224,19 @@ export default function CreateOrderCustomerSelection() {
       <header style={styles.header}>
         <div style={styles.headerContent}>
           <div style={styles.breadcrumb}>
-            <Link to="/sales/dashboard" style={styles.breadcrumbLink}>Dashboard</Link>
+            <Link
+              to={`/sales/portal?companyId=${company.id}`}
+              style={styles.breadcrumbLink}
+            >
+              Dashboard
+            </Link>
             <span style={styles.breadcrumbSeparator}>/</span>
-            <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>{company.name}</Link>
+            <Link
+              to={`/sales/portal?companyId=${company.id}`}
+              style={styles.breadcrumbLink}
+            >
+              {company.name}
+            </Link>
             <span style={styles.breadcrumbSeparator}>/</span>
             <span style={styles.breadcrumbCurrent}>Create Order</span>
           </div>
@@ -206,7 +244,9 @@ export default function CreateOrderCustomerSelection() {
             <div style={styles.avatar}>
               {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
             </div>
-            <span style={styles.userName}>{user.firstName} {user.lastName}</span>
+            <span style={styles.userName}>
+              {user.firstName} {user.lastName}
+            </span>
           </div>
         </div>
       </header>
@@ -223,7 +263,9 @@ export default function CreateOrderCustomerSelection() {
           <div style={styles.card}>
             <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Who is this order for?</h2>
-              <p style={styles.cardSubtitle}>Select a customer user to proceed with building the order.</p>
+              <p style={styles.cardSubtitle}>
+                Select a customer user to proceed with building the order.
+              </p>
             </div>
 
             {company.users.length > 0 ? (
@@ -236,20 +278,23 @@ export default function CreateOrderCustomerSelection() {
                   >
                     <div style={styles.userCard}>
                       <div style={styles.userCardAvatar}>
-                        {companyUser.firstName?.charAt(0) || companyUser.email.charAt(0).toUpperCase()}
+                        {companyUser.firstName?.charAt(0) ||
+                          companyUser.email.charAt(0).toUpperCase()}
                       </div>
                       <div style={styles.userCardInfo}>
                         <div style={styles.userCardName}>
                           {companyUser.firstName} {companyUser.lastName}
                         </div>
-                        <div style={styles.userCardEmail}>{companyUser.email}</div>
+                        <div style={styles.userCardEmail}>
+                          {companyUser.email}
+                        </div>
                       </div>
                       <div style={styles.userCardRole}>
-                        <span style={styles.roleBadge}>{companyUser.companyRole || "User"}</span>
+                        <span style={styles.roleBadge}>
+                          {companyUser.companyRole || "User"}
+                        </span>
                       </div>
-                      <div style={styles.userCardAction}>
-                        Select →
-                      </div>
+                      <div style={styles.userCardAction}>Select →</div>
                     </div>
                   </Link>
                 ))}
@@ -257,7 +302,9 @@ export default function CreateOrderCustomerSelection() {
             ) : (
               <div style={styles.emptyState}>
                 <span style={styles.emptyStateIcon}>👥</span>
-                <p style={styles.emptyStateText}>No active users found for this company.</p>
+                <p style={styles.emptyStateText}>
+                  No active users found for this company.
+                </p>
               </div>
             )}
           </div>
@@ -266,22 +313,32 @@ export default function CreateOrderCustomerSelection() {
           <div style={styles.sideCol}>
             <div style={styles.card}>
               <h3 style={styles.sectionTitle}>Company Snapshot</h3>
-              
+
               <div style={styles.infoList}>
                 <div style={styles.infoRow}>
                   <span style={styles.infoLabel}>Company Name</span>
                   <span style={styles.infoValue}>{company.name}</span>
                 </div>
-                
+
                 <div style={styles.divider} />
-                
+
                 <div style={styles.infoRow}>
                   <span style={styles.infoLabel}>Credit Limit</span>
-                  <span style={styles.infoValue}>{formatCurrency(company.creditLimit)}</span>
+                  <span style={styles.infoValue}>
+                    {formatCurrency(company.creditLimit)}
+                  </span>
                 </div>
                 <div style={styles.infoRow}>
                   <span style={styles.infoLabel}>Available Credit</span>
-                  <span style={{ ...styles.infoValue, color: Number(company.availableCredit) > 0 ? "#16a34a" : "#dc2626" }}>
+                  <span
+                    style={{
+                      ...styles.infoValue,
+                      color:
+                        Number(company.availableCredit) > 0
+                          ? "#16a34a"
+                          : "#dc2626",
+                    }}
+                  >
                     {formatCurrency(company.availableCredit)}
                   </span>
                 </div>
@@ -289,11 +346,15 @@ export default function CreateOrderCustomerSelection() {
                 <div style={styles.divider} />
 
                 <div style={styles.infoCol}>
-                  <span style={styles.infoLabel}>Assigned Catalogs ({company.catalogs.length})</span>
+                  <span style={styles.infoLabel}>
+                    Assigned Catalogs ({company.catalogs.length})
+                  </span>
                   {company.catalogs.length > 0 ? (
                     <div style={styles.tagList}>
-                      {company.catalogs.map(cat => (
-                        <span key={cat.id} style={styles.tag}>{cat.title}</span>
+                      {company.catalogs.map((cat) => (
+                        <span key={cat.id} style={styles.tag}>
+                          {cat.title}
+                        </span>
                       ))}
                     </div>
                   ) : (
@@ -304,18 +365,23 @@ export default function CreateOrderCustomerSelection() {
                 <div style={styles.divider} />
 
                 <div style={styles.infoCol}>
-                  <span style={styles.infoLabel}>Assigned Price Lists ({company.priceLists.length})</span>
+                  <span style={styles.infoLabel}>
+                    Assigned Price Lists ({company.priceLists.length})
+                  </span>
                   {company.priceLists.length > 0 ? (
                     <div style={styles.tagList}>
-                      {company.priceLists.map(pl => (
-                        <span key={pl.name} style={styles.tag}>{pl.name} ({pl.currency})</span>
+                      {company.priceLists.map((pl) => (
+                        <span key={pl.name} style={styles.tag}>
+                          {pl.name} ({pl.currency})
+                        </span>
                       ))}
                     </div>
                   ) : (
-                    <span style={styles.emptyText}>No price lists assigned</span>
+                    <span style={styles.emptyText}>
+                      No price lists assigned
+                    </span>
                   )}
                 </div>
-
               </div>
             </div>
           </div>
@@ -430,7 +496,8 @@ const styles = {
   card: {
     backgroundColor: "white",
     borderRadius: "16px",
-    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)",
+    boxShadow:
+      "0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)",
     border: "1px solid #f3f4f6",
     padding: "24px",
   },
@@ -456,6 +523,7 @@ const styles = {
   },
   userForm: {
     margin: 0,
+    textDecoration: "none",
   },
   userCard: {
     width: "100%",

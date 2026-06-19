@@ -9,12 +9,12 @@ import {
 } from "app/utils/sales-session.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // If already logged in, redirect to dashboard
+  // If already logged in, redirect to portal
   const existingToken = getSessionTokenFromCookie(request);
   if (existingToken) {
     const result = await validateSalesSession(existingToken);
     if (result.valid) {
-      return redirect("/sales/dashboard");
+      return redirect("/sales/portal");
     }
   }
 
@@ -42,6 +42,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       status: "APPROVED",
       isActive: true,
     },
+    include: {
+      salesCompanies: {
+        include: {
+          company: {
+            select: { id: true },
+          },
+        },
+      },
+    },
   });
 
   if (!user) {
@@ -59,7 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Create session and set cookie
   const sessionToken = await createSalesSession(user.id);
 
-  return redirect("/sales/dashboard", {
+  return redirect("/sales/portal", {
     headers: {
       "Set-Cookie": buildSessionCookie(sessionToken),
     },

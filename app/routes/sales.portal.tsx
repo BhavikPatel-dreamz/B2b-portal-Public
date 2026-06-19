@@ -11,11 +11,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
 
   const url = new URL(request.url);
-  const companyId = url.searchParams.get("companyId");
+  let companyId = url.searchParams.get("companyId");
 
-  // Validate company access
-  if (!companyId || !hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/dashboard");
+  if (!companyId && user.salesCompanies.length > 0) {
+    companyId = user.salesCompanies[0].companyId;
+  }
+
+  if (!companyId) {
+    return redirect("/sales/portal");
+  }
+
+  if (!hasCompanyAccess(user, companyId)) {
+    return redirect("/sales/portal");
   }
 
   // Get full company data
@@ -29,7 +36,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!company) {
-    return redirect("/sales/dashboard");
+    return redirect("/sales/portal");
   }
 
   // Fetch real-time users directly from Shopify (fixes the issue where Shopify users aren't synced locally)
@@ -55,23 +62,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
-    const { getCompanyCustomers } = await import("app/utils/b2b-customer.server");
-    const customersData = await getCompanyCustomers(company.shopifyCompanyId, company.shop.shopDomain, company.shop.accessToken, { first: 50 });
-    
+    const { getCompanyCustomers } =
+      await import("app/utils/b2b-customer.server");
+    const customersData = await getCompanyCustomers(
+      company.shopifyCompanyId,
+      company.shop.shopDomain,
+      company.shop.accessToken,
+      { first: 50 },
+    );
+
     if (!customersData.error && customersData.customers) {
-      activeUsers = (customersData.customers as ShopifyCompanyCustomer[]).map((c) => {
-        const firstName = c.customer.firstName?.trim() || null;
-        const lastName = c.customer.lastName?.trim() || null;
-        const companyRole = c.customer.roleAssignments?.edges?.[0]?.node?.role?.name || "Customer";
-        
-        return {
-          id: c.customer.id.split("/").pop(), // Extract ID from GID
-          email: c.customer.email,
-          firstName,
-          lastName,
-          companyRole
-        };
-      });
+      activeUsers = customersData.customers
+        .map((c: any) => {
+          const firstName = c.customer.firstName?.trim() || null;
+          const lastName = c.customer.lastName?.trim() || null;
+          const companyRole =
+            c.customer.roleAssignments?.edges?.[0]?.node?.role?.name ||
+            "Ordering only";
+          const customerId = c.customer.id.split("/").pop();
+
+          return {
+            id: customerId,
+            email: c.customer.email,
+            firstName,
+            lastName,
+            shopifyCustomerId: customerId,
+            companyRole,
+          };
+        })
+        .filter((u: any) => u.companyRole?.toLowerCase() === "location admin");
     }
   }
 
@@ -154,7 +173,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function SalesPortal() {
   const { user, company, recentOrders, allCompanies } = useLoaderData<{
-    user: { id: string; firstName: string | null; lastName: string | null; email: string };
+    user: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    };
     company: {
       id: string;
       name: string;
@@ -183,7 +207,11 @@ export default function SalesPortal() {
   }>();
 
   const formatDate = (iso: string) =>
-    new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
+    new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(iso));
 
   const formatCurrency = (val: string | number) =>
     `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
@@ -200,23 +228,29 @@ export default function SalesPortal() {
     };
     const s = map[status?.toLowerCase()] || { bg: "#f3f4f6", color: "#374151" };
     return (
-      <span style={{
-        padding: "4px 10px",
-        borderRadius: "20px",
-        fontSize: "12px",
-        fontWeight: 600,
-        backgroundColor: s.bg,
-        color: s.color,
-        textTransform: "capitalize" as const,
-      }}>
+      <span
+        style={{
+          padding: "4px 10px",
+          borderRadius: "20px",
+          fontSize: "12px",
+          fontWeight: 600,
+          backgroundColor: s.bg,
+          color: s.color,
+          textTransform: "capitalize" as const,
+        }}
+      >
         {status || "N/A"}
       </span>
     );
   };
 
-  const creditPercent = Number(company.creditLimit) > 0
-    ? Math.min(100, (Number(company.usedCredit) / Number(company.creditLimit)) * 100)
-    : 0;
+  const creditPercent =
+    Number(company.creditLimit) > 0
+      ? Math.min(
+          100,
+          (Number(company.usedCredit) / Number(company.creditLimit)) * 100,
+        )
+      : 0;
 
   return (
     <div style={styles.container}>
@@ -235,11 +269,18 @@ export default function SalesPortal() {
         </div>
 
         <nav style={styles.nav}>
-          <a href="#overview" style={{ ...styles.navItem, ...styles.navItemActive }}>
+          <a
+            href="#overview"
+            style={{ ...styles.navItem, ...styles.navItemActive }}
+          >
             <span style={styles.navIcon}>📊</span> Overview
           </a>
-          <Link to={`/sales/portal/company/${company.id}/orders`} style={styles.navItem}>
-            <span style={styles.navIcon}>📦</span> Orders ({recentOrders.length})
+          <Link
+            to={`/sales/portal/company/${company.id}/orders`}
+            style={styles.navItem}
+          >
+            <span style={styles.navIcon}>📦</span> Orders ({recentOrders.length}
+            )
           </Link>
         </nav>
 
@@ -267,17 +308,27 @@ export default function SalesPortal() {
               {user.firstName?.charAt(0) || user.email.charAt(0).toUpperCase()}
             </div>
             <div style={styles.userInfo}>
-              <div style={styles.userName}>{user.firstName} {user.lastName}</div>
+              <div style={styles.userName}>
+                {user.firstName} {user.lastName}
+              </div>
               <div style={styles.userRole}>Sales Agent</div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: "8px", flexDirection: "column" as const }}>
-            <Link to="/sales/dashboard" style={styles.backLink}>
-              ← Back to Dashboard
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              flexDirection: "column" as const,
+            }}
+          >
+            <Link to="/sales/portal" style={styles.backLink}>
+              ← Back to Portal
             </Link>
             <Form method="post">
               <input type="hidden" name="intent" value="logout" />
-              <button type="submit" style={styles.logoutBtn}>Sign Out</button>
+              <button type="submit" style={styles.logoutBtn}>
+                Sign Out
+              </button>
             </Form>
           </div>
         </div>
@@ -286,16 +337,55 @@ export default function SalesPortal() {
       {/* Main Content */}
       <main style={styles.mainContent}>
         {/* Header */}
-        <header style={{...styles.header, display: "flex", justifyContent: "space-between", alignItems: "flex-start"}} id="overview">
+        <header
+          style={{
+            ...styles.header,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+          }}
+          id="overview"
+        >
           <div>
             <h1 style={styles.heroTitle}>{company.name}</h1>
             <p style={styles.subtitle}>
-              {company.contactEmail ? `Contact: ${company.contactEmail}` : "Sales Portal"} · {company.users.length} customer(s) · {company.storeName}
+              {company.contactEmail
+                ? `Contact: ${company.contactEmail}`
+                : "Sales Portal"}{" "}
+              · {company.users.length} customer(s) · {company.storeName}
             </p>
           </div>
-          <div>
-            <Link 
-              to={`/sales/portal/company/${company.id}/create-order`} 
+          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+            {allCompanies.length > 1 && (
+              <select
+                value={company.id}
+                onChange={(e) => {
+                  const selectedCompanyId = e.target.value;
+                  if (selectedCompanyId !== company.id) {
+                    window.location.href = `/sales/portal?companyId=${selectedCompanyId}`;
+                  }
+                }}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1.5px solid #e5e7eb",
+                  fontSize: "13px",
+                  fontFamily: "'Inter', system-ui, sans-serif",
+                  backgroundColor: "#fff",
+                  color: "#202223",
+                  cursor: "pointer",
+                  minWidth: "160px",
+                }}
+              >
+                {allCompanies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Link
+              to={`/sales/portal/company/${company.id}/create-order`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -307,7 +397,7 @@ export default function SalesPortal() {
                 textDecoration: "none",
                 fontWeight: 500,
                 fontSize: "14px",
-                transition: "background-color 0.2s"
+                transition: "background-color 0.2s",
               }}
             >
               <span>+</span> Create Order
@@ -324,23 +414,36 @@ export default function SalesPortal() {
             <div style={styles.creditStatGroup}>
               <div style={styles.creditStat}>
                 <span style={styles.creditStatLabel}>Credit Limit</span>
-                <span style={styles.creditStatValue}>{formatCurrency(company.creditLimit)}</span>
+                <span style={styles.creditStatValue}>
+                  {formatCurrency(company.creditLimit)}
+                </span>
               </div>
               <div style={styles.creditStat}>
                 <span style={styles.creditStatLabel}>Credit Used</span>
-                <span style={styles.creditStatValue}>{formatCurrency(company.usedCredit)}</span>
+                <span style={styles.creditStatValue}>
+                  {formatCurrency(company.usedCredit)}
+                </span>
               </div>
               <div style={styles.creditStat}>
                 <span style={styles.creditStatLabel}>Available Credit</span>
-                <span style={styles.creditStatValue}>{formatCurrency(company.availableCredit)}</span>
+                <span style={styles.creditStatValue}>
+                  {formatCurrency(company.availableCredit)}
+                </span>
               </div>
             </div>
             <div style={styles.progressBarBg}>
-              <div style={{
-                ...styles.progressBarFill,
-                width: `${creditPercent}%`,
-                backgroundColor: creditPercent > 90 ? "#ef4444" : creditPercent > 70 ? "#f97316" : "#E91E63"
-              }} />
+              <div
+                style={{
+                  ...styles.progressBarFill,
+                  width: `${creditPercent}%`,
+                  backgroundColor:
+                    creditPercent > 90
+                      ? "#ef4444"
+                      : creditPercent > 70
+                        ? "#f97316"
+                        : "#E91E63",
+                }}
+              />
             </div>
             <div style={styles.progressLabel}>
               {creditPercent.toFixed(0)}% of limit utilized
@@ -367,11 +470,15 @@ export default function SalesPortal() {
                     {company.users.map((u) => (
                       <tr key={u.id} style={styles.tr}>
                         <td style={styles.td}>
-                          <strong>{u.firstName} {u.lastName}</strong>
+                          <strong>
+                            {u.firstName} {u.lastName}
+                          </strong>
                         </td>
                         <td style={styles.td}>{u.email}</td>
                         <td style={styles.td}>
-                          <span style={styles.roleBadge}>{u.companyRole || "User"}</span>
+                          <span style={styles.roleBadge}>
+                            {u.companyRole || "User"}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -412,9 +519,15 @@ export default function SalesPortal() {
                           </strong>
                         </td>
                         <td style={styles.td}>{formatDate(order.createdAt)}</td>
-                        <td style={styles.td}>{formatCurrency(order.orderTotal)}</td>
-                        <td style={styles.td}>{getStatusBadge(order.paymentStatus)}</td>
-                        <td style={styles.td}>{getStatusBadge(order.orderStatus)}</td>
+                        <td style={styles.td}>
+                          {formatCurrency(order.orderTotal)}
+                        </td>
+                        <td style={styles.td}>
+                          {getStatusBadge(order.paymentStatus)}
+                        </td>
+                        <td style={styles.td}>
+                          {getStatusBadge(order.orderStatus)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

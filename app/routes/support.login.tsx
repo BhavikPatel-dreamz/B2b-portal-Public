@@ -85,7 +85,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Create a cookie-based session and redirect to the unified Sales Portal
   const sessionToken = await createSalesSession(userid);
 
-  return redirect("/sales/dashboard", {
+  return redirect("/sales/portal", {
     headers: {
       "Set-Cookie": buildSessionCookie(sessionToken),
     },
