@@ -43,7 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Extract order source from note_attributes (e.g., 'quick_order')
     const orderSource =
-      draftOrder.note_attributes?.find((attr: any) => attr.name === "_source")
+      draftOrder.note_attributes?.find((attr) => attr.name === "_source")
         ?.value || null;
 
     // Validate required fields from the payload
@@ -120,8 +120,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (existingB2bOrder) {
       console.log(`ℹ️ Order ${draftOrder.id} already exists in database (ID: ${existingB2bOrder.id}).`);
       
-      // Normalize shopifyOrderId to numeric format
-      if (existingB2bOrder.shopifyOrderId === `gid://shopify/DraftOrder/${draftOrder.id}`) {
+      // Normalize/attach the Shopify draft ID so final-order conversion can find it.
+      if (
+        !existingB2bOrder.shopifyOrderId ||
+        existingB2bOrder.shopifyOrderId === `gid://shopify/DraftOrder/${draftOrder.id}`
+      ) {
         await prisma.b2BOrder.update({
           where: { id: existingB2bOrder.id },
           data: { shopifyOrderId: draftOrder.id.toString() }

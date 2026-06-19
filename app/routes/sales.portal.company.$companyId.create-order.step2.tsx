@@ -76,7 +76,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const actionType = formData.get("actionType") as string;
     const companyId = params.companyId;
 
-  if (actionType === "save_draft") {
+    if (actionType !== "save_draft") {
+      return Response.json({ error: "Invalid order action" }, { status: 400 });
+    }
+
     const { user } = await requireSalesSession(request);
     const customerId = formData.get("customerId") as string;
     const cartDataStr = formData.get("cartData") as string;
@@ -297,14 +300,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     return Response.json({ success: true, name: createdDraft.name, id: createdDraft.id });
-  }
-
-  const customerId = formData.get("customerId") as string;
-  if (!customerId) {
-    return redirect(`/sales/portal/company/${companyId}/create-order`);
-  }
-
-    return redirect(`/sales/portal/company/${companyId}/create-order/step2?customerId=${customerId}`);
   } catch (err: any) {
     if (err instanceof Response) throw err;
     console.error("Action Crash Error:", err);

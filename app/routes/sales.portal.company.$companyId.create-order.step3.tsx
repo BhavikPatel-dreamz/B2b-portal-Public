@@ -44,10 +44,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const { user } = await requireSalesSession(request);
     const companyId = params.companyId;
     const formData = await request.formData();
+    const actionType = formData.get("actionType") as string | null;
 
-  const customerId = formData.get("customerId") as string;
-  const cartDataStr = formData.get("cartData") as string;
-  const internalNotes = formData.get("internalNotes") as string;
+    if (actionType !== "process_order") {
+      return Response.json({ error: "Invalid order action" }, { status: 400 });
+    }
+
+    const customerId = formData.get("customerId") as string;
+    const cartDataStr = formData.get("cartData") as string;
+    const internalNotes = formData.get("internalNotes") as string;
   const customerNotes = formData.get("customerNotes") as string;
   const discountAmount = Number(formData.get("discountAmount") || "0");
   const discountType = normalizeDiscountType(formData.get("discountType") as string);
@@ -469,6 +474,7 @@ export default function ReviewOrder() {
       return;
     }
     submit({
+      actionType: "process_order",
       customerId: selectedCustomer.shopifyCustomerId,
       cartData: JSON.stringify(cartItems),
       internalNotes,
@@ -617,12 +623,13 @@ export default function ReviewOrder() {
               </div>
 
               <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <input type="hidden" name="actionType" value="process_order" />
                 <button
                   type="submit"
                   disabled={isSubmitting}
                   style={styles.submitBtn}
                 >
-                  {isSubmitting ? "Submitting Order..." : "Submit Order"}
+                  {isSubmitting ? "Processing Order..." : "Process Order"}
                 </button>
                 <Link
                   to={`/sales/portal/company/${company.id}/create-order/step2?customerId=${selectedCustomer.shopifyCustomerId}`}

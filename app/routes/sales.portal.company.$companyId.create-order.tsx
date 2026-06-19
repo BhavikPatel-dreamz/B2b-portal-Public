@@ -1,5 +1,5 @@
 import { LoaderFunctionArgs, redirect } from "react-router";
-import { useLoaderData, Link, Form, useNavigation } from "react-router";
+import { useLoaderData, Link } from "react-router";
 import prisma from "app/db.server";
 import { requireSalesSession, hasCompanyAccess } from "app/utils/sales-session.server";
 
@@ -187,9 +187,6 @@ export default function CreateOrderCustomerSelection() {
       email: string;
     };
   }>();
-  const navigation = useNavigation();
-  const isSubmitting = navigation.state === "submitting";
-
   const formatCurrency = (val: string | number) =>
     `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
@@ -232,9 +229,12 @@ export default function CreateOrderCustomerSelection() {
             {company.users.length > 0 ? (
               <div style={styles.usersList}>
                 {company.users.map((companyUser) => (
-                  <Form key={companyUser.id} method="post" action={`/sales/portal/company/${company.id}/create-order/step2`} style={styles.userForm}>
-                    <input type="hidden" name="customerId" value={companyUser.id} />
-                    <button type="submit" style={styles.userCard} disabled={isSubmitting}>
+                  <Link
+                    key={companyUser.id}
+                    to={`/sales/portal/company/${company.id}/create-order/step2?customerId=${companyUser.shopifyCustomerId || companyUser.id}`}
+                    style={styles.userForm}
+                  >
+                    <div style={styles.userCard}>
                       <div style={styles.userCardAvatar}>
                         {companyUser.firstName?.charAt(0) || companyUser.email.charAt(0).toUpperCase()}
                       </div>
@@ -250,8 +250,8 @@ export default function CreateOrderCustomerSelection() {
                       <div style={styles.userCardAction}>
                         Select →
                       </div>
-                    </button>
-                  </Form>
+                    </div>
+                  </Link>
                 ))}
               </div>
             ) : (

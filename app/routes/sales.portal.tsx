@@ -1,12 +1,11 @@
-import { LoaderFunctionArgs, redirect } from "react-router";
-import { useLoaderData, Link, Form } from "react-router";
+import { redirect, useLoaderData, Link, Form } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "app/db.server";
 import {
   requireSalesSession,
   hasCompanyAccess,
   buildClearSessionCookie,
 } from "app/utils/sales-session.server";
-import type { ActionFunctionArgs } from "react-router";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -41,13 +40,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     lastName: string | null;
     companyRole: string | null;
   }> = [];
+  type ShopifyCompanyCustomer = {
+    customer: {
+      id: string;
+      email: string;
+      firstName?: string | null;
+      lastName?: string | null;
+      roleAssignments?: {
+        edges?: Array<{
+          node?: { role?: { name?: string | null } | null } | null;
+        }>;
+      } | null;
+    };
+  };
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
     const { getCompanyCustomers } = await import("app/utils/b2b-customer.server");
     const customersData = await getCompanyCustomers(company.shopifyCompanyId, company.shop.shopDomain, company.shop.accessToken, { first: 50 });
     
     if (!customersData.error && customersData.customers) {
-      activeUsers = customersData.customers.map((c: any) => {
+      activeUsers = (customersData.customers as ShopifyCompanyCustomer[]).map((c) => {
         const firstName = c.customer.firstName?.trim() || null;
         const lastName = c.customer.lastName?.trim() || null;
         const companyRole = c.customer.roleAssignments?.edges?.[0]?.node?.role?.name || "Customer";
@@ -65,7 +77,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Get recent orders for this company
   const recentOrders = await prisma.b2BOrder.findMany({
-    where: { companyId: company.id },
+    where: {
+      companyId: company.id,
+      orderStatus: { notIn: ["converted", "archived"] },
+    },
     orderBy: { createdAt: "desc" },
     take: 15,
     select: {

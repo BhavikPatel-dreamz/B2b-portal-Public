@@ -80,6 +80,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Build where clause
     const whereClause: Prisma.B2BOrderWhereInput = {
       companyId,
+      orderStatus: { notIn: ["converted", "archived"] },
     };
 
     if (filters.paymentStatus) {

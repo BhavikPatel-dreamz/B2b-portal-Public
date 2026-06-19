@@ -96,6 +96,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const whereClause: Prisma.B2BOrderWhereInput = {
       companyId,
       createdByUserId: userId,
+      orderStatus: { notIn: ["converted", "archived"] },
     };
 
     if (dateFrom || dateTo) {
@@ -143,6 +144,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: {
         companyId,
         createdByUserId: userId,
+        orderStatus: { notIn: ["converted", "archived"] },
       },
       select: {
         orderTotal: true,
