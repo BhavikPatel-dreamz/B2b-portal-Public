@@ -108,7 +108,12 @@ export default [
   route("sales/portal/company/:companyId/create-order", "routes/sales.portal.company.$companyId.create-order.tsx"),
   route("sales/portal/company/:companyId/create-order/step2", "routes/sales.portal.company.$companyId.create-order.step2.tsx"),
   route("sales/portal/company/:companyId/create-order/step3", "routes/sales.portal.company.$companyId.create-order.step3.tsx"),
+  route("sales/portal/company/:companyId/create-quote", "routes/sales.portal.company.$companyId.create-quote.tsx"),
+  route("sales/portal/company/:companyId/create-quote/step2", "routes/sales.portal.company.$companyId.create-quote.step2.tsx"),
+  route("sales/portal/company/:companyId/create-quote/step3", "routes/sales.portal.company.$companyId.create-quote.step3.tsx"),
   route("sales/portal/company/:companyId/orders", "routes/sales.portal.company.$companyId.orders.tsx"),
+  route("sales/portal/company/:companyId/quotes", "routes/sales.portal.company.$companyId.quotes.tsx"),
+  route("sales/portal/company/:companyId/quotes/:quoteId", "routes/sales.portal.company.$companyId.quotes.$quoteId.tsx"),
 
   // Legacy support routes (kept for backward compatibility with invitation links)
   route("support/login", "routes/support.login.tsx"),
@@ -116,6 +121,7 @@ export default [
   route("support/portal", "routes/support.portal.tsx"),
   // App Proxy routes (public, no auth required)
   route("smartb2b", "routes/smartb2b.tsx"),
+  route("quote/:quoteId/:secureToken", "routes/quote.$quoteId.$secureToken.tsx"),
 
   // Index route
   index("routes/_index/route.tsx"),

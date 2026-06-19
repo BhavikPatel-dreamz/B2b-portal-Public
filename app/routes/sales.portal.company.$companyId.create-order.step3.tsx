@@ -14,6 +14,11 @@ import {
   type SalesDraftLineItemInput,
   type SalesDraftShippingLineInput,
 } from "app/utils/sales-order-pricing.server";
+import {
+  createQuoteFromCart,
+  getQuoteUrl,
+  type QuoteCartItem,
+} from "app/services/quote.server";
 
 type DraftOrderInput = {
   lineItems: SalesDraftLineItemInput[];
@@ -46,7 +51,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const formData = await request.formData();
     const actionType = formData.get("actionType") as string | null;
 
-    if (actionType !== "process_order") {
+    if (!["process_order", "save_quote_draft", "submit_quote"].includes(actionType || "")) {
       return Response.json({ error: "Invalid order action" }, { status: 400 });
     }
 
@@ -75,6 +80,31 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const cartData = JSON.parse(cartDataStr || "[]") as SalesCartItem[];
   if (cartData.length === 0) {
     return Response.json({ error: "Cart is empty" }, { status: 400 });
+  }
+
+  if (actionType === "save_quote_draft" || actionType === "submit_quote") {
+    const quoteTitle = String(formData.get("quoteTitle") || "").trim();
+    const expirationDate = String(formData.get("expirationDate") || "");
+    const expiresAt = expirationDate ? new Date(`${expirationDate}T23:59:59.999`) : null;
+    const quote = await createQuoteFromCart({
+      companyId: company.id,
+      salesAgentId: user.id,
+      customerId,
+      cartData: cartData as QuoteCartItem[],
+      title: quoteTitle || null,
+      internalNotes,
+      customerNotes,
+      discountAmount,
+      discountType,
+      shippingCost,
+      taxRate,
+      expiresAt,
+      submit: actionType === "submit_quote",
+    });
+
+    return redirect(
+      `/sales/portal/company/${company.id}/quotes/${quote.id}?created=1&quoteUrl=${encodeURIComponent(getQuoteUrl(request, quote))}`,
+    );
   }
 
   // 1. Fetch B2B contact and location details from Shopify
@@ -316,6 +346,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
+  const isQuoteMode = new URL(request.url).pathname.includes("create-quote");
 
   if (!companyId) {
     return redirect("/sales/portal");
@@ -329,7 +360,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const customerId = url.searchParams.get("customerId");
   
   if (!customerId) {
-    return redirect(`/sales/portal/company/${companyId}/create-order`);
+    return redirect(`/sales/portal/company/${companyId}/${isQuoteMode ? "create-quote" : "create-order"}`);
   }
 
   const company = await prisma.companyAccount.findUnique({
@@ -411,14 +442,19 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
-    }
+    },
+    mode: isQuoteMode ? "quote" : "order",
   });
 };
 
 export default function ReviewOrder() {
-  const { company, selectedCustomer, user } = useLoaderData<any>();
+  const { company, selectedCustomer, user, mode } = useLoaderData<any>();
   const submit = useSubmit();
   const navigation = useNavigation();
+  const isQuoteMode = mode === "quote";
+  const flowBase = isQuoteMode
+    ? `/sales/portal/company/${company.id}/create-quote`
+    : `/sales/portal/company/${company.id}/create-order`;
 
   // Local state retrieved from sessionStorage
   const [cartItems, setCartItems] = useState<any[]>([]);
@@ -429,6 +465,8 @@ export default function ReviewOrder() {
   const [shippingCost, setShippingCost] = useState(0);
   const [taxRate, setTaxRate] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
+  const [quoteTitle, setQuoteTitle] = useState("");
+  const [expirationDate, setExpirationDate] = useState("");
 
   useEffect(() => {
     const storedCart = sessionStorage.getItem(`sales_checkout_cart_${company.id}`);
@@ -446,6 +484,9 @@ export default function ReviewOrder() {
     if (storedDiscountType) setDiscountType(storedDiscountType);
     if (storedShipping) setShippingCost(Number(storedShipping));
     if (storedTax) setTaxRate(Number(storedTax));
+    const defaultExpiry = new Date();
+    defaultExpiry.setDate(defaultExpiry.getDate() + 30);
+    setExpirationDate(defaultExpiry.toISOString().slice(0, 10));
   }, [company.id]);
 
   const subtotal = cartItems.reduce((acc, item) => acc + Number(item.price) * item.quantity, 0);
@@ -471,14 +512,13 @@ export default function ReviewOrder() {
 
   const isSubmitting = navigation.state === "submitting";
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitReview = (quoteAction?: "save_quote_draft" | "submit_quote") => {
     if (cartItems.length === 0) {
-      setErrorMsg("Cannot submit an empty order.");
+      setErrorMsg(`Cannot submit an empty ${isQuoteMode ? "quote" : "order"}.`);
       return;
     }
     submit({
-      actionType: "process_order",
+      actionType: quoteAction || "process_order",
       customerId: selectedCustomer.shopifyCustomerId,
       cartData: JSON.stringify(cartItems),
       internalNotes,
@@ -487,7 +527,14 @@ export default function ReviewOrder() {
       discountType,
       shippingCost: shippingCost.toString(),
       taxRate: taxRate.toString(),
+      quoteTitle,
+      expirationDate,
     }, { method: "POST" });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitReview(isQuoteMode ? "submit_quote" : undefined);
   };
 
   return (
@@ -500,9 +547,9 @@ export default function ReviewOrder() {
             <span style={styles.breadcrumbSeparator}>/</span>
             <Link to={`/sales/portal?companyId=${company.id}`} style={styles.breadcrumbLink}>{company.name}</Link>
             <span style={styles.breadcrumbSeparator}>/</span>
-            <Link to={`/sales/portal/company/${company.id}/create-order/step2?customerId=${selectedCustomer.shopifyCustomerId}`} style={styles.breadcrumbLink}>Product Catalog</Link>
+            <Link to={`${flowBase}/step2?customerId=${selectedCustomer.shopifyCustomerId}`} style={styles.breadcrumbLink}>Product Catalog</Link>
             <span style={styles.breadcrumbSeparator}>/</span>
-            <span style={styles.breadcrumbCurrent}>Review Order</span>
+            <span style={styles.breadcrumbCurrent}>{isQuoteMode ? "Review Quote" : "Review Order"}</span>
           </div>
           <div style={styles.headerUser}>
             <div style={styles.avatar}>
@@ -515,8 +562,12 @@ export default function ReviewOrder() {
 
       <main style={styles.mainContent}>
         <div style={styles.pageHeader}>
-          <h1 style={styles.pageTitle}>Review B2B Order</h1>
-          <p style={styles.pageSubtitle}>Verify details and complete the purchasing flow for the company location.</p>
+          <h1 style={styles.pageTitle}>{isQuoteMode ? "Review B2B Quote" : "Review B2B Order"}</h1>
+          <p style={styles.pageSubtitle}>
+            {isQuoteMode
+              ? "Verify pricing, expiration, and notes before saving or sending the quote."
+              : "Verify details and complete the purchasing flow for the company location."}
+          </p>
         </div>
 
         {errorMsg && (
@@ -530,7 +581,7 @@ export default function ReviewOrder() {
           <section style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             {/* Customer info card */}
             <div style={styles.card}>
-              <h3 style={styles.cardTitle}>Gifting & Purchasing Context</h3>
+              <h3 style={styles.cardTitle}>Customer Information</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "14px" }}>
                 <div>
                   <span style={{ fontWeight: 600, color: "#4b5563" }}>B2B Company:</span>
@@ -544,9 +595,35 @@ export default function ReviewOrder() {
               </div>
             </div>
 
+            {isQuoteMode && (
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>Quote Information</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: "16px" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                    Quote Title
+                    <input
+                      value={quoteTitle}
+                      onChange={(e) => setQuoteTitle(e.target.value)}
+                      placeholder={`${company.name} quote`}
+                      style={{ height: "42px", borderRadius: "8px", border: "1px solid #d1d5db", padding: "0 12px", font: "inherit" }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                    Expiration Date
+                    <input
+                      type="date"
+                      value={expirationDate}
+                      onChange={(e) => setExpirationDate(e.target.value)}
+                      style={{ height: "42px", borderRadius: "8px", border: "1px solid #d1d5db", padding: "0 12px", font: "inherit" }}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
             {/* Line Items Card */}
             <div style={styles.card}>
-              <h3 style={styles.cardTitle}>Order Line Items ({cartItems.length} Products)</h3>
+              <h3 style={styles.cardTitle}>{isQuoteMode ? "Quote" : "Order"} Line Items ({cartItems.length} Products)</h3>
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 {cartItems.map((item) => (
                   <div key={item.variantId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f3f4f6", paddingBottom: "12px" }}>
@@ -577,7 +654,7 @@ export default function ReviewOrder() {
 
             {/* Notes Card */}
             <div style={styles.card}>
-              <h3 style={styles.cardTitle}>Order Notes</h3>
+              <h3 style={styles.cardTitle}>{isQuoteMode ? "Quote" : "Order"} Notes</h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", fontSize: "13px" }}>
                 <div>
                   <h4 style={{ margin: "0 0 6px 0", color: "#ef4444" }}>Internal Notes (Private)</h4>
@@ -598,7 +675,7 @@ export default function ReviewOrder() {
           {/* Right Column: Pricing & Submit */}
           <aside style={styles.sidebar}>
             <div style={styles.card}>
-              <h3 style={styles.sidebarTitle}>Order Summary</h3>
+              <h3 style={styles.sidebarTitle}>{isQuoteMode ? "Quote" : "Order"} Summary</h3>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "14px", color: "#4b5563", marginBottom: "20px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -627,19 +704,34 @@ export default function ReviewOrder() {
               </div>
 
               <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <input type="hidden" name="actionType" value="process_order" />
+                {isQuoteMode && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => submitReview("save_quote_draft")}
+                    style={styles.backBtn}
+                  >
+                    Save Draft Quote
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={isSubmitting}
                   style={styles.submitBtn}
                 >
-                  {isSubmitting ? "Processing Order..." : "Process Order"}
+                  {isSubmitting
+                    ? isQuoteMode
+                      ? "Saving Quote..."
+                      : "Processing Order..."
+                    : isQuoteMode
+                      ? "Submit Quote"
+                      : "Process Order"}
                 </button>
                 <Link
-                  to={`/sales/portal/company/${company.id}/create-order/step2?customerId=${selectedCustomer.shopifyCustomerId}`}
+                  to={`${flowBase}/step2?customerId=${selectedCustomer.shopifyCustomerId}`}
                   style={styles.backBtn}
                 >
-                  Modify Order
+                  {isQuoteMode ? "Edit Quote" : "Modify Order"}
                 </Link>
               </form>
             </div>

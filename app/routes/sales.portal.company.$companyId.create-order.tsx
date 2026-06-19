@@ -9,6 +9,7 @@ import {
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
+  const isQuoteMode = new URL(request.url).pathname.includes("create-quote");
 
   if (!companyId) {
     return redirect("/sales/portal");
@@ -184,11 +185,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       lastName: user.lastName,
       email: user.email,
     },
+    mode: isQuoteMode ? "quote" : "order",
   });
 };
 
 export default function CreateOrderCustomerSelection() {
-  const { company, user } = useLoaderData<{
+  const { company, user, mode } = useLoaderData<{
     company: {
       id: string;
       name: string;
@@ -214,7 +216,13 @@ export default function CreateOrderCustomerSelection() {
       lastName: string | null;
       email: string;
     };
+    mode: "order" | "quote";
   }>();
+  const flowBase =
+    mode === "quote"
+      ? `/sales/portal/company/${company.id}/create-quote`
+      : `/sales/portal/company/${company.id}/create-order`;
+  const flowLabel = mode === "quote" ? "Create Quote" : "Create Order";
   const formatCurrency = (val: string | number) =>
     `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
@@ -238,7 +246,7 @@ export default function CreateOrderCustomerSelection() {
               {company.name}
             </Link>
             <span style={styles.breadcrumbSeparator}>/</span>
-            <span style={styles.breadcrumbCurrent}>Create Order</span>
+            <span style={styles.breadcrumbCurrent}>{flowLabel}</span>
           </div>
           <div style={styles.headerUser}>
             <div style={styles.avatar}>
@@ -253,7 +261,7 @@ export default function CreateOrderCustomerSelection() {
 
       <main style={styles.mainContent}>
         <div style={styles.pageHeader}>
-          <h1 style={styles.pageTitle}>Create Order: {company.name}</h1>
+          <h1 style={styles.pageTitle}>{flowLabel}: {company.name}</h1>
           <p style={styles.pageSubtitle}>Step 1: Select Customer</p>
         </div>
 
@@ -264,7 +272,7 @@ export default function CreateOrderCustomerSelection() {
             <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Who is this order for?</h2>
               <p style={styles.cardSubtitle}>
-                Select a customer user to proceed with building the order.
+                Select a customer user to proceed with building the {mode}.
               </p>
             </div>
 
@@ -273,7 +281,7 @@ export default function CreateOrderCustomerSelection() {
                 {company.users.map((companyUser) => (
                   <Link
                     key={companyUser.id}
-                    to={`/sales/portal/company/${company.id}/create-order/step2?customerId=${companyUser.shopifyCustomerId || companyUser.id}`}
+                    to={`${flowBase}/step2?customerId=${companyUser.shopifyCustomerId || companyUser.id}`}
                     style={styles.userForm}
                   >
                     <div style={styles.userCard}>

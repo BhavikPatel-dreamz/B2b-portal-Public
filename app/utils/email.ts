@@ -912,3 +912,66 @@ ${shopName}`;
     smtpConfig,
   );
 }
+
+export async function sendQuoteEmail({
+  storeId,
+  to,
+  customerName,
+  quoteNumber,
+  quoteTitle,
+  companyName,
+  totalAmount,
+  currencyCode,
+  expiresAt,
+  quoteUrl,
+}: {
+  storeId: string;
+  to: string;
+  customerName: string;
+  quoteNumber: string;
+  quoteTitle: string;
+  companyName: string;
+  totalAmount: string;
+  currencyCode: string;
+  expiresAt: Date;
+  quoteUrl: string;
+}) {
+  const storeData = await prisma.store.findUnique({
+    where: { id: storeId },
+  });
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
+  const shopName = storeData?.shopName || storeData?.shopDomain || "SmartB2B";
+  const formattedTotal = `${currencyCode} ${totalAmount}`;
+  const formattedExpiry = expiresAt.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+  const safeCustomerName = customerName || "there";
+  const subject = `${shopName} quote ${quoteNumber}: ${quoteTitle}`;
+  const body = `
+    Hello ${safeCustomerName},<br /><br />
+    ${companyName} has a new quote ready for review.<br /><br />
+    <strong>Quote:</strong> ${quoteNumber}<br />
+    <strong>Total:</strong> ${formattedTotal}<br />
+    <strong>Expires:</strong> ${formattedExpiry}<br /><br />
+    Please review the quote and choose approve or reject.
+  `;
+
+  const html = convertToHtmlEmail(body, storeData?.shopDomain || "store.com", subject, {
+    logoUrl: storeData?.logo,
+    ctaLabel: "Review Quote",
+    ctaUrl: quoteUrl,
+    footerText: "This secure quote link is intended for the selected customer.",
+  });
+
+  return sendEmail(
+    {
+      to,
+      subject,
+      html,
+      text: stripHtmlTags(`${body}\n\nReview quote: ${quoteUrl}`),
+    },
+    smtpConfig,
+  );
+}

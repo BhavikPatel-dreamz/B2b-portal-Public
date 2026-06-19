@@ -187,22 +187,7 @@ export default function SalesPortal() {
         </nav>
 
         {/* Other Companies */}
-        {allCompanies.length > 1 && (
-          <div style={styles.otherCompanies}>
-            <div style={styles.otherCompaniesLabel}>Switch Company</div>
-            {allCompanies
-              .filter((c) => c.id !== company.id)
-              .map((c) => (
-                <Link
-                  key={c.id}
-                  to={`/support/portal?session=${sessionToken}&companyId=${c.id}`}
-                  style={styles.companyLink}
-                >
-                  🏢 {c.name}
-                </Link>
-              ))}
-          </div>
-        )}
+      
 
         <div style={styles.sidebarFooter}>
           <div style={styles.userProfile}>
