@@ -462,7 +462,7 @@ export default function CentralOrderListPage() {
         aria-label="Order summary"
       >
         <Summary label="Total Orders" value={data.summary.total} />
-        <Summary label="Draft Orders" value={data.summary.draft} />
+        {/* <Summary label="Draft Orders" value={data.summary.draft} /> */}
         <Summary label="Payment Pending" value={data.summary.pending} />
         <Summary label="Paid Orders" value={data.summary.paid} />
         <Summary label="Cancelled" value={data.summary.cancelled} />
@@ -500,7 +500,7 @@ export default function CentralOrderListPage() {
             </option>
           ))}
         </select>
-        <select
+        {/* <select
           name="company"
           defaultValue={data.filters.companyId}
           style={styles.input}
@@ -511,7 +511,7 @@ export default function CentralOrderListPage() {
               {company.name}
             </option>
           ))}
-        </select>
+        </select> */}
         <select
           name="customer"
           defaultValue={data.filters.customer}
