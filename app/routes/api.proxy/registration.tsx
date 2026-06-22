@@ -13,16 +13,6 @@ import {
   getFreePlanUsage,
 } from "app/utils/free-plan-limits.server";
 
-function getCorsHeaders(request: Request) {
-  const origin = request.headers.get("Origin") || "*";
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Accept",
-    "Access-Control-Max-Age": "86400",
-  };
-}
-
 const CORE_FIELD_KEYS = [
   "companyName",
   "email",
@@ -991,48 +981,25 @@ async function autoApproveRegistrationSubmission({
   });
 }
 
-function json(data: unknown, init: ResponseInit = {}, request?: Request) {
-  const corsHeaders = request ? getCorsHeaders(request) : {};
-  return Response.json(data, {
-    ...init,
-    headers: {
-      ...corsHeaders,
-      ...(init.headers ?? {}),
-    },
-  });
-}
-
-function handlePreflight(request: Request): Response | null {
-  if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: getCorsHeaders(request),
-    });
-  }
-  return null;
-}
-
 export const loader: LoaderFunction = async ({ request }) => {
-  // ✅ Handle CORS preflight
-  const preflight = handlePreflight(request);
-  if (preflight) return preflight;
-
-  const respond = (data: unknown, init: ResponseInit = {}) =>
-    json(data, init, request);
+  // ✅ Handle OPTIONS preflight
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204 });
+  }
 
   const { shop, loggedInCustomerId: shopifyCustomerId } = getProxyParams(request);
 
   if (!shop) {
-    return respond({ success: false, error: "Store identification failed." }, { status: 400 });
+    return Response.json({ success: false, error: "Store identification failed." }, { status: 400 });
   }
 
   if (!shopifyCustomerId) {
-    return respond({ success: false, error: "Shopify customer ID is required." }, { status: 400 });
+    return Response.json({ success: false, error: "Shopify customer ID is required." }, { status: 400 });
   }
 
   const store = await getStoreByDomain(shop);
   if (!store) {
-    return respond({ success: false, error: "Store not found." }, { status: 404 });
+    return Response.json({ success: false, error: "Store not found." }, { status: 404 });
   }
 
   const data = await prisma.registrationSubmission.findFirst({
@@ -1042,7 +1009,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     },
   });
 
-  return respond({
+  return Response.json({
     success: true,
     message: "Registration details fetched successfully.",
     data,
@@ -1053,12 +1020,10 @@ export const loader: LoaderFunction = async ({ request }) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   console.log("📝 Registration API called");
   
-  // ✅ Handle CORS preflight
-  const preflight = handlePreflight(request);
-  if (preflight) return preflight;
-
-  const respond = (data: unknown, init: ResponseInit = {}) =>
-    json(data, init, request);
+  // ✅ Handle OPTIONS preflight
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204 });
+  }
 
   let authenticatedShop: string | null = null;
   const authenticatedCustomerId: string | null = null;
@@ -1076,15 +1041,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const shop = authenticatedShop || url.searchParams.get("shop");
 
     if (!shop) {
-      return respond({ success: false, error: "Store identification failed." }, { status: 400 });
+      return Response.json({ success: false, error: "Store identification failed." }, { status: 400 });
     }
 
     const store = await getStoreByDomain(shop);
     if (!store) {
-      return respond({ success: false, error: "Store not found." }, { status: 404 });
+      return Response.json({ success: false, error: "Store not found." }, { status: 404 });
     }
     if (!store.accessToken) {
-      return respond(
+      return Response.json(
         { success: false, error: "Store access token is missing." },
         { status: 400 },
       );
@@ -1190,7 +1155,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ✅ Basic validation
     if (!companyName) {
-      return respond(
+      return Response.json(
         { success: false, error: "Company name is required." },
         { status: 400 },
       );
@@ -1200,7 +1165,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? "Could not retrieve your account email. Please ensure you are logged in or contact support."
         : "Email is required. Please log in to your account first.";
       
-      return respond(
+      return Response.json(
         { success: false, error: errorMsg },
         { status: 400 },
       );
@@ -1208,7 +1173,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return respond({ success: false, error: "Invalid email format." }, { status: 400 });
+      return Response.json({ success: false, error: "Invalid email format." }, { status: 400 });
     }
 
     // ✅ Duplicate email check
@@ -1218,7 +1183,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("✅ Existing Registration:", existing);
 
     if (existing) {
-      return respond({ success: false, error: "Email already registered." }, { status: 409 });
+      return Response.json({ success: false, error: "Email already registered." }, { status: 409 });
     }
 
     const { location, customFields } = parseFormFields(allFields);
@@ -1251,7 +1216,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
 
       if (hasDuplicatePhone) {
-        return respond(
+        return Response.json(
           { success: false, error: "Phone number already registered." },
           { status: 409 },
         );
@@ -1263,7 +1228,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (RegistrationData?.companyName === companyName) {
-      return respond({ success: false, error: "Company already registered." }, { status: 409 });
+      return Response.json({ success: false, error: "Company already registered." }, { status: 409 });
     }
 
     // ✅ FIX: createOrFindCustomer now updates existing customer if firstName/lastName/phone are null
@@ -1278,7 +1243,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const usage = await getFreePlanUsage(store.id);
 
       if (usage.registrationLimitReached) {
-        return respond(
+        return Response.json(
           {
             success: false,
             error: getFreePlanRegistrationsLimitMessage(),
@@ -1394,7 +1359,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    return respond({
+    return Response.json({
       success: true,
       message: autoApproved
         ? "Registration submitted and approved successfully!"
@@ -1414,6 +1379,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch (error) {
     const message = extractErrorMessage(error);
     console.error("❌ Registration error:", error);
-    return respond({ success: false, error: message }, { status: 500 });
+    return Response.json({ success: false, error: message }, { status: 500 });
   }
 };

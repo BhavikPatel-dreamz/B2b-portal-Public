@@ -16,36 +16,13 @@ import {
 } from "app/utils/b2b-customer.server";
 
 
-function getCorsHeaders(request: Request) {
-  const origin = request.headers.get("Origin") || "*";
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
-    "Access-Control-Max-Age": "86400",
-  };
-}
-
-function json(data: unknown, init: ResponseInit = {}, request?: Request) {
-  const corsHeaders = request ? getCorsHeaders(request) : {};
-  return Response.json(data, {
-    ...init,
-    headers: {
-      ...corsHeaders,
-      ...(init.headers ?? {}),
-    },
-  });
-}
- 
 // ─── LOADER ────────────────────────────────────────────────────────────────────
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // ✅ Handle OPTIONS preflight — must come before ANY other logic
+  // ✅ Handle OPTIONS preflight — Shopify CDN handles CORS, but this route
+  //    still needs to respond to OPTIONS for completeness.
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: getCorsHeaders(request) });
+    return new Response(null, { status: 204 });
   }
-
-  const respond = (data: unknown, init: ResponseInit = {}) =>
-    json(data, init, request);
 
   try {
     const { shop, customerGid, customerId } =
@@ -54,7 +31,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
  
     if (!shop) {
-      return respond({ error: "Missing shop" }, { status: 400 });
+      return Response.json({ error: "Missing shop" }, { status: 400 });
     }
  
     const store = await prisma.store.findUnique({
@@ -64,7 +41,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
  
     // ❌ Store doesn't exist — return blank response (with CORS)
     if (!store) {
-      return respond({}, { status: 200 });
+      return Response.json({}, { status: 200 });
     }
  
     const [customerRecord, userData, companyData] = customerGid
@@ -101,7 +78,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : [null, null, null];
 
     if (customerRecord?.status === "PENDING") {
-      return respond({
+      return Response.json({
         message: "Your account has already been submitted and is under review",
         reviewNotes: customerRecord.reviewNotes ?? null,
       });
@@ -112,7 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       userData.shopifyCustomerId === customerGid &&
       userData.role !== "STORE_ADMIN"
     ) {
-      return respond({
+      return Response.json({
         message: "Your account is not a customer. Please contact the support team.",
         redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
       });
@@ -127,7 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         );
 
         if (customerCompanyInfo.hasCompany) {
-          return respond({
+          return Response.json({
             message: "Your B2B account is already active.",
             redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
           });
@@ -140,7 +117,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         );
 
         if (b2bCheck.success && b2bCheck.hasAccess) {
-          return respond({
+          return Response.json({
             message: "Your B2B account is already active.",
             redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
           });
@@ -151,20 +128,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
  
     if (customerRecord?.status === "APPROVED") {
-      return respond({
+      return Response.json({
         message: "Your account is approved, but B2B access is not yet configured in Shopify.",
         redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
       });
     }
  
     if (customerRecord?.status === "REJECTED") {
-      return respond({
+      return Response.json({
         message: "Your account has been rejected. Please contact the support team.",
         reviewNotes: customerRecord.reviewNotes ?? null,
       });
     }
     if(companyData?.isDisable == true){
-      return respond(
+      return Response.json(
         {
           message: "Your company account has been deactivated. Please contact the support team.",
         },
@@ -174,7 +151,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const usage = await getFreePlanUsage(store.id);
 
       if (usage.registrationLimitReached) {
-        return respond({
+        return Response.json({
           message: getFreePlanRegistrationsLimitMessage(),
           reviewNotes:
             "The merchant has reached the free plan registration limit.",
@@ -216,7 +193,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   
  
-    return respond({
+    return Response.json({
       config,
       storeMissing: false,
       savedAt: formFieldConfig?.updatedAt?.toISOString() ?? null,
@@ -225,7 +202,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
  
   } catch (error) {
     if (error instanceof Response) {
-      return respond(
+      return Response.json(
         { error: error.statusText || "Unauthorized" },
         { status: error.status || 401 }
       );
@@ -233,7 +210,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     console.error("❌ Error validating customer", error);
  
-    return respond(
+    return Response.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
     );
