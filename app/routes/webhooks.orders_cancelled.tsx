@@ -2,7 +2,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
-import { getOrderByShopifyId, updateOrder } from "../services/order.server";
+import { getOrderByShopifyId } from "../services/order.server";
 import { restoreCredit } from "../services/creditService";
 
 // Handle Shopify ORDERS_CANCELLED webhook
@@ -33,11 +33,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.error("Failed to restore credit on cancellation", creditErr);
     }
 
-    // Mark the order as cancelled locally
-    await updateOrder(order.id, {
-      orderStatus: "cancelled",
-      paymentStatus: "cancelled",
-      remainingBalance: 0,
+    console.log("ℹ️ ORDERS_CANCELLED webhook acknowledged without local status sync", {
+      orderId: order.id,
+      shopifyOrderId: orderGid,
+      currentPaymentStatus: order.paymentStatus,
+      currentOrderStatus: order.orderStatus,
     });
 
     return new Response();

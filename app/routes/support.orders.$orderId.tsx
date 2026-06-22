@@ -18,7 +18,7 @@ import {
   requireSalesSession,
 } from "app/utils/sales-session.server";
 import {
-  createPaymentLink,
+  getOrCreateSalesOrderPaymentLink,
   getAccessibleOrder,
   getOrderAccessWhere,
   getOrderNumber,
@@ -159,34 +159,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     if (intent === "generate_payment_link") {
-      const generated = createPaymentLink(request, order.id);
-      await prisma.b2BOrder.update({
-        where: { id: order.id },
-        data: {
-          paymentLink: generated.link,
-          paymentLinkToken: generated.token,
-          paymentLinkAt: new Date(),
-          paymentStatus: "pending",
-          orderStatus:
-            order.orderStatus === "draft"
-              ? "payment_pending"
-              : order.orderStatus,
-        },
-      });
+      const generated = await getOrCreateSalesOrderPaymentLink(order);
       await logOrderActivity({
         orderId: order.id,
         userId: user.id,
-        action: "Payment Link Generated",
+        action: generated.reused
+          ? "Payment Link Reused"
+          : "Payment Link Generated",
         message: generated.link,
       });
       return Response.json({
         success: true,
-        message: "Payment link generated.",
+        message: generated.reused
+          ? "Existing active payment link reused."
+          : "Payment link generated.",
         paymentLink: generated.link,
       });
     }
 
     if (intent === "send_payment_link" || intent === "resend_payment_link") {
+      if (
+        order.source !== "Sales Portal" ||
+        order.paymentStatus !== "pending" ||
+        order.orderStatus === "cancelled"
+      )
+        return Response.json(
+          {
+            error:
+              "Only pending Sales Portal orders can receive payment links.",
+          },
+          { status: 400 },
+        );
       if (!order.paymentLink)
         return Response.json(
           { error: "Generate a payment link first." },
@@ -197,6 +200,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           { error: "This order does not have a customer email." },
           { status: 400 },
         );
+      const verifiedPaymentLink = await getOrCreateSalesOrderPaymentLink(order);
       await sendOrderPaymentLinkEmail({
         storeId: order.shopId,
         to: order.customerEmail,
@@ -205,7 +209,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         companyName: order.company.name,
         totalAmount: order.remainingBalance.toString(),
         currencyCode: order.currencyCode,
-        paymentUrl: order.paymentLink,
+        paymentUrl: verifiedPaymentLink.link,
       });
       await prisma.b2BOrder.update({
         where: { id: order.id },
@@ -312,6 +316,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return redirect("/sales/portal/orders");
     }
   } catch (error) {
+    console.error("[sales-order-action] Action failed", {
+      orderId: order.id,
+      intent,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return Response.json(
       {
         error: error instanceof Error ? error.message : "Order action failed.",
@@ -532,60 +541,66 @@ export default function OrderDetailsPage() {
             <Row label="Balance" value={money(order.remainingBalance)} />
           </Card>
 
-          <Card title="Payment Link">
-            {order.paymentLink ? (
-              <>
-                <span style={styles.generated}>Payment Link Generated</span>
-                <div style={styles.copyRow}>
-                  <input
-                    readOnly
-                    value={order.paymentLink}
-                    style={styles.input}
-                    onFocus={(event) => event.currentTarget.select()}
-                  />
-                  <button
-                    type="button"
-                    style={styles.copyButton}
-                    onClick={() =>
-                      navigator.clipboard.writeText(order.paymentLink)
-                    }
-                  >
-                    Copy
-                  </button>
-                </div>
-                <div style={styles.buttonStack}>
-                  <Action
-                    intent="send_payment_link"
-                    label="Send Email"
-                    disabled={busy || !order.customerEmail}
-                    primary
-                  />
-                  <Action
-                    intent="resend_payment_link"
-                    label="Resend Link"
-                    disabled={busy || !order.customerEmail}
-                  />
-                </div>
-              </>
-            ) : (
-              <Action
-                intent="generate_payment_link"
-                label="Generate Payment Link"
-                disabled={busy}
-                primary
-              />
-            )}
-            {order.payments.length > 0 && (
-              <div style={styles.paymentList}>
-                {order.payments.map((payment: any) => (
-                  <div key={payment.id} style={styles.paymentRow}>
-                    <span>{paymentLabel(payment.status)}</span>
-                    <strong>{money(payment.amount)}</strong>
+          {order.source === "Sales Portal" &&
+          order.paymentStatus === "pending" &&
+          order.orderStatus !== "cancelled" ? (
+            <Card title="Payment Link">
+              {order.paymentLink &&
+              !order.paymentLinkToken &&
+              !order.paymentLink.includes("/account/orders/") ? (
+                <>
+                  <span style={styles.generated}>Payment Link Generated</span>
+                  <div style={styles.copyRow}>
+                    <input
+                      readOnly
+                      value={order.paymentLink}
+                      style={styles.input}
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                    <button
+                      type="button"
+                      style={styles.copyButton}
+                      onClick={() =>
+                        navigator.clipboard.writeText(order.paymentLink)
+                      }
+                    >
+                      Copy
+                    </button>
                   </div>
-                ))}
-              </div>
-            )}
-          </Card>
+                  <div style={styles.buttonStack}>
+                    <Action
+                      intent="send_payment_link"
+                      label="Send Email"
+                      disabled={busy || !order.customerEmail}
+                      primary
+                    />
+                    <Action
+                      intent="resend_payment_link"
+                      label="Resend Link"
+                      disabled={busy || !order.customerEmail}
+                    />
+                  </div>
+                </>
+              ) : (
+                <Action
+                  intent="generate_payment_link"
+                  label="Generate Payment Link"
+                  disabled={busy}
+                  primary
+                />
+              )}
+              {order.payments.length > 0 && (
+                <div style={styles.paymentList}>
+                  {order.payments.map((payment: any) => (
+                    <div key={payment.id} style={styles.paymentRow}>
+                      <span>{paymentLabel(payment.status)}</span>
+                      <strong>{money(payment.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          ) : null}
 
           {data.accessLevel !== "agent" && (
             <Card title="Manager Actions">

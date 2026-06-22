@@ -138,56 +138,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
 
-      // Map Shopify statuses to our local statuses
-      let paymentStatus: string = "pending"; // pending, partial, paid, cancelled
-      switch (financialStatus) {
-        case "paid":
-          paymentStatus = "paid";
-          break;
-        case "partially_paid":
-          paymentStatus = "partial";
-          break;
-        case "refunded":
-        case "voided":
-          paymentStatus = "cancelled";
-          break;
-        default:
-          paymentStatus = "pending";
-      }
-
-      let orderStatus: string = "submitted"; // draft, submitted, processing, shipped, delivered, cancelled
-      switch (fulfillmentStatus) {
-        case "fulfilled":
-          orderStatus = "delivered";
-          break;
-        case "partial":
-        case "in_progress":
-          orderStatus = "processing";
-          break;
-        case "cancelled":
-          orderStatus = "cancelled";
-          break;
-        default:
-          orderStatus = "submitted";
-      }
+      // Webhooks are not allowed to apply Shopify financial/fulfillment state
+      // to Sales Portal statuses. New webhook-created rows start pending, and
+      // existing rows keep whatever status a manual action/API set.
+      const paymentStatus = "pending";
+      const orderStatus = "payment_pending";
 
       // Amounts
       const orderTotal = new Prisma.Decimal(totalPriceStr);
-      const paidAmount =
-        paymentStatus === "paid" ? orderTotal : new Prisma.Decimal(0);
+      const paidAmount = new Prisma.Decimal(0);
       const remainingBalance = orderTotal.minus(paidAmount);
       const existingOrder = orderGid
         ? await getOrderByShopifyId(store.id, orderGid)
         : null;
-      const existingCreditUsed = existingOrder?.creditUsed
-        ? new Prisma.Decimal(existingOrder.creditUsed)
-        : new Prisma.Decimal(0);
+      if (existingOrder) {
+        console.log(`ℹ️ Existing B2B order found for ${orderGid}; preserving manual statuses`, {
+          existingOrderId: existingOrder.id,
+          currentPaymentStatus: existingOrder.paymentStatus,
+          currentOrderStatus: existingOrder.orderStatus,
+          shopifyFinancialStatus: financialStatus,
+          shopifyFulfillmentStatus: fulfillmentStatus,
+        });
+        return new Response();
+      }
+
+      const existingCreditUsed = new Prisma.Decimal(0);
 
       console.log(`🎯 B2B Order Creation - Processing:`, {
         orderId: orderIdNum,
         companyId: user.companyId,
         paymentStatus,
         orderStatus,
+        shopifyFinancialStatus: financialStatus,
+        shopifyFulfillmentStatus: fulfillmentStatus,
         orderTotal: orderTotal.toString(),
         paidAmount: paidAmount.toString(),
         remainingBalance: remainingBalance.toString(),
@@ -203,7 +186,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (creditAlreadyReserved) {
           console.log(`ℹ️ Credit already reserved for B2B order - skipping duplicate deduction`, {
             orderId: orderIdNum,
-            existingOrderId: existingOrder?.id,
             existingCreditUsed: existingCreditUsed.toString(),
             remainingBalance: remainingBalance.toString(),
           });
@@ -241,7 +223,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 userCreditUsed: new Prisma.Decimal(0), // No user credit used yet
                 remainingBalance,
                 paymentStatus: "pending",
-                orderStatus: "submitted",
+                orderStatus,
                 notes: `Credit validation failed: ${validation.message}. Order requires manual review.`,
                 userId: user.id,
                 source: orderSource,

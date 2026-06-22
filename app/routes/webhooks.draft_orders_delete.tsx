@@ -67,22 +67,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    // Mark the B2B order as cancelled/deleted
-    const deletedOrder = await db.b2BOrder.update({
-      where: {
-        id: existingOrder.id,
-      },
-      data: {
-        orderStatus: "cancelled",
-        paymentStatus: "refunded",
-        updatedAt: new Date(),
-      },
-    });
-
-    console.log(`📊 Draft order marked as cancelled in B2B system:`, {
-      id: deletedOrder.id,
-      shopifyOrderId: deletedOrder.shopifyOrderId,
-      status: deletedOrder.orderStatus,
+    console.log(`ℹ️ Draft order delete webhook acknowledged without local status sync:`, {
+      id: existingOrder.id,
+      shopifyOrderId: existingOrder.shopifyOrderId,
+      currentPaymentStatus: existingOrder.paymentStatus,
+      currentOrderStatus: existingOrder.orderStatus,
     });
 
   } catch (error: unknown) {

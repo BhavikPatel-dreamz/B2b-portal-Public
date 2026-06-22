@@ -214,13 +214,7 @@ const shopify = shopifyApp({
         console.error("❌ Error during store bootstrap:", error);
       }
 
-      // Register webhooks
-      try {
-        await shopify.registerWebhooks({ session });
-        console.log(`✅ Webhooks registered for ${session.shop}`);
-      } catch (error) {
-        console.error(`❌ Failed to register webhooks for ${session.shop}:`, error);
-      }
+      console.log(`ℹ️ Webhook registration is managed by shopify.app.toml for ${session.shop}`);
 
       // First, debug what functions are available
       try {
@@ -250,7 +244,7 @@ const shopify = shopifyApp({
             console.log(`✅ Post-install setup completed: ${result.message}`);
           } else {
             console.warn(`⚠️ Post-install setup warning: ${result.message || result.error}`);
-            if (result.debug) {
+            if ("debug" in result && result.debug) {
               console.log("🐛 Debug info:", JSON.stringify(result.debug, null, 2));
             }
           }
