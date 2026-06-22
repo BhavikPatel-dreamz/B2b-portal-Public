@@ -1,5 +1,6 @@
 import nodeCrypto from "node:crypto";
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   Form,
@@ -26,6 +27,12 @@ import {
   SalesPortalHeader,
   SalesPortalLayout,
 } from "app/components/SalesPortalLayout";
+
+type ActionResponse = {
+  success?: boolean;
+  message?: string;
+  error?: string;
+};
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -61,6 +68,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     quote.status = "expired";
   }
 
+  const url = new URL(request.url);
   return Response.json({
     quote: serializeQuote(quote),
     user: {
@@ -80,8 +88,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       },
     }),
     quoteUrl: getQuoteUrl(request, quote),
-    created: new URL(request.url).searchParams.get("created") === "1",
-    passedQuoteUrl: new URL(request.url).searchParams.get("quoteUrl") || "",
+    created: url.searchParams.get("created") === "1",
+    duplicatedFrom: url.searchParams.get("duplicatedFrom") || "",
+    passedQuoteUrl: url.searchParams.get("quoteUrl") || "",
   });
 };
 
@@ -221,7 +230,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         message: `Duplicated from ${quote.quoteNumber}.`,
       });
       return redirect(
-        `/sales/portal/company/${companyId}/quotes/${duplicate.id}`,
+        `/sales/portal/company/${companyId}/quotes/${duplicate.id}?duplicatedFrom=${encodeURIComponent(quote.quoteNumber)}`,
       );
     }
 
@@ -250,16 +259,59 @@ export default function QuoteDetailPage() {
     quote,
     quoteUrl,
     created,
+    duplicatedFrom,
     passedQuoteUrl,
     user,
     allCompanies,
     quoteCount,
     orderCount,
   } = useLoaderData<any>();
-  const actionData = useActionData<any>();
+  const actionData = useActionData<ActionResponse>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state !== "idle";
+  const pendingIntent = String(navigation.formData?.get("intent") || "");
+  const submissionLock = useRef(false);
   const shareUrl = passedQuoteUrl || quoteUrl;
+  const initialSuccessMessage = created
+    ? `Quote created successfully. Secure link: ${shareUrl}`
+    : duplicatedFrom
+      ? `${quote.quoteNumber} was duplicated successfully from ${duplicatedFrom}.`
+      : "";
+  const [notification, setNotification] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(initialSuccessMessage ? { type: "success", message: initialSuccessMessage } : null);
+
+  useEffect(() => {
+    if (navigation.state === "idle") submissionLock.current = false;
+  }, [navigation.state]);
+
+  useEffect(() => {
+    if (actionData?.error) {
+      setNotification({ type: "error", message: actionData.error });
+    } else if (actionData?.success) {
+      setNotification({
+        type: "success",
+        message: actionData.message || "Quote updated successfully.",
+      });
+    }
+  }, [actionData]);
+
+  useEffect(() => {
+    if (initialSuccessMessage) {
+      setNotification({ type: "success", message: initialSuccessMessage });
+    }
+  }, [initialSuccessMessage]);
+
+  const guardSubmission = (event: React.FormEvent<HTMLFormElement>) => {
+    if (submissionLock.current || isSubmitting) {
+      event.preventDefault();
+      return false;
+    }
+    submissionLock.current = true;
+    setNotification(null);
+    return true;
+  };
 
   const fmtMoney = (amount: string, currency = quote.currencyCode) =>
     new Intl.NumberFormat(undefined, {
@@ -276,6 +328,7 @@ export default function QuoteDetailPage() {
       minute: "2-digit",
     }).format(new Date(iso));
   const dateInput = quote.expiresAt.slice(0, 10);
+  const sendIntent = quote.status === "draft" ? "send_quote" : "resend_quote";
 
   return (
     <SalesPortalLayout
@@ -291,7 +344,12 @@ export default function QuoteDetailPage() {
     >
       <Link
         to={`/sales/portal/company/${quote.companyId}/quotes`}
-        style={styles.backLink}
+        aria-disabled={isSubmitting}
+        style={{
+          ...styles.backLink,
+          opacity: isSubmitting ? 0.55 : 1,
+          pointerEvents: isSubmitting ? "none" : "auto",
+        }}
       >
         Back to Quotes
       </Link>
@@ -302,40 +360,91 @@ export default function QuoteDetailPage() {
         companies={allCompanies}
         actions={
           <>
-            <Form method="post">
-              <input type="hidden" name="intent" value="send_quote" />
-              <button disabled={isSubmitting} style={styles.primaryBtn}>
-                {quote.status === "draft" ? "Send Quote" : "Resend Quote"}
+            <Form method="post" onSubmit={guardSubmission}>
+              <input type="hidden" name="intent" value={sendIntent} />
+              <button
+                disabled={isSubmitting}
+                aria-busy={pendingIntent === sendIntent}
+                style={disabledButtonStyle(styles.primaryBtn, isSubmitting)}
+              >
+                {pendingIntent === sendIntent && <Spinner />}
+                {pendingIntent === sendIntent
+                  ? quote.status === "draft" ? "Sending Quote..." : "Resending Quote..."
+                  : quote.status === "draft" ? "Send Quote" : "Resend Quote"}
               </button>
             </Form>
-            <Form method="post">
+            <Form method="post" onSubmit={guardSubmission}>
               <input type="hidden" name="intent" value="duplicate_quote" />
-              <button style={styles.secondaryBtn}>Duplicate</button>
+              <button
+                disabled={isSubmitting}
+                aria-busy={pendingIntent === "duplicate_quote"}
+                style={disabledButtonStyle(styles.secondaryBtn, isSubmitting)}
+              >
+                {pendingIntent === "duplicate_quote" && <Spinner dark />}
+                {pendingIntent === "duplicate_quote" ? "Duplicating..." : "Duplicate"}
+              </button>
             </Form>
             {quote.status === "approved" && (
-              <Form method="post">
+              <Form method="post" onSubmit={guardSubmission}>
                 <input type="hidden" name="intent" value="convert_quote" />
-                <button disabled={isSubmitting} style={styles.primaryBtn}>
-                  Convert To Order
+                <button
+                  disabled={isSubmitting}
+                  aria-busy={pendingIntent === "convert_quote"}
+                  style={disabledButtonStyle(styles.primaryBtn, isSubmitting)}
+                >
+                  {pendingIntent === "convert_quote" && <Spinner />}
+                  {pendingIntent === "convert_quote" ? "Converting..." : "Convert To Order"}
                 </button>
               </Form>
             )}
             {["draft", "sent", "viewed"].includes(quote.status) && (
-              <Form method="post">
+              <Form
+                method="post"
+                onSubmit={(event) => {
+                  if (!confirm("Cancel this quote?")) {
+                    event.preventDefault();
+                    return;
+                  }
+                  guardSubmission(event);
+                }}
+              >
                 <input type="hidden" name="intent" value="cancel_quote" />
-                <button style={styles.secondaryBtn}>Cancel</button>
+                <button
+                  disabled={isSubmitting}
+                  aria-busy={pendingIntent === "cancel_quote"}
+                  style={disabledButtonStyle(styles.secondaryBtn, isSubmitting)}
+                >
+                  {pendingIntent === "cancel_quote" && <Spinner dark />}
+                  {pendingIntent === "cancel_quote" ? "Cancelling..." : "Cancel"}
+                </button>
               </Form>
             )}
           </>
         }
       />
 
-      {created && (
-        <div style={styles.success}>Quote created. Secure link: {shareUrl}</div>
-      )}
-      {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
-      {actionData?.success && (
-        <div style={styles.success}>{actionData.message}</div>
+      {notification && (
+        <div
+          role={notification.type === "error" ? "alert" : "status"}
+          aria-live={notification.type === "error" ? "assertive" : "polite"}
+          style={{
+            ...styles.toast,
+            ...(notification.type === "error" ? styles.error : styles.success),
+          }}
+        >
+          <div style={{ paddingRight: 28 }}>
+            <strong>{notification.type === "error" ? "Action failed" : "Success"}</strong>
+            <p style={{ margin: "4px 0 0" }}>{notification.message}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() => setNotification(null)}
+            style={styles.toastCloseButton}
+          >
+            x
+          </button>
+        </div>
       )}
 
       <div className="sales-quote-detail-grid" style={styles.grid}>
@@ -345,7 +454,7 @@ export default function QuoteDetailPage() {
               <h2 style={styles.cardTitle}>Customer Information</h2>
               <span style={styles.badge}>{quote.status}</span>
             </div>
-            <div style={styles.infoGrid}>
+            <div className="sales-quote-info-grid" style={styles.infoGrid}>
               <Info label="Company" value={quote.company.name} />
               <Info
                 label="Customer"
@@ -443,7 +552,8 @@ export default function QuoteDetailPage() {
               />
               <button
                 type="button"
-                style={styles.copyBtn}
+                disabled={isSubmitting}
+                style={disabledButtonStyle(styles.copyBtn, isSubmitting)}
                 onClick={() => navigator.clipboard.writeText(shareUrl)}
               >
                 Copy
@@ -477,6 +587,7 @@ export default function QuoteDetailPage() {
               method="post"
               className="sales-quote-card"
               style={styles.card}
+              onSubmit={guardSubmission}
             >
               <input type="hidden" name="intent" value="update_quote" />
               <h2 style={styles.cardTitle}>Edit Draft</h2>
@@ -486,6 +597,7 @@ export default function QuoteDetailPage() {
                   name="title"
                   defaultValue={quote.title}
                   style={styles.input}
+                  disabled={isSubmitting}
                 />
               </label>
               <label style={styles.label}>
@@ -495,6 +607,7 @@ export default function QuoteDetailPage() {
                   name="expiresAt"
                   defaultValue={dateInput}
                   style={styles.input}
+                  disabled={isSubmitting}
                 />
               </label>
               <label style={styles.label}>
@@ -503,6 +616,7 @@ export default function QuoteDetailPage() {
                   name="customerNotes"
                   defaultValue={quote.customerNotes || ""}
                   style={styles.textarea}
+                  disabled={isSubmitting}
                 />
               </label>
               <label style={styles.label}>
@@ -511,15 +625,33 @@ export default function QuoteDetailPage() {
                   name="internalNotes"
                   defaultValue={quote.internalNotes || ""}
                   style={styles.textarea}
+                  disabled={isSubmitting}
                 />
               </label>
-              <button disabled={isSubmitting} style={styles.primaryBtn}>
-                Save Draft
+              <button
+                disabled={isSubmitting}
+                aria-busy={pendingIntent === "update_quote"}
+                style={disabledButtonStyle(styles.primaryBtn, isSubmitting)}
+              >
+                {pendingIntent === "update_quote" && <Spinner />}
+                {pendingIntent === "update_quote" ? "Saving Draft..." : "Save Draft"}
               </button>
             </Form>
           )}
         </aside>
       </div>
+      <style>{`
+        @keyframes quote-action-spin { to { transform: rotate(360deg); } }
+        .sales-quote-table-wrap { overflow-x: auto; }
+        @media (max-width: 1080px) {
+          .sales-quote-detail-grid { grid-template-columns: minmax(0, 1fr) !important; }
+          .sales-quote-side-column { position: static !important; }
+        }
+        @media (max-width: 700px) {
+          .sales-quote-card { padding: 16px !important; }
+          .sales-quote-info-grid { grid-template-columns: minmax(0, 1fr) !important; }
+        }
+      `}</style>
     </SalesPortalLayout>
   );
 }
@@ -540,6 +672,34 @@ function Summary({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function Spinner({ dark = false }: { dark?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        ...styles.buttonSpinner,
+        borderColor: dark ? "#d1d5db" : "rgba(255, 255, 255, 0.45)",
+        borderTopColor: dark ? "#374151" : "#ffffff",
+      }}
+    />
+  );
+}
+
+function disabledButtonStyle(
+  style: React.CSSProperties,
+  disabled: boolean,
+): React.CSSProperties {
+  return {
+    ...style,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    opacity: disabled ? 0.6 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -593,7 +753,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     textTransform: "capitalize",
   },
-  table: { width: "100%", borderCollapse: "collapse" },
+  table: { width: "100%", minWidth: 620, borderCollapse: "collapse" },
   th: {
     textAlign: "left",
     padding: "10px 8px",
@@ -684,16 +844,41 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#ecfdf5",
     color: "#065f46",
     border: "1px solid #a7f3d0",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
   },
   error: {
     background: "#fef2f2",
     color: "#991b1b",
     border: "1px solid #fecaca",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+  },
+  toast: {
+    position: "fixed",
+    top: 20,
+    right: 20,
+    zIndex: 11000,
+    width: "min(400px, calc(100vw - 32px))",
+    boxSizing: "border-box",
+    borderRadius: 10,
+    padding: 14,
+    boxShadow: "0 12px 30px rgba(17, 24, 39, 0.16)",
+    fontSize: 13,
+  },
+  toastCloseButton: {
+    position: "absolute",
+    top: 8,
+    right: 10,
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    fontSize: 18,
+    lineHeight: 1,
+  },
+  buttonSpinner: {
+    width: 15,
+    height: 15,
+    border: "2px solid",
+    borderRadius: "50%",
+    animation: "quote-action-spin 0.8s linear infinite",
+    flexShrink: 0,
   },
 };

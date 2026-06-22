@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   Form,
@@ -28,12 +29,22 @@ import {
 } from "app/services/sales-order-management.server";
 import { sendOrderPaymentLinkEmail } from "app/utils/email";
 
+type ActionResponse = {
+  success?: boolean;
+  message?: string;
+  error?: string;
+  paymentLink?: string;
+};
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   if (!params.orderId) return redirect("/sales/portal/orders");
   const order = await getAccessibleOrder(user, params.orderId);
   if (!order) throw new Response("Order not found", { status: 404 });
   const accessLevel = getSalesOrderAccessLevel(user);
+  const url = new URL(request.url);
+  const createdFrom = url.searchParams.get("createdFrom");
+  const sourceOrder = url.searchParams.get("sourceOrder");
   const companyIds = user.salesCompanies.map((item) => item.companyId);
   const [orderCount, quoteCount] = await Promise.all([
     prisma.b2BOrder.count({ where: getOrderAccessWhere(user) }),
@@ -53,6 +64,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     accessLevel,
     orderCount,
     quoteCount,
+    successMessage:
+      createdFrom && sourceOrder
+        ? `${getOrderNumber(order)} was ${createdFrom === "reorder" ? "reordered" : createdFrom === "draft_conversion" ? "converted to an order" : "duplicated"} successfully from ${sourceOrder}.`
+        : null,
     companies: user.salesCompanies.map((item) => ({
       id: item.company.id,
       name: item.company.name,
@@ -155,7 +170,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         action: "Order Created",
         message: `Created from ${getOrderNumber(order)}.`,
       });
-      return redirect(`/sales/portal/orders/${duplicate.id}`);
+      return redirect(
+        `/sales/portal/orders/${duplicate.id}?createdFrom=${intent}&sourceOrder=${encodeURIComponent(getOrderNumber(order))}`,
+      );
     }
 
     if (intent === "generate_payment_link") {
@@ -312,8 +329,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           { error: "Admin access is required." },
           { status: 403 },
         );
+      const deletedOrderNumber = getOrderNumber(order);
       await prisma.b2BOrder.delete({ where: { id: order.id } });
-      return redirect("/sales/portal/orders");
+      return redirect(
+        `/sales/portal/orders?deletedOrder=${encodeURIComponent(deletedOrderNumber)}`,
+      );
     }
   } catch (error) {
     console.error("[sales-order-action] Action failed", {
@@ -333,10 +353,47 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export default function OrderDetailsPage() {
   const data = useLoaderData<any>();
-  const actionData = useActionData<any>();
+  const actionData = useActionData<ActionResponse>();
   const navigation = useNavigation();
   const order = data.order;
   const busy = navigation.state !== "idle";
+  const pendingIntent = String(navigation.formData?.get("intent") || "");
+  const submissionLock = useRef(false);
+  const [notification, setNotification] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(data.successMessage ? { type: "success", message: data.successMessage } : null);
+
+  useEffect(() => {
+    if (navigation.state === "idle") submissionLock.current = false;
+  }, [navigation.state]);
+
+  useEffect(() => {
+    if (actionData?.error) {
+      setNotification({ type: "error", message: actionData.error });
+    } else if (actionData?.success) {
+      setNotification({
+        type: "success",
+        message: actionData.message || "Order updated successfully.",
+      });
+    }
+  }, [actionData]);
+
+  useEffect(() => {
+    if (data.successMessage) {
+      setNotification({ type: "success", message: data.successMessage });
+    }
+  }, [data.successMessage]);
+
+  const guardSubmission = (event: React.FormEvent<HTMLFormElement>) => {
+    if (submissionLock.current || busy) {
+      event.preventDefault();
+      return false;
+    }
+    submissionLock.current = true;
+    setNotification(null);
+    return true;
+  };
   const money = (amount: string) =>
     new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -363,7 +420,15 @@ export default function OrderDetailsPage() {
       orderCount={data.orderCount}
       quoteCount={data.quoteCount}
     >
-      <Link to="/sales/portal/orders" style={styles.backLink}>
+      <Link
+        to="/sales/portal/orders"
+        aria-disabled={busy}
+        style={{
+          ...styles.backLink,
+          opacity: busy ? 0.55 : 1,
+          pointerEvents: busy ? "none" : "auto",
+        }}
+      >
         Back to Orders
       </Link>
       <SalesPortalHeader
@@ -377,21 +442,49 @@ export default function OrderDetailsPage() {
               intent="duplicate_order"
               label="Duplicate"
               disabled={busy}
+              pending={pendingIntent === "duplicate_order"}
+              onSubmit={guardSubmission}
             />
-            <Action intent="reorder" label="Reorder" disabled={busy} />
+            <Action
+              intent="reorder"
+              label="Reorder"
+              disabled={busy}
+              pending={pendingIntent === "reorder"}
+              onSubmit={guardSubmission}
+            />
             <button
               type="button"
               onClick={() => window.print()}
               style={styles.secondaryButton}
+              disabled={busy}
             >
               Download PDF
             </button>
           </>
         }
       />
-      {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
-      {actionData?.success && (
-        <div style={styles.success}>{actionData.message}</div>
+      {notification && (
+        <div
+          role={notification.type === "error" ? "alert" : "status"}
+          aria-live={notification.type === "error" ? "assertive" : "polite"}
+          style={{
+            ...styles.toast,
+            ...(notification.type === "error" ? styles.error : styles.success),
+          }}
+        >
+          <div style={{ paddingRight: 28 }}>
+            <strong>{notification.type === "error" ? "Action failed" : "Success"}</strong>
+            <p style={{ margin: "4px 0 0" }}>{notification.message}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() => setNotification(null)}
+            style={styles.toastCloseButton}
+          >
+            x
+          </button>
+        </div>
       )}
 
       <div className="order-detail-grid" style={styles.grid}>
@@ -572,12 +665,16 @@ export default function OrderDetailsPage() {
                       intent="send_payment_link"
                       label="Send Email"
                       disabled={busy || !order.customerEmail}
+                      pending={pendingIntent === "send_payment_link"}
+                      onSubmit={guardSubmission}
                       primary
                     />
                     <Action
                       intent="resend_payment_link"
                       label="Resend Link"
                       disabled={busy || !order.customerEmail}
+                      pending={pendingIntent === "resend_payment_link"}
+                      onSubmit={guardSubmission}
                     />
                   </div>
                 </>
@@ -586,6 +683,8 @@ export default function OrderDetailsPage() {
                   intent="generate_payment_link"
                   label="Generate Payment Link"
                   disabled={busy}
+                  pending={pendingIntent === "generate_payment_link"}
+                  onSubmit={guardSubmission}
                   primary
                 />
               )}
@@ -608,13 +707,15 @@ export default function OrderDetailsPage() {
                 intent="cancel_order"
                 label="Cancel Order"
                 disabled={busy || order.orderStatus === "cancelled"}
+                pending={pendingIntent === "cancel_order"}
+                onSubmit={guardSubmission}
                 danger
               />
             </Card>
           )}
           {data.accessLevel === "admin" && (
             <Card title="Admin Controls">
-              <Form method="post" style={styles.adminForm}>
+              <Form method="post" style={styles.adminForm} onSubmit={guardSubmission}>
                 <input type="hidden" name="intent" value="update_status" />
                 <label style={styles.label}>
                   Order status
@@ -622,6 +723,7 @@ export default function OrderDetailsPage() {
                     name="orderStatus"
                     defaultValue={order.orderStatus}
                     style={styles.input}
+                    disabled={busy}
                   >
                     {[
                       "draft",
@@ -644,6 +746,7 @@ export default function OrderDetailsPage() {
                     name="paymentStatus"
                     defaultValue={order.paymentStatus}
                     style={styles.input}
+                    disabled={busy}
                   >
                     {[
                       "pending",
@@ -659,20 +762,33 @@ export default function OrderDetailsPage() {
                     ))}
                   </select>
                 </label>
-                <button disabled={busy} style={styles.primaryButton}>
-                  Update Status
+                <button
+                  disabled={busy}
+                  aria-busy={pendingIntent === "update_status"}
+                  style={disabledButtonStyle(styles.primaryButton, busy)}
+                >
+                  {pendingIntent === "update_status" && <Spinner />}
+                  {pendingIntent === "update_status" ? "Updating Status..." : "Update Status"}
                 </button>
               </Form>
               <Form
                 method="post"
                 onSubmit={(event) => {
-                  if (!confirm("Delete this order permanently?"))
+                  if (!confirm("Delete this order permanently?")) {
                     event.preventDefault();
+                    return;
+                  }
+                  guardSubmission(event);
                 }}
               >
                 <input type="hidden" name="intent" value="delete_order" />
-                <button disabled={busy} style={styles.dangerButton}>
-                  Delete Order
+                <button
+                  disabled={busy}
+                  aria-busy={pendingIntent === "delete_order"}
+                  style={disabledButtonStyle(styles.dangerButton, busy)}
+                >
+                  {pendingIntent === "delete_order" && <Spinner dark />}
+                  {pendingIntent === "delete_order" ? "Deleting Order..." : "Delete Order"}
                 </button>
               </Form>
             </Card>
@@ -696,32 +812,79 @@ function Action({
   intent,
   label: text,
   disabled,
+  pending,
+  onSubmit,
   primary,
   danger,
 }: {
   intent: string;
   label: string;
   disabled?: boolean;
+  pending?: boolean;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => boolean;
   primary?: boolean;
   danger?: boolean;
 }) {
+  const buttonStyle = primary
+    ? styles.primaryButton
+    : danger
+      ? styles.dangerButton
+      : styles.secondaryButton;
+
   return (
-    <Form method="post" style={{ display: "inline-flex" }}>
+    <Form method="post" style={{ display: "inline-flex" }} onSubmit={onSubmit}>
       <input type="hidden" name="intent" value={intent} />
       <button
+        type="submit"
         disabled={disabled}
-        style={
-          primary
-            ? styles.primaryButton
-            : danger
-              ? styles.dangerButton
-              : styles.secondaryButton
-        }
+        aria-busy={pending}
+        style={disabledButtonStyle(buttonStyle, Boolean(disabled))}
       >
-        {text}
+        {pending && <Spinner dark={!primary} />}
+        {pending ? pendingLabel(intent) : text}
       </button>
     </Form>
   );
+}
+
+function Spinner({ dark = false }: { dark?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        ...styles.buttonSpinner,
+        borderColor: dark ? "#d1d5db" : "rgba(255, 255, 255, 0.45)",
+        borderTopColor: dark ? "#374151" : "#ffffff",
+      }}
+    />
+  );
+}
+
+function pendingLabel(intent: string) {
+  const labels: Record<string, string> = {
+    duplicate_order: "Duplicating...",
+    reorder: "Creating Reorder...",
+    generate_payment_link: "Generating Link...",
+    send_payment_link: "Sending Email...",
+    resend_payment_link: "Resending Link...",
+    cancel_order: "Cancelling Order...",
+  };
+  return labels[intent] || "Processing...";
+}
+
+function disabledButtonStyle(
+  style: React.CSSProperties,
+  disabled: boolean,
+): React.CSSProperties {
+  return {
+    ...style,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    opacity: disabled ? 0.6 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
 }
 function Card({
   title,
@@ -755,6 +918,7 @@ function Row({ label: title, value }: { label: string; value: string }) {
 }
 
 const responsiveCss = `
+  @keyframes order-action-spin { to { transform: rotate(360deg); } }
   @media (max-width: 1080px) { .order-detail-grid { grid-template-columns: minmax(0, 1fr) !important; } .order-detail-side { position: static !important; } }
   @media (max-width: 680px) { .order-info-grid { grid-template-columns: minmax(0, 1fr) !important; } }
   @media print { .sales-portal-sidebar, .sales-portal-header-actions, .order-detail-side form { display: none !important; } .sales-portal-main { padding: 0 !important; } }
@@ -942,19 +1106,44 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
   },
   success: {
-    marginBottom: 16,
-    padding: 12,
     border: "1px solid #a7f3d0",
-    borderRadius: 8,
     background: "#ecfdf5",
     color: "#065f46",
   },
   error: {
-    marginBottom: 16,
-    padding: 12,
     border: "1px solid #fecaca",
-    borderRadius: 8,
     background: "#fef2f2",
     color: "#991b1b",
+  },
+  toast: {
+    position: "fixed",
+    top: 20,
+    right: 20,
+    zIndex: 11000,
+    width: "min(400px, calc(100vw - 32px))",
+    boxSizing: "border-box",
+    borderRadius: 10,
+    padding: 14,
+    boxShadow: "0 12px 30px rgba(17, 24, 39, 0.16)",
+    fontSize: 13,
+  },
+  toastCloseButton: {
+    position: "absolute",
+    top: 8,
+    right: 10,
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    fontSize: 18,
+    lineHeight: 1,
+  },
+  buttonSpinner: {
+    width: 15,
+    height: 15,
+    border: "2px solid",
+    borderRadius: "50%",
+    animation: "order-action-spin 0.8s linear infinite",
+    flexShrink: 0,
   },
 };

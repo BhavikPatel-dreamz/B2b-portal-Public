@@ -1,6 +1,14 @@
-import { LoaderFunctionArgs, ActionFunctionArgs, redirect } from "react-router";
-import { useLoaderData, Link, useSubmit, useNavigation, useSearchParams, useFetcher } from "react-router";
-import { useState, useEffect } from "react";
+import {
+  type LoaderFunctionArgs,
+  type ActionFunctionArgs,
+  redirect,
+  useLoaderData,
+  Link,
+  useNavigation,
+  useSearchParams,
+  useFetcher,
+} from "react-router";
+import { useState, useEffect, useRef } from "react";
 import prisma from "app/db.server";
 import {
   buildClearSessionCookie,
@@ -662,7 +670,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       // If a collection is selected, we must fetch products from that specific collection connection.
       // Otherwise we use the global products search query.
       let productsQuery = "";
-      let productsVariables: any = { cursor, locationId };
+      const productsVariables: any = { cursor, locationId };
 
       if (filterCollection) {
         productsQuery = `
@@ -868,11 +876,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export default function CreateOrderProductCatalog() {
-  const { company, selectedCustomer, products, collections, filterOptions, pageInfo, searchParams, user, mode } = useLoaderData<any>();
-  const submit = useSubmit();
+  const { company, selectedCustomer, products, collections, filterOptions, searchParams, user, mode } = useLoaderData<any>();
   const navigation = useNavigation();
   const draftFetcher = useFetcher<SaveDraftResponse>();
-  const [urlParams, setUrlParams] = useSearchParams();
+  const [, setUrlParams] = useSearchParams();
 
   // Local State for Search/Filters
   const [search, setSearch] = useState(searchParams.q || "");
@@ -885,6 +892,7 @@ export default function CreateOrderProductCatalog() {
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({}); // { productId: variantId }
   const [quantities, setQuantities] = useState<Record<string, number>>({}); // { variantId: quantity }
   const [cart, setCart] = useState<Record<string, any>>({});
+  const [isCartHydrated, setIsCartHydrated] = useState(false);
   const [internalNotes, setInternalNotes] = useState("");
   const [customerNotes, setCustomerNotes] = useState("");
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -902,6 +910,7 @@ export default function CreateOrderProductCatalog() {
     warning?: string;
   } | null>(null);
   const isSavingDraft = draftFetcher.state !== "idle";
+  const draftSubmitLock = useRef(false);
   const selectedCustomerShopifyId = selectedCustomer.shopifyCustomerId || selectedCustomer.id || "";
   const isQuoteMode = mode === "quote";
   const flowBase = isQuoteMode
@@ -927,15 +936,21 @@ export default function CreateOrderProductCatalog() {
 
   // Load cart and notes from localStorage
   useEffect(() => {
+    setCart({});
+    setIsCartHydrated(false);
     const cartKey = `sales_cart_${company.id}_${selectedCustomer.id}`;
     const storedCart = localStorage.getItem(cartKey);
     if (storedCart) {
       try {
-        setCart(JSON.parse(storedCart));
+        const parsedCart = JSON.parse(storedCart);
+        if (parsedCart && typeof parsedCart === "object" && !Array.isArray(parsedCart)) {
+          setCart(parsedCart);
+        }
       } catch (e) {
         console.error("Failed to load cart", e);
       }
     }
+    setIsCartHydrated(true);
 
     const intNotesKey = `sales_int_notes_${company.id}_${selectedCustomer.id}`;
     const custNotesKey = `sales_cust_notes_${company.id}_${selectedCustomer.id}`;
@@ -962,6 +977,28 @@ export default function CreateOrderProductCatalog() {
   };
 
   useEffect(() => {
+    if (draftFetcher.state === "idle") {
+      draftSubmitLock.current = false;
+    }
+  }, [draftFetcher.state]);
+
+  useEffect(() => {
+    if (!isMobileCartOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsMobileCartOpen(false);
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isMobileCartOpen]);
+
+  useEffect(() => {
     if (!draftFetcher.data) {
       return;
     }
@@ -984,6 +1021,16 @@ export default function CreateOrderProductCatalog() {
   }, [draftFetcher.data, isQuoteMode]);
 
   const saveDraftOrder = () => {
+    if (draftSubmitLock.current || isSavingDraft) {
+      return;
+    }
+
+    if (Object.keys(cart).length === 0) {
+      setDraftSaveStatus({ error: "Your cart is empty. Add at least one product before saving." });
+      return;
+    }
+
+    draftSubmitLock.current = true;
     setDraftSaveStatus(null);
 
     const formData = new FormData();
@@ -1063,6 +1110,7 @@ export default function CreateOrderProductCatalog() {
         sku: variant.sku,
         price: variant.price,
         currencyCode: variant.currencyCode,
+        inventoryQuantity: variant.inventoryQuantity,
         image: product.image,
         quantity,
       };
@@ -1164,54 +1212,12 @@ export default function CreateOrderProductCatalog() {
           </div>
         )}
 
-        {/* Draft Save Status Banner */}
-        {draftSaveStatus && (
-          <div style={{
-            backgroundColor: draftSaveStatus.success ? "#ecfdf5" : "#fef2f2",
-            border: `1px solid ${draftSaveStatus.success ? "#a7f3d0" : "#fecaca"}`,
-            borderRadius: "8px",
-            padding: "12px",
-            fontSize: "12px",
-            color: draftSaveStatus.success ? "#065f46" : "#991b1b",
-            position: "relative",
-          }}>
-            <button 
-              onClick={() => setDraftSaveStatus(null)}
-              style={{
-                position: "absolute",
-                top: "6px",
-                right: "8px",
-                background: "none",
-                border: "none",
-                fontSize: "14px",
-                cursor: "pointer",
-                color: "inherit",
-              }}
-            >
-              ✕
-            </button>
-            {draftSaveStatus.success ? (
-              <div>
-                <strong>Success!</strong>
-                <p style={{ margin: "4px 0 0 0" }}>
-                  {draftSaveStatus.message || <>{isQuoteMode ? "Quote" : "Order"} has been saved as draft successfully (<strong>{draftSaveStatus.name}</strong>).</>}
-                </p>
-                {draftSaveStatus.warning && (
-                  <p style={{ margin: "6px 0 0", color: "#92400e" }}>
-                    {draftSaveStatus.warning}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div>
-                <strong>Failed to Save Draft</strong>
-                <p style={{ margin: "4px 0 0 0" }}>{draftSaveStatus.error}</p>
-              </div>
-            )}
+        {!isCartHydrated ? (
+          <div style={styles.emptyCart} role="status">
+            <span style={styles.inlineSpinner} />
+            <p style={{ margin: "10px 0 0", fontWeight: 500 }}>Loading cart...</p>
           </div>
-        )}
-
-        {cartItems.length > 0 ? (
+        ) : cartItems.length > 0 ? (
           <>
             {/* Scrollable Line Items */}
             <div style={{ ...styles.cartItemsList, maxHeight: "300px" }}>
@@ -1234,7 +1240,7 @@ export default function CreateOrderProductCatalog() {
 
                       {/* Item Details */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: "13px", color: "#111827", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                        <div style={{ fontWeight: 600, fontSize: "13px", color: "#111827", overflowWrap: "anywhere" }}>
                           {item.productTitle}
                         </div>
                         {item.variantTitle !== "Default Title" && (
@@ -1246,8 +1252,8 @@ export default function CreateOrderProductCatalog() {
                           SKU: {item.sku || "N/A"}
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px" }}>
-                          <span style={{ fontWeight: 600, color: "#374151" }}>{formatCurrency(item.price)}</span>
-                          <span style={{ fontSize: "12px", color: "#9ca3af" }}>Total: {formatCurrency(Number(item.price) * item.quantity)}</span>
+                          <span style={{ fontWeight: 600, color: "#374151" }}>{formatCurrency(item.price, item.currencyCode)}</span>
+                          <span style={{ fontSize: "12px", color: "#6b7280" }}>Total: {formatCurrency(Number(item.price) * item.quantity, item.currencyCode)}</span>
                         </div>
 
                         {/* Low stock warning */}
@@ -1438,6 +1444,7 @@ export default function CreateOrderProductCatalog() {
                 type="button"
                 onClick={saveDraftOrder}
                 disabled={isSavingDraft}
+                aria-busy={isSavingDraft}
                 style={{
                   ...styles.clearBtn,
                   backgroundColor: isSavingDraft ? "#f3f4f6" : "#ffffff",
@@ -1447,6 +1454,8 @@ export default function CreateOrderProductCatalog() {
                   alignItems: "center",
                   justifyContent: "center",
                   gap: "8px",
+                  cursor: isSavingDraft ? "not-allowed" : "pointer",
+                  opacity: isSavingDraft ? 0.7 : 1,
                 }}
               >
                 {isSavingDraft ? (
@@ -1468,8 +1477,17 @@ export default function CreateOrderProductCatalog() {
 
               <Link 
                 to={`${flowBase}/step3?customerId=${selectedCustomerShopifyId}`}
-                style={styles.checkoutBtn}
-                onClick={() => {
+                aria-disabled={isSavingDraft}
+                style={{
+                  ...styles.checkoutBtn,
+                  opacity: isSavingDraft ? 0.55 : 1,
+                  pointerEvents: isSavingDraft ? "none" : "auto",
+                }}
+                onClick={(event) => {
+                  if (isSavingDraft) {
+                    event.preventDefault();
+                    return;
+                  }
                   // Save all order details to sessionStorage to pass to Step 3
                   sessionStorage.setItem(`sales_checkout_cart_${company.id}`, JSON.stringify(cartItems));
                   sessionStorage.setItem(`sales_checkout_notes_int_${company.id}`, internalNotes);
@@ -1519,7 +1537,39 @@ export default function CreateOrderProductCatalog() {
         }
       />
       <div style={styles.container}>
-      <main style={styles.mainContent}>
+      {draftSaveStatus && (
+        <div
+          role={draftSaveStatus.success ? "status" : "alert"}
+          aria-live={draftSaveStatus.success ? "polite" : "assertive"}
+          style={{
+            ...styles.statusToast,
+            backgroundColor: draftSaveStatus.success ? "#ecfdf5" : "#fef2f2",
+            borderColor: draftSaveStatus.success ? "#a7f3d0" : "#fecaca",
+            color: draftSaveStatus.success ? "#065f46" : "#991b1b",
+          }}
+        >
+          <div style={{ paddingRight: "28px" }}>
+            <strong>{draftSaveStatus.success ? "Draft saved" : "Unable to save draft"}</strong>
+            <p style={{ margin: "4px 0 0" }}>
+              {draftSaveStatus.success
+                ? draftSaveStatus.message || `${isQuoteMode ? "Quote" : "Order"} ${draftSaveStatus.name || ""} was saved successfully.`
+                : draftSaveStatus.error}
+            </p>
+            {draftSaveStatus.warning && (
+              <p style={{ margin: "6px 0 0", color: "#92400e" }}>{draftSaveStatus.warning}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() => setDraftSaveStatus(null)}
+            style={styles.toastCloseBtn}
+          >
+            x
+          </button>
+        </div>
+      )}
+      <main className="catalog-main" style={styles.mainContent}>
         {/* <div style={styles.pageHeader}>
           <div style={styles.headerInfo}>
             <h1 style={styles.pageTitle}>Create Order: {company.name}</h1>
@@ -1530,10 +1580,10 @@ export default function CreateOrderProductCatalog() {
         </div> */}
 
         {/* Three Column Layout: Filters (Left), Products (Center), Cart Summary (Right) */}
-        <div style={styles.layoutGrid}>
+        <div className="catalog-layout" style={styles.layoutGrid}>
           
           {/* Column 1: Filters */}
-          <aside style={styles.filterSidebar}>
+          <aside className="filter-sidebar" style={styles.filterSidebar}>
             <div style={styles.card}>
               <h3 style={styles.sidebarTitle}>Filters</h3>
 
@@ -1656,7 +1706,7 @@ export default function CreateOrderProductCatalog() {
 
               <div style={{ opacity: isLoading ? 0.4 : 1, transition: "opacity 0.2s" }}>
                 {products.length > 0 ? (
-                  <div style={styles.productsGrid}>
+                  <div className="products-grid" style={styles.productsGrid}>
                     {products.map((product: any) => {
                       const currentVariantId = selectedVariants[product.id] || (product.variants[0]?.id);
                       const currentVariant = product.variants.find((v: any) => v.id === currentVariantId) || product.variants[0];
@@ -1777,8 +1827,7 @@ export default function CreateOrderProductCatalog() {
               zIndex: 9999,
               transition: "transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
             }}
-            onMouseOver={(e) => e.currentTarget.style.transform = "scale(1.08)"}
-            onMouseOut={(e) => e.currentTarget.style.transform = "scale(1)"}
+            aria-label={`Open cart with ${totalUnits} ${totalUnits === 1 ? "item" : "items"}`}
           >
             <span>🛒</span>
             {cartItems.length > 0 && (
@@ -1816,9 +1865,18 @@ export default function CreateOrderProductCatalog() {
                 display: "flex",
                 justifyContent: "flex-end",
               }}
-              onClick={() => setIsMobileCartOpen(false)}
             >
+              <button
+                type="button"
+                aria-label="Close cart"
+                onClick={() => setIsMobileCartOpen(false)}
+                style={styles.drawerBackdrop}
+              />
               <div 
+                className="mobile-cart-panel"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Cart summary"
                 style={{
                   width: "100%",
                   maxWidth: "400px",
@@ -1829,12 +1887,16 @@ export default function CreateOrderProductCatalog() {
                   padding: "20px",
                   boxShadow: "-10px 0 25px -5px rgba(0,0,0,0.1)",
                   overflowY: "auto",
+                  boxSizing: "border-box",
+                  position: "relative",
+                  zIndex: 1,
                 }}
-                onClick={(e) => e.stopPropagation()}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                   <h3 style={{ ...styles.sidebarTitle, borderBottom: "none", margin: 0, paddingBottom: 0 }}>Cart Summary</h3>
                   <button 
+                    type="button"
+                    aria-label="Close cart"
                     onClick={() => setIsMobileCartOpen(false)}
                     style={{ background: "none", border: "none", fontSize: "24px", cursor: "pointer", color: "#6b7280" }}
                   >
@@ -1881,8 +1943,10 @@ export default function CreateOrderProductCatalog() {
           .mobile-cart-btn {
             display: flex !important;
           }
-          /* Adjust layoutGrid to 2 columns on tablets */
-          div[style*="display: grid"] {
+          .mobile-cart-btn:hover {
+            transform: scale(1.08);
+          }
+          .catalog-layout {
             grid-template-columns: 240px 1fr !important;
           }
         }
@@ -1895,8 +1959,25 @@ export default function CreateOrderProductCatalog() {
           }
         }
         @media (max-width: 768px) {
-          /* Full single column layout on phones */
-          div[style*="display: grid"] {
+          .catalog-main {
+            padding: 20px 16px !important;
+          }
+          .catalog-layout {
+            grid-template-columns: 1fr !important;
+          }
+          .products-grid {
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)) !important;
+          }
+          .mobile-cart-panel {
+            max-width: none !important;
+          }
+          .mobile-cart-btn {
+            right: 16px !important;
+            bottom: 16px !important;
+          }
+        }
+        @media (max-width: 480px) {
+          .products-grid {
             grid-template-columns: 1fr !important;
           }
         }
@@ -2259,6 +2340,7 @@ const styles = {
   },
   cartItem: {
     display: "flex",
+    flexDirection: "column" as const,
     justifyContent: "space-between",
     alignItems: "flex-start",
     fontSize: "13px",
@@ -2361,6 +2443,47 @@ const styles = {
     color: "#9ca3af",
     textAlign: "center" as const,
     fontSize: "13px",
+  },
+  inlineSpinner: {
+    width: "24px",
+    height: "24px",
+    border: "3px solid #f3f4f6",
+    borderTop: "3px solid #E91E63",
+    borderRadius: "50%",
+    animation: "spin 0.8s linear infinite",
+  },
+  statusToast: {
+    position: "fixed" as const,
+    top: "20px",
+    right: "20px",
+    zIndex: 11000,
+    width: "min(380px, calc(100vw - 32px))",
+    border: "1px solid",
+    borderRadius: "10px",
+    padding: "14px",
+    boxShadow: "0 12px 30px rgba(17, 24, 39, 0.16)",
+    fontSize: "13px",
+  },
+  toastCloseBtn: {
+    position: "absolute" as const,
+    top: "8px",
+    right: "10px",
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    fontSize: "18px",
+    lineHeight: 1,
+  },
+  drawerBackdrop: {
+    position: "absolute" as const,
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    padding: 0,
+    border: "none",
+    background: "transparent",
+    cursor: "default",
   },
   emptyState: {
     display: "flex",
