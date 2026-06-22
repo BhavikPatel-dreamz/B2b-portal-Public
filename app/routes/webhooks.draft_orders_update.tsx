@@ -2,8 +2,9 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { deductCredit, restoreCredit } from "../services/tieredCreditService";
 import { getCompanyByUserId } from "../services/user.server";
-import { upsertOrder, getOrderByShopifyIdWithDetails, deleteOrder, convertDraftOrderToFinal } from "../services/order.server";
+import { getOrderByShopifyIdWithDetails } from "../services/order.server";
 import { getStoreByDomain } from "../services/store.server";
+import prisma from "../db.server";
 
 interface ShopifyDraftOrder {
   id: string;
@@ -38,7 +39,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Extract order source from note_attributes (e.g., 'quick_order')
     const orderSource =
-      draftOrder.note_attributes?.find((attr: any) => attr.name === "_source")
+      draftOrder.note_attributes?.find((attr) => attr.name === "_source")
         ?.value || null;
 
     console.log(`Draft Order Update Details:`, {
@@ -95,19 +96,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Check if the draft order status is "completed" - if so, mark it as converted/archived in B2B system
     if (draftOrder.status === "completed") {
-      console.log(`🔄 Draft order status is "completed" - marking as converted/archived in B2B system`);
-
-      const finalOrderId = (draftOrder as any).order_id
-        ? (draftOrder as any).order_id.toString()
-        : "unknown";
-
-      try {
-        await convertDraftOrderToFinal(draftOrder.id.toString(), finalOrderId, admin);
-      } catch (convError: unknown) {
-        console.error(`❌ Failed to convert draft order:`, (convError as Error).message);
-        return new Response(`Failed to convert draft order: ${(convError as Error).message}`, { status: 500 });
-      }
-
+      console.log(`ℹ️ Draft order completed webhook acknowledged without local status sync`);
       return new Response("OK", { status: 200 });
     }
 
@@ -163,22 +152,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    // Update the B2B order record using upsert function (same as create)
-    const updatedOrder = await upsertOrder({
-      shopifyOrderId: draftOrder.id.toString(),
-      companyId: b2bUser.company.id,
-      createdByUserId: b2bUser.id,
-      shopId: store.id,
-      orderTotal: newTotalAmount,
-      creditUsed: newTotalAmount, // Use total amount since we track credit used
-      userCreditUsed: 0, // Add required field - no user-specific credit used for draft orders
-      paymentStatus: "pending",
-      orderStatus: "draft", // Draft order status
-      remainingBalance: newTotalAmount,
-      source: orderSource,
+    const updatedOrder = await prisma.b2BOrder.update({
+      where: { id: existingOrder.id },
+      data: {
+        orderTotal: newTotalAmount,
+        creditUsed: newTotalAmount,
+        remainingBalance: newTotalAmount,
+        source: orderSource,
+      },
     });
 
-    console.log(`📊 Draft order updated in B2B system:`, {
+    console.log(`📊 Draft order totals updated in B2B system without status sync:`, {
       id: updatedOrder.id,
       shopifyOrderId: updatedOrder.shopifyOrderId,
       orderTotal: updatedOrder.orderTotal,

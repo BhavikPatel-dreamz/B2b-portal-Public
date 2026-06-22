@@ -1,9 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate, getAdminForShop } from "../shopify.server";
+import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
-import { getOrderByShopifyId, updateOrder } from "../services/order.server";
-import { Prisma } from "@prisma/client";
+import { getOrderByShopifyId } from "../services/order.server";
 
 // Handle Shopify ORDERS_EDITED webhook
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -28,88 +27,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Only sync if order exists and belongs to a registered B2B company
     if (!existing?.companyId) return new Response();
 
-    // Since order_edit webhook doesn't have full order details,
-    // we need to fetch order from Shopify to get current status/totals
-    const adminSession = await getAdminForShop(shop);
-    if (!adminSession) return new Response();
-
-    const orderQuery = `
-      query GetOrder($id: ID!) {
-        order(id: $id) {
-          id
-          totalPriceSet {
-            shopMoney {
-              amount
-            }
-          }
-          financialStatus
-          fulfillmentStatus
-        }
-      }
-    `;
-
-    const response = await adminSession.graphql(orderQuery, {
-      variables: { id: orderGid },
-    });
-    const result = await response.json();
-    const order = result?.data?.order;
-    if (!order) return new Response();
-
-    // Map statuses from Shopify
-    const financialStatus = order.financialStatus as string | undefined;
-    const fulfillmentStatus = order.fulfillmentStatus as string | undefined;
-    let paymentStatus: string = "pending";
-    switch (financialStatus) {
-      case "PAID":
-        paymentStatus = "paid";
-        break;
-      case "PARTIALLY_PAID":
-        paymentStatus = "partial";
-        break;
-      case "REFUNDED":
-      case "VOIDED":
-        paymentStatus = "cancelled";
-        break;
-      default:
-        paymentStatus = "pending";
-    }
-
-    let orderStatus: string = "submitted";
-    switch (fulfillmentStatus) {
-      case "FULFILLED":
-        orderStatus = "delivered";
-        break;
-      case "PARTIAL":
-      case "IN_PROGRESS":
-        orderStatus = "processing";
-        break;
-      case "CANCELLED":
-        orderStatus = "cancelled";
-        break;
-      default:
-        orderStatus = "submitted";
-    }
-
-    const orderTotal = new Prisma.Decimal(
-      order.totalPriceSet?.shopMoney?.amount ?? "0",
-    );
-    const currentPaid = existing.paidAmount ?? new Prisma.Decimal(0);
-    const paidAmount = paymentStatus === "paid" ? orderTotal : currentPaid;
-    const remainingBalance = orderTotal.minus(paidAmount);
-
-    // Update existing order via service
-    await updateOrder(existing.id, {
-      orderTotal,
-      paymentStatus,
-      orderStatus: paymentStatus === "cancelled" ? "cancelled" : orderStatus,
-      paidAmount,
-      remainingBalance,
-      paidAt:
-        paymentStatus === "paid"
-          ? existing.paidAt ?? new Date()
-          : remainingBalance.isZero()
-            ? existing.paidAt ?? new Date()
-            : existing.paidAt,
+    console.log("ℹ️ ORDERS_EDITED webhook acknowledged without local status sync", {
+      orderId: existing.id,
+      shopifyOrderId: orderGid,
+      currentPaymentStatus: existing.paymentStatus,
+      currentOrderStatus: existing.orderStatus,
     });
 
     return new Response();

@@ -1,5 +1,7 @@
-import { LoaderFunctionArgs, redirect } from "react-router";
 import {
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+  redirect,
   useLoaderData,
   Link,
   Form,
@@ -12,19 +14,18 @@ import {
   hasCompanyAccess,
   buildClearSessionCookie,
 } from "app/utils/sales-session.server";
-import {
-  restoreCredit,
-  calculateAvailableCredit,
-} from "app/services/creditService";
+import { restoreCredit } from "app/services/creditService";
 import { getAdminForShop } from "app/shopify.server";
-import type { ActionFunctionArgs } from "react-router";
-import { Decimal } from "@prisma/client/runtime/library";
 import {
   SalesPortalHeader,
   SalesPortalLayout,
   salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
-import { getShopifyOrderWhere } from "app/services/sales-order-management.server";
+import {
+  getOrCreateSalesOrderPaymentLink,
+  getShopifyOrderWhere,
+  logOrderActivity,
+} from "app/services/sales-order-management.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -71,6 +72,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       orderStatus: true,
       createdAt: true,
       remainingBalance: true,
+      currencyCode: true,
+      customerEmail: true,
+      source: true,
+      paymentLink: true,
+      paymentLinkToken: true,
       createdByUser: {
         select: { firstName: true, lastName: true, email: true },
       },
@@ -169,7 +175,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           order.remainingBalance,
           user.id,
           "cancelled",
-          admin as any,
+          admin as Parameters<typeof restoreCredit>[5],
         );
       }
 
@@ -254,11 +260,58 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         success: true,
         message: "Order deleted successfully",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error deleting order:", err);
       return Response.json(
-        { error: `Failed to delete order: ${err.message}` },
+        {
+          error: `Failed to delete order: ${
+            err instanceof Error ? err.message : "Unknown error"
+          }`,
+        },
         { status: 500 },
+      );
+    }
+  }
+
+  if (intent === "generate_payment_link") {
+    const orderId = String(formData.get("orderId") || "");
+    const order = await prisma.b2BOrder.findFirst({
+      where: { id: orderId, companyId },
+      include: { company: { include: { shop: true } } },
+    });
+    if (!order) {
+      return Response.json({ error: "Order not found" }, { status: 404 });
+    }
+    try {
+      const generated = await getOrCreateSalesOrderPaymentLink(order);
+      await logOrderActivity({
+        orderId: order.id,
+        userId: user.id,
+        action: generated.reused
+          ? "Payment Link Reused"
+          : "Payment Link Generated",
+        message: generated.link,
+      });
+      return Response.json({
+        success: true,
+        message: generated.reused
+          ? "Existing active payment link reused."
+          : "Payment link generated.",
+      });
+    } catch (error) {
+      console.error("[sales-payment-link] Generation failed", {
+        orderId: order.id,
+        companyId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return Response.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Payment link generation failed.",
+        },
+        { status: 400 },
       );
     }
   }
@@ -288,6 +341,11 @@ export default function OrderManageScreen() {
       orderStatus: string;
       createdAt: string;
       remainingBalance: string;
+      currencyCode: string;
+      customerEmail: string | null;
+      source: string | null;
+      paymentLink: string | null;
+      paymentLinkToken: string | null;
       createdByUser: {
         firstName: string | null;
         lastName: string | null;
@@ -306,6 +364,11 @@ export default function OrderManageScreen() {
   const isDeleting =
     navigation.state === "submitting" &&
     navigation.formData?.get("intent") === "delete_order";
+  const generatingOrderId =
+    navigation.state === "submitting" &&
+    navigation.formData?.get("intent") === "generate_payment_link"
+      ? String(navigation.formData.get("orderId"))
+      : null;
 
   const formatDate = (iso: string) =>
     new Intl.DateTimeFormat("en-IN", {
@@ -316,8 +379,11 @@ export default function OrderManageScreen() {
       minute: "2-digit",
     }).format(new Date(iso));
 
-  const formatCurrency = (val: string | number) =>
-    `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatCurrency = (val: string | number, currencyCode: string) =>
+    new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currencyCode,
+    }).format(Number(val) || 0);
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { bg: string; color: string }> = {
@@ -416,6 +482,10 @@ export default function OrderManageScreen() {
                   const canDelete =
                     order.orderStatus !== "shipped" &&
                     order.orderStatus !== "delivered";
+                  const canGeneratePaymentLink =
+                    order.source === "Sales Portal" &&
+                    order.paymentStatus.toLowerCase() === "pending" &&
+                    order.orderStatus.toLowerCase() !== "cancelled";
 
                   return (
                     <tr key={order.id} style={styles.tr}>
@@ -438,7 +508,9 @@ export default function OrderManageScreen() {
                       </td>
                       <td style={styles.td}>{formatDate(order.createdAt)}</td>
                       <td style={styles.td}>
-                        <strong>{formatCurrency(order.orderTotal)}</strong>
+                        <strong>
+                          {formatCurrency(order.orderTotal, order.currencyCode)}
+                        </strong>
                       </td>
                       <td style={styles.td}>
                         {getStatusBadge(order.paymentStatus)}
@@ -447,6 +519,41 @@ export default function OrderManageScreen() {
                         {getStatusBadge(order.orderStatus)}
                       </td>
                       <td style={{ ...styles.td, textAlign: "right" }}>
+                        {canGeneratePaymentLink &&
+                          (order.paymentLink &&
+                          !order.paymentLinkToken &&
+                          !order.paymentLink.includes("/account/orders/") ? (
+                            <a
+                              href={order.paymentLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={styles.paymentLinkBtn}
+                            >
+                              Open Payment Checkout
+                            </a>
+                          ) : (
+                            <Form method="post" style={{ display: "inline" }}>
+                              <input
+                                type="hidden"
+                                name="intent"
+                                value="generate_payment_link"
+                              />
+                              <input
+                                type="hidden"
+                                name="orderId"
+                                value={order.id}
+                              />
+                              <button
+                                type="submit"
+                                disabled={generatingOrderId === order.id}
+                                style={styles.paymentLinkBtn}
+                              >
+                                {generatingOrderId === order.id
+                                  ? "Generating..."
+                                  : "Generate Payment Link"}
+                              </button>
+                            </Form>
+                          ))}
                         {canDelete ? (
                           <Form
                             method="post"
@@ -563,6 +670,19 @@ const styles = {
     fontWeight: 500,
     cursor: "pointer",
     transition: "background-color 0.2s",
+  },
+  paymentLinkBtn: {
+    display: "inline-block",
+    marginRight: "8px",
+    padding: "7px 10px",
+    border: "1px solid #2c6ecb",
+    borderRadius: "6px",
+    background: "white",
+    color: "#2c6ecb",
+    fontSize: "12px",
+    fontWeight: 600,
+    textDecoration: "none",
+    cursor: "pointer",
   },
   errorBanner: {
     backgroundColor: "#fef2f2",

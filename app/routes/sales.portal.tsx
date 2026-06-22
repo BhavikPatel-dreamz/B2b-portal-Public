@@ -431,7 +431,7 @@ export default function SalesPortal() {
                       <th style={styles.th}>Date</th>
                       <th style={styles.th}>Total</th>
                       <th style={styles.th}>Payment</th>
-                      <th style={styles.th}>Status</th>
+                      {/* <th style={styles.th}>Order Status</th> */}
                     </tr>
                   </thead>
                   <tbody>
@@ -449,9 +449,9 @@ export default function SalesPortal() {
                         <td style={styles.td}>
                           {getStatusBadge(order.paymentStatus)}
                         </td>
-                        <td style={styles.td}>
+                        {/* <td style={styles.td}>
                           {getStatusBadge(order.orderStatus)}
-                        </td>
+                        </td> */}
                       </tr>
                     ))}
                   </tbody>

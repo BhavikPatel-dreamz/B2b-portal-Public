@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "npx prisma generate & react-router build",
-    "dev": " cloudflared tunnel run shopify & shopify app dev --tunnel-url=https://dd-19.dynamicdreamz.com:3000",
+    "dev": "cloudflared tunnel run shopify & shopify app dev --config=smartb2b --tunnel-url=https://dd-19.dynamicdreamz.com:3000",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
     "deploy": "shopify app deploy",
@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@shopify/api-codegen-preset": "^1.2.0",
+    "@shopify/cli": "^3.94.3",
     "@shopify/polaris-types": "^1.0.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/eslint": "^9.6.1",

@@ -881,17 +881,15 @@ export const syncShopifyOrders = async (
           continue;
         }
 
-        // Map Shopify statuses → your local enums
-        const paymentStatus = mapPaymentStatus(order.displayFinancialStatus);
-        const orderStatus = mapOrderStatus(order.displayFulfillmentStatus);
+        // Shopify status is informational here. Do not let background sync
+        // change Sales Portal payment/order status; manual actions own status.
+        const paymentStatus = "pending";
+        const orderStatus = "payment_pending";
 
-        const isCreditOrder =
-          ["pending", "partial"].includes(paymentStatus) &&
-          orderStatus !== "cancelled";
+        const isCreditOrder = true;
         const creditUsed =  totalAmount 
-        const remainingBalance = new Decimal(0);
-        const paidAmount =
-          paymentStatus === "paid" ? totalAmount : new Decimal(0);
+        const remainingBalance = totalAmount;
+        const paidAmount = new Decimal(0);
 
         const syncedOrder = await prisma.b2BOrder.upsert({
           where: {
@@ -900,10 +898,7 @@ export const syncShopifyOrders = async (
           update: {
             orderTotal: totalAmount,
             creditUsed,
-            paymentStatus,
-            orderStatus,
             remainingBalance,
-            paidAmount,
             updatedAt: new Date(),
           },
           create: {
@@ -1015,31 +1010,6 @@ export const syncShopifyOrders = async (
     };
   }
 };
-
-function mapPaymentStatus(status: string | null | undefined): string {
-  const map: Record<string, string> = {
-    PAID: "paid",
-    PENDING: "pending",
-    PARTIALLY_PAID: "partial",
-    REFUNDED: "refunded",
-    PARTIALLY_REFUNDED: "partially_refunded",
-    VOIDED: "voided",
-    AUTHORIZED: "pending",
-  };
-  return map[status ?? ""] ?? "pending";
-}
-
-function mapOrderStatus(status: string | null | undefined): string {
-  const map: Record<string, string> = {
-    FULFILLED: "fulfilled",
-    UNFULFILLED: "draft",
-    PARTIALLY_FULFILLED: "partially_fulfilled",
-    IN_PROGRESS: "in_progress",
-    ON_HOLD: "on_hold",
-    SCHEDULED: "scheduled",
-  };
-  return map[status ?? ""] ?? "draft";
-}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

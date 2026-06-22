@@ -291,8 +291,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   // 4. Complete Draft Order (Convert to Final Shopify Order)
   const completeMutation = `
-    mutation CompleteDraftOrder($id: ID!) {
-      draftOrderComplete(id: $id) {
+    mutation CompleteDraftOrder($id: ID!, $paymentPending: Boolean) {
+      draftOrderComplete(id: $id, paymentPending: $paymentPending) {
         draftOrder {
           order {
             id
@@ -327,7 +327,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     admin,
     operation: "CompleteSalesPortalDraftOrder",
     query: completeMutation,
-    variables: { id: draftId },
+    variables: { id: draftId, paymentPending: true },
   });
   assertNoShopifyUserErrors("CompleteSalesPortalDraftOrder", completeData.draftOrderComplete.userErrors);
   const createdOrder = completeData.draftOrderComplete.draftOrder?.order;

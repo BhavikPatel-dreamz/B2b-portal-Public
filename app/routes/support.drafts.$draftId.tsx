@@ -590,8 +590,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         admin,
         operation: "CompleteSalesPortalDraftOrder",
         query: `#graphql
-          mutation CompleteDraftOrder($id: ID!) {
-            draftOrderComplete(id: $id) {
+          mutation CompleteDraftOrder($id: ID!, $paymentPending: Boolean) {
+            draftOrderComplete(id: $id, paymentPending: $paymentPending) {
               draftOrder {
                 order {
                   id
@@ -603,7 +603,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             }
           }
         `,
-        variables: { id: draftOrderId },
+        variables: { id: draftOrderId, paymentPending: true },
       });
       assertNoShopifyUserErrors(
         "CompleteSalesPortalDraftOrder",
@@ -883,7 +883,7 @@ export default function DraftDetailsPage() {
                         </td>
                       </tr>
                     ))}
-                    <tr>
+                    {/* <tr>
                       <td style={styles.td}>
                         <div style={styles.productInputs}>
                           <input
@@ -950,7 +950,7 @@ export default function DraftDetailsPage() {
                       <td colSpan={2} style={styles.td}>
                         Add this product on Save Changes
                       </td>
-                    </tr>
+                    </tr> */}
                   </tbody>
                 </table>
               </div>

@@ -150,7 +150,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       "Quantity",
       "Order Total",
       "Payment Status",
-      "Order Status",
+      // "Order Status",
       "PO Number",
       "Created Date",
       "Last Updated",
@@ -168,7 +168,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       order.items.reduce((sum, item) => sum + item.quantity, 0),
       order.orderTotal.toString(),
       order.paymentStatus,
-      order.orderStatus,
+      // order.orderStatus,
       order.poNumber,
       order.createdAt.toISOString(),
       order.updatedAt.toISOString(),
@@ -258,7 +258,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderTotal: order.orderTotal.toString(),
       currencyCode: order.currencyCode,
       paymentStatus: order.paymentStatus,
-      orderStatus: order.orderStatus,
+      // orderStatus: order.orderStatus,
       createdAt: order.createdAt.toISOString(),
       updatedAt: order.updatedAt.toISOString(),
       paymentLink: order.paymentLink,
@@ -589,7 +589,7 @@ export default function CentralOrderListPage() {
                 "Quantity",
                 "Order Total",
                 "Payment Status",
-                "Order Status",
+                // "Order Status",
                 "Created Date",
                 "Last Updated",
                 "Actions",
@@ -631,9 +631,9 @@ export default function CentralOrderListPage() {
                 <td style={styles.td}>
                   <Status value={order.paymentStatus} kind="payment" />
                 </td>
-                <td style={styles.td}>
+                {/* <td style={styles.td}>
                   <Status value={order.orderStatus} />
-                </td>
+                </td> */}
                 <td style={styles.td}>{date(order.createdAt)}</td>
                 <td style={styles.td}>{date(order.updatedAt)}</td>
                 <td style={styles.td}>
