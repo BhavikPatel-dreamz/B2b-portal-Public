@@ -34,6 +34,7 @@ jobs:
         run: |
           cp "${{ env.VPS_APP_PATH }}/../B2B-Portal-Front/dist/"*embed* \
           "${{ env.VPS_APP_PATH }}/public/"
+          cp -r ${{ env.VPS_APP_PATH }}/../B2B-Portal-Front/dist/assets ${{ env.VPS_APP_PATH }}/public/
              
       - name: Start App
         run: |
