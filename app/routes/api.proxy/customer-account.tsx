@@ -214,6 +214,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       config,
       storeMissing: false,
       savedAt: formFieldConfig?.updatedAt?.toISOString() ?? null,
+      appUrl: process.env.SHOPIFY_APP_URL || "",
     });
  
   } catch (error) {

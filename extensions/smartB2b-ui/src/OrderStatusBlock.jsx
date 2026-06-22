@@ -11,11 +11,10 @@ import { useEffect, useState } from "preact/hooks";
 export default async () => {
   render(<Extension />, document.body);
 };
-const API_URL = "https://smartb2b.dynamicdreamz.com";
-// "https://dd-20.dynamicdreamz.com"
-// "https://dd-79.dynamicdreamz.com"
-//"https://b2b-portal-public.vercel.app"
-// "https://smartb2b.dynamicdreamz.com";
+const getProxyApiUrl = (shopDomain) => {
+  if (!shopDomain) return "";
+  return `https://${shopDomain}/apps/b2b-portal-public-3`;
+};
 
 const SECTION_LABELS = {
   company: "Company information",
@@ -156,6 +155,7 @@ function Extension() {
   const [accountCheckComplete, setAccountCheckComplete] = useState(false);
   const [countriesData, setCountriesData] = useState([]);
   const [fieldErrors, setFieldErrors] = useState({});
+  const [appBaseUrl, setAppBaseUrl] = useState("");
 
   const getCustomerMetafieldQuery = {
     query: `query {
@@ -204,11 +204,13 @@ function Extension() {
 
   useEffect(() => {
     const fetchAccountStatus = async () => {
+      if (!shopDomain) return;
       try {
         setAccountCheckComplete(false);
         const token = await sessionToken.get();
+        const proxyUrl = getProxyApiUrl(shopDomain);
         const res = await fetch(
-          `${API_URL}/api/proxy/customer-account`,
+          `${proxyUrl}/api/proxy/customer-account`,
           {
             method: "GET",
             headers: {
@@ -218,6 +220,9 @@ function Extension() {
           },
         );
         const result = await res.json();
+        if (result.appUrl) {
+          setAppBaseUrl(result.appUrl);
+        }
         const {
           config,
           message,
@@ -286,7 +291,7 @@ function Extension() {
       }
     };
     fetchAccountStatus();
-  }, [sessionToken]);
+  }, [sessionToken, shopDomain]);
 
   useEffect(() => {
     if (!shopDomain || !customerId || !accountCheckComplete || isRedirecting)
@@ -294,8 +299,9 @@ function Extension() {
     const fetchCustomerDetails = async () => {
       try {
         const token = await sessionToken.get();
+        const baseUrl = appBaseUrl || getProxyApiUrl(shopDomain);
         const res = await fetch(
-          `${API_URL}/api/proxy/customer-detail`,
+          `${baseUrl}/api/proxy/customer-detail`,
           {
             method: "GET",
             headers: {
@@ -313,15 +319,16 @@ function Extension() {
       }
     };
     fetchCustomerDetails();
-  }, [shopDomain, customerId, accountCheckComplete, isRedirecting, sessionToken]);
+  }, [shopDomain, customerId, accountCheckComplete, isRedirecting, sessionToken, appBaseUrl]);
 
   // useEffect(() => {
   //   if (!accountCheckComplete || isRedirecting) return;
   //   const fetchCountries = async () => {
   //     try {
   //       const token = await sessionToken.get();
+  //       const baseUrl = appBaseUrl || getProxyApiUrl(shopDomain);
   //       const res = await fetch(
-  //         `${API_URL}/api/proxy/shipping-zones`,
+  //         `${baseUrl}/api/proxy/shipping-zones`,
   //         {
   //           method: "GET",
   //           headers: {
@@ -1192,8 +1199,9 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
 
       if (customerId) form.append("shopifyCustomerId", customerId);
 
+      const baseUrl = appBaseUrl || getProxyApiUrl(shopDomain);
       const res = await fetch(
-        `${API_URL}/api/proxy/registration?shop=${shopDomain}`,
+        `${baseUrl}/api/proxy/registration`,
         { method: "POST", body: form, headers: { Accept: "application/json" } },
       );
       const text = await res.text();
