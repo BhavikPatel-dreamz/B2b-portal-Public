@@ -11,9 +11,8 @@ import { useEffect, useState } from "preact/hooks";
 export default async () => {
   render(<Extension />, document.body);
 };
-const getProxyApiUrl = (shopDomain) => {
-  if (!shopDomain) return "";
-  return `https://${shopDomain}/apps/b2b-portal-public-3`;
+const getProxyApiUrl = () => {
+  return "https://smartb2b.dynamicdreamz.com";
 };
 
 const SECTION_LABELS = {
@@ -208,7 +207,7 @@ function Extension() {
       try {
         setAccountCheckComplete(false);
         const token = await sessionToken.get();
-        const proxyUrl = getProxyApiUrl(shopDomain);
+        const proxyUrl = getProxyApiUrl();
         const res = await fetch(
           `${proxyUrl}/api/proxy/customer-account`,
           {
@@ -299,7 +298,7 @@ function Extension() {
     const fetchCustomerDetails = async () => {
       try {
         const token = await sessionToken.get();
-        const baseUrl = appBaseUrl || getProxyApiUrl(shopDomain);
+        const baseUrl = appBaseUrl || getProxyApiUrl();
         const res = await fetch(
           `${baseUrl}/api/proxy/customer-detail`,
           {
@@ -1200,9 +1199,17 @@ const getRowGridTemplate = (row, breakpoint = FORM_ROW_BREAKPOINT) => {
       if (customerId) form.append("shopifyCustomerId", customerId);
 
       const baseUrl = appBaseUrl || getProxyApiUrl(shopDomain);
+      const token = await sessionToken.get();
       const res = await fetch(
         `${baseUrl}/api/proxy/registration`,
-        { method: "POST", body: form, headers: { Accept: "application/json" } },
+        {
+          method: "POST",
+          body: form,
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
       const text = await res.text();
       let result;

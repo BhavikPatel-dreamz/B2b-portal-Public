@@ -2,18 +2,22 @@ import type { LoaderFunctionArgs } from "react-router";
 import { unauthenticated } from "app/shopify.server";
 import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
-  "Access-Control-Max-Age": "86400",
-};
+function getCorsHeaders(request: Request) {
+  const origin = request.headers.get("Origin") || "*";
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+    "Access-Control-Max-Age": "86400",
+  };
+}
 
-function json(data: unknown, init: ResponseInit = {}) {
+function json(data: unknown, init: ResponseInit = {}, request?: Request) {
+  const corsHeaders = request ? getCorsHeaders(request) : {};
   return Response.json(data, {
     ...init,
     headers: {
-      ...CORS_HEADERS,
+      ...corsHeaders,
       ...(init.headers ?? {}),
     },
   });
@@ -50,8 +54,11 @@ type ShippingZonesPayload = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204, headers: getCorsHeaders(request) });
   }
+
+  const respond = (data: unknown, init: ResponseInit = {}) =>
+    json(data, init, request);
 
   try {
     const { shop } = await authenticateCustomerAccountSession(request, {
@@ -93,7 +100,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const payload = (await response.json()) as ShippingZonesPayload;
 
     if (!response.ok) {
-      return json(
+      return respond(
         {
           error: "Shopify Admin API request failed",
           status: response.status,
@@ -104,7 +111,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     if (payload.errors) {
-      return json({ errors: payload.errors }, { status: 500 });
+      return respond({ errors: payload.errors }, { status: 500 });
     }
 
     const shippingZoneData = payload.data?.shop?.countriesInShippingZones;
@@ -173,17 +180,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .filter((country) => validCountryCodes.has(country.value))
       .sort((a, b) => a.label.localeCompare(b.label));
 
-    return json({ countries, total: countries.length });
+    return respond({ countries, total: countries.length });
   } catch (error) {
     if (error instanceof Response) {
-      return json(
+      return respond(
         { error: error.statusText || "Unauthorized" },
         { status: error.status || 401 }
       );
     }
 
     console.error("❌ Error fetching shipping zones:", error);
-    return json(
+    return respond(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
     );

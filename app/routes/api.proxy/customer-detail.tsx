@@ -2,18 +2,22 @@ import { LoaderFunctionArgs } from "react-router";
 import { unauthenticated } from "../../shopify.server";
 import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
-  "Access-Control-Max-Age": "86400",
-};
+function getCorsHeaders(request: Request) {
+  const origin = request.headers.get("Origin") || "*";
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+    "Access-Control-Max-Age": "86400",
+  };
+}
 
-function json(data: unknown, init: ResponseInit = {}) {
+function json(data: unknown, init: ResponseInit = {}, request?: Request) {
+  const corsHeaders = request ? getCorsHeaders(request) : {};
   return Response.json(data, {
     ...init,
     headers: {
-      ...CORS_HEADERS,
+      ...corsHeaders,
       ...(init.headers ?? {}),
     },
   });
@@ -48,15 +52,18 @@ type CustomerDetailPayload = {
 // ─── LOADER ────────────────────────────────────────────────────────────────────
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204, headers: getCorsHeaders(request) });
   }
+
+  const respond = (data: unknown, init: ResponseInit = {}) =>
+    json(data, init, request);
 
   try {
     const { shop, customerGid, customerId: numericCustomerId } =
       await authenticateCustomerAccountSession(request);
 
     if (!shop) {
-      return json({ error: "Missing shop" }, { status: 400 });
+      return respond({ error: "Missing shop" }, { status: 400 });
     }
 
     const { admin } = await unauthenticated.admin(shop);
@@ -94,23 +101,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
 
     if (!response.ok) {
-      return json({ error: "Failed to fetch customer from Shopify" }, { status: 502 });
+      return respond({ error: "Failed to fetch customer from Shopify" }, { status: 502 });
     }
 
     const result = (await response.json()) as CustomerDetailPayload;
 
     if (result.errors) {
       console.error("GraphQL Errors:", result.errors);
-      return json({ error: result.errors }, { status: 400 });
+      return respond({ error: result.errors }, { status: 400 });
     }
 
     const customerData = result?.data?.customer;
 
     if (!customerData) {
-      return json({ error: "Customer not found" }, { status: 404 });
+      return respond({ error: "Customer not found" }, { status: 404 });
     }
 
-    return json({
+    return respond({
       success: true,
       customer: {
         id: numericCustomerId,
@@ -139,14 +146,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   } catch (error) {
     if (error instanceof Response) {
-      return json(
+      return respond(
         { error: error.statusText || "Unauthorized" },
         { status: error.status || 401 }
       );
     }
 
     console.error("❌ Error fetching customer detail:", error);
-    return json(
+    return respond(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
     );
