@@ -21,7 +21,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // ✅ Handle OPTIONS preflight — Shopify CDN handles CORS, but this route
   //    still needs to respond to OPTIONS for completeness.
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204 });
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
   }
 
   try {
