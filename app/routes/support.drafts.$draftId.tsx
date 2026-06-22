@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   Form,
@@ -12,7 +13,6 @@ import prisma from "app/db.server";
 import {
   SalesPortalHeader,
   SalesPortalLayout,
-  salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
 import {
   buildClearSessionCookie,
@@ -40,6 +40,12 @@ import {
 type DraftNotes = {
   internalNotes: string;
   customerNotes: string;
+};
+
+type ActionResponse = {
+  success?: boolean;
+  message?: string;
+  error?: string;
 };
 
 function parseDraftNotes(notes?: string | null): DraftNotes {
@@ -203,6 +209,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
 
   const accessLevel = getSalesOrderAccessLevel(user);
+  const url = new URL(request.url);
+  const saved = url.searchParams.get("saved") === "1";
+  const duplicatedFrom = url.searchParams.get("duplicatedFrom");
   const accessWhere = getOrderAccessWhere(user);
   const companyIds = user.salesCompanies.map((item) => item.companyId);
   const [draftCount, orderCount, quoteCount, companyUsers] = await Promise.all([
@@ -251,6 +260,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       name: item.company.name,
     })),
     counts: { drafts: draftCount, orders: orderCount, quotes: quoteCount },
+    successMessage: saved
+      ? "Draft changes saved successfully."
+      : duplicatedFrom
+        ? `${getOrderNumber(draft)} was duplicated successfully from ${duplicatedFrom}.`
+        : null,
     companyUsers,
     draft: {
       id: draft.id,
@@ -505,13 +519,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         action: "Draft Duplicated",
         message: `Created from ${getOrderNumber(draft)}.`,
       });
-      return redirect(`/support/drafts/${duplicate.id}`);
+      return redirect(
+        `/support/drafts/${duplicate.id}?duplicatedFrom=${encodeURIComponent(getOrderNumber(draft))}`,
+      );
     }
 
     if (intent === "delete_draft") {
       await deleteShopifyDraftOrder(draft);
       await deleteDraftRecord(draft);
-      return redirect("/sales/portal/drafts");
+      return redirect(
+        `/sales/portal/drafts?deletedDraft=${encodeURIComponent(getOrderNumber(draft))}`,
+      );
     }
 
     if (intent === "convert_to_quote") {
@@ -640,7 +658,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         action: "Draft Converted To Order",
         message: `Converted to ${verifiedOrder.name}.`,
       });
-      return redirect(`/sales/portal/orders/${draft.id}`);
+      return redirect(
+        `/sales/portal/orders/${draft.id}?createdFrom=draft_conversion&sourceOrder=${encodeURIComponent(getOrderNumber(draft))}`,
+      );
     }
   } catch (error) {
     return Response.json(
@@ -657,14 +677,47 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export default function DraftDetailsPage() {
   const data = useLoaderData<any>();
-  const actionData = useActionData<any>();
+  const actionData = useActionData<ActionResponse>();
   const navigation = useNavigation();
   const draft = data.draft;
   const busy = navigation.state !== "idle";
-  const saved =
-    typeof window === "undefined"
-      ? false
-      : new URLSearchParams(window.location.search).get("saved") === "1";
+  const pendingIntent = String(navigation.formData?.get("intent") || "");
+  const submissionLock = useRef(false);
+  const [notification, setNotification] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(data.successMessage ? { type: "success", message: data.successMessage } : null);
+
+  useEffect(() => {
+    if (navigation.state === "idle") submissionLock.current = false;
+  }, [navigation.state]);
+
+  useEffect(() => {
+    if (actionData?.error) {
+      setNotification({ type: "error", message: actionData.error });
+    } else if (actionData?.success) {
+      setNotification({
+        type: "success",
+        message: actionData.message || "Draft updated successfully.",
+      });
+    }
+  }, [actionData]);
+
+  useEffect(() => {
+    if (data.successMessage) {
+      setNotification({ type: "success", message: data.successMessage });
+    }
+  }, [data.successMessage]);
+
+  const guardSubmission = (event: React.FormEvent<HTMLFormElement>) => {
+    if (submissionLock.current || busy) {
+      event.preventDefault();
+      return false;
+    }
+    submissionLock.current = true;
+    setNotification(null);
+    return true;
+  };
   const money = (amount: string | number) =>
     new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -680,7 +733,15 @@ export default function DraftDetailsPage() {
       draftCount={data.counts.drafts}
       quoteCount={data.counts.quotes}
     >
-      <Link to="/sales/portal/drafts" style={styles.backLink}>
+      <Link
+        to="/sales/portal/drafts"
+        aria-disabled={busy}
+        style={{
+          ...styles.backLink,
+          opacity: busy ? 0.55 : 1,
+          pointerEvents: busy ? "none" : "auto",
+        }}
+      >
         Back to Drafts
       </Link>
       <SalesPortalHeader
@@ -694,26 +755,53 @@ export default function DraftDetailsPage() {
               intent="duplicate_draft"
               label="Duplicate Draft"
               disabled={busy}
+              pending={pendingIntent === "duplicate_draft"}
+              onSubmit={guardSubmission}
             />
             <DraftAction
               intent="convert_to_quote"
               label="Convert To Quote"
               disabled={busy}
+              pending={pendingIntent === "convert_to_quote"}
+              onSubmit={guardSubmission}
             />
             <DraftAction
               intent="convert_to_order"
               label="Convert To Order"
               disabled={busy}
+              pending={pendingIntent === "convert_to_order"}
+              onSubmit={guardSubmission}
               primary
             />
           </>
         }
       />
 
-      {saved && <div style={styles.success}>Draft changes saved.</div>}
-      {actionData?.error && <div style={styles.error}>{actionData.error}</div>}
+      {notification && (
+        <div
+          role={notification.type === "error" ? "alert" : "status"}
+          aria-live={notification.type === "error" ? "assertive" : "polite"}
+          style={{
+            ...styles.toast,
+            ...(notification.type === "error" ? styles.error : styles.success),
+          }}
+        >
+          <div style={{ paddingRight: 28 }}>
+            <strong>{notification.type === "error" ? "Action failed" : "Success"}</strong>
+            <p style={{ margin: "4px 0 0" }}>{notification.message}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() => setNotification(null)}
+            style={styles.toastCloseButton}
+          >
+            x
+          </button>
+        </div>
+      )}
 
-      <Form method="post">
+      <Form method="post" onSubmit={guardSubmission}>
         <input type="hidden" name="intent" value="save_changes" />
         <div className="draft-detail-grid" style={styles.grid}>
           <section style={styles.mainColumn}>
@@ -787,7 +875,6 @@ export default function DraftDetailsPage() {
                         "Unit Price",
                         "Discount",
                         "Line Total",
-                        "Remove",
                       ].map((heading) => (
                         <th key={heading} style={styles.th}>
                           {heading}
@@ -871,16 +958,7 @@ export default function DraftDetailsPage() {
                         <td style={styles.td}>
                           <strong>{money(item.lineTotal)}</strong>
                         </td>
-                        <td style={styles.td}>
-                          <label style={styles.checkLabel}>
-                            <input
-                              type="checkbox"
-                              name="removeItemId"
-                              value={item.id}
-                            />
-                            Remove
-                          </label>
-                        </td>
+
                       </tr>
                     ))}
                     {/* <tr>
@@ -996,8 +1074,14 @@ export default function DraftDetailsPage() {
 
             <Card title="Draft Actions">
               <div style={styles.buttonStack}>
-                <button disabled={busy} style={styles.primaryButton}>
-                  Save Changes
+                <button
+                  type="submit"
+                  disabled={busy}
+                  aria-busy={pendingIntent === "save_changes"}
+                  style={disabledButtonStyle(styles.primaryButton, busy)}
+                >
+                  {pendingIntent === "save_changes" && <Spinner />}
+                  {pendingIntent === "save_changes" ? "Saving Changes..." : "Save Changes"}
                 </button>
               </div>
             </Card>
@@ -1011,22 +1095,30 @@ export default function DraftDetailsPage() {
             intent="duplicate_draft"
             label="Duplicate Draft"
             disabled={busy}
+            pending={pendingIntent === "duplicate_draft"}
+            onSubmit={guardSubmission}
           />
           <DraftAction
             intent="convert_to_quote"
             label="Convert To Quote"
             disabled={busy}
+            pending={pendingIntent === "convert_to_quote"}
+            onSubmit={guardSubmission}
           />
           <DraftAction
             intent="convert_to_order"
             label="Convert To Order"
             disabled={busy}
+            pending={pendingIntent === "convert_to_order"}
+            onSubmit={guardSubmission}
             primary
           />
           <DraftAction
             intent="delete_draft"
             label="Delete Draft"
             disabled={busy}
+            pending={pendingIntent === "delete_draft"}
+            onSubmit={guardSubmission}
             danger
             confirmMessage="Delete this draft permanently?"
           />
@@ -1041,6 +1133,8 @@ function DraftAction({
   intent,
   label,
   disabled,
+  pending,
+  onSubmit,
   primary,
   danger,
   confirmMessage,
@@ -1048,33 +1142,80 @@ function DraftAction({
   intent: string;
   label: string;
   disabled?: boolean;
+  pending?: boolean;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => boolean;
   primary?: boolean;
   danger?: boolean;
   confirmMessage?: string;
 }) {
+  const buttonStyle = primary
+    ? styles.primaryButton
+    : danger
+      ? styles.dangerButton
+      : styles.secondaryButton;
+
   return (
     <Form
       method="post"
       style={{ display: "inline-flex" }}
       onSubmit={(event) => {
-        if (confirmMessage && !confirm(confirmMessage)) event.preventDefault();
+        if (confirmMessage && !confirm(confirmMessage)) {
+          event.preventDefault();
+          return;
+        }
+        onSubmit(event);
       }}
     >
       <input type="hidden" name="intent" value={intent} />
       <button
+        type="submit"
         disabled={disabled}
-        style={
-          primary
-            ? styles.primaryButton
-            : danger
-              ? styles.dangerButton
-              : styles.secondaryButton
-        }
+        aria-busy={pending}
+        style={disabledButtonStyle(buttonStyle, Boolean(disabled))}
       >
-        {label}
+        {pending && <Spinner dark={!primary} />}
+        {pending ? pendingLabel(intent) : label}
       </button>
     </Form>
   );
+}
+
+function Spinner({ dark = false }: { dark?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        ...styles.buttonSpinner,
+        borderColor: dark ? "#d1d5db" : "rgba(255, 255, 255, 0.45)",
+        borderTopColor: dark ? "#374151" : "#ffffff",
+      }}
+    />
+  );
+}
+
+function pendingLabel(intent: string) {
+  const labels: Record<string, string> = {
+    duplicate_draft: "Duplicating Draft...",
+    convert_to_quote: "Converting To Quote...",
+    convert_to_order: "Converting To Order...",
+    delete_draft: "Deleting Draft...",
+  };
+  return labels[intent] || "Processing...";
+}
+
+function disabledButtonStyle(
+  style: React.CSSProperties,
+  disabled: boolean,
+): React.CSSProperties {
+  return {
+    ...style,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    opacity: disabled ? 0.6 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
 }
 
 function SummaryInput({
@@ -1120,6 +1261,7 @@ function Card({
 }
 
 const responsiveCss = `
+  @keyframes draft-action-spin { to { transform: rotate(360deg); } }
   .draft-detail-grid { align-items: start; }
   @media (max-width: 1180px) {
     .draft-detail-grid { grid-template-columns: minmax(0, 1fr) !important; }
@@ -1314,21 +1456,46 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   success: {
-    marginBottom: 16,
-    padding: 12,
     border: "1px solid #a7f3d0",
-    borderRadius: 8,
     background: "#ecfdf5",
     color: "#065f46",
     fontSize: 13,
   },
   error: {
-    marginBottom: 16,
-    padding: 12,
     border: "1px solid #fecaca",
-    borderRadius: 8,
     background: "#fef2f2",
     color: "#991b1b",
     fontSize: 13,
+  },
+  toast: {
+    position: "fixed",
+    top: 20,
+    right: 20,
+    zIndex: 11000,
+    width: "min(400px, calc(100vw - 32px))",
+    boxSizing: "border-box",
+    borderRadius: 10,
+    padding: 14,
+    boxShadow: "0 12px 30px rgba(17, 24, 39, 0.16)",
+    fontSize: 13,
+  },
+  toastCloseButton: {
+    position: "absolute",
+    top: 8,
+    right: 10,
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    fontSize: 18,
+    lineHeight: 1,
+  },
+  buttonSpinner: {
+    width: 15,
+    height: 15,
+    border: "2px solid",
+    borderRadius: "50%",
+    animation: "draft-action-spin 0.8s linear infinite",
+    flexShrink: 0,
   },
 };

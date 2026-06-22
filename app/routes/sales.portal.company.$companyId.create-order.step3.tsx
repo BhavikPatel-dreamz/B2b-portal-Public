@@ -1,6 +1,14 @@
-import { LoaderFunctionArgs, ActionFunctionArgs, redirect } from "react-router";
-import { useLoaderData, Link, useSubmit, useNavigation } from "react-router";
-import { useState, useEffect } from "react";
+import {
+  type LoaderFunctionArgs,
+  type ActionFunctionArgs,
+  redirect,
+  useActionData,
+  useLoaderData,
+  Link,
+  useSubmit,
+  useNavigation,
+} from "react-router";
+import { useState, useEffect, useRef } from "react";
 import prisma from "app/db.server";
 import {
   buildClearSessionCookie,
@@ -60,6 +68,11 @@ type DraftOrderInput = {
   };
   shippingLine?: SalesDraftShippingLineInput;
   taxExempt?: boolean;
+};
+
+type ActionResponse = {
+  error?: string;
+  requestId?: string;
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -579,6 +592,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
 export default function ReviewOrder() {
   const { company, selectedCustomer, user, mode } = useLoaderData<any>();
+  const actionData = useActionData<ActionResponse>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isQuoteMode = mode === "quote";
@@ -597,6 +611,8 @@ export default function ReviewOrder() {
   const [errorMsg, setErrorMsg] = useState("");
   const [quoteTitle, setQuoteTitle] = useState("");
   const [expirationDate, setExpirationDate] = useState("");
+  const [pendingAction, setPendingAction] = useState<"process_order" | "save_quote_draft" | "submit_quote" | null>(null);
+  const submissionLock = useRef(false);
 
   useEffect(() => {
     const storedCart = sessionStorage.getItem(`sales_checkout_cart_${company.id}`);
@@ -619,6 +635,23 @@ export default function ReviewOrder() {
     setExpirationDate(defaultExpiry.toISOString().slice(0, 10));
   }, [company.id]);
 
+  useEffect(() => {
+    if (navigation.state === "idle") {
+      submissionLock.current = false;
+      setPendingAction(null);
+    }
+  }, [navigation.state]);
+
+  useEffect(() => {
+    if (!actionData?.error) return;
+
+    setErrorMsg(
+      actionData.requestId
+        ? `${actionData.error} (Request ID: ${actionData.requestId})`
+        : actionData.error,
+    );
+  }, [actionData]);
+
   const subtotal = cartItems.reduce((acc, item) => acc + Number(item.price) * item.quantity, 0);
   const discountVal = discountType === "PERCENTAGE" ? (subtotal * (discountAmount / 100)) : discountAmount;
   const taxableAmount = Math.max(0, subtotal - discountVal);
@@ -640,15 +673,22 @@ export default function ReviewOrder() {
     }
   };
 
-  const isSubmitting = navigation.state === "submitting";
+  const isSubmitting = navigation.state !== "idle";
 
   const submitReview = (quoteAction?: "save_quote_draft" | "submit_quote") => {
+    if (submissionLock.current || isSubmitting) return;
+
     if (cartItems.length === 0) {
       setErrorMsg(`Cannot submit an empty ${isQuoteMode ? "quote" : "order"}.`);
       return;
     }
+
+    const actionType = quoteAction || "process_order";
+    submissionLock.current = true;
+    setPendingAction(actionType);
+    setErrorMsg("");
     submit({
-      actionType: quoteAction || "process_order",
+      actionType,
       customerId: selectedCustomer.shopifyCustomerId,
       cartData: JSON.stringify(cartItems),
       internalNotes,
@@ -684,7 +724,12 @@ export default function ReviewOrder() {
         actions={
           <Link
             to={`${flowBase}/step2?customerId=${selectedCustomer.shopifyCustomerId}`}
-            style={salesPortalButtonStyles.secondary}
+            aria-disabled={isSubmitting}
+            style={{
+              ...salesPortalButtonStyles.secondary,
+              opacity: isSubmitting ? 0.55 : 1,
+              pointerEvents: isSubmitting ? "none" : "auto",
+            }}
           >
             Back to Products
           </Link>
@@ -702,8 +747,19 @@ export default function ReviewOrder() {
         </div> */}
 
         {errorMsg && (
-          <div style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "12px 16px", color: "#991b1b", marginBottom: "20px", fontSize: "14px" }}>
-            ⚠️ {errorMsg}
+          <div role="alert" aria-live="assertive" style={styles.errorToast}>
+            <div style={{ paddingRight: "28px" }}>
+              <strong>Unable to complete request</strong>
+              <p style={{ margin: "4px 0 0" }}>{errorMsg}</p>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss error"
+              onClick={() => setErrorMsg("")}
+              style={styles.toastCloseBtn}
+            >
+              x
+            </button>
           </div>
         )}
 
@@ -839,28 +895,49 @@ export default function ReviewOrder() {
                   <button
                     type="button"
                     disabled={isSubmitting}
+                    aria-busy={pendingAction === "save_quote_draft"}
                     onClick={() => submitReview("save_quote_draft")}
-                    style={styles.backBtn}
+                    style={{
+                      ...styles.backBtn,
+                      opacity: isSubmitting ? 0.6 : 1,
+                      cursor: isSubmitting ? "not-allowed" : "pointer",
+                    }}
                   >
-                    Save Draft Quote
+                    {pendingAction === "save_quote_draft" && (
+                      <span style={{ ...styles.buttonSpinner, borderColor: "#d1d5db", borderTopColor: "#374151" }} />
+                    )}
+                    {pendingAction === "save_quote_draft" ? "Saving Draft..." : "Save Draft Quote"}
                   </button>
                 )}
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  style={styles.submitBtn}
+                  aria-busy={pendingAction === "process_order" || pendingAction === "submit_quote"}
+                  style={{
+                    ...styles.submitBtn,
+                    opacity: isSubmitting ? 0.7 : 1,
+                    cursor: isSubmitting ? "not-allowed" : "pointer",
+                  }}
                 >
-                  {isSubmitting
-                    ? isQuoteMode
-                      ? "Saving Quote..."
-                      : "Processing Order..."
-                    : isQuoteMode
-                      ? "Submit Quote"
-                      : "Process Order"}
+                  {(pendingAction === "process_order" || pendingAction === "submit_quote") && (
+                    <span style={styles.buttonSpinner} />
+                  )}
+                  {pendingAction === "submit_quote"
+                    ? "Submitting Quote..."
+                    : pendingAction === "process_order"
+                      ? "Processing Order..."
+                      : isQuoteMode
+                        ? "Submit Quote"
+                        : "Process Order"}
                 </button>
                 <Link
                   to={`${flowBase}/step2?customerId=${selectedCustomer.shopifyCustomerId}`}
-                  style={styles.backBtn}
+                  aria-disabled={isSubmitting}
+                  style={{
+                    ...styles.backBtn,
+                    opacity: isSubmitting ? 0.55 : 1,
+                    pointerEvents: isSubmitting ? "none" : "auto",
+                  }}
                 >
                   {isQuoteMode ? "Edit Quote" : "Modify Order"}
                 </Link>
@@ -869,6 +946,11 @@ export default function ReviewOrder() {
           </aside>
         </div>
       </main>
+      <style>{`
+        @keyframes order-submit-spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
       </div>
     </SalesPortalLayout>
   );
@@ -999,6 +1081,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    gap: "8px",
     width: "100%",
     height: "46px",
     background: "linear-gradient(90deg, #E91E63 0%, #FF6B35 100%)",
@@ -1014,6 +1097,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    gap: "8px",
     width: "100%",
     height: "44px",
     backgroundColor: "#ffffff",
@@ -1024,5 +1108,40 @@ const styles = {
     fontSize: "14px",
     textDecoration: "none",
     cursor: "pointer",
+  },
+  buttonSpinner: {
+    width: "16px",
+    height: "16px",
+    border: "2px solid rgba(255, 255, 255, 0.45)",
+    borderTopColor: "#ffffff",
+    borderRadius: "50%",
+    animation: "order-submit-spin 0.8s linear infinite",
+    flexShrink: 0,
+  },
+  errorToast: {
+    position: "fixed" as const,
+    top: "20px",
+    right: "20px",
+    zIndex: 11000,
+    width: "min(400px, calc(100vw - 32px))",
+    boxSizing: "border-box" as const,
+    backgroundColor: "#fef2f2",
+    border: "1px solid #fecaca",
+    borderRadius: "10px",
+    padding: "14px",
+    color: "#991b1b",
+    boxShadow: "0 12px 30px rgba(17, 24, 39, 0.16)",
+    fontSize: "13px",
+  },
+  toastCloseBtn: {
+    position: "absolute" as const,
+    top: "8px",
+    right: "10px",
+    border: "none",
+    background: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    fontSize: "18px",
+    lineHeight: 1,
   },
 };
