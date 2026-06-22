@@ -209,18 +209,18 @@ Changes will be reflected immediately in the theme editor.
 Modify iframe src to load specific routes:
 
 ```liquid
-iframe.src = '/apps/b2b-portal/dashboard/ordermanagement';
+iframe.src = '/apps/b2b-portal-public/dashboard/ordermanagement';
 ```
 
 Available routes:
-- `/apps/b2b-portal/dashboard` - Overview
-- `/apps/b2b-portal/dashboard/usermanagement`
-- `/apps/b2b-portal/dashboard/location`
-- `/apps/b2b-portal/dashboard/ordermanagement`
-- `/apps/b2b-portal/dashboard/wishlist`
-- `/apps/b2b-portal/dashboard/creditmangement`
-- `/apps/b2b-portal/dashboard/notification`
-- `/apps/b2b-portal/dashboard/setting`
+- `/apps/b2b-portal-public/dashboard` - Overview
+- `/apps/b2b-portal-public/dashboard/usermanagement`
+- `/apps/b2b-portal-public/dashboard/location`
+- `/apps/b2b-portal-public/dashboard/ordermanagement`
+- `/apps/b2b-portal-public/dashboard/wishlist`
+- `/apps/b2b-portal-public/dashboard/creditmangement`
+- `/apps/b2b-portal-public/dashboard/notification`
+- `/apps/b2b-portal-public/dashboard/setting`
 
 ### Custom Event Communication
 
