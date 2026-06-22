@@ -984,14 +984,7 @@ async function autoApproveRegistrationSubmission({
 export const loader: LoaderFunction = async ({ request }) => {
   // ✅ Handle OPTIONS preflight
   if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Headers": "Content-Type, Accept",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
+    return new Response(null, { status: 204 });
   }
 
   const { shop, loggedInCustomerId: shopifyCustomerId } = getProxyParams(request);
@@ -1029,14 +1022,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   
   // ✅ Handle OPTIONS preflight
   if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Headers": "Content-Type, Accept",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
+    return new Response(null, { status: 204 });
   }
 
   let authenticatedShop: string | null = null;
