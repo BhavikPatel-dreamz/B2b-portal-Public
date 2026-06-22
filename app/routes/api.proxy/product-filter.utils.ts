@@ -67,14 +67,14 @@ export function filterEdgesByCriteria(
             if (
               criteria.color &&
               option.name.toLowerCase() === "color" &&
-              option.value === criteria.color
+              option.value.toLowerCase() === criteria.color.toLowerCase()
             ) {
               matchesColor = true;
             }
             if (
               criteria.size &&
               option.name.toLowerCase() === "size" &&
-              option.value === criteria.size
+              option.value.toLowerCase() === criteria.size.toLowerCase()
             ) {
               matchesSize = true;
             }
