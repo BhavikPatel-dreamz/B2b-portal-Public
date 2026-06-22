@@ -130,6 +130,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw new Error("Store not found");
   }
 
+  const hasVariantFilter = !!(color || size);
+  const productLimit = hasVariantFilter ? 250 : 10;
+
   const endpoint = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
   const response = await fetch(endpoint, {
     method: "POST",
@@ -139,11 +142,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     body: JSON.stringify({
       query: `
-        query productFilterSearch($query: String!, $cursor: String) {
+        query productFilterSearch($query: String!, $cursor: String, $first: Int!) {
           shop {
             currencyCode
           }
-          products(first: 10, after: $cursor, query: $query) {
+          products(first: $first, after: $cursor, query: $query) {
             edges {
               cursor
               node {
@@ -208,6 +211,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       variables: {
         query: shopifySearchQuery,
         cursor: cursor || null,
+        first: productLimit,
       },
     }),
   });
@@ -266,7 +270,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 
   const filters: FilterOptions = buildFiltersFromEdges(
-    filterEdgesByCriteria(data.data.filterProducts.edges || [], criteria),
+    filterEdgesByCriteria(data.data.filterProducts.edges || [], {
+      size: undefined,
+      color: undefined,
+      minPrice: criteria.minPrice,
+      maxPrice: criteria.maxPrice,
+      available: criteria.available,
+    }),
   );
 
   // Filter products by color/size, price and availability if specified.
