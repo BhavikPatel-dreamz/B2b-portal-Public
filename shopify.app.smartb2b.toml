@@ -5,9 +5,6 @@ name = "SmartB2B"
 application_url = "https://smartb2b.dynamicdreamz.com"
 embedded = true
 
-[build]
-automatically_update_urls_on_dev = true
-
 [webhooks]
 api_version = "2026-01"
 
@@ -16,68 +13,69 @@ api_version = "2026-01"
   uri = "/webhooks/draft_orders/delete"
 
   [[webhooks.subscriptions]]
-  topics = [ "orders/create" ]
-  uri = "/webhooks/orders/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
   topics = [ "orders/paid" ]
   uri = "/webhooks/orders/paid"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/cancelled" ]
-  uri = "/webhooks/orders/cancelled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "customers/delete" ]
-  uri = "/webhooks/customers/delete"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/edited" ]
-  uri = "/webhooks/orders/edited"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
   [[webhooks.subscriptions]]
-  topics = [ "draft_orders/update" ]
-  uri = "/webhooks/draft_orders/update"
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
   [[webhooks.subscriptions]]
-  topics = [ "customers/create" ]
-  uri = "/webhooks/customers/create"
+  topics = [ "orders/edited" ]
+  uri = "/webhooks/orders/edited"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/delete" ]
+  uri = "/webhooks/customers/delete"
 
   [[webhooks.subscriptions]]
   topics = [ "orders/updated" ]
   uri = "/webhooks/orders/updated"
 
   [[webhooks.subscriptions]]
-  topics = [ "shop/update" ]
-  uri = "/webhooks/shop/update"
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
 
   [[webhooks.subscriptions]]
   topics = [ "draft_orders/create" ]
   uri = "/webhooks/draft_orders/create"
 
   [[webhooks.subscriptions]]
+  topics = [ "orders/cancelled" ]
+  uri = "/webhooks/orders/cancelled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/create" ]
+  uri = "/webhooks/customers/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "draft_orders/update" ]
+  uri = "/webhooks/draft_orders/update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "shop/update" ]
+  uri = "/webhooks/shop/update"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request"]
   uri = "/webhooks/customers/data_request"
-  compliance_topics = [ "customers/data_request" ]
 
   [[webhooks.subscriptions]]
+  compliance_topics = ["customers/redact"]
   uri = "/webhooks/customers/redact"
-  compliance_topics = [ "customers/redact" ]
 
   [[webhooks.subscriptions]]
+  compliance_topics = ["shop/redact"]
   uri = "/webhooks/shop/redact"
-  compliance_topics = [ "shop/redact" ]
+
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "customer_read_customers,read_all_orders,read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,read_shipping,write_companies,write_customers,write_draft_orders,write_locations,write_validations"
+scopes = "customer_read_customers,read_companies,read_customers,read_draft_orders,read_locations,read_orders,read_products,read_shipping,write_companies,write_customers,write_draft_orders,write_locations,write_validations,read_all_orders"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 
@@ -88,3 +86,6 @@ redirect_urls = [ "https://smartb2b.dynamicdreamz.com/api/auth" ]
 url = "https://smartb2b.dynamicdreamz.com"
 subpath = "b2b-portal-public-3"
 prefix = "apps"
+
+[build]
+automatically_update_urls_on_dev = true
