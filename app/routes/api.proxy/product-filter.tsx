@@ -286,10 +286,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           if (!matchesAvailable) return false;
 
           variant.selectedOptions?.forEach((option) => {
-            if (color && option.name.toLowerCase() === "color" && option.value.toLowerCase() === color.toLowerCase()) {
+            const optName = option.name.toLowerCase();
+            if (color && (optName === "color" || optName === "colour" || optName.includes("color")) && option.value.toLowerCase() === color.toLowerCase()) {
               matchesColor = true;
             }
-            if (size && option.name.toLowerCase() === "size" && option.value.toLowerCase() === size.toLowerCase()) {
+            if (size && (optName === "size" || optName.includes("size")) && option.value.toLowerCase() === size.toLowerCase()) {
               matchesSize = true;
             }
           });

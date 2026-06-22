@@ -64,16 +64,17 @@ export function filterEdgesByCriteria(
           if (!matchesAvailable) return false;
 
           variant.selectedOptions?.forEach((option) => {
+            const optName = option.name.toLowerCase();
             if (
               criteria.color &&
-              option.name.toLowerCase() === "color" &&
+              (optName === "color" || optName === "colour" || optName.includes("color")) &&
               option.value.toLowerCase() === criteria.color.toLowerCase()
             ) {
               matchesColor = true;
             }
             if (
               criteria.size &&
-              option.name.toLowerCase() === "size" &&
+              (optName === "size" || optName.includes("size")) &&
               option.value.toLowerCase() === criteria.size.toLowerCase()
             ) {
               matchesSize = true;
@@ -144,10 +145,11 @@ export function buildFiltersFromEdges(
       }
 
       v.selectedOptions?.forEach((option) => {
-        if (option.name.toLowerCase() === "color") {
+        const optName = option.name.toLowerCase();
+        if (optName === "color" || optName === "colour" || optName.includes("color")) {
           colorSet.add(option.value);
         }
-        if (option.name.toLowerCase() === "size") {
+        if (optName === "size" || optName.includes("size")) {
           sizeSet.add(option.value);
         }
       });
