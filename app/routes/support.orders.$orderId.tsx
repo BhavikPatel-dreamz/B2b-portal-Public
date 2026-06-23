@@ -36,6 +36,26 @@ type ActionResponse = {
   paymentLink?: string;
 };
 
+type ShopifyAddress = {
+  firstName?: string | null;
+  lastName?: string | null;
+  company?: string | null;
+  address1?: string | null;
+  address2?: string | null;
+  city?: string | null;
+  province?: string | null;
+  country?: string | null;
+  zip?: string | null;
+  phone?: string | null;
+};
+
+type DeliveryDetails = {
+  locationName: string | null;
+  addressLines: string[];
+  phone: string | null;
+  source: "shipping_address" | "company_location" | "none";
+};
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   if (!params.orderId) return redirect("/sales/portal/orders");
@@ -55,6 +75,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       },
     }),
   ]);
+  const deliveryDetails = await getShopifyDeliveryDetails(order);
   return Response.json({
     user: {
       firstName: user.firstName,
@@ -101,8 +122,342 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         createdAt: activity.createdAt.toISOString(),
       })),
     },
+    deliveryDetails,
   });
 };
+
+async function getShopifyDeliveryDetails(order: any): Promise<DeliveryDetails> {
+  const empty: DeliveryDetails = {
+    locationName: null,
+    addressLines: [],
+    phone: null,
+    source: "none",
+  };
+  const shopDomain = order.company?.shop?.shopDomain;
+  const accessToken = order.company?.shop?.accessToken;
+  const shopifyOrder = normalizeShopifyOrderId(order);
+
+  if (
+    !shopDomain ||
+    !accessToken ||
+    !shopifyOrder
+  ) {
+    return getCompanyLocationDeliveryDetails(order, empty);
+  }
+
+  try {
+    const orderQuery = `
+      query GetSupportOrderDelivery($id: ID!) {
+        node(id: $id) {
+          ... on Order {
+            shippingAddress {
+              firstName
+              lastName
+              company
+              address1
+              address2
+              city
+              province
+              country
+              zip
+              phone
+            }
+            purchasingEntity {
+              ... on PurchasingCompany {
+                location {
+                  id
+                  name
+                }
+              }
+            }
+            customAttributes {
+              key
+              value
+            }
+          }
+        }
+      }
+    `;
+    const orderResponse = await fetch(
+      `https://${shopDomain}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query: orderQuery,
+          variables: { id: shopifyOrder.id },
+        }),
+      },
+    );
+    const orderPayload = await orderResponse.json();
+    if (orderPayload.errors?.length) {
+      console.warn("[support-order] delivery lookup failed", {
+        orderId: order.id,
+        errors: orderPayload.errors,
+      });
+      return getCompanyLocationDeliveryDetails(order, empty);
+    }
+
+    const shopifyOrderNode = orderPayload.data?.node;
+    const purchasingLocation =
+      shopifyOrderNode?.purchasingEntity?.location || null;
+    const customLocationName =
+      shopifyOrderNode?.customAttributes?.find(
+        (attribute: { key?: string }) => attribute.key === "Delivery Location",
+      )?.value || null;
+    const locationName =
+      purchasingLocation?.name || customLocationName || empty.locationName;
+    const shippingLines = formatAddressLines(
+      shopifyOrderNode?.shippingAddress,
+      locationName,
+    );
+    if (shippingLines.length > 0) {
+      return {
+        locationName,
+        addressLines: shippingLines,
+        phone: shopifyOrderNode.shippingAddress?.phone || null,
+        source: "shipping_address",
+      };
+    }
+
+    if (purchasingLocation?.id) {
+      const locationQuery = `
+        query GetSupportOrderLocationAddress($id: ID!) {
+          companyLocation(id: $id) {
+            id
+            name
+            phone
+            shippingAddress {
+              address1
+              address2
+              city
+              province
+              country
+              zip
+              phone
+            }
+          }
+        }
+      `;
+      const locationResponse = await fetch(
+        `https://${shopDomain}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query: locationQuery,
+            variables: { id: purchasingLocation.id },
+          }),
+        },
+      );
+      const locationPayload = await locationResponse.json();
+      if (locationPayload.errors?.length) {
+        console.warn("[support-order] location address lookup failed", {
+          orderId: order.id,
+          locationId: purchasingLocation.id,
+          errors: locationPayload.errors,
+        });
+      }
+      const location = locationPayload.data?.companyLocation;
+      const locationLines = formatAddressLines(
+        location?.shippingAddress,
+        location?.name || locationName,
+      );
+      return {
+        locationName: location?.name || locationName,
+        addressLines: locationLines,
+        phone: location?.shippingAddress?.phone || location?.phone || null,
+        source: locationLines.length > 0 ? "company_location" : "none",
+      };
+    }
+
+    return getCompanyLocationDeliveryDetails(order, { ...empty, locationName });
+  } catch (error) {
+    console.error("[support-order] delivery details unavailable", {
+      orderId: order.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return getCompanyLocationDeliveryDetails(order, empty);
+  }
+}
+
+function normalizeShopifyOrderId(order: any) {
+  const rawId = String(order.shopifyOrderId || "").trim();
+  if (!rawId) return null;
+  if (rawId.startsWith("gid://shopify/Order/")) {
+    return { id: rawId };
+  }
+  if (rawId.startsWith("gid://shopify/DraftOrder/")) {
+    return { id: rawId };
+  }
+  if (/^\d+$/.test(rawId)) {
+    const resource = order.orderStatus === "draft" ? "DraftOrder" : "Order";
+    return { id: `gid://shopify/${resource}/${rawId}` };
+  }
+  return null;
+}
+
+async function getCompanyLocationDeliveryDetails(
+  order: any,
+  fallback: DeliveryDetails,
+): Promise<DeliveryDetails> {
+  const shopDomain = order.company?.shop?.shopDomain;
+  const accessToken = order.company?.shop?.accessToken;
+  const shopifyCompanyId = order.company?.shopifyCompanyId;
+
+  if (!shopDomain || !accessToken || !shopifyCompanyId) {
+    return fallback;
+  }
+
+  try {
+    const query = `
+      query GetSupportOrderCompanyLocations($companyId: ID!) {
+        company(id: $companyId) {
+          locations(first: 50) {
+            nodes {
+              id
+              name
+              phone
+              shippingAddress {
+                address1
+                address2
+                city
+                province
+                country
+                zip
+                phone
+              }
+            }
+          }
+          contacts(first: 50) {
+            edges {
+              node {
+                customer {
+                  id
+                }
+                roleAssignments(first: 5) {
+                  edges {
+                    node {
+                      companyLocation {
+                        id
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+    const response = await fetch(
+      `https://${shopDomain}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          query,
+          variables: { companyId: shopifyCompanyId },
+        }),
+      },
+    );
+    const payload = await response.json();
+    if (payload.errors?.length) {
+      console.warn("[support-order] company location fallback failed", {
+        orderId: order.id,
+        errors: payload.errors,
+      });
+      return fallback;
+    }
+
+    const locations = payload.data?.company?.locations?.nodes || [];
+    const contacts = payload.data?.company?.contacts?.edges || [];
+    const customerGid = normalizeCustomerGid(order.customerId);
+    const assignedLocationId = customerGid
+      ? contacts
+          .find((edge: any) => edge.node?.customer?.id === customerGid)
+          ?.node?.roleAssignments?.edges?.[0]?.node?.companyLocation?.id
+      : null;
+    const namedLocation = fallback.locationName
+      ? locations.find(
+          (location: any) =>
+            location.name?.toLowerCase() ===
+            fallback.locationName?.toLowerCase(),
+        )
+      : null;
+    const location =
+      locations.find((item: any) => item.id === assignedLocationId) ||
+      namedLocation ||
+      (locations.length === 1 ? locations[0] : null);
+
+    if (!location) return fallback;
+
+    const addressLines = formatAddressLines(
+      location.shippingAddress,
+      location.name,
+    );
+    return {
+      locationName: location.name || fallback.locationName,
+      addressLines:
+        addressLines.length > 0 ? addressLines : fallback.addressLines,
+      phone:
+        location.shippingAddress?.phone ||
+        location.phone ||
+        fallback.phone ||
+        null,
+      source:
+        addressLines.length > 0 ? "company_location" : fallback.source,
+    };
+  } catch (error) {
+    console.error("[support-order] company location fallback unavailable", {
+      orderId: order.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return fallback;
+  }
+}
+
+function normalizeCustomerGid(customerId?: string | null) {
+  const rawId = String(customerId || "").trim();
+  if (!rawId) return null;
+  if (rawId.startsWith("gid://shopify/Customer/")) return rawId;
+  if (/^\d+$/.test(rawId)) return `gid://shopify/Customer/${rawId}`;
+  return null;
+}
+
+function formatAddressLines(
+  address?: ShopifyAddress | null,
+  locationName?: string | null,
+) {
+  if (!address) return [];
+  const recipient = [address.firstName, address.lastName]
+    .filter(Boolean)
+    .join(" ");
+  const cityLine = [address.city, address.province, address.zip]
+    .filter(Boolean)
+    .join(", ");
+  const lines = [
+    recipient,
+    address.company || locationName,
+    address.address1,
+    address.address2,
+    cityLine,
+    address.country,
+  ];
+  return Array.from(
+    new Set(lines.map((line) => String(line || "").trim()).filter(Boolean)),
+  );
+}
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -356,6 +711,7 @@ export default function OrderDetailsPage() {
   const actionData = useActionData<ActionResponse>();
   const navigation = useNavigation();
   const order = data.order;
+  const deliveryDetails = data.deliveryDetails as DeliveryDetails;
   const busy = navigation.state !== "idle";
   const pendingIntent = String(navigation.formData?.get("intent") || "");
   const submissionLock = useRef(false);
@@ -520,6 +876,44 @@ export default function OrderDetailsPage() {
                 label="Payment Status"
                 value={paymentLabel(order.paymentStatus)}
               />
+            </div>
+          </Card>
+
+          <Card title="Delivery Details">
+            <div className="delivery-detail-grid" style={styles.deliveryBlock}>
+              <div>
+                <span style={styles.metaLabel}>Location</span>
+                <strong style={styles.infoValue}>
+                  {deliveryDetails.locationName || "Not captured"}
+                </strong>
+              </div>
+              <div>
+                <span style={styles.metaLabel}>
+                  {deliveryDetails.source === "company_location"
+                    ? "Location Address"
+                    : "Delivery Address"}
+                </span>
+                {deliveryDetails.addressLines.length > 0 ? (
+                  <address style={styles.addressText}>
+                    {deliveryDetails.addressLines.map((line) => (
+                      <span key={line}>{line}</span>
+                    ))}
+                  </address>
+                ) : (
+                  <p style={styles.muted}>
+                    Delivery address was not captured for this order.
+                  </p>
+                )}
+              </div>
+              {deliveryDetails.phone && (
+                <Info label="Phone" value={deliveryDetails.phone} />
+              )}
+              {deliveryDetails.source === "company_location" && (
+                <p style={styles.deliveryHint}>
+                  Shopify order shipping address was empty, so this uses the
+                  selected company location address.
+                </p>
+              )}
             </div>
           </Card>
 
@@ -920,7 +1314,7 @@ function Row({ label: title, value }: { label: string; value: string }) {
 const responsiveCss = `
   @keyframes order-action-spin { to { transform: rotate(360deg); } }
   @media (max-width: 1080px) { .order-detail-grid { grid-template-columns: minmax(0, 1fr) !important; } .order-detail-side { position: static !important; } }
-  @media (max-width: 680px) { .order-info-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+  @media (max-width: 680px) { .order-info-grid, .delivery-detail-grid { grid-template-columns: minmax(0, 1fr) !important; } }
   @media print { .sales-portal-sidebar, .sales-portal-header-actions, .order-detail-side form { display: none !important; } .sales-portal-main { padding: 0 !important; } }
 `;
 const styles: Record<string, React.CSSProperties> = {
@@ -958,6 +1352,27 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: 20,
+  },
+  deliveryBlock: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 20,
+  },
+  addressText: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    margin: 0,
+    color: "#202223",
+    fontSize: 13,
+    fontStyle: "normal",
+    lineHeight: 1.45,
+  },
+  deliveryHint: {
+    gridColumn: "1 / -1",
+    margin: 0,
+    color: "#6d7175",
+    fontSize: 12,
   },
   metaLabel: {
     display: "block",

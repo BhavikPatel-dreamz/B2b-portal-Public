@@ -108,6 +108,25 @@ type SaveDraftResponse = {
   warning?: string;
 };
 
+const PRODUCT_PAGE_SIZE_OPTIONS = [12, 24, 48];
+const DEFAULT_PRODUCT_PAGE_SIZE = 12;
+
+const getProductPageSize = (value: string | null) => {
+  const parsed = Number(value);
+  return PRODUCT_PAGE_SIZE_OPTIONS.includes(parsed)
+    ? parsed
+    : DEFAULT_PRODUCT_PAGE_SIZE;
+};
+
+const cleanShopifySearchTerm = (value: string) =>
+  value
+    .replace(/[\\"(){}\[\]^~*?:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const escapeShopifyQuotedValue = (value: string) =>
+  value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     const formData = await request.formData();
@@ -127,6 +146,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     const { user } = await requireSalesSession(request);
     const customerId = formData.get("customerId") as string;
+    const submittedCompanyLocationId = String(
+      formData.get("companyLocationId") || "",
+    ).trim();
     const cartDataStr = formData.get("cartData") as string;
     const internalNotes = formData.get("internalNotes") as string;
     const customerNotes = formData.get("customerNotes") as string;
@@ -182,9 +204,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const baseMetaQuery = `
       query GetBaseMeta($companyId: ID!) {
         company(id: $companyId) {
-          locations(first: 10) {
+          locations(first: 50) {
             nodes {
               id
+              name
             }
           }
           contacts(first: 50) {
@@ -212,7 +235,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     const baseMetaData = await shopifyOrderGraphql<{
       company: null | {
-        locations?: { nodes?: Array<{ id?: string }> };
+        locations?: { nodes?: Array<{ id?: string; name?: string | null }> };
         contacts?: { edges?: ShopifyCompanyContactEdge[] };
       };
     }>({
@@ -224,9 +247,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const contacts = baseMetaData.company?.contacts?.edges || [];
     const matchCustGid = `gid://shopify/Customer/${customerId}`;
     const matchedContact = contacts.find((edge) => edge.node.customer?.id === matchCustGid);
-    
-    const companyLocationId = matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id || 
-                              baseMetaData.company?.locations?.nodes?.[0]?.id || "";
+    const companyLocations = baseMetaData.company?.locations?.nodes || [];
+    const validLocationIds = new Set(
+      companyLocations.map((location) => location.id).filter(Boolean),
+    );
+    if (
+      submittedCompanyLocationId &&
+      !validLocationIds.has(submittedCompanyLocationId)
+    ) {
+      return Response.json(
+        { error: "The selected delivery location is not assigned to this company." },
+        { status: 400 },
+      );
+    }
+
+    const companyLocationId =
+      submittedCompanyLocationId ||
+      matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id ||
+      companyLocations[0]?.id ||
+      "";
     const companyContactId = matchedContact?.node?.id || "";
 
     if (!companyLocationId || !companyContactId) {
@@ -484,6 +523,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   const url = new URL(request.url);
   const customerId = url.searchParams.get("customerId");
+  const requestedLocationId = url.searchParams.get("locationId")?.trim() || "";
   
   if (!customerId) {
     return redirect(`/sales/portal/company/${companyId}/create-order`);
@@ -575,31 +615,35 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const filterTag = url.searchParams.get("tag")?.trim() || "";
   const filterCollection = url.searchParams.get("collection_id")?.trim() || "";
   const cursor = url.searchParams.get("cursor") || null;
+  const direction = url.searchParams.get("direction") === "previous" ? "previous" : "next";
+  const pageSize = getProductPageSize(url.searchParams.get("limit"));
+  const currentPage = Math.max(1, Number(url.searchParams.get("page") || "1") || 1);
 
   // Build shopify query
   const queryFilters = ["status:active", "published_status:published"];
-  if (searchQuery) {
-    // Search by title, SKU, or Barcode
-    queryFilters.push(`(title:${searchQuery}* OR sku:${searchQuery}* OR barcode:${searchQuery}*)`);
+  const cleanedSearchQuery = cleanShopifySearchTerm(searchQuery);
+  if (cleanedSearchQuery) {
+    queryFilters.push(cleanedSearchQuery);
   }
   if (filterVendor) {
-    queryFilters.push(`vendor:"${filterVendor}"`);
+    queryFilters.push(`vendor:"${escapeShopifyQuotedValue(filterVendor)}"`);
   }
   if (filterType) {
-    queryFilters.push(`product_type:"${filterType}"`);
+    queryFilters.push(`product_type:"${escapeShopifyQuotedValue(filterType)}"`);
   }
   if (filterTag) {
-    queryFilters.push(`tag:"${filterTag}"`);
+    queryFilters.push(`tag:"${escapeShopifyQuotedValue(filterTag)}"`);
   }
 
   const shopifySearchQuery = queryFilters.join(" ");
 
   // 1. Fetch Company Location ID to get B2B Contextual pricing
   let locationId = "";
+  let companyLocations: Array<{ id: string; name: string }> = [];
   let companyContactId = "";
   let collections: Array<{ id: string; title: string }> = [];
   let products: any[] = [];
-  let pageInfo = { hasNextPage: false, endCursor: null };
+  let pageInfo = { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null };
   let filterOptions = { vendors: [] as string[], productTypes: [] as string[], tags: [] as string[] };
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
@@ -611,7 +655,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       const baseMetaQuery = `
         query GetBaseMeta($companyId: ID!) {
           company(id: $companyId) {
-            locations(first: 10) {
+            locations(first: 50) {
               nodes {
                 id
                 name
@@ -657,6 +701,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       const baseMetaData = await baseMetaRes.json();
       
       collections = baseMetaData.data?.collections?.nodes || [];
+      companyLocations =
+        baseMetaData.data?.company?.locations?.nodes?.map((location: any) => ({
+          id: location.id,
+          name: location.name || "Company location",
+        })) || [];
 
       // Resolve locationId based on customer location assignment, falling back to company's first location
       const contacts = baseMetaData.data?.company?.contacts?.edges || [];
@@ -665,18 +714,28 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       const matchedLocationId = matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id;
       companyContactId = matchedContact?.node?.id || "";
 
-      locationId = matchedLocationId || baseMetaData.data?.company?.locations?.nodes?.[0]?.id || "";
+      const requestedLocationIsValid = companyLocations.some(
+        (location) => location.id === requestedLocationId,
+      );
+      locationId =
+        (requestedLocationIsValid ? requestedLocationId : "") ||
+        matchedLocationId ||
+        companyLocations[0]?.id ||
+        "";
 
       // If a collection is selected, we must fetch products from that specific collection connection.
       // Otherwise we use the global products search query.
       let productsQuery = "";
-      const productsVariables: any = { cursor, locationId };
+      const productsVariables: any = { cursor, locationId, pageSize };
+      const productConnectionArgs = direction === "previous" && cursor
+        ? "last: $pageSize, before: $cursor"
+        : "first: $pageSize, after: $cursor";
 
       if (filterCollection) {
         productsQuery = `
-          query GetCollectionProducts($collectionId: ID!, $cursor: String, $locationId: ID!) {
+          query GetCollectionProducts($collectionId: ID!, $cursor: String, $locationId: ID!, $pageSize: Int!) {
             collection(id: $collectionId) {
-              products(first: 24, after: $cursor) {
+              products(${productConnectionArgs}) {
                 edges {
                   cursor
                   node {
@@ -702,7 +761,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
                     }
                   }
                 }
-                pageInfo { hasNextPage endCursor }
+                pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
               }
             }
           }
@@ -710,8 +769,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         productsVariables.collectionId = filterCollection;
       } else {
         productsQuery = `
-          query GetSearchProducts($query: String!, $cursor: String, $locationId: ID!) {
-            products(first: 24, after: $cursor, query: $query) {
+          query GetSearchProducts($query: String!, $cursor: String, $locationId: ID!, $pageSize: Int!) {
+            products(${productConnectionArgs}, query: $query) {
               edges {
                 cursor
                 node {
@@ -737,7 +796,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
                   }
                 }
               }
-              pageInfo { hasNextPage endCursor }
+              pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
             }
           }
         `;
@@ -770,7 +829,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       products = productEdges
         .map((edge: any) => {
           const node = edge.node;
-          const mappedVariants = node.variants?.nodes?.map((v: any) => {
+          const mappedVariants = (node.variants?.nodes || []).map((v: any) => {
             const contextualPrice = v.contextualPricing?.price?.amount;
             return {
               id: v.id,
@@ -783,7 +842,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
               availableForSale: v.availableForSale,
               inStock: v.availableForSale && (v.inventoryQuantity > 0 || v.inventoryPolicy === "CONTINUE"),
             };
-          }) || [];
+          }).filter((variant: any) => variant.price !== null) || [];
 
           return {
             id: node.id,
@@ -851,6 +910,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       storeName: company.shop.shopName || company.shop.shopDomain,
       creditLimit: company.creditLimit.toString(),
       companyLocationId: locationId,
+      selectedLocation:
+        companyLocations.find((location) => location.id === locationId) || null,
+      locations: companyLocations,
       companyContactId: companyContactId,
       defaultTaxRate: defaultTaxRate,
     },
@@ -859,6 +921,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     collections,
     filterOptions,
     pageInfo,
+    pagination: {
+      currentPage,
+      pageSize,
+      pageSizeOptions: PRODUCT_PAGE_SIZE_OPTIONS,
+      direction,
+    },
     searchParams: {
       q: searchQuery,
       vendor: filterVendor,
@@ -876,7 +944,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export default function CreateOrderProductCatalog() {
-  const { company, selectedCustomer, products, collections, filterOptions, searchParams, user, mode } = useLoaderData<any>();
+  const { company, selectedCustomer, products, collections, filterOptions, pageInfo, pagination, searchParams, user, mode } = useLoaderData<any>();
   const navigation = useNavigation();
   const draftFetcher = useFetcher<SaveDraftResponse>();
   const [, setUrlParams] = useSearchParams();
@@ -887,6 +955,7 @@ export default function CreateOrderProductCatalog() {
   const [selectedVendor, setSelectedVendor] = useState(searchParams.vendor || "");
   const [selectedType, setSelectedType] = useState(searchParams.product_type || "");
   const [selectedTag, setSelectedTag] = useState(searchParams.tag || "");
+  const [selectedPageSize, setSelectedPageSize] = useState(String(pagination?.pageSize || DEFAULT_PRODUCT_PAGE_SIZE));
 
   // Local state for Product Cards
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({}); // { productId: variantId }
@@ -912,10 +981,31 @@ export default function CreateOrderProductCatalog() {
   const isSavingDraft = draftFetcher.state !== "idle";
   const draftSubmitLock = useRef(false);
   const selectedCustomerShopifyId = selectedCustomer.shopifyCustomerId || selectedCustomer.id || "";
+  const selectedLocationId = company.companyLocationId || "";
+  const selectedLocationQuery = selectedLocationId
+    ? `&locationId=${encodeURIComponent(selectedLocationId)}`
+    : "";
+  const cartStorageScope = `${company.id}_${selectedCustomer.id}_${selectedLocationId || "default"}`;
   const isQuoteMode = mode === "quote";
   const flowBase = isQuoteMode
     ? `/sales/portal/company/${company.id}/create-quote`
     : `/sales/portal/company/${company.id}/create-order`;
+
+  useEffect(() => {
+    setSearch(searchParams.q || "");
+    setSelectedCollection(searchParams.collection_id || "");
+    setSelectedVendor(searchParams.vendor || "");
+    setSelectedType(searchParams.product_type || "");
+    setSelectedTag(searchParams.tag || "");
+    setSelectedPageSize(String(pagination?.pageSize || DEFAULT_PRODUCT_PAGE_SIZE));
+  }, [
+    searchParams.q,
+    searchParams.collection_id,
+    searchParams.vendor,
+    searchParams.product_type,
+    searchParams.tag,
+    pagination?.pageSize,
+  ]);
 
   // Initialize selected variants and quantities
   useEffect(() => {
@@ -938,7 +1028,7 @@ export default function CreateOrderProductCatalog() {
   useEffect(() => {
     setCart({});
     setIsCartHydrated(false);
-    const cartKey = `sales_cart_${company.id}_${selectedCustomer.id}`;
+    const cartKey = `sales_cart_${cartStorageScope}`;
     const storedCart = localStorage.getItem(cartKey);
     if (storedCart) {
       try {
@@ -952,28 +1042,28 @@ export default function CreateOrderProductCatalog() {
     }
     setIsCartHydrated(true);
 
-    const intNotesKey = `sales_int_notes_${company.id}_${selectedCustomer.id}`;
-    const custNotesKey = `sales_cust_notes_${company.id}_${selectedCustomer.id}`;
+    const intNotesKey = `sales_int_notes_${cartStorageScope}`;
+    const custNotesKey = `sales_cust_notes_${cartStorageScope}`;
     const storedIntNotes = localStorage.getItem(intNotesKey);
     const storedCustNotes = localStorage.getItem(custNotesKey);
     if (storedIntNotes) setInternalNotes(storedIntNotes);
     if (storedCustNotes) setCustomerNotes(storedCustNotes);
-  }, [company.id, selectedCustomer.id]);
+  }, [cartStorageScope]);
 
   const saveCart = (newCart: Record<string, any>) => {
     setCart(newCart);
-    const cartKey = `sales_cart_${company.id}_${selectedCustomer.id}`;
+    const cartKey = `sales_cart_${cartStorageScope}`;
     localStorage.setItem(cartKey, JSON.stringify(newCart));
   };
 
   const saveInternalNotes = (val: string) => {
     setInternalNotes(val);
-    localStorage.setItem(`sales_int_notes_${company.id}_${selectedCustomer.id}`, val);
+    localStorage.setItem(`sales_int_notes_${cartStorageScope}`, val);
   };
 
   const saveCustomerNotes = (val: string) => {
     setCustomerNotes(val);
-    localStorage.setItem(`sales_cust_notes_${company.id}_${selectedCustomer.id}`, val);
+    localStorage.setItem(`sales_cust_notes_${cartStorageScope}`, val);
   };
 
   useEffect(() => {
@@ -1036,6 +1126,7 @@ export default function CreateOrderProductCatalog() {
     const formData = new FormData();
     formData.append("actionType", isQuoteMode ? "save_quote_draft" : "save_draft");
     formData.append("customerId", selectedCustomerShopifyId);
+    formData.append("companyLocationId", selectedLocationId);
     formData.append("cartData", JSON.stringify(Object.values(cart)));
     formData.append("internalNotes", internalNotes);
     formData.append("customerNotes", customerNotes);
@@ -1051,6 +1142,44 @@ export default function CreateOrderProductCatalog() {
   };
 
   const isLoading = navigation.state === "loading";
+  const currentCatalogPage = pagination?.currentPage || 1;
+  const currentPageSize = pagination?.pageSize || DEFAULT_PRODUCT_PAGE_SIZE;
+  const pageSizeOptions = pagination?.pageSizeOptions || PRODUCT_PAGE_SIZE_OPTIONS;
+  const hasActiveFilters = Boolean(
+    searchParams.q ||
+    searchParams.vendor ||
+    searchParams.product_type ||
+    searchParams.tag ||
+    searchParams.collection_id,
+  );
+  const canGoPrevious = Boolean(pageInfo?.hasPreviousPage && pageInfo?.startCursor);
+  const canGoNext = Boolean(pageInfo?.hasNextPage && pageInfo?.endCursor);
+
+  const buildCatalogSearchParams = (overrides: Record<string, string | number | null | undefined> = {}) => {
+    const params = new URLSearchParams();
+    params.set("customerId", selectedCustomerShopifyId);
+    if (selectedLocationId) params.set("locationId", selectedLocationId);
+
+    const nextSearch = overrides.q !== undefined ? String(overrides.q || "") : search;
+    const nextCollection = overrides.collection_id !== undefined ? String(overrides.collection_id || "") : selectedCollection;
+    const nextVendor = overrides.vendor !== undefined ? String(overrides.vendor || "") : selectedVendor;
+    const nextType = overrides.product_type !== undefined ? String(overrides.product_type || "") : selectedType;
+    const nextTag = overrides.tag !== undefined ? String(overrides.tag || "") : selectedTag;
+    const nextLimit = overrides.limit !== undefined ? String(overrides.limit || DEFAULT_PRODUCT_PAGE_SIZE) : selectedPageSize;
+
+    if (nextSearch.trim()) params.set("q", nextSearch.trim());
+    if (nextCollection) params.set("collection_id", nextCollection);
+    if (nextVendor) params.set("vendor", nextVendor);
+    if (nextType) params.set("product_type", nextType);
+    if (nextTag) params.set("tag", nextTag);
+    params.set("limit", nextLimit);
+
+    if (overrides.cursor) params.set("cursor", String(overrides.cursor));
+    if (overrides.direction) params.set("direction", String(overrides.direction));
+    if (overrides.page) params.set("page", String(overrides.page));
+
+    return params;
+  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1058,14 +1187,7 @@ export default function CreateOrderProductCatalog() {
   };
 
   const applyFilters = () => {
-    const params = new URLSearchParams();
-    params.set("customerId", selectedCustomerShopifyId);
-    if (search) params.set("q", search);
-    if (selectedCollection) params.set("collection_id", selectedCollection);
-    if (selectedVendor) params.set("vendor", selectedVendor);
-    if (selectedType) params.set("product_type", selectedType);
-    if (selectedTag) params.set("tag", selectedTag);
-    setUrlParams(params);
+    setUrlParams(buildCatalogSearchParams({ page: 1, cursor: null, direction: null }));
   };
 
   const clearFilters = () => {
@@ -1074,7 +1196,21 @@ export default function CreateOrderProductCatalog() {
     setSelectedVendor("");
     setSelectedType("");
     setSelectedTag("");
-    setUrlParams({ customerId: selectedCustomerShopifyId });
+    setUrlParams(buildCatalogSearchParams({
+      q: "",
+      collection_id: "",
+      vendor: "",
+      product_type: "",
+      tag: "",
+      page: 1,
+      cursor: null,
+      direction: null,
+    }));
+  };
+
+  const handlePageSizeChange = (value: string) => {
+    setSelectedPageSize(value);
+    setUrlParams(buildCatalogSearchParams({ limit: value, page: 1, cursor: null, direction: null }));
   };
 
   const handleVariantChange = (productId: string, variantId: string) => {
@@ -1476,7 +1612,7 @@ export default function CreateOrderProductCatalog() {
               </button>
 
               <Link 
-                to={`${flowBase}/step3?customerId=${selectedCustomerShopifyId}`}
+                to={`${flowBase}/step3?customerId=${selectedCustomerShopifyId}${selectedLocationQuery}`}
                 aria-disabled={isSavingDraft}
                 style={{
                   ...styles.checkoutBtn,
@@ -1489,13 +1625,14 @@ export default function CreateOrderProductCatalog() {
                     return;
                   }
                   // Save all order details to sessionStorage to pass to Step 3
-                  sessionStorage.setItem(`sales_checkout_cart_${company.id}`, JSON.stringify(cartItems));
-                  sessionStorage.setItem(`sales_checkout_notes_int_${company.id}`, internalNotes);
-                  sessionStorage.setItem(`sales_checkout_notes_cust_${company.id}`, customerNotes);
-                  sessionStorage.setItem(`sales_checkout_discount_${company.id}`, discountAmount.toString());
-                  sessionStorage.setItem(`sales_checkout_discount_type_${company.id}`, discountType);
-                  sessionStorage.setItem(`sales_checkout_shipping_${company.id}`, estShipping.toString());
-                  sessionStorage.setItem(`sales_checkout_tax_rate_${company.id}`, estTaxRate.toString());
+                  const checkoutScope = `${company.id}_${selectedLocationId || "default"}`;
+                  sessionStorage.setItem(`sales_checkout_cart_${checkoutScope}`, JSON.stringify(cartItems));
+                  sessionStorage.setItem(`sales_checkout_notes_int_${checkoutScope}`, internalNotes);
+                  sessionStorage.setItem(`sales_checkout_notes_cust_${checkoutScope}`, customerNotes);
+                  sessionStorage.setItem(`sales_checkout_discount_${checkoutScope}`, discountAmount.toString());
+                  sessionStorage.setItem(`sales_checkout_discount_type_${checkoutScope}`, discountType);
+                  sessionStorage.setItem(`sales_checkout_shipping_${checkoutScope}`, estShipping.toString());
+                  sessionStorage.setItem(`sales_checkout_tax_rate_${checkoutScope}`, estTaxRate.toString());
                 }}
               >
                 {isQuoteMode ? "Review Quote" : "Review Order"} →
@@ -1672,131 +1809,253 @@ export default function CreateOrderProductCatalog() {
 
           {/* Column 2: Products Listing */}
           <section style={styles.productsSection}>
-            <form onSubmit={handleSearchSubmit} style={styles.searchBarForm}>
-              <div style={styles.searchContainer}>
-                <input 
-                  type="text" 
-                  placeholder="Search by product name, SKU, or Barcode..." 
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={styles.searchInput}
-                  disabled={isLoading}
-                />
-                <button 
-                  type="submit" 
-                  style={{
-                    ...styles.searchBtn,
-                    opacity: isLoading ? 0.7 : 1,
-                    cursor: isLoading ? "not-allowed" : "pointer"
-                  }}
+            <div className="catalog-toolbar" style={styles.catalogToolbar}>
+              <form onSubmit={handleSearchSubmit} style={styles.searchBarForm}>
+                <div className="search-container" style={styles.searchContainer}>
+                  <input
+                    type="text"
+                    placeholder="Search by product name, SKU, or barcode..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    style={styles.searchInput}
+                    disabled={isLoading}
+                  />
+                  <button
+                    type="submit"
+                    style={{
+                      ...styles.searchBtn,
+                      opacity: isLoading ? 0.7 : 1,
+                      cursor: isLoading ? "not-allowed" : "pointer"
+                    }}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? "Searching..." : "Search"}
+                  </button>
+                </div>
+              </form>
+
+              <div style={styles.pageSizeControl}>
+                <label htmlFor="catalog-page-size" style={styles.pageSizeLabel}>Rows per page</label>
+                <select
+                  id="catalog-page-size"
+                  value={selectedPageSize}
+                  onChange={(e) => handlePageSizeChange(e.target.value)}
+                  style={styles.pageSizeSelect}
                   disabled={isLoading}
                 >
-                  {isLoading ? "..." : "Search"}
-                </button>
+                  {pageSizeOptions.map((size: number) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
               </div>
-            </form>
+            </div>
 
-            <div style={{ position: "relative", minHeight: "300px" }}>
+            <div className="results-summary" style={styles.resultsSummary}>
+              <div>
+                <h2 style={styles.resultsTitle}>Product catalog</h2>
+                <p style={styles.resultsText}>
+                  Page {currentCatalogPage} · Showing {products.length} of up to {currentPageSize} products
+                  {hasActiveFilters ? " matching your filters" : " in this page"}.
+                </p>
+              </div>
+
+              {hasActiveFilters && (
+                <div style={styles.activeFilterRow}>
+                  {[
+                    searchParams.q ? ["Search", searchParams.q] : null,
+                    searchParams.collection_id
+                      ? ["Collection", collections.find((collection: any) => collection.id === searchParams.collection_id)?.title || "Selected collection"]
+                      : null,
+                    searchParams.vendor ? ["Vendor", searchParams.vendor] : null,
+                    searchParams.product_type ? ["Type", searchParams.product_type] : null,
+                    searchParams.tag ? ["Tag", searchParams.tag] : null,
+                  ].filter(Boolean).map((chip: any) => (
+                    <span key={`${chip[0]}-${chip[1]}`} style={styles.activeFilterChip}>
+                      {chip[0]}: {chip[1]}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ position: "relative", minHeight: "360px" }}>
               {isLoading && (
                 <div style={styles.loaderOverlay}>
                   <div style={styles.spinner}></div>
-                  <span style={styles.loaderText}>Updating Catalog...</span>
+                  <span style={styles.loaderText}>Updating product list...</span>
                 </div>
               )}
 
-              <div style={{ opacity: isLoading ? 0.4 : 1, transition: "opacity 0.2s" }}>
+              <div style={{ opacity: isLoading ? 0.45 : 1, transition: "opacity 0.2s" }}>
                 {products.length > 0 ? (
-                  <div className="products-grid" style={styles.productsGrid}>
-                    {products.map((product: any) => {
-                      const currentVariantId = selectedVariants[product.id] || (product.variants[0]?.id);
-                      const currentVariant = product.variants.find((v: any) => v.id === currentVariantId) || product.variants[0];
-                      const currentQty = quantities[currentVariantId] || 1;
+                  <>
+                    <div className="products-list" style={styles.productsList}>
+                      {products.map((product: any) => {
+                        const currentVariantId = selectedVariants[product.id] || product.variants[0]?.id || "";
+                        const currentVariant = product.variants.find((v: any) => v.id === currentVariantId) || product.variants[0];
+                        const currentQty = quantities[currentVariantId] || 1;
 
-                      return (
-                        <div key={product.id} style={styles.productCard}>
-                          <div style={styles.imgContainer}>
-                            {product.image ? (
-                              <img src={product.image} alt={product.title} style={styles.productImage} />
-                            ) : (
-                              <div style={styles.placeholderImg}>📦</div>
-                            )}
-                          </div>
-
-                          <div style={styles.productCardBody}>
-                            <h4 style={styles.productTitle}>{product.title}</h4>
-                            
-                            <div style={styles.skuRow}>
-                              <span style={styles.skuLabel}>SKU:</span>
-                              <span style={styles.skuValue}>{currentVariant?.sku || "N/A"}</span>
+                        return (
+                          <article key={product.id} className="product-list-item" style={styles.productListItem}>
+                            <div className="product-list-image" style={styles.listImageWrap}>
+                              {product.image ? (
+                                <img src={product.image} alt={product.title} style={styles.listProductImage} />
+                              ) : (
+                                <div style={styles.placeholderImg}>📦</div>
+                              )}
                             </div>
 
-                            {/* Customer Price (contextualized B2B pricing) */}
-                            <div style={styles.priceRow}>
-                              <span style={styles.priceLabel}>Customer Price:</span>
-                              <span style={styles.priceValue}>{formatCurrency(currentVariant?.price || 0)}</span>
+                            <div style={styles.productListInfo}>
+                              <div className="product-list-header" style={styles.productListHeader}>
+                                <div>
+                                  <h3 style={styles.listProductTitle}>{product.title}</h3>
+                                  <div style={styles.productMetaRow}>
+                                    {product.vendor && <span style={styles.productMetaPill}>{product.vendor}</span>}
+                                    {product.productType && <span style={styles.productMetaPill}>{product.productType}</span>}
+                                    {product.tags?.slice(0, 2).map((tag: string) => (
+                                      <span key={tag} style={styles.productMetaPill}>{tag}</span>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="list-price-block" style={styles.listPriceBlock}>
+                                  <span style={styles.priceLabel}>Customer price</span>
+                                  <span style={styles.listPrice}>
+                                    {formatCurrency(currentVariant?.price || 0, currentVariant?.currencyCode || displayCurrencyCode)}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="product-list-controls" style={styles.productListControls}>
+                                <div style={styles.variantBlock}>
+                                  <label style={styles.inlineLabel}>Variant</label>
+                                  {product.variants.length > 1 ? (
+                                    <select
+                                      style={styles.listVariantSelect}
+                                      value={currentVariantId}
+                                      onChange={(e) => handleVariantChange(product.id, e.target.value)}
+                                      disabled={isLoading}
+                                    >
+                                      {product.variants.map((variant: any) => (
+                                        <option key={variant.id} value={variant.id}>
+                                          {variant.title} · SKU {variant.sku || "N/A"} · {formatCurrency(variant.price, variant.currencyCode || displayCurrencyCode)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <div style={styles.singleVariantText}>
+                                      {currentVariant?.title && currentVariant.title !== "Default Title"
+                                        ? currentVariant.title
+                                        : "Default variant"}
+                                    </div>
+                                  )}
+                                  <div style={styles.skuInline}>SKU: {currentVariant?.sku || "N/A"}</div>
+                                </div>
+
+                                <div className="list-actions" style={styles.listActions}>
+                                  <div style={styles.qtyContainer}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleQuantityChange(currentVariantId, currentQty - 1)}
+                                      style={styles.qtyBtn}
+                                      disabled={isLoading}
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="number"
+                                      value={currentQty}
+                                      onChange={(e) => handleQuantityChange(currentVariantId, parseInt(e.target.value) || 1)}
+                                      style={styles.qtyInput}
+                                      disabled={isLoading}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleQuantityChange(currentVariantId, currentQty + 1)}
+                                      style={styles.qtyBtn}
+                                      disabled={isLoading}
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => addToCart(product)}
+                                    style={{
+                                      ...styles.addToCartBtn,
+                                      minWidth: "116px",
+                                      height: "36px",
+                                      opacity: !currentVariant?.inStock || isLoading ? 0.65 : 1,
+                                      cursor: !currentVariant?.inStock || isLoading ? "not-allowed" : "pointer",
+                                    }}
+                                    disabled={!currentVariant?.inStock || isLoading}
+                                  >
+                                    {currentVariant?.inStock ? "Add to cart" : "Out of stock"}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-
-                        {/* Variant Selector */}
-                        {product.variants.length > 1 && (
-                          <div style={styles.selectorGroup}>
-                            <select 
-                              style={styles.variantSelect}
-                              value={currentVariantId}
-                              onChange={(e) => handleVariantChange(product.id, e.target.value)}
-                            >
-                              {product.variants.map((v: any) => (
-                                <option key={v.id} value={v.id}>
-                                  {v.title} ({formatCurrency(v.price)})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* Quantity Selector & Add To Cart Button */}
-                        <div style={styles.actionRow}>
-                          <div style={styles.qtyContainer}>
-                            <button 
-                              type="button" 
-                              onClick={() => handleQuantityChange(currentVariantId, currentQty - 1)}
-                              style={styles.qtyBtn}
-                            >
-                              -
-                            </button>
-                            <input 
-                              type="number" 
-                              value={currentQty} 
-                              onChange={(e) => handleQuantityChange(currentVariantId, parseInt(e.target.value) || 1)}
-                              style={styles.qtyInput}
-                            />
-                            <button 
-                              type="button" 
-                              onClick={() => handleQuantityChange(currentVariantId, currentQty + 1)}
-                              style={styles.qtyBtn}
-                            >
-                              +
-                            </button>
-                          </div>
-
-                          <button 
-                            type="button" 
-                            onClick={() => addToCart(product)} 
-                            style={styles.addToCartBtn}
-                            disabled={!currentVariant?.inStock}
-                          >
-                            {currentVariant?.inStock ? "Add" : "Out of Stock"}
-                          </button>
-                        </div>
-                      </div>
+                          </article>
+                        );
+                      })}
                     </div>
-                      );
-                    })}
-                  </div>
+
+                    <div className="pagination-bar" style={styles.paginationBar}>
+                      <Link
+                        to={`?${buildCatalogSearchParams({
+                          cursor: pageInfo?.startCursor,
+                          direction: "previous",
+                          page: Math.max(1, currentCatalogPage - 1),
+                        }).toString()}`}
+                        aria-disabled={!canGoPrevious}
+                        style={{
+                          ...styles.paginationButton,
+                          opacity: canGoPrevious && !isLoading ? 1 : 0.45,
+                          pointerEvents: canGoPrevious && !isLoading ? "auto" : "none",
+                        }}
+                      >
+                        ← Previous
+                      </Link>
+
+                      <div style={styles.paginationStatus}>
+                        Page {currentCatalogPage}
+                      </div>
+
+                      <Link
+                        to={`?${buildCatalogSearchParams({
+                          cursor: pageInfo?.endCursor,
+                          direction: "next",
+                          page: currentCatalogPage + 1,
+                        }).toString()}`}
+                        aria-disabled={!canGoNext}
+                        style={{
+                          ...styles.paginationButton,
+                          opacity: canGoNext && !isLoading ? 1 : 0.45,
+                          pointerEvents: canGoNext && !isLoading ? "auto" : "none",
+                        }}
+                      >
+                        Next →
+                      </Link>
+                    </div>
+                  </>
                 ) : (
                   <div style={styles.emptyState}>
-                    <span style={{ fontSize: "40px", marginBottom: "16px" }}>🔍</span>
-                    <h3>No products found</h3>
-                    <p>Try altering your filters or search terms.</p>
+                    <span style={{ fontSize: "44px", marginBottom: "16px" }}>🔍</span>
+                    <h3 style={{ margin: "0 0 8px", color: "#111827" }}>No products found</h3>
+                    <p style={{ margin: 0, maxWidth: "420px" }}>
+                      Try a different search, clear filters, or check this customer’s catalog availability.
+                    </p>
+                    {hasActiveFilters && (
+                      <button
+                        type="button"
+                        onClick={clearFilters}
+                        style={{ ...styles.clearBtn, width: "auto", padding: "0 18px", marginTop: "18px" }}
+                        disabled={isLoading}
+                      >
+                        Clear filters
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1965,8 +2224,25 @@ export default function CreateOrderProductCatalog() {
           .catalog-layout {
             grid-template-columns: 1fr !important;
           }
-          .products-grid {
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)) !important;
+          .catalog-toolbar {
+            grid-template-columns: 1fr !important;
+          }
+          .results-summary {
+            flex-direction: column !important;
+          }
+          .product-list-item {
+            grid-template-columns: 70px minmax(0, 1fr) !important;
+          }
+          .product-list-header,
+          .product-list-controls {
+            grid-template-columns: 1fr !important;
+          }
+          .list-price-block {
+            text-align: left !important;
+          }
+          .list-actions {
+            width: 100% !important;
+            justify-content: space-between !important;
           }
           .mobile-cart-panel {
             max-width: none !important;
@@ -1977,8 +2253,25 @@ export default function CreateOrderProductCatalog() {
           }
         }
         @media (max-width: 480px) {
-          .products-grid {
+          .search-container {
+            flex-direction: column !important;
+          }
+          .product-list-item {
             grid-template-columns: 1fr !important;
+          }
+          .product-list-image {
+            width: 100% !important;
+            height: 150px !important;
+          }
+          .list-actions {
+            flex-direction: column !important;
+            align-items: stretch !important;
+          }
+          .pagination-bar {
+            flex-direction: column !important;
+          }
+          .pagination-bar a {
+            width: 100% !important;
           }
         }
       `}</style>
@@ -2197,6 +2490,234 @@ const styles = {
     fontWeight: 600,
     fontSize: "14px",
     cursor: "pointer",
+  },
+  catalogToolbar: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "12px",
+    alignItems: "center",
+  },
+  pageSizeControl: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    backgroundColor: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    minHeight: "44px",
+  },
+  pageSizeLabel: {
+    fontSize: "12px",
+    fontWeight: 600,
+    color: "#4b5563",
+    whiteSpace: "nowrap" as const,
+  },
+  pageSizeSelect: {
+    height: "32px",
+    border: "1px solid #d1d5db",
+    borderRadius: "8px",
+    padding: "0 8px",
+    backgroundColor: "#fff",
+    fontSize: "13px",
+    color: "#374151",
+    outline: "none",
+  },
+  resultsSummary: {
+    backgroundColor: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "14px",
+    padding: "16px",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "16px",
+    alignItems: "flex-start",
+  },
+  resultsTitle: {
+    margin: 0,
+    fontSize: "16px",
+    fontWeight: 700,
+    color: "#111827",
+    fontFamily: "'Poppins', sans-serif",
+  },
+  resultsText: {
+    margin: "4px 0 0",
+    fontSize: "13px",
+    color: "#6b7280",
+  },
+  activeFilterRow: {
+    display: "flex",
+    flexWrap: "wrap" as const,
+    gap: "8px",
+    justifyContent: "flex-end",
+  },
+  activeFilterChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    border: "1px solid #fbcfe8",
+    backgroundColor: "#fdf2f8",
+    color: "#be185d",
+    borderRadius: "999px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: 600,
+  },
+  productsList: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "12px",
+  },
+  productListItem: {
+    backgroundColor: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "14px",
+    padding: "14px",
+    display: "grid",
+    gridTemplateColumns: "84px minmax(0, 1fr)",
+    gap: "16px",
+    boxShadow: "0 1px 2px rgba(17, 24, 39, 0.04)",
+  },
+  listImageWrap: {
+    width: "84px",
+    height: "84px",
+    borderRadius: "12px",
+    backgroundColor: "#f9fafb",
+    border: "1px solid #f3f4f6",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  listProductImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain" as const,
+  },
+  productListInfo: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "12px",
+  },
+  productListHeader: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "16px",
+    alignItems: "start",
+  },
+  listProductTitle: {
+    margin: 0,
+    color: "#111827",
+    fontSize: "15px",
+    fontWeight: 700,
+    fontFamily: "'Poppins', sans-serif",
+    overflowWrap: "anywhere" as const,
+  },
+  productMetaRow: {
+    marginTop: "6px",
+    display: "flex",
+    flexWrap: "wrap" as const,
+    gap: "6px",
+    color: "#6b7280",
+    fontSize: "12px",
+  },
+  productMetaPill: {
+    backgroundColor: "#f3f4f6",
+    color: "#4b5563",
+    borderRadius: "999px",
+    padding: "3px 8px",
+    fontWeight: 600,
+  },
+  listPriceBlock: {
+    textAlign: "right" as const,
+    minWidth: "120px",
+  },
+  listPrice: {
+    display: "block",
+    marginTop: "2px",
+    color: "#E91E63",
+    fontSize: "16px",
+    fontWeight: 800,
+  },
+  productListControls: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "14px",
+    alignItems: "end",
+  },
+  variantBlock: {
+    minWidth: 0,
+  },
+  inlineLabel: {
+    display: "block",
+    fontSize: "11px",
+    fontWeight: 700,
+    color: "#6b7280",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.04em",
+    marginBottom: "5px",
+  },
+  listVariantSelect: {
+    width: "100%",
+    minHeight: "38px",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    padding: "0 10px",
+    fontSize: "13px",
+    color: "#374151",
+    backgroundColor: "#fff",
+    outline: "none",
+  },
+  singleVariantText: {
+    minHeight: "38px",
+    display: "flex",
+    alignItems: "center",
+    color: "#374151",
+    backgroundColor: "#f9fafb",
+    border: "1px solid #e5e7eb",
+    borderRadius: "8px",
+    padding: "0 10px",
+    fontSize: "13px",
+  },
+  skuInline: {
+    marginTop: "5px",
+    fontSize: "12px",
+    color: "#6b7280",
+  },
+  listActions: {
+    display: "flex",
+    gap: "10px",
+    alignItems: "center",
+  },
+  paginationBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginTop: "16px",
+    backgroundColor: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: "14px",
+    padding: "12px",
+  },
+  paginationButton: {
+    minWidth: "112px",
+    height: "38px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    backgroundColor: "#ffffff",
+    color: "#374151",
+    textDecoration: "none",
+    fontWeight: 700,
+    fontSize: "13px",
+  },
+  paginationStatus: {
+    fontSize: "13px",
+    fontWeight: 700,
+    color: "#4b5563",
   },
   productsGrid: {
     display: "grid",

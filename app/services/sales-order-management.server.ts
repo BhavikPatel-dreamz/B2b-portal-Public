@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import { getAdminForShop } from "app/shopify.server";
 import type { SalesSessionUser } from "app/utils/sales-session.server";
+import { sendOrderPaymentLinkEmail } from "app/utils/email";
 
 export type SalesOrderAccessLevel = "agent" | "manager" | "admin";
 
@@ -96,8 +97,9 @@ export function isSalesPortalPaymentLinkEligible(order: {
   paymentStatus: string;
   orderStatus: string;
 }) {
+  const source = (order.source || "").toLowerCase();
   return (
-    order.source === "Sales Portal" &&
+    (source === "sales portal" || source === "sales portal quote") &&
     order.paymentStatus.toLowerCase() === "pending" &&
     order.orderStatus.toLowerCase() !== "cancelled"
   );
@@ -266,6 +268,83 @@ export async function getOrCreateSalesOrderPaymentLink(
   }
 
   return { link: paymentLink, reused };
+}
+
+type PendingOrderPaymentEmailOrder = PaymentLinkOrder & {
+  shopId: string;
+  orderNumber: string | null;
+  customerName: string | null;
+  company: {
+    name: string;
+    shop: {
+      shopDomain: string;
+    };
+  };
+};
+
+export async function sendPendingOrderPaymentRequestEmail(
+  order: PendingOrderPaymentEmailOrder,
+  userId?: string | null,
+) {
+  if (!order.customerEmail) {
+    return { success: false, skipped: true, error: "Missing customer email" };
+  }
+
+  let generated: Awaited<
+    ReturnType<typeof getOrCreateSalesOrderPaymentLink>
+  > | null = null;
+  let lastLinkError: unknown;
+  for (const delay of [0, 1000, 2500]) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    try {
+      generated = await getOrCreateSalesOrderPaymentLink(order);
+      lastLinkError = null;
+      break;
+    } catch (error) {
+      lastLinkError = error;
+    }
+  }
+  if (lastLinkError) {
+    throw lastLinkError;
+  }
+  if (!generated) {
+    throw new Error("Payment link generation failed.");
+  }
+
+  const emailResult = await sendOrderPaymentLinkEmail({
+    storeId: order.shopId,
+    to: order.customerEmail,
+    customerName: order.customerName,
+    orderNumber: getOrderNumber(order),
+    companyName: order.company.name,
+    totalAmount: order.remainingBalance.toString(),
+    currencyCode: order.currencyCode,
+    paymentUrl: generated.link,
+  });
+
+  if (emailResult.success) {
+    await prisma.b2BOrder.update({
+      where: { id: order.id },
+      data: { paymentLinkSentAt: new Date() },
+    });
+  }
+
+  await logOrderActivity({
+    orderId: order.id,
+    userId,
+    action: emailResult.success
+      ? "Payment Link Sent"
+      : "Payment Link Email Failed",
+    message: emailResult.success
+      ? `Sent to ${order.customerEmail}.`
+      : emailResult.error,
+    metadata: {
+      generatedLink: generated.link,
+      emailResult,
+    } as Prisma.InputJsonValue,
+  });
+
+  return { ...emailResult, paymentLink: generated.link };
 }
 
 export async function notifyOrderCreator(input: {

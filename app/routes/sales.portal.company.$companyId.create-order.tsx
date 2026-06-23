@@ -1,6 +1,11 @@
-import { ActionFunctionArgs, LoaderFunctionArgs, redirect } from "react-router";
-import { useLoaderData, Link } from "react-router";
-import type { Prisma } from "@prisma/client";
+import {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  Link,
+  redirect,
+  useLoaderData,
+} from "react-router";
+import { useState } from "react";
 import prisma from "app/db.server";
 import {
   requireSalesSession,
@@ -12,10 +17,93 @@ import {
   SalesPortalLayout,
   salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
-import {
-  getOrderAccessWhere,
-  getShopifyOrderWhere,
-} from "app/services/sales-order-management.server";
+import { getCreditSummary } from "app/services/creditService";
+
+type ShopifyCompanyCustomer = {
+  customerId?: string;
+  id?: string;
+  name?: string;
+  email?: string;
+  isGlobalAdmin?: boolean;
+  roles?: string[];
+  locationIds?: string[];
+  locationNames?: string[];
+  locationRoles?: Array<{
+    roleName?: string | null;
+    locationName?: string | null;
+  }>;
+  customer?: {
+    id: string;
+    email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    roleAssignments?: {
+      edges?: Array<{
+        node?: { role?: { name?: string | null } | null } | null;
+      }>;
+    } | null;
+  };
+};
+
+type CompanyUserOption = {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  shopifyCustomerId: string | null;
+  companyRole: string | null;
+  locationIds: string[];
+  locationNames: string[];
+  isGlobalAdmin: boolean;
+};
+
+type ShopifyCatalogNode = {
+  id: string;
+  title: string;
+  priceList: { name: string; currency: string } | null;
+};
+
+type ShopifyCatalogLocation = {
+  id: string;
+  name: string;
+  phone?: string | null;
+  shippingAddress?: {
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    province?: string | null;
+    country?: string | null;
+    zip?: string | null;
+    phone?: string | null;
+  } | null;
+  catalogs?: { nodes?: ShopifyCatalogNode[] } | null;
+};
+
+type CompanyCatalogsResponse = {
+  errors?: unknown;
+  data?: {
+    company?: {
+      locations?: { nodes?: ShopifyCatalogLocation[] } | null;
+    } | null;
+  };
+};
+
+function formatLocationAddress(
+  address?: ShopifyCatalogLocation["shippingAddress"],
+) {
+  if (!address) return [];
+  const cityLine = [address.city, address.province, address.zip]
+    .filter(Boolean)
+    .join(", ");
+  return [
+    address.address1,
+    address.address2,
+    cityLine,
+    address.country,
+  ]
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
@@ -50,7 +138,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     where: { id: companyId },
     include: {
       shop: {
-        select: { shopName: true, shopDomain: true, accessToken: true },
+        select: {
+          shopName: true,
+          shopDomain: true,
+          accessToken: true,
+          currencyCode: true,
+          plan: true,
+        },
       },
     },
   });
@@ -60,14 +154,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
 
   // Fetch real-time users directly from Shopify (fixes the issue where Shopify users aren't synced locally)
-  let activeUsers: Array<{
-    id: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-    shopifyCustomerId: string | null;
-    companyRole: string | null;
-  }> = [];
+  let activeUsers: CompanyUserOption[] = [];
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
     const { getCompanyCustomers } =
@@ -81,52 +168,77 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
     if (!customersData.error && customersData.customers) {
       activeUsers = customersData.customers
-        .map((c: any) => {
-          const firstName = c.customer.firstName?.trim() || null;
-          const lastName = c.customer.lastName?.trim() || null;
+        .map((c: ShopifyCompanyCustomer) => {
+          const fallbackName = c.name?.trim() || "";
+          const [fallbackFirstName, ...fallbackLastParts] =
+            fallbackName.split(/\s+/).filter(Boolean);
+          const firstName =
+            c.customer?.firstName?.trim() || fallbackFirstName || null;
+          const lastName =
+            c.customer?.lastName?.trim() ||
+            fallbackLastParts.join(" ") ||
+            null;
+          const locationRoleNames =
+            c.locationRoles
+              ?.map((role) => role.roleName || "")
+              .filter(Boolean) || [];
+          const roleNames =
+            [
+              ...(c.roles || []),
+              ...locationRoleNames,
+              ...(c.customer?.roleAssignments?.edges
+                ?.map((edge) => edge.node?.role?.name || "")
+                .filter(Boolean) || []),
+            ];
+          const adminRole =
+            roleNames.find((role) =>
+              role.toLowerCase().includes("admin"),
+            ) || null;
           const companyRole =
-            c.customer.roleAssignments?.edges?.[0]?.node?.role?.name ||
+            adminRole ||
+            roleNames[0] ||
             "Ordering only";
-          const customerId = c.customer.id.split("/").pop();
+          const customerId =
+            (c.customerId || c.customer?.id || c.id || "")
+            .split("/")
+            .pop() || "";
+          const locationNames =
+            c.locationNames ||
+            c.locationRoles
+              ?.map((role) => role.locationName || "")
+              .filter(Boolean) ||
+            [];
 
           return {
             id: customerId,
-            email: c.customer.email,
+            email: c.customer?.email || c.email || "",
             firstName,
             lastName,
             shopifyCustomerId: customerId,
             companyRole,
+            locationIds: c.locationIds || [],
+            locationNames,
+            isGlobalAdmin: Boolean(c.isGlobalAdmin),
           };
         })
-        .filter((u: any) => u.companyRole?.toLowerCase() === "location admin");
+        .filter((u: CompanyUserOption) =>
+          u.isGlobalAdmin ||
+          String(u.companyRole || "").toLowerCase().includes("admin"),
+        );
     }
   }
 
-  // Calculate available credit using the same visible-order scope as the orders page
-  const visibleOrderWhere: Prisma.B2BOrderWhereInput = {
-    AND: [
-      getOrderAccessWhere(user),
-      getShopifyOrderWhere(),
-      { companyId: company.id },
-    ],
-  };
-  const creditOrderWhere: Prisma.B2BOrderWhereInput = {
-    AND: [
-      visibleOrderWhere,
-      {
-        paymentStatus: { in: ["pending", "partial"] },
-        orderStatus: { notIn: ["cancelled", "converted", "archived"] },
-      },
-    ],
-  };
-  const pendingCreditOrders = await prisma.b2BOrder.aggregate({
-    where: creditOrderWhere,
-    _sum: { remainingBalance: true },
-  });
+  const creditSummary = await getCreditSummary(company.id);
 
-  const creditLimit = Number(company.creditLimit ?? 0);
-  const usedCredit = Number(pendingCreditOrders._sum.remainingBalance ?? 0);
-  const availableCredit = creditLimit - usedCredit;
+  if (!creditSummary) {
+    throw new Response("Unable to fetch credit summary", { status: 500 });
+  }
+
+  const isFreePlan = company.shop.plan === "free";
+  const creditLimit = isFreePlan ? 0 : creditSummary.creditLimit.toNumber();
+  const availableCredit = isFreePlan
+    ? 0
+    : Math.max(0, creditSummary.availableCredit.toNumber());
 
   // Fetch catalogs and price lists assigned to the company locations via Shopify GraphQL
   let catalogs: Array<{
@@ -135,13 +247,31 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     priceList: { name: string; currency: string } | null;
   }> = [];
   let priceLists: Array<{ name: string; currency: string }> = [];
+  let locations: Array<{
+    id: string;
+    name: string;
+    phone: string | null;
+    addressLines: string[];
+  }> = [];
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
     const query = `
       query GetCompanyCatalogs($companyId: ID!) {
         company(id: $companyId) {
-          locations(first: 10) {
+          locations(first: 50) {
             nodes {
+              id
+              name
+              phone
+              shippingAddress {
+                address1
+                address2
+                city
+                province
+                country
+                zip
+                phone
+              }
               catalogs(first: 20) {
                 nodes {
                   id
@@ -176,14 +306,24 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         },
       );
 
-      const data = await response.json();
+      const data = (await response.json()) as CompanyCatalogsResponse;
 
       if (!data.errors && data.data?.company?.locations?.nodes) {
-        const uniqueCatalogs = new Map();
-        const uniquePriceLists = new Map();
+        locations = data.data.company.locations.nodes.map((loc) => ({
+          id: loc.id,
+          name: loc.name || "Company location",
+          phone: loc.shippingAddress?.phone || loc.phone || null,
+          addressLines: formatLocationAddress(loc.shippingAddress),
+        }));
 
-        data.data.company.locations.nodes.forEach((loc: any) => {
-          loc.catalogs?.nodes?.forEach((cat: any) => {
+        const uniqueCatalogs = new Map<string, ShopifyCatalogNode>();
+        const uniquePriceLists = new Map<
+          string,
+          { name: string; currency: string }
+        >();
+
+        data.data.company.locations.nodes.forEach((loc) => {
+          loc.catalogs?.nodes?.forEach((cat) => {
             if (!uniqueCatalogs.has(cat.id)) {
               uniqueCatalogs.set(cat.id, {
                 id: cat.id,
@@ -215,7 +355,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       storeName: company.shop.shopName || company.shop.shopDomain,
       creditLimit: creditLimit.toString(),
       availableCredit: availableCredit.toString(),
+      currencyCode: company.shop.currencyCode || "USD",
       users: activeUsers,
+      locations,
       catalogs,
       priceLists,
     },
@@ -236,13 +378,13 @@ export default function CreateOrderCustomerSelection() {
       storeName: string | null;
       creditLimit: string;
       availableCredit: string;
-      users: Array<{
+      currencyCode: string;
+      users: CompanyUserOption[];
+      locations: Array<{
         id: string;
-        firstName: string | null;
-        lastName: string | null;
-        email: string;
-        shopifyCustomerId: string | null;
-        companyRole: string | null;
+        name: string;
+        phone: string | null;
+        addressLines: string[];
       }>;
       catalogs: Array<{
         id: string;
@@ -258,13 +400,53 @@ export default function CreateOrderCustomerSelection() {
     };
     mode: "order" | "quote";
   }>();
+  const [selectedLocationId, setSelectedLocationId] = useState(
+    company.locations[0]?.id || "",
+  );
   const flowBase =
     mode === "quote"
       ? `/sales/portal/company/${company.id}/create-quote`
       : `/sales/portal/company/${company.id}/create-order`;
   const flowLabel = mode === "quote" ? "Create Quote" : "Create Order";
+  const selectedLocation = company.locations.find(
+    (location) => location.id === selectedLocationId,
+  );
+  const locationAdmins = company.users.filter((companyUser) =>
+    companyUser.locationIds.includes(selectedLocationId) ||
+    Boolean(
+      selectedLocation?.name &&
+        companyUser.locationNames.some(
+          (name) =>
+            name.trim().toLowerCase() ===
+            selectedLocation.name.trim().toLowerCase(),
+        ),
+    ),
+  );
+  const globalAdmins = company.users.filter(
+    (companyUser) => companyUser.isGlobalAdmin,
+  );
+  const fallbackAdmins = company.users.filter(
+    (companyUser) => companyUser.locationIds.length === 0,
+  );
+  const selectedAdmin =
+    locationAdmins[0] || globalAdmins[0] || fallbackAdmins[0] || null;
+  const buildStep2Url = (customerId: string) => {
+    const params = new URLSearchParams({ customerId });
+    if (selectedLocationId) {
+      params.set("locationId", selectedLocationId);
+    }
+    return `${flowBase}/step2?${params.toString()}`;
+  };
+  const selectedAdminName = selectedAdmin
+    ? [selectedAdmin.firstName, selectedAdmin.lastName]
+        .filter(Boolean)
+        .join(" ") || selectedAdmin.email
+    : "";
   const formatCurrency = (val: string | number) =>
-    `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+    new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: company.currencyCode,
+    }).format(Number(val) || 0);
 
   return (
     <SalesPortalLayout
@@ -286,144 +468,285 @@ export default function CreateOrderCustomerSelection() {
         }
       />
       <div style={styles.container}>
-      <main style={styles.mainContent}>
-        <div style={styles.pageHeader}>
-          <h1 style={styles.pageTitle}>{flowLabel}: {company.name}</h1>
-          <p style={styles.pageSubtitle}>Step 1: Select Customer</p>
-        </div>
-
-        {/* Two Column Layout */}
-        <div style={styles.twoColGrid}>
-          {/* Left Column: Customer Selection */}
-          <div style={styles.card}>
-            <div style={styles.cardHeader}>
-              <h2 style={styles.cardTitle}>Who is this order for?</h2>
-              <p style={styles.cardSubtitle}>
-                Select a customer user to proceed with building the {mode}.
-              </p>
-            </div>
-
-            {company.users.length > 0 ? (
-              <div style={styles.usersList}>
-                {company.users.map((companyUser) => (
-                  <Link
-                    key={companyUser.id}
-                    to={`${flowBase}/step2?customerId=${companyUser.shopifyCustomerId || companyUser.id}`}
-                    style={styles.userForm}
-                  >
-                    <div style={styles.userCard}>
-                      <div style={styles.userCardAvatar}>
-                        {companyUser.firstName?.charAt(0) ||
-                          companyUser.email.charAt(0).toUpperCase()}
-                      </div>
-                      <div style={styles.userCardInfo}>
-                        <div style={styles.userCardName}>
-                          {companyUser.firstName} {companyUser.lastName}
-                        </div>
-                        <div style={styles.userCardEmail}>
-                          {companyUser.email}
-                        </div>
-                      </div>
-                      <div style={styles.userCardRole}>
-                        <span style={styles.roleBadge}>
-                          {companyUser.companyRole || "User"}
-                        </span>
-                      </div>
-                      <div style={styles.userCardAction}>Select →</div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div style={styles.emptyState}>
-                <span style={styles.emptyStateIcon}>👥</span>
-                <p style={styles.emptyStateText}>
-                  No active users found for this company.
-                </p>
-              </div>
-            )}
+        <main style={styles.mainContent}>
+          <div style={styles.pageHeader}>
+            <h1 style={styles.pageTitle}>
+              {flowLabel}: {company.name}
+            </h1>
+            <p style={styles.pageSubtitle}>Step 1: Select Customer</p>
           </div>
 
-          {/* Right Column: Company Info Snapshot */}
-          <div style={styles.sideCol}>
+          {/* Two Column Layout */}
+          <div style={styles.twoColGrid}>
+            {/* Left Column: Customer Selection */}
             <div style={styles.card}>
-              <h3 style={styles.sectionTitle}>Company Snapshot</h3>
+              <div style={styles.cardHeader}>
+                <h2 style={styles.cardTitle}>Select delivery location</h2>
+                <p style={styles.cardSubtitle}>
+                  Choose the company location. The related admin user will be
+                  selected automatically.
+                </p>
+              </div>
 
-              <div style={styles.infoList}>
-                <div style={styles.infoRow}>
-                  <span style={styles.infoLabel}>Company Name</span>
-                  <span style={styles.infoValue}>{company.name}</span>
-                </div>
-
-                <div style={styles.divider} />
-
-                <div style={styles.infoRow}>
-                  <span style={styles.infoLabel}>Credit Limit</span>
-                  <span style={styles.infoValue}>
-                    {formatCurrency(company.creditLimit)}
-                  </span>
-                </div>
-                <div style={styles.infoRow}>
-                  <span style={styles.infoLabel}>Available Credit</span>
-                  <span
-                    style={{
-                      ...styles.infoValue,
-                      color:
-                        Number(company.availableCredit) > 0
-                          ? "#16a34a"
-                          : "#dc2626",
-                    }}
-                  >
-                    {formatCurrency(company.availableCredit)}
-                  </span>
-                </div>
-
-                <div style={styles.divider} />
-
-                <div style={styles.infoCol}>
-                  <span style={styles.infoLabel}>
-                    Assigned Catalogs ({company.catalogs.length})
-                  </span>
-                  {company.catalogs.length > 0 ? (
-                    <div style={styles.tagList}>
-                      {company.catalogs.map((cat) => (
-                        <span key={cat.id} style={styles.tag}>
-                          {cat.title}
-                        </span>
+              <div>
+                <label style={styles.locationLabel} htmlFor="deliveryLocation">
+                  Delivery location
+                </label>
+                {company.locations.length > 0 ? (
+                  <>
+                    <select
+                      id="deliveryLocation"
+                      value={selectedLocationId}
+                      onChange={(event) =>
+                        setSelectedLocationId(event.currentTarget.value)
+                      }
+                      style={styles.locationSelect}
+                    >
+                      {company.locations.map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name}
+                        </option>
                       ))}
-                    </div>
+                    </select>
+                    <p style={styles.locationHint}>
+                      {selectedLocation
+                        ? `${flowLabel} will use ${selectedLocation.name} for B2B delivery, pricing, and admin selection.`
+                        : "Select a Shopify company location to continue."}
+                    </p>
+                  </>
+                ) : (
+                  <p style={styles.locationWarning}>
+                    No Shopify company locations were found. The next step will
+                    use Shopify's default B2B location if available.
+                  </p>
+                )}
+              </div>
+
+              {selectedLocation && (
+                <div style={styles.locationDetailsCard}>
+                  <div>
+                    <span style={styles.infoLabel}>Location Details</span>
+                    <strong style={styles.locationName}>
+                      {selectedLocation.name}
+                    </strong>
+                  </div>
+                  {selectedLocation.addressLines.length > 0 ? (
+                    <address style={styles.addressText}>
+                      {selectedLocation.addressLines.map((line) => (
+                        <span key={line}>{line}</span>
+                      ))}
+                    </address>
                   ) : (
-                    <span style={styles.emptyText}>No catalogs assigned</span>
+                    <p style={styles.locationHint}>
+                      No shipping address is configured for this location.
+                    </p>
                   )}
-                </div>
-
-                <div style={styles.divider} />
-
-                <div style={styles.infoCol}>
-                  <span style={styles.infoLabel}>
-                    Assigned Price Lists ({company.priceLists.length})
-                  </span>
-                  {company.priceLists.length > 0 ? (
-                    <div style={styles.tagList}>
-                      {company.priceLists.map((pl) => (
-                        <span key={pl.name} style={styles.tag}>
-                          {pl.name} ({pl.currency})
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span style={styles.emptyText}>
-                      No price lists assigned
+                  {selectedLocation.phone && (
+                    <span style={styles.locationPhone}>
+                      Phone: {selectedLocation.phone}
                     </span>
                   )}
                 </div>
+              )}
+
+              <div style={styles.locationSelectorSection}>
+                <span style={styles.locationLabel}>Auto-selected admin</span>
+                {selectedAdmin ? (
+                  <div style={styles.userCard}>
+                    <div style={styles.userCardAvatar}>
+                      {selectedAdmin.firstName?.charAt(0) ||
+                        selectedAdmin.email.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={styles.userCardInfo}>
+                      <div style={styles.userCardName}>
+                        {selectedAdminName}
+                      </div>
+                      <div style={styles.userCardEmail}>
+                        {selectedAdmin.email}
+                      </div>
+                    </div>
+                    <div style={styles.userCardRole}>
+                      <span style={styles.roleBadge}>
+                        {selectedAdmin.isGlobalAdmin
+                          ? "Global admin"
+                          : selectedAdmin.companyRole || "Admin"}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={styles.emptyState}>
+                    <p style={styles.emptyStateText}>
+                      No admin user is assigned to this location.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div style={styles.adminListSection}>
+                <span style={styles.locationLabel}>
+                  Admin users ({company.users.length})
+                </span>
+                {company.users.length > 0 ? (
+                  <div style={styles.usersList}>
+                    {company.users.map((companyUser) => (
+                      <div
+                        key={companyUser.id}
+                        style={{
+                          ...styles.adminListItem,
+                          borderColor:
+                            companyUser.id === selectedAdmin?.id
+                              ? "#f9a8d4"
+                              : "#e5e7eb",
+                          backgroundColor:
+                            companyUser.id === selectedAdmin?.id
+                              ? "#fdf4f7"
+                              : "#ffffff",
+                        }}
+                      >
+                        <div style={styles.userCardInfo}>
+                          <div style={styles.userCardName}>
+                            {[companyUser.firstName, companyUser.lastName]
+                              .filter(Boolean)
+                              .join(" ") || companyUser.email}
+                          </div>
+                          <div style={styles.userCardEmail}>
+                            {companyUser.locationNames.length > 0
+                              ? companyUser.locationNames.join(", ")
+                              : "Company admin"}
+                          </div>
+                        </div>
+                        <span style={styles.roleBadge}>
+                          {companyUser.isGlobalAdmin
+                            ? "Global admin"
+                            : companyUser.companyRole || "Admin"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={styles.locationWarning}>
+                    No admin users found for this company.
+                  </p>
+                )}
+              </div>
+
+              {selectedAdmin ? (
+                <Link
+                  to={buildStep2Url(
+                    selectedAdmin.shopifyCustomerId || selectedAdmin.id,
+                  )}
+                  style={styles.continueButton}
+                >
+                  Continue with {selectedAdminName} →
+                </Link>
+              ) : (
+                <button type="button" disabled style={styles.disabledContinueButton}>
+                  Assign an admin to continue
+                </button>
+              )}
+            </div>
+
+            {/* Right Column: Company Info Snapshot */}
+            <div style={styles.sideCol}>
+              <div style={styles.card}>
+                <h3 style={styles.sectionTitle}>Company Snapshot</h3>
+
+                <div style={styles.infoList}>
+                  <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Company Name</span>
+                    <span style={styles.infoValue}>{company.name}</span>
+                  </div>
+
+                  <div style={styles.divider} />
+
+                  <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Credit Limit</span>
+                    <span style={styles.infoValue}>
+                      {formatCurrency(company.creditLimit)}
+                    </span>
+                  </div>
+                  <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Available Credit</span>
+                    <span
+                      style={{
+                        ...styles.infoValue,
+                        color:
+                          Number(company.availableCredit) > 0
+                            ? "#16a34a"
+                            : "#dc2626",
+                      }}
+                    >
+                      {formatCurrency(company.availableCredit)}
+                    </span>
+                  </div>
+
+                  <div style={styles.divider} />
+
+                  <div style={styles.infoCol}>
+                    <span style={styles.infoLabel}>
+                      Company Locations ({company.locations.length})
+                    </span>
+                    {company.locations.length > 0 ? (
+                      <div style={styles.tagList}>
+                        {company.locations.map((location) => (
+                          <span key={location.id} style={styles.tag}>
+                            {location.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={styles.emptyText}>
+                        No locations assigned
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={styles.divider} />
+
+                  <div style={styles.infoCol}>
+                    <span style={styles.infoLabel}>
+                      Assigned Catalogs ({company.catalogs.length})
+                    </span>
+                    {company.catalogs.length > 0 ? (
+                      <div style={styles.tagList}>
+                        {company.catalogs.map((cat) => (
+                          <span key={cat.id} style={styles.tag}>
+                            {cat.title}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={styles.emptyText}>No catalogs assigned</span>
+                    )}
+                  </div>
+
+                  <div style={styles.divider} />
+
+                  <div style={styles.infoCol}>
+                    <span style={styles.infoLabel}>
+                      Assigned Price Lists ({company.priceLists.length})
+                    </span>
+                    {company.priceLists.length > 0 ? (
+                      <div style={styles.tagList}>
+                        {company.priceLists.map((pl) => (
+                          <span key={pl.name} style={styles.tag}>
+                            {pl.name} ({pl.currency})
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={styles.emptyText}>
+                        No price lists assigned
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </main>
+        </main>
 
-      <style>{`
+        <style>{`
         button:hover:not(:disabled) {
           border-color: #E91E63 !important;
           background-color: #fff0f4 !important;
@@ -556,6 +879,109 @@ const styles = {
     display: "flex",
     flexDirection: "column" as const,
     gap: "12px",
+  },
+  locationSelectorSection: {
+    marginTop: "24px",
+    paddingTop: "20px",
+    borderTop: "1px solid #f3f4f6",
+  },
+  locationLabel: {
+    display: "block",
+    marginBottom: "8px",
+    fontSize: "13px",
+    color: "#374151",
+    fontWeight: 700,
+  },
+  locationSelect: {
+    width: "100%",
+    height: "44px",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    backgroundColor: "#ffffff",
+    color: "#111827",
+    padding: "0 12px",
+    fontSize: "14px",
+    fontWeight: 600,
+  },
+  locationHint: {
+    margin: "8px 0 0",
+    fontSize: "12px",
+    color: "#6b7280",
+    lineHeight: 1.5,
+  },
+  locationWarning: {
+    margin: 0,
+    fontSize: "13px",
+    color: "#b45309",
+    lineHeight: 1.5,
+  },
+  locationDetailsCard: {
+    marginTop: "16px",
+    padding: "16px",
+    borderRadius: "8px",
+    border: "1px solid #e5e7eb",
+    backgroundColor: "#f9fafb",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "8px",
+  },
+  locationName: {
+    display: "block",
+    marginTop: "4px",
+    color: "#111827",
+    fontSize: "15px",
+  },
+  addressText: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "3px",
+    margin: 0,
+    color: "#374151",
+    fontSize: "13px",
+    fontStyle: "normal",
+    lineHeight: 1.45,
+  },
+  locationPhone: {
+    color: "#4b5563",
+    fontSize: "13px",
+    fontWeight: 600,
+  },
+  adminListSection: {
+    marginTop: "18px",
+  },
+  adminListItem: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    padding: "12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: "8px",
+  },
+  continueButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: "20px",
+    minHeight: "44px",
+    borderRadius: "8px",
+    backgroundColor: "#E91E63",
+    color: "#ffffff",
+    textDecoration: "none",
+    fontSize: "14px",
+    fontWeight: 700,
+  },
+  disabledContinueButton: {
+    width: "100%",
+    marginTop: "20px",
+    minHeight: "44px",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    backgroundColor: "#f3f4f6",
+    color: "#9ca3af",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "not-allowed",
   },
   userForm: {
     margin: 0,
