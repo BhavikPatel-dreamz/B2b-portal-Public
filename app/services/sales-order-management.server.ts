@@ -105,6 +105,11 @@ export function isSalesPortalPaymentLinkEligible(order: {
   );
 }
 
+const SALES_PORTAL_PAYMENT_LINK_SOURCES = [
+  "Sales Portal",
+  "Sales Portal Quote",
+];
+
 type PaymentLinkOrder = {
   id: string;
   source: string | null;
@@ -251,7 +256,7 @@ export async function getOrCreateSalesOrderPaymentLink(
   const saved = await prisma.b2BOrder.updateMany({
     where: {
       id: order.id,
-      source: "Sales Portal",
+      source: { in: SALES_PORTAL_PAYMENT_LINK_SOURCES },
       paymentStatus: "pending",
       orderStatus: { not: "cancelled" },
     },
