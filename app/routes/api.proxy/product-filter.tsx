@@ -130,9 +130,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw new Error("Store not found");
   }
 
-  const hasVariantFilter = !!(color || size);
-  const productLimit = hasVariantFilter ? 250 : 10;
-
   const endpoint = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
   const response = await fetch(endpoint, {
     method: "POST",
@@ -142,11 +139,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     body: JSON.stringify({
       query: `
-        query productFilterSearch($query: String!, $cursor: String, $first: Int!) {
+        query productFilterSearch($query: String!, $cursor: String) {
           shop {
             currencyCode
           }
-          products(first: $first, after: $cursor, query: $query) {
+          products(first: 10, after: $cursor, query: $query) {
             edges {
               cursor
               node {
@@ -185,17 +182,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
           filterProducts: products(first: 250, query: $query) {
             edges {
+              cursor
               node {
+                id
+                title
                 vendor
                 productType
                 tags
+                totalInventory
+                featuredImage {
+                  url
+                }
                 variants(first: 20) {
                   edges {
                     node {
+                      id
+                      title
                       price
-                      availableForSale
+                      sku
                       inventoryQuantity
                       inventoryPolicy
+                      availableForSale
                       selectedOptions {
                         name
                         value
@@ -211,7 +218,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       variables: {
         query: shopifySearchQuery,
         cursor: cursor || null,
-        first: productLimit,
       },
     }),
   });
@@ -261,6 +267,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
   }));
 
+  const filterProducts: ProductResponse["products"] = (data.data.filterProducts.edges || []).map((edge: any) => ({
+    id: edge.node.id ?? "",
+    title: edge.node.title ?? "",
+    vendor: edge.node.vendor ?? "",
+    productType: edge.node.productType ?? "",
+    tags: edge.node.tags ?? [],
+    image: edge.node.featuredImage?.url,
+    cursor: edge.cursor ?? "",
+    totalInventory: edge.node.totalInventory ?? 0,
+    variants: edge.node.variants.edges.map(({ node: v }: any) => ({
+      id: v.id ?? "",
+      title: v.title ?? "",
+      price: v.price ?? "0",
+      sku: v.sku ?? "",
+      currencyCode: shopCurrency,
+      currencySymbol,
+      inventoryQuantity: v.inventoryQuantity ?? 0,
+      inventoryPolicy: v.inventoryPolicy ?? "",
+      availableForSale: v.availableForSale ?? false,
+      inStock:
+        v.availableForSale &&
+        (v.inventoryQuantity > 0 || v.inventoryPolicy === "CONTINUE"),
+      selectedOptions: v.selectedOptions ?? [],
+    })),
+  }));
+
   const criteria: FilterCriteria = {
     color,
     size,
@@ -279,11 +311,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
   );
 
-  // Filter products by color/size, price and availability if specified.
-  let filteredProducts: ProductResponse["products"] = products;
+  const hasActiveFilters = !!(color || size || criteria.minPrice != null || criteria.maxPrice != null || available?.toLowerCase() === "true");
 
-  if (color || size || criteria.minPrice != null || criteria.maxPrice != null || available?.toLowerCase() === "true") {
-    filteredProducts = products
+  // When filters are active, use filterProducts (250) so enough matching products are available.
+  // When no filters, use products (10) with cursor pagination.
+  let filteredProducts: ProductResponse["products"];
+  let pageInfo = data.data.products.pageInfo;
+
+  if (hasActiveFilters) {
+    filteredProducts = filterProducts
       .map((product) => ({
         ...product,
         variants: product.variants.filter((variant) => {
@@ -317,11 +353,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }),
       }))
       .filter((product) => product.variants.length > 0);
+    // All matching results returned at once, no more pages
+    pageInfo = { hasNextPage: false, endCursor: null };
+  } else {
+    filteredProducts = products;
   }
 
   const result: ProductResponse = {
     products: filteredProducts,
-    pageInfo: data.data.products.pageInfo,
+    pageInfo,
     filters,
   };
 
