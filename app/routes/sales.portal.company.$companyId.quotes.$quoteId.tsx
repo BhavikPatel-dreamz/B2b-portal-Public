@@ -27,6 +27,10 @@ import {
   SalesPortalHeader,
   SalesPortalLayout,
 } from "app/components/SalesPortalLayout";
+import {
+  getDeliveryDetailsForRecord,
+  type DeliveryDetails,
+} from "app/services/delivery-details.server";
 
 type ActionResponse = {
   success?: boolean;
@@ -46,7 +50,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     where: { id: quoteId, companyId },
     include: {
       company: {
-        include: { shop: { select: { shopName: true, shopDomain: true } } },
+        include: {
+          shop: {
+            select: {
+              shopName: true,
+              shopDomain: true,
+            },
+          },
+        },
       },
       salesAgent: { select: { firstName: true, lastName: true, email: true } },
       items: { orderBy: { createdAt: "asc" } },
@@ -69,6 +80,21 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
 
   const url = new URL(request.url);
+  const shopCredentials = await prisma.store.findUnique({
+    where: { id: quote.shopId },
+    select: { shopDomain: true, accessToken: true },
+  });
+  const deliveryDetails = await getDeliveryDetailsForRecord({
+    ...quote,
+    company: {
+      ...quote.company,
+      shop: {
+        ...quote.company.shop,
+        shopDomain: shopCredentials?.shopDomain || quote.company.shop.shopDomain,
+        accessToken: shopCredentials?.accessToken || null,
+      },
+    },
+  });
   return Response.json({
     quote: serializeQuote(quote),
     user: {
@@ -91,6 +117,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     created: url.searchParams.get("created") === "1",
     duplicatedFrom: url.searchParams.get("duplicatedFrom") || "",
     passedQuoteUrl: url.searchParams.get("quoteUrl") || "",
+    deliveryDetails,
   });
 };
 
@@ -265,6 +292,7 @@ export default function QuoteDetailPage() {
     allCompanies,
     quoteCount,
     orderCount,
+    deliveryDetails,
   } = useLoaderData<any>();
   const actionData = useActionData<ActionResponse>();
   const navigation = useNavigation();
@@ -477,6 +505,8 @@ export default function QuoteDetailPage() {
             </div>
           </div>
 
+          <DeliveryDetailsCard deliveryDetails={deliveryDetails} />
+
           <div
             className="sales-quote-card"
             style={{ ...styles.card, padding: 0, overflow: "hidden" }}
@@ -649,7 +679,7 @@ export default function QuoteDetailPage() {
         }
         @media (max-width: 700px) {
           .sales-quote-card { padding: 16px !important; }
-          .sales-quote-info-grid { grid-template-columns: minmax(0, 1fr) !important; }
+          .sales-quote-info-grid, .sales-quote-delivery-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
       `}</style>
     </SalesPortalLayout>
@@ -670,6 +700,45 @@ function Summary({ label, value }: { label: string; value: string }) {
     <div style={styles.summaryRow}>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DeliveryDetailsCard({
+  deliveryDetails,
+}: {
+  deliveryDetails: DeliveryDetails;
+}) {
+  return (
+    <div className="sales-quote-card" style={styles.card}>
+      <h2 style={styles.cardTitle}>Delivery Details</h2>
+      <div className="sales-quote-delivery-grid" style={styles.deliveryGrid}>
+        <Info
+          label="Location"
+          value={deliveryDetails.locationName || "Not captured"}
+        />
+        <div>
+          <span style={styles.metaLabel}>
+            {deliveryDetails.source === "company_location"
+              ? "Location Address"
+              : "Delivery Address"}
+          </span>
+          {deliveryDetails.addressLines.length > 0 ? (
+            <address style={styles.addressText}>
+              {deliveryDetails.addressLines.map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+            </address>
+          ) : (
+            <p style={styles.muted}>
+              Delivery address was not captured for this quote.
+            </p>
+          )}
+        </div>
+        {deliveryDetails.phone && (
+          <Info label="Phone" value={deliveryDetails.phone} />
+        )}
+      </div>
     </div>
   );
 }
@@ -738,6 +807,21 @@ const styles: Record<string, React.CSSProperties> = {
   },
   cardTitle: { margin: "0 0 16px", fontSize: 18, color: "#111827" },
   infoGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 },
+  deliveryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 16,
+  },
+  addressText: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    margin: 0,
+    color: "#111827",
+    fontSize: 13,
+    fontStyle: "normal",
+    lineHeight: 1.45,
+  },
   metaLabel: {
     display: "block",
     color: "#6b7280",

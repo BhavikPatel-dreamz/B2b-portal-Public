@@ -17,6 +17,7 @@ import {
   getOrderNumber,
   getShopifyOrderWhere,
 } from "app/services/sales-order-management.server";
+import { getCreditSummary } from "app/services/creditService";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
@@ -41,7 +42,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { id: companyId },
     include: {
       shop: {
-        select: { shopName: true, shopDomain: true, accessToken: true },
+        select: {
+          shopName: true,
+          shopDomain: true,
+          accessToken: true,
+          currencyCode: true,
+          plan: true,
+        },
       },
     },
   });
@@ -84,7 +91,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     if (!customersData.error && customersData.customers) {
       activeUsers = customersData.customers
-        .map((c: any) => {
+        .map((c: ShopifyCompanyCustomer) => {
           const firstName = c.customer.firstName?.trim() || null;
           const lastName = c.customer.lastName?.trim() || null;
           const companyRole =
@@ -97,11 +104,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             email: c.customer.email,
             firstName,
             lastName,
-            shopifyCustomerId: customerId,
             companyRole,
           };
         })
-        .filter((u: any) => u.companyRole?.toLowerCase() === "location admin");
+        .filter((u) => u.companyRole?.toLowerCase() === "location admin");
     }
   }
 
@@ -134,24 +140,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { companyId: company.id },
   });
 
-  // Get credit data
-  const creditOrderWhere: Prisma.B2BOrderWhereInput = {
-    AND: [
-      recentOrderWhere,
-      {
-        paymentStatus: { in: ["pending", "partial"] },
-        orderStatus: { notIn: ["cancelled", "converted", "archived"] },
-      },
-    ],
-  };
-  const pendingCreditOrders = await prisma.b2BOrder.aggregate({
-    where: creditOrderWhere,
-    _sum: { remainingBalance: true },
-  });
+  const creditSummary = await getCreditSummary(company.id);
 
-  const creditLimit = Number(company.creditLimit ?? 0);
-  const usedCredit = Number(pendingCreditOrders._sum.remainingBalance ?? 0);
-  const availableCredit = creditLimit - usedCredit;
+  if (!creditSummary) {
+    throw new Response("Unable to fetch credit summary", { status: 500 });
+  }
+
+  const isFreePlan = company.shop.plan === "free";
+  const creditLimit = isFreePlan ? 0 : creditSummary.creditLimit.toNumber();
+  const usedCredit = isFreePlan ? 0 : creditSummary.usedCredit.toNumber();
+  const availableCredit = isFreePlan
+    ? 0
+    : Math.max(0, creditSummary.availableCredit.toNumber());
 
   return Response.json({
     user: {
@@ -166,6 +166,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       usedCredit: usedCredit.toString(),
       availableCredit: availableCredit.toString(),
       storeName: company.shop.shopName || company.shop.shopDomain,
+      currencyCode: company.shop.currencyCode || "USD",
       users: activeUsers,
     },
     recentOrders: recentOrders.map((o) => ({
@@ -224,6 +225,7 @@ export default function SalesPortal() {
         creditLimit: string;
         usedCredit: string;
         availableCredit: string;
+        currencyCode: string;
         storeName: string | null;
         users: Array<{
           id: string;
@@ -341,19 +343,22 @@ export default function SalesPortal() {
               <div style={styles.creditStat}>
                 <span style={styles.creditStatLabel}>Credit Limit</span>
                 <span style={styles.creditStatValue}>
-                  {formatCurrency(company.creditLimit)}
+                  {formatCurrency(company.creditLimit, company.currencyCode)}
                 </span>
               </div>
               <div style={styles.creditStat}>
                 <span style={styles.creditStatLabel}>Credit Used</span>
                 <span style={styles.creditStatValue}>
-                  {formatCurrency(company.usedCredit)}
+                  {formatCurrency(company.usedCredit, company.currencyCode)}
                 </span>
               </div>
               <div style={styles.creditStat}>
                 <span style={styles.creditStatLabel}>Available Credit</span>
                 <span style={styles.creditStatValue}>
-                  {formatCurrency(company.availableCredit)}
+                  {formatCurrency(
+                    company.availableCredit,
+                    company.currencyCode,
+                  )}
                 </span>
               </div>
             </div>

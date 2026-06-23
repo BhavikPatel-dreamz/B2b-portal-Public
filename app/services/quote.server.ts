@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import prisma from "app/db.server";
 import { sendQuoteEmail } from "app/utils/email";
+import { sendPendingOrderPaymentRequestEmail } from "app/services/sales-order-management.server";
 import {
   buildSalesDraftLineItems,
   buildSalesDraftShippingLine,
@@ -54,7 +55,10 @@ type DraftOrderInput = {
   taxExempt?: boolean;
 };
 
-export function getQuoteUrl(request: Request, quote: { id: string; secureToken: string }) {
+export function getQuoteUrl(
+  request: Request,
+  quote: { id: string; secureToken: string },
+) {
   const url = new URL(request.url);
   return `${url.origin}/quote/${quote.id}/${quote.secureToken}`;
 }
@@ -441,7 +445,9 @@ async function resolveShopifyB2BContext(quote: any) {
   );
   const companyLocationId =
     matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation
-      ?.id || baseMetaData.data?.company?.locations?.nodes?.[0]?.id || "";
+      ?.id ||
+    baseMetaData.data?.company?.locations?.nodes?.[0]?.id ||
+    "";
   const companyContactId = matchedContact?.node?.id || "";
 
   if (!companyLocationId || !companyContactId) {
@@ -514,7 +520,10 @@ export async function convertQuoteToOrder({
     { key: "Quote Number", value: quote.quoteNumber },
   ];
   if (quote.internalNotes) {
-    customAttributes.push({ key: "Internal Notes", value: quote.internalNotes });
+    customAttributes.push({
+      key: "Internal Notes",
+      value: quote.internalNotes,
+    });
   }
 
   const draftInput: DraftOrderInput = {
@@ -662,6 +671,29 @@ export async function convertQuoteToOrder({
       },
     },
   });
+
+  if (order.customerEmail) {
+    try {
+      await sendPendingOrderPaymentRequestEmail(
+        {
+          ...order,
+          company: {
+            name: quote.company.name,
+            shop: { shopDomain: quote.company.shop.shopDomain },
+          },
+        },
+        salesAgentId,
+      );
+    } catch (emailError) {
+      console.error("[quote-order] pending payment email failed", {
+        orderId: order.id,
+        shopifyOrderId: order.shopifyOrderId,
+        customerEmail: order.customerEmail,
+        error:
+          emailError instanceof Error ? emailError.message : String(emailError),
+      });
+    }
+  }
 
   await prisma.quote.update({
     where: { id: quote.id },

@@ -11,15 +11,47 @@ import {
   Text,
   BlockStack,
   InlineStack,
-  ChoiceList,
 } from "@shopify/polaris";
-import { useState, useCallback, useEffect } from "react";
-import { useLoaderData, useFetcher, useActionData, Link } from "react-router";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { useLoaderData, useFetcher, Link } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
 import { sendSalesUserInvitationEmail } from "app/utils/email";
 import crypto from "crypto";
+
+const COMPANY_PICKER_LARGE_LIST_THRESHOLD = 100;
+const COMPANY_PICKER_PAGE_SIZE = 50;
+
+type CompanyOption = {
+  id: string;
+  name: string;
+};
+
+type SalesUserRow = {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  status: string;
+  isActive: boolean;
+  invitation: {
+    isActive: boolean;
+    token: string;
+  } | null;
+  salesCompanies: Array<{
+    company: {
+      name: string;
+    };
+  }>;
+};
+
+type SalesUsersLoaderData = {
+  salesUsers: SalesUserRow[];
+  companies: CompanyOption[];
+  storeId: string;
+  appUrl: string;
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -156,7 +188,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await sendSalesUserInvitationEmail({
         storeId: store.id,
         email: user.email,
-        firstName: user.firstName,
+        firstName: user.firstName || "there",
         inviteLink,
       });
     }
@@ -176,7 +208,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await sendSalesUserInvitationEmail({
         storeId: store.id,
         email: user.email,
-        firstName: user.firstName,
+        firstName: user.firstName || "there",
         inviteLink,
       });
       return Response.json({ success: true, message: "Email Resent Successfully" });
@@ -188,7 +220,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SalesUsers() {
-  const { salesUsers, companies, storeId, appUrl } = useLoaderData<typeof loader>();
+  const { salesUsers, companies, storeId, appUrl } =
+    useLoaderData<typeof loader>() as unknown as SalesUsersLoaderData;
   const fetcher = useFetcher();
   const [isModalOpen, setIsModalOpen] = useState(false);
   
@@ -196,6 +229,8 @@ export default function SalesUsers() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
+  const [companySearch, setCompanySearch] = useState("");
+  const [companyPickerPage, setCompanyPickerPage] = useState(1);
 
   const toggleModal = useCallback(() => setIsModalOpen((open) => !open), []);
 
@@ -206,8 +241,14 @@ export default function SalesUsers() {
       setLastName("");
       setEmail("");
       setSelectedCompanyIds([]);
+      setCompanySearch("");
+      setCompanyPickerPage(1);
     }
   }, [fetcher.state, fetcher.data]);
+
+  useEffect(() => {
+    setCompanyPickerPage(1);
+  }, [companySearch]);
 
   const handleCreate = () => {
     const formData = new FormData();
@@ -250,7 +291,45 @@ export default function SalesUsers() {
     }
   };
 
-  const companyOptions = companies.map(c => ({ label: c.name, value: c.id }));
+  const normalizedCompanySearch = companySearch.trim().toLowerCase();
+  const filteredCompanies = useMemo(
+    () =>
+      companies.filter((company) =>
+        company.name.toLowerCase().includes(normalizedCompanySearch),
+      ),
+    [companies, normalizedCompanySearch],
+  );
+  const shouldPaginateCompanyPicker =
+    companies.length >= COMPANY_PICKER_LARGE_LIST_THRESHOLD &&
+    filteredCompanies.length > COMPANY_PICKER_PAGE_SIZE;
+  const totalCompanyPages = Math.max(
+    1,
+    Math.ceil(filteredCompanies.length / COMPANY_PICKER_PAGE_SIZE),
+  );
+  const visibleCompanies = shouldPaginateCompanyPicker
+    ? filteredCompanies.slice(
+        (companyPickerPage - 1) * COMPANY_PICKER_PAGE_SIZE,
+        companyPickerPage * COMPANY_PICKER_PAGE_SIZE,
+      )
+    : filteredCompanies;
+  const selectedCompanyCount = selectedCompanyIds.length;
+
+  const toggleCompanySelection = (companyId: string) => {
+    setSelectedCompanyIds((current) =>
+      current.includes(companyId)
+        ? current.filter((id) => id !== companyId)
+        : [...current, companyId],
+    );
+  };
+
+  const selectAllFilteredCompanies = () => {
+    const filteredCompanyIds = filteredCompanies.map((company) => company.id);
+    setSelectedCompanyIds((current) => Array.from(new Set([...current, ...filteredCompanyIds])));
+  };
+
+  const clearAllCompanies = () => {
+    setSelectedCompanyIds([]);
+  };
 
   const portalLoginUrl = `${appUrl}/sales/login`;
 
@@ -348,6 +427,60 @@ export default function SalesUsers() {
     maxWidth: 1200,
     margin: "0 auto",
     boxSizing: "border-box",
+  } as const;
+
+  const companyPickerHeaderStyle = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+    marginBottom: "10px",
+  } as const;
+
+  const companyPickerCountStyle = {
+    fontSize: "13px",
+    color: "#5c5f62",
+    fontWeight: 600,
+  } as const;
+
+  const companyPickerActionsStyle = {
+    display: "flex",
+    gap: "8px",
+    alignItems: "center",
+  } as const;
+
+  const companyPickerListStyle = {
+    border: "1px solid #dfe3e8",
+    borderRadius: "10px",
+    maxHeight: "300px",
+    overflowY: "auto",
+    background: "#ffffff",
+  } as const;
+
+  const companyPickerRowStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "10px 12px",
+    cursor: "pointer",
+    borderBottom: "1px solid #f1f2f4",
+    transition: "background-color 0.15s ease",
+  } as const;
+
+  const companyPickerEmptyStyle = {
+    padding: "28px 16px",
+    textAlign: "center",
+    color: "#6d7175",
+    background: "#ffffff",
+  } as const;
+
+  const companyPickerPaginationStyle = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginTop: "10px",
   } as const;
 
   return (
@@ -464,13 +597,109 @@ export default function SalesUsers() {
               onChange={setEmail}
               autoComplete="email"
             />
-            <ChoiceList
-              allowMultiple
-              title="Assign Companies"
-              choices={companyOptions}
-              selected={selectedCompanyIds}
-              onChange={setSelectedCompanyIds}
-            />
+            <BlockStack gap="300">
+              <div style={companyPickerHeaderStyle}>
+                <Text variant="headingSm" as="h3">Assign Companies</Text>
+                <span style={companyPickerCountStyle}>
+                  {selectedCompanyCount} {selectedCompanyCount === 1 ? "company" : "companies"} selected
+                </span>
+              </div>
+
+              <TextField
+                label="Search companies"
+                labelHidden
+                placeholder="Search companies by name..."
+                value={companySearch}
+                onChange={setCompanySearch}
+                autoComplete="off"
+              />
+
+              <div style={companyPickerActionsStyle}>
+                <Button
+                  size="micro"
+                  onClick={selectAllFilteredCompanies}
+                  disabled={filteredCompanies.length === 0}
+                >
+                  Select All
+                </Button>
+                <Button
+                  size="micro"
+                  onClick={clearAllCompanies}
+                  disabled={selectedCompanyIds.length === 0}
+                >
+                  Clear All
+                </Button>
+                <Text variant="bodySm" tone="subdued" as="span">
+                  {filteredCompanies.length} {filteredCompanies.length === 1 ? "match" : "matches"}
+                </Text>
+              </div>
+
+              <div style={companyPickerListStyle} role="group" aria-label="Assign companies">
+                {visibleCompanies.length > 0 ? (
+                  visibleCompanies.map((company, index) => {
+                    const isSelected = selectedCompanyIds.includes(company.id);
+                    const baseBackground = index % 2 === 0 ? "#ffffff" : "#fafbfb";
+
+                    return (
+                      <label
+                        key={company.id}
+                        style={{
+                          ...companyPickerRowStyle,
+                          backgroundColor: isSelected ? "#f0f7ff" : baseBackground,
+                        }}
+                        onMouseEnter={(event) => {
+                          event.currentTarget.style.backgroundColor = isSelected ? "#e4f0ff" : "#f6f6f7";
+                        }}
+                        onMouseLeave={(event) => {
+                          event.currentTarget.style.backgroundColor = isSelected ? "#f0f7ff" : baseBackground;
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleCompanySelection(company.id)}
+                          style={{
+                            width: "16px",
+                            height: "16px",
+                            accentColor: "#2c6ecb",
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ fontSize: "14px", color: "#202223", lineHeight: 1.35 }}>
+                          {company.name}
+                        </span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <div style={companyPickerEmptyStyle}>
+                    No companies found
+                  </div>
+                )}
+              </div>
+
+              {shouldPaginateCompanyPicker && (
+                <div style={companyPickerPaginationStyle}>
+                  <Button
+                    size="micro"
+                    onClick={() => setCompanyPickerPage((page) => Math.max(1, page - 1))}
+                    disabled={companyPickerPage <= 1}
+                  >
+                    Previous
+                  </Button>
+                  <Text variant="bodySm" tone="subdued" as="span">
+                    Page {companyPickerPage} of {totalCompanyPages}
+                  </Text>
+                  <Button
+                    size="micro"
+                    onClick={() => setCompanyPickerPage((page) => Math.min(totalCompanyPages, page + 1))}
+                    disabled={companyPickerPage >= totalCompanyPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
+            </BlockStack>
           </FormLayout>
         </Modal.Section>
       </Modal>

@@ -30,6 +30,10 @@ import {
   getQuoteUrl,
   type QuoteCartItem,
 } from "app/services/quote.server";
+import {
+  getDeliveryDetailsForRecord,
+  type DeliveryDetails,
+} from "app/services/delivery-details.server";
 import { getAdminForShop } from "app/shopify.server";
 import {
   assertNoShopifyUserErrors,
@@ -249,6 +253,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   ]);
 
   const notes = parseDraftNotes(draft.notes);
+  const deliveryDetails = await getDeliveryDetailsForRecord(draft);
   return Response.json({
     user: {
       firstName: user.firstName,
@@ -266,6 +271,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         ? `${getOrderNumber(draft)} was duplicated successfully from ${duplicatedFrom}.`
         : null,
     companyUsers,
+    deliveryDetails,
     draft: {
       id: draft.id,
       orderNumber: getOrderNumber(draft),
@@ -680,6 +686,7 @@ export default function DraftDetailsPage() {
   const actionData = useActionData<ActionResponse>();
   const navigation = useNavigation();
   const draft = data.draft;
+  const deliveryDetails = data.deliveryDetails as DeliveryDetails;
   const busy = navigation.state !== "idle";
   const pendingIntent = String(navigation.formData?.get("intent") || "");
   const submissionLock = useRef(false);
@@ -858,6 +865,8 @@ export default function DraftDetailsPage() {
                 </label>
               </div>
             </Card>
+
+            <DeliveryDetailsCard deliveryDetails={deliveryDetails} />
 
             <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
               <div style={styles.cardHeader}>
@@ -1260,6 +1269,49 @@ function Card({
   );
 }
 
+function DeliveryDetailsCard({
+  deliveryDetails,
+}: {
+  deliveryDetails: DeliveryDetails;
+}) {
+  return (
+    <Card title="Delivery Details">
+      <div className="draft-delivery-grid" style={styles.deliveryGrid}>
+        <div>
+          <span style={styles.metaLabel}>Location</span>
+          <strong style={styles.infoValue}>
+            {deliveryDetails.locationName || "Not captured"}
+          </strong>
+        </div>
+        <div>
+          <span style={styles.metaLabel}>
+            {deliveryDetails.source === "company_location"
+              ? "Location Address"
+              : "Delivery Address"}
+          </span>
+          {deliveryDetails.addressLines.length > 0 ? (
+            <address style={styles.addressText}>
+              {deliveryDetails.addressLines.map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+            </address>
+          ) : (
+            <p style={styles.muted}>
+              Delivery address was not captured for this draft.
+            </p>
+          )}
+        </div>
+        {deliveryDetails.phone && (
+          <div>
+            <span style={styles.metaLabel}>Phone</span>
+            <strong style={styles.infoValue}>{deliveryDetails.phone}</strong>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 const responsiveCss = `
   @keyframes draft-action-spin { to { transform: rotate(360deg); } }
   .draft-detail-grid { align-items: start; }
@@ -1268,7 +1320,7 @@ const responsiveCss = `
     .draft-detail-side { position: static !important; }
   }
   @media (max-width: 760px) {
-    .draft-info-grid, .draft-notes-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .draft-info-grid, .draft-notes-grid, .draft-delivery-grid { grid-template-columns: minmax(0, 1fr) !important; }
   }
 `;
 
@@ -1310,6 +1362,31 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: 14,
+  },
+  deliveryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 14,
+  },
+  metaLabel: {
+    display: "block",
+    marginBottom: 4,
+    color: "#6d7175",
+    fontSize: 12,
+  },
+  infoValue: {
+    color: "#202223",
+    fontSize: 13,
+  },
+  addressText: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    margin: 0,
+    color: "#202223",
+    fontSize: 13,
+    fontStyle: "normal",
+    lineHeight: 1.45,
   },
   notesGrid: {
     display: "grid",
