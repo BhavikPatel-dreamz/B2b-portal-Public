@@ -108,8 +108,8 @@ type SaveDraftResponse = {
   warning?: string;
 };
 
-const PRODUCT_PAGE_SIZE_OPTIONS = [12, 24, 48];
-const DEFAULT_PRODUCT_PAGE_SIZE = 12;
+const PRODUCT_PAGE_SIZE_OPTIONS = [10, 24, 48];
+const DEFAULT_PRODUCT_PAGE_SIZE = 10;
 
 const getProductPageSize = (value: string | null) => {
   const parsed = Number(value);

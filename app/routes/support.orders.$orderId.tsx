@@ -24,6 +24,7 @@ import {
   getOrderAccessWhere,
   getOrderNumber,
   getSalesOrderAccessLevel,
+  isSalesPortalPaymentLinkEligible,
   logOrderActivity,
   notifyOrderCreator,
 } from "app/services/sales-order-management.server";
@@ -550,15 +551,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     if (intent === "send_payment_link" || intent === "resend_payment_link") {
-      if (
-        order.source !== "Sales Portal" ||
-        order.paymentStatus !== "pending" ||
-        order.orderStatus === "cancelled"
-      )
+      if (!isSalesPortalPaymentLinkEligible(order))
         return Response.json(
           {
             error:
-              "Only pending Sales Portal orders can receive payment links.",
+              "Only pending Sales Portal or converted quote orders can receive payment links.",
           },
           { status: 400 },
         );
@@ -713,7 +710,9 @@ export default function OrderDetailsPage() {
   const order = data.order;
   const deliveryDetails = data.deliveryDetails as DeliveryDetails;
   const busy = navigation.state !== "idle";
-  const pendingIntent = String(navigation.formData?.get("intent") || "");
+  const navigationIntent = String(navigation.formData?.get("intent") || "");
+  const [pendingActionIntent, setPendingActionIntent] = useState("");
+  const activePendingIntent = navigationIntent || (busy ? pendingActionIntent : "");
   const submissionLock = useRef(false);
   const [notification, setNotification] = useState<{
     type: "success" | "error";
@@ -721,7 +720,10 @@ export default function OrderDetailsPage() {
   } | null>(data.successMessage ? { type: "success", message: data.successMessage } : null);
 
   useEffect(() => {
-    if (navigation.state === "idle") submissionLock.current = false;
+    if (navigation.state === "idle") {
+      submissionLock.current = false;
+      setPendingActionIntent("");
+    }
   }, [navigation.state]);
 
   useEffect(() => {
@@ -747,6 +749,9 @@ export default function OrderDetailsPage() {
       return false;
     }
     submissionLock.current = true;
+    setPendingActionIntent(
+      String(new FormData(event.currentTarget).get("intent") || ""),
+    );
     setNotification(null);
     return true;
   };
@@ -763,6 +768,7 @@ export default function OrderDetailsPage() {
       hour: "2-digit",
       minute: "2-digit",
     }).format(new Date(value));
+  const canManagePaymentLink = isSalesPortalPaymentLinkEligible(order);
 
   return (
     <SalesPortalLayout
@@ -798,14 +804,14 @@ export default function OrderDetailsPage() {
               intent="duplicate_order"
               label="Duplicate"
               disabled={busy}
-              pending={pendingIntent === "duplicate_order"}
+              pending={activePendingIntent === "duplicate_order"}
               onSubmit={guardSubmission}
             />
             <Action
               intent="reorder"
               label="Reorder"
               disabled={busy}
-              pending={pendingIntent === "reorder"}
+              pending={activePendingIntent === "reorder"}
               onSubmit={guardSubmission}
             />
             <button
@@ -1028,9 +1034,7 @@ export default function OrderDetailsPage() {
             <Row label="Balance" value={money(order.remainingBalance)} />
           </Card>
 
-          {order.source === "Sales Portal" &&
-          order.paymentStatus === "pending" &&
-          order.orderStatus !== "cancelled" ? (
+          {canManagePaymentLink ? (
             <Card title="Payment Link">
               {order.paymentLink &&
               !order.paymentLinkToken &&
@@ -1059,7 +1063,7 @@ export default function OrderDetailsPage() {
                       intent="send_payment_link"
                       label="Send Email"
                       disabled={busy || !order.customerEmail}
-                      pending={pendingIntent === "send_payment_link"}
+                      pending={activePendingIntent === "send_payment_link"}
                       onSubmit={guardSubmission}
                       primary
                     />
@@ -1067,7 +1071,7 @@ export default function OrderDetailsPage() {
                       intent="resend_payment_link"
                       label="Resend Link"
                       disabled={busy || !order.customerEmail}
-                      pending={pendingIntent === "resend_payment_link"}
+                      pending={activePendingIntent === "resend_payment_link"}
                       onSubmit={guardSubmission}
                     />
                   </div>
@@ -1077,7 +1081,7 @@ export default function OrderDetailsPage() {
                   intent="generate_payment_link"
                   label="Generate Payment Link"
                   disabled={busy}
-                  pending={pendingIntent === "generate_payment_link"}
+                  pending={activePendingIntent === "generate_payment_link"}
                   onSubmit={guardSubmission}
                   primary
                 />
@@ -1101,7 +1105,7 @@ export default function OrderDetailsPage() {
                 intent="cancel_order"
                 label="Cancel Order"
                 disabled={busy || order.orderStatus === "cancelled"}
-                pending={pendingIntent === "cancel_order"}
+                pending={activePendingIntent === "cancel_order"}
                 onSubmit={guardSubmission}
                 danger
               />
@@ -1158,11 +1162,11 @@ export default function OrderDetailsPage() {
                 </label>
                 <button
                   disabled={busy}
-                  aria-busy={pendingIntent === "update_status"}
+                  aria-busy={activePendingIntent === "update_status"}
                   style={disabledButtonStyle(styles.primaryButton, busy)}
                 >
-                  {pendingIntent === "update_status" && <Spinner />}
-                  {pendingIntent === "update_status" ? "Updating Status..." : "Update Status"}
+                  {activePendingIntent === "update_status" && <Spinner />}
+                  {activePendingIntent === "update_status" ? "Updating Status..." : "Update Status"}
                 </button>
               </Form>
               <Form
@@ -1178,11 +1182,11 @@ export default function OrderDetailsPage() {
                 <input type="hidden" name="intent" value="delete_order" />
                 <button
                   disabled={busy}
-                  aria-busy={pendingIntent === "delete_order"}
+                  aria-busy={activePendingIntent === "delete_order"}
                   style={disabledButtonStyle(styles.dangerButton, busy)}
                 >
-                  {pendingIntent === "delete_order" && <Spinner dark />}
-                  {pendingIntent === "delete_order" ? "Deleting Order..." : "Delete Order"}
+                  {activePendingIntent === "delete_order" && <Spinner dark />}
+                  {activePendingIntent === "delete_order" ? "Deleting Order..." : "Delete Order"}
                 </button>
               </Form>
             </Card>

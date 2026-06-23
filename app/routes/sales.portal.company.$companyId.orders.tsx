@@ -24,6 +24,7 @@ import {
 import {
   getOrCreateSalesOrderPaymentLink,
   getShopifyOrderWhere,
+  isSalesPortalPaymentLinkEligible,
   logOrderActivity,
 } from "app/services/sales-order-management.server";
 
@@ -483,9 +484,7 @@ export default function OrderManageScreen() {
                     order.orderStatus !== "shipped" &&
                     order.orderStatus !== "delivered";
                   const canGeneratePaymentLink =
-                    order.source === "Sales Portal" &&
-                    order.paymentStatus.toLowerCase() === "pending" &&
-                    order.orderStatus.toLowerCase() !== "cancelled";
+                    isSalesPortalPaymentLinkEligible(order);
 
                   return (
                     <tr key={order.id} style={styles.tr}>
