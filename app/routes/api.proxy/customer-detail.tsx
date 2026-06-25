@@ -31,7 +31,14 @@ type CustomerDetailPayload = {
 // ─── LOADER ────────────────────────────────────────────────────────────────────
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204 });
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
   }
 
   try {
