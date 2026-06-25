@@ -28,6 +28,9 @@ import {
   logOrderActivity,
 } from "app/services/sales-order-management.server";
 
+// ⚠️ NOTE: isSalesPortalPaymentLinkEligible is only called inside loader/action
+// (server-only exports). It must NOT be called in the component body.
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
@@ -105,6 +108,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       orderTotal: o.orderTotal?.toString() || "0",
       remainingBalance: o.remainingBalance?.toString() || "0",
       createdAt: o.createdAt.toISOString(),
+      canGeneratePaymentLink: isSalesPortalPaymentLinkEligible(o),
     })),
     quoteCount,
     allCompanies: user.salesCompanies.map((sc) => ({
@@ -347,6 +351,7 @@ export default function OrderManageScreen() {
       source: string | null;
       paymentLink: string | null;
       paymentLinkToken: string | null;
+      canGeneratePaymentLink: boolean;
       createdByUser: {
         firstName: string | null;
         lastName: string | null;
@@ -483,8 +488,7 @@ export default function OrderManageScreen() {
                   const canDelete =
                     order.orderStatus !== "shipped" &&
                     order.orderStatus !== "delivered";
-                  const canGeneratePaymentLink =
-                    isSalesPortalPaymentLinkEligible(order);
+                  const { canGeneratePaymentLink } = order;
 
                   return (
                     <tr key={order.id} style={styles.tr}>

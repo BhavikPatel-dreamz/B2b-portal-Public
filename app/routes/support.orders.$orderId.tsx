@@ -22,12 +22,14 @@ import {
   getOrCreateSalesOrderPaymentLink,
   getAccessibleOrder,
   getOrderAccessWhere,
-  getOrderNumber,
-  getSalesOrderAccessLevel,
-  isSalesPortalPaymentLinkEligible,
   logOrderActivity,
   notifyOrderCreator,
 } from "app/services/sales-order-management.server";
+import {
+  getOrderNumber,
+  getSalesOrderAccessLevel,
+  isSalesPortalPaymentLinkEligible,
+} from "app/services/sales-order-management.shared";
 import { sendOrderPaymentLinkEmail } from "app/utils/email";
 
 type ActionResponse = {
