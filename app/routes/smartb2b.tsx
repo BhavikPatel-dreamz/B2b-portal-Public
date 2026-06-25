@@ -17,11 +17,11 @@ function FrontendLandingPage({ customerId, shop }) {
     <div style={styles.index}>
       <div id="shopify-company-app-root"></div>
 
-      <link rel="stylesheet" href="https://smartb2b.dynamicdreamz.com/embed.css"/>
+      <link rel="stylesheet" href="https://b2-b-portal-front.vercel.app/embed.css"/>
 
       <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
       <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-      <script type="module" src="https://smartb2b.dynamicdreamz.com/embed.js"></script>
+      <script type="module" src="https://b2-b-portal-front.vercel.app/embed.js"></script>
       <script src="https://unpkg.com/@shopify/app-bridge-react/umd/index.umd.production.min.js"></script>
 
       <script
