@@ -4,6 +4,33 @@ import { useState, useEffect } from "react";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
 
+type SalesDashboardFilters = {
+  filterAgent: string;
+  filterPaymentStatus: string;
+  filterOrderStatus: string;
+  filterCompany: string;
+  filterDateFrom: string;
+  filterDateTo: string;
+};
+
+type SalesDashboardLoaderData = {
+  items: Array<any>;
+  metrics: {
+    totalOrders: number;
+    totalQuotes: number;
+    pendingOrders: number;
+    pendingQuotes: number;
+    totalRevenue: number;
+  };
+  salesUsers: Array<{ id: string; firstName: string; lastName: string; email: string }>;
+  companies: Array<{ id: string; name: string }>;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  activeTab: string;
+  filters: SalesDashboardFilters;
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const store = await prisma.store.findUnique({
@@ -149,7 +176,7 @@ export default function SalesDashboard() {
   const {
     items, metrics, salesUsers, companies,
     totalCount, currentPage, totalPages, activeTab, filters,
-  } = useLoaderData<typeof loader>();
+  } = useLoaderData<typeof loader>() as SalesDashboardLoaderData;
   const [searchParams, setSearchParams] = useSearchParams();
 
   const setFilter = (key: string, value: string) => {
@@ -374,7 +401,7 @@ export default function SalesDashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>Order ID</th>
+                    <th style={thStyle}>Order Name</th>
                     <th style={thStyle}>Company</th>
                     <th style={thStyle}>Sales Agent</th>
                     <th style={thStyle}>Total</th>
@@ -388,9 +415,10 @@ export default function SalesDashboard() {
                     <tr key={item.id} style={trStyle}>
                       <td style={tdStyle}>
                         <strong style={{ color: "#2c6ecb" }}>
-                          {item.shopifyOrderId
-                            ? `#${item.shopifyOrderId.split("/").pop()}`
-                            : item.id.slice(0, 8)}
+                          {item.orderNumber ||
+                            (item.orderNumber
+                              ? `#${item.orderNumber.split("/").pop()}`
+                              : item.orderNumber.slice(0, 8))}
                         </strong>
                       </td>
                       <td style={tdStyle}>{item.company.name}</td>
