@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { FREE_PLAN, PAID_PLAN } from "../billing-plans.shared";
+import { FREE_PLAN, PAID_PLAN, PLAN_99 } from "../billing-plans.shared";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { registerCartValidationFunction } from "./cartValidationRegistration.server";
 
@@ -131,7 +131,7 @@ export function getStorePlanValue(subscriptionName?: string | null) {
     return "free";
   }
 
-  if (subscriptionName === PAID_PLAN) {
+  if (subscriptionName === PAID_PLAN || subscriptionName === PLAN_99) {
     return "approved payment";
   }
 
@@ -315,8 +315,10 @@ export async function syncStoreSubscriptionState(
     appSubscriptions.find((subscription) => subscription.status === "ACTIVE") ||
     null;
 
-  const plan = getStorePlanValue(activeSubscription?.name);
-  const isPaid = plan === "approved payment";
+  // For Shopify's Paid subscription, we need to check if it's Plan 99 or regular paid
+  // Store the subscription name directly to preserve tier information
+  const plan = activeSubscription?.name ? activeSubscription.name : "free";
+  const isPaid = plan === PAID_PLAN || plan === PLAN_99;
 
   const store = await prisma.store.findUnique({
     where: { shopDomain },
@@ -370,7 +372,8 @@ export async function syncStoreSubscriptionStateFast(
     appSubscriptions.find((subscription) => subscription.status === "ACTIVE") ||
     null;
 
-  const plan = getStorePlanValue(activeSubscription?.name);
+  // Store the subscription name directly to preserve tier information (PAID_PLAN vs PLAN_99)
+  const plan = activeSubscription?.name ? activeSubscription.name : "free";
 
   const updatedStore = await prisma.store.updateMany({
     where: { shopDomain },

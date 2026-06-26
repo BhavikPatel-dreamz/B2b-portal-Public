@@ -6,6 +6,7 @@ import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
 import { APP_BILLING_PLANS, getIsTestBilling } from "app/utils/billing.server";
+import { PLAN_99 } from "app/billing-plans.shared";
 import {
   syncStoreSubscriptionState,
   getStorePlanValue,
@@ -27,20 +28,22 @@ function requiresPlan(pathname: string) {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, redirect, session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: session.shop },
+    select: { plan: true, planKey: true },
+  });
+  let showSalesLinks = store?.plan === PLAN_99;
 
   if (requiresPlan(url.pathname)) {
-    const store = await prisma.store.findUnique({
-      where: { shopDomain: session.shop },
-      select: { plan: true, planKey: true },
-    });
-
     const billingState = await billing.check({
-      plans: APP_BILLING_PLANS,
+      plans: APP_BILLING_PLANS as any,
       isTest: getIsTestBilling(),
     });
 
     const activeSubscription = billingState.appSubscriptions?.find((s) => s.status === "ACTIVE");
     const currentPlan = getStorePlanValue(activeSubscription?.name);
+    const currentPlanName = activeSubscription?.name ?? store?.plan ?? "free";
+    showSalesLinks = currentPlanName === PLAN_99;
 
     if (billingState.hasActivePayment) {
       // Only sync if plan changed or wasn"t previously synced
@@ -74,11 +77,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", showSalesLinks };
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  const { apiKey, showSalesLinks } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
@@ -91,8 +94,8 @@ export default function App() {
           <s-link href="/app/registration-form">Registrations Form</s-link>
           <s-link href="/app/settings">Settings</s-link>
           <s-link href="/app/notifications">Email Template</s-link>
-          <s-link href="/app/sales-users">Sales Users</s-link>
-          <s-link href="/app/sales-dashboard">Sales Dashboard</s-link>
+          {showSalesLinks && <s-link href="/app/sales-users">Sales Users</s-link>}
+          {showSalesLinks && <s-link href="/app/sales-dashboard">Sales Dashboard</s-link>}
           <s-link href="/app/select-plan">Select Plan</s-link>
           {/* <s-link href="/support/test">test</s-link> */}
         </s-app-nav>

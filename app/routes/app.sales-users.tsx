@@ -231,18 +231,29 @@ export default function SalesUsers() {
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [companySearch, setCompanySearch] = useState("");
   const [companyPickerPage, setCompanyPickerPage] = useState(1);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const toggleModal = useCallback(() => setIsModalOpen((open) => !open), []);
+  const toggleModal = useCallback(() => {
+    setIsModalOpen((open) => !open);
+    if (isModalOpen) {
+      setErrorMessage("");
+    }
+  }, [isModalOpen]);
 
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data?.success && fetcher.data?.intent === "create") {
-      setIsModalOpen(false);
-      setFirstName("");
-      setLastName("");
-      setEmail("");
-      setSelectedCompanyIds([]);
-      setCompanySearch("");
-      setCompanyPickerPage(1);
+    if (fetcher.state === "idle" && fetcher.data) {
+      if (fetcher.data?.success && fetcher.data?.intent === "create") {
+        setIsModalOpen(false);
+        setFirstName("");
+        setLastName("");
+        setEmail("");
+        setSelectedCompanyIds([]);
+        setCompanySearch("");
+        setCompanyPickerPage(1);
+        setErrorMessage("");
+      } else if (fetcher.data?.error) {
+        setErrorMessage(fetcher.data.error);
+      }
     }
   }, [fetcher.state, fetcher.data]);
 
@@ -251,6 +262,25 @@ export default function SalesUsers() {
   }, [companySearch]);
 
   const handleCreate = () => {
+    // Validate required fields
+    if (!email.trim()) {
+      setErrorMessage("Email is required");
+      return;
+    }
+    if (!firstName.trim()) {
+      setErrorMessage("First name is required");
+      return;
+    }
+    if (!lastName.trim()) {
+      setErrorMessage("Last name is required");
+      return;
+    }
+    if (selectedCompanyIds.length === 0) {
+      setErrorMessage("Please select at least one company");
+      return;
+    }
+
+    setErrorMessage(""); // Clear any previous errors
     const formData = new FormData();
     formData.append("intent", "create");
     formData.append("email", email);
@@ -577,6 +607,35 @@ export default function SalesUsers() {
         ]}
       >
         <Modal.Section>
+          {errorMessage && (
+            <div
+              style={{
+                padding: "12px 16px",
+                marginBottom: "16px",
+                borderRadius: "6px",
+                backgroundColor: "#fef2f2",
+                border: "1px solid #fecaca",
+                color: "#dc2626",
+                fontSize: "14px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <svg
+                viewBox="0 0 20 20"
+                style={{ width: "18px", height: "18px", flexShrink: 0 }}
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0V5.75A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {errorMessage}
+            </div>
+          )}
           <FormLayout>
             <TextField
               label="First Name"

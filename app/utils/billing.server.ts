@@ -1,7 +1,7 @@
-import { PAID_PLAN } from "app/billing-plans.shared";
+import { PAID_PLAN, PLAN_99 } from "app/billing-plans.shared";
 
 export function getIsTestBilling() {
-  return process.env.SHOPIFY_BILLING_TEST == "true";
+  return process.env.SHOPIFY_BILLING_TEST == "false";
 }
 
-export const APP_BILLING_PLANS = [PAID_PLAN];
+export const APP_BILLING_PLANS: string[] = [PAID_PLAN, PLAN_99];

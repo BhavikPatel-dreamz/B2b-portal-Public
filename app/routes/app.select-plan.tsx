@@ -10,7 +10,7 @@ import {
   Link,
  LoaderFunctionArgs } from "react-router";
 import { useEffect, useMemo } from "react";
-import { FREE_PLAN, PAID_PLAN } from "app/billing-plans.shared";
+import { FREE_PLAN, PAID_PLAN, PLAN_99 } from "app/billing-plans.shared";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   setStoreFreePlan,
@@ -134,8 +134,9 @@ const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
     return { ...result, returnTo };
   }
 
-  const { hasActivePayment, appSubscriptions } = await billing.check({
-    plans: [PAID_PLAN],
+  const billingAny = billing as any;
+  const { hasActivePayment, appSubscriptions } = await billingAny.check({
+    plans: [PAID_PLAN, PLAN_99] as any,
     isTest,
   });
 
@@ -157,8 +158,9 @@ const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
       (s) => s.status === "ACTIVE",
     );
 
+    // Compare stored plan with active subscription name (now we store the name directly, not converted)
     if (
-      store.plan !== getStorePlanValue(activeSubscription?.name) ||
+      store.plan !== activeSubscription?.name ||
       store.planKey !== activeSubscription?.id
     ) {
       await syncStoreSubscriptionState(shop, appSubscriptions || [], admin);
@@ -188,12 +190,32 @@ const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { authenticate } = await import("../shopify.server");
   const { billing, session, admin } = await authenticate.admin(request);
+  const billingAny = billing as any;
   const formData = await request.formData();
   console.log("FormData:", formData);
-  const plan = formData.get("plan");
+  const plan = String(formData.get("plan") || "") as any;
   const returnToRaw = String(formData.get("returnTo") || "/app");
   console.log("Return to raw:", returnToRaw);
-  const returnTo = returnToRaw === "/app" || returnToRaw.startsWith("/app/") ? returnToRaw : "/app";
+
+  const normalizeReturnTo = (value: string) => {
+    try {
+      const url = new URL(value, "https://example.com");
+      const path = url.pathname;
+      if (path === "/app" || path.startsWith("/app/")) {
+        return path;
+      }
+    } catch (error) {
+      console.warn("Invalid returnTo value", value, error);
+    }
+    return "/app";
+  };
+
+  let returnTo = normalizeReturnTo(returnToRaw);
+  if (returnTo.length > 100) {
+    console.warn("returnTo path too long, falling back to /app", returnTo);
+    returnTo = "/app";
+  }
+
   const requestUrl = new URL(request.url);
   console.log("Running action for select-plan route111", requestUrl);
 
@@ -202,13 +224,13 @@ const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
 
 
   try {
-    if (plan !== FREE_PLAN && plan !== PAID_PLAN) {
+    if (plan !== FREE_PLAN && plan !== PAID_PLAN && plan !== PLAN_99) {
       return { ok: false, message: "Invalid plan" };
     }
 
     if (plan === FREE_PLAN) {
-      const billingCheck = await billing.check({
-        plans: [PAID_PLAN],
+      const billingCheck = await billingAny.check({
+        plans: [PAID_PLAN, PLAN_99] as any,
         isTest,
       });
 
@@ -235,15 +257,27 @@ const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
     const shopName = session.shop.split(".")[0];
     const appHandle = "b2b-portal-public-dev";
    // Change your returnUrl to pass through select-plan first
-    const returnUrl = `https://admin.shopify.com/store/${shopName}/apps/${appHandle}/app/?charge_id_pending=1&returnTo=${encodeURIComponent(returnTo)}`;
 
-    console.log("Requesting billing for plan", returnUrl, "isTest:", isTest);
-    await billing.request({
-      plan,
+    // Use the plan as-is (PLAN_99 is now configured in billing settings)
+    const billingPlan = plan;
+    let billingReturnUrl = `https://admin.shopify.com/store/${shopName}/apps/${appHandle}/app/?charge_id_pending=1&returnTo=${encodeURIComponent(returnTo)}`;
+    const maxReturnUrlLength = 255;
+    if (billingReturnUrl.length > maxReturnUrlLength) {
+      console.warn("Full billing returnUrl too long, using admin app root fallback");
+      billingReturnUrl = `https://admin.shopify.com/store/${shopName}/apps/${appHandle}/app/?charge_id_pending=1`;
+    }
+    console.log("Requesting billing for plan", billingPlan, "returnUrl:", billingReturnUrl, "isTest:", isTest);
+    const billingResponse = await billingAny.request({
+      plan: billingPlan as any,
       isTest,
-      returnUrl: returnUrl,
+      returnUrl: billingReturnUrl,
     });
-    console.log("Billing request sent");
+    console.log("Billing request sent", billingResponse);
+    if (billingResponse instanceof Response) {
+      clearSelectPlanCache(session.shop);
+      clearDashboardStatsCache(session.shop);
+      return billingResponse;
+    }
   } catch (err) {
     if (err instanceof Response) {
       clearSelectPlanCache(session.shop); 
@@ -286,6 +320,10 @@ export default function SelectPlan() {
     () => ({ amount: 49, currency: "USD", label: "$49 / month" }),
     [],
   );
+  const plan99Price = useMemo(
+    () => ({ amount: 99, currency: "USD", label: "$99 / month" }),
+    [],
+  );
 
   const selectedPriceLabel = useMemo(() => {
     if (activePlanName === FREE_PLAN) {
@@ -296,16 +334,27 @@ export default function SelectPlan() {
       return paidPrice.label;
     }
 
+    if (activePlanName === PLAN_99) {
+      return plan99Price.label;
+    }
+
     return null;
-  }, [activePlanName, freePrice.label, paidPrice.label]);
+  }, [activePlanName, freePrice.label, paidPrice.label, plan99Price.label]);
 
   const hasShopifySubscription = activePlans.some(
-    (plan) => plan.status === "ACTIVE",
+    (plan: { status: string; }) => plan.status === "ACTIVE",
   );
   const submittingPlan = navigation.formData?.get("plan");
   const isSubmitting = navigation.state !== "idle";
   const isCancelling = cancelFetcher.state !== "idle";
   const cancelResult = cancelFetcher.data;
+
+  const submittingPlanLabel = useMemo(() => {
+    if (submittingPlan === FREE_PLAN) return { name: "Free Plan", price: freePrice.label };
+    if (submittingPlan === PAID_PLAN) return { name: "Plus Plan ($49/month)", price: paidPrice.label };
+    if (submittingPlan === PLAN_99) return { name: "Plan 99 - Sales Portal Plan ($99/month)", price: plan99Price.label };
+    return null;
+  }, [submittingPlan, freePrice.label, paidPrice.label, plan99Price.label]);
 
   useEffect(() => {
     if (cancelFetcher.state === "idle" && cancelFetcher.data) {
@@ -426,6 +475,52 @@ export default function SelectPlan() {
         </p>
       </div>
       <div style={contentPanelStyle}>
+        {isSubmitting && submittingPlanLabel && (
+          <div
+            style={{
+              background: "#e3f2fd",
+              border: "2px solid #2c6ecb",
+              borderRadius: 16,
+              boxShadow: "0 2px 8px rgba(44, 110, 203, 0.15)",
+              padding: "20px 24px",
+              marginBottom: "20px",
+              display: "flex",
+              alignItems: "center",
+              gap: "16px",
+            }}
+          >
+            <svg
+              style={{ width: "24px", height: "24px", color: "#2c6ecb", flexShrink: 0 }}
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: "0 0 4px", fontSize: "16px", fontWeight: 700, color: "#1976d2" }}>
+                Subscribing to {submittingPlanLabel.name}
+              </p>
+              <p style={{ margin: 0, fontSize: "14px", color: "#1565c0" }}>
+                Redirecting to payment confirmation...
+              </p>
+            </div>
+            <svg
+              style={{
+                width: "20px",
+                height: "20px",
+                color: "#2c6ecb",
+                animation: "spin 1s linear infinite",
+                flexShrink: 0,
+              }}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="10" strokeWidth="2" strokeDasharray="15.7" strokeDashoffset="0" />
+            </svg>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
        <div
           style={{
             background: "#ffffff",
@@ -692,7 +787,7 @@ export default function SelectPlan() {
                       lineHeight: 1.65,
                     }}
                   >
-                    <li>All app feature</li>
+                    <li>All app features</li>
                     <li>Credit Management</li>
                     <li>Unlimited Orders</li>
                     <li>Unlimited Companies</li>
@@ -729,6 +824,133 @@ export default function SelectPlan() {
                     {isSubmitting && submittingPlan === PAID_PLAN
                       ? "Loading..."
                       : activePlanName === PAID_PLAN
+                        ? "Current plan"
+                        : "Subscribe"}
+                  </button>
+                </Form>
+              </div>
+            </div>
+
+            <div style={pricingCardStyle}>
+              <div style={pricingCardBodyStyle}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                  }}
+                >
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: "15px",
+                      fontWeight: 600,
+                      color: "#5c5f62",
+                    }}
+                  >
+                  Pro Plan
+                  </p>
+                  <span
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      background: "#f3eff7",
+                      color: "#6f42c1",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Best for B2B sales
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "12px",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "40px",
+                      lineHeight: 0.95,
+                      fontWeight: 700,
+                      color: "#111827",
+                    }}
+                  >
+                    $99
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "16px",
+                      color: "#6b7280",
+                      marginBottom: "5px",
+                    }}
+                  >
+                    / month
+                  </span>
+                </div>
+                <div style={{ marginTop: "42px" }}>
+                  <h3
+                    style={{
+                      margin: "0 0 12px",
+                      fontSize: "16px",
+                      fontWeight: 700,
+                      color: "#111827",
+                    }}
+                  >
+                    Features
+                  </h3>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: "22px",
+                      color: "#5c5f62",
+                      fontSize: "14px",
+                      lineHeight: 1.65,
+                    }}
+                  >
+                    <li>Sales Portal access</li>
+                    <li>Unlimited Companies</li>
+                    <li>Unlimited Orders</li>
+                    <li>Premium support</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div style={pricingCardFooterStyle}>
+                <span
+                  style={{
+                    fontSize: "13px",
+                    color: activePlanName === PLAN_99 ? "#6f42c1" : "#5c5f62",
+                    fontWeight: 600,
+                  }}
+                >
+                  Sales Portal access
+                </span>
+                <Form method="post">
+                  <input type="hidden" name="returnTo" value={returnTo} />
+                  <input type="hidden" name="plan" value={PLAN_99} />
+                  <button
+                    type="submit"
+                    disabled={activePlanName === PLAN_99 || isSubmitting}
+                    style={{
+                      ...subscriptionButtonStyle,
+                      background:
+                        activePlanName === PLAN_99 || isSubmitting
+                          ? "#d1d1db"
+                          : "#111827",
+                      color: "#ffffff",
+                      fontSize: "14px",
+                    }}
+                  >
+                    {isSubmitting && submittingPlan === PLAN_99
+                      ? "Loading..."
+                      : activePlanName === PLAN_99
                         ? "Current plan"
                         : "Subscribe"}
                   </button>

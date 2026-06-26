@@ -10,17 +10,15 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import type { Session } from "@shopify/shopify-api";
 import { Prisma } from "@prisma/client";
 import prisma from "./db.server";
-import {
-  PAID_PLAN,
-  USAGE_PLAN,
-} from "./billing-plans.shared";
+import { PAID_PLAN, PLAN_99 } from "./billing-plans.shared";
 import { upsertStore } from "./services/store.server";
 import { sendAppWelcomeEmail } from "./utils/email";
-import { registerCartValidationFunction, debugListAllShopifyFunctions, unregisterAllCartValidations } from "./services/cartValidationRegistration.server";
 import {
-  DEFAULT_CONFIG,
-  serializeConfig,
-} from "./utils/form-config.shared";
+  registerCartValidationFunction,
+  debugListAllShopifyFunctions,
+  unregisterAllCartValidations,
+} from "./services/cartValidationRegistration.server";
+import { DEFAULT_CONFIG, serializeConfig } from "./utils/form-config.shared";
 
 type AdminGraphQLClient = {
   graphql: (
@@ -31,7 +29,9 @@ type AdminGraphQLClient = {
   ) => Promise<Response>;
 };
 
-class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> {
+class PrismaSessionStorageWithStore extends PrismaSessionStorage<
+  typeof prisma
+> {
   // Upsert store record whenever Shopify saves a session (install or token refresh)
   async storeSession(session: Session) {
     const saved = await super.storeSession(session);
@@ -44,7 +44,7 @@ class PrismaSessionStorageWithStore extends PrismaSessionStorage<typeof prisma> 
       // but we can try to fetch the shop info if we have the accessToken.
       // However, to keep it simple and reliable, we mostly rely on afterAuth for the initial setup
       // and SHOP_UPDATE webhooks for ongoing changes.
-      
+
       await upsertStore({
         shopDomain: session.shop,
         accessToken: session.accessToken,
@@ -77,14 +77,12 @@ const shopify = shopifyApp({
         },
       ],
     },
-    [USAGE_PLAN]: {
+    [PLAN_99]: {
       lineItems: [
         {
-          amount: 5,
+          amount: 99,
           currencyCode: "USD",
-          interval: BillingInterval.Usage,
-          terms: "Usage based",
-      
+          interval: BillingInterval.Every30Days,
         },
       ],
     },
@@ -111,7 +109,7 @@ const shopify = shopifyApp({
               email
               contactEmail
             }
-          }`
+          }`,
         );
         const shopData = await response.json();
         const shop = shopData?.data?.shop;
@@ -119,16 +117,19 @@ const shopify = shopifyApp({
 
         const existingStore = await prisma.store.findUnique({
           where: { shopDomain: session.shop },
-          select: { id: true, contactEmail: true }
+          select: { id: true, contactEmail: true },
         });
 
         const storeContactEmail = shop?.contactEmail || shop?.email;
 
         let storeOwnerName: string | null = null;
         try {
-          const shopRes = await fetch(`https://${session.shop}/admin/api/2026-01/shop.json`, {
-            headers: { "X-Shopify-Access-Token": session.accessToken ?? "" },
-          });
+          const shopRes = await fetch(
+            `https://${session.shop}/admin/api/2026-01/shop.json`,
+            {
+              headers: { "X-Shopify-Access-Token": session.accessToken ?? "" },
+            },
+          );
           const shopJson = await shopRes.json();
           storeOwnerName = shopJson?.shop?.shop_owner?.trim() || null;
         } catch (e) {
@@ -147,14 +148,20 @@ const shopify = shopifyApp({
 
         // Send welcome email if this is a new store or contact email was previously missing
         if (!existingStore || !existingStore.contactEmail) {
-          console.log(`📧 Triggering welcome email to ${storeContactEmail} for ${session.shop}...`);
+          console.log(
+            `📧 Triggering welcome email to ${storeContactEmail} for ${session.shop}...`,
+          );
           // Pass the email directly to avoid race conditions with uninstalls
-          sendAppWelcomeEmail(store.id, storeContactEmail || undefined).catch((err) => {
-            console.error(`❌ Background welcome email failed for ${session.shop}:`, err);
-          });
+          sendAppWelcomeEmail(store.id, storeContactEmail || undefined).catch(
+            (err) => {
+              console.error(
+                `❌ Background welcome email failed for ${session.shop}:`,
+                err,
+              );
+            },
+          );
         }
 
-      
         const defaultStoredConfig = serializeConfig(DEFAULT_CONFIG);
 
         await prisma.formFieldConfig.upsert({
@@ -169,12 +176,15 @@ const shopify = shopifyApp({
         // Set validation state metafield
         const storeRecord = await prisma.store.findUnique({
           where: { shopDomain: session.shop },
-          select: { plan: true }
+          select: { plan: true },
         });
         const isPaidPlan = storeRecord?.plan === "approved payment";
 
-        console.log(`🏷️ Setting validation state metafield for ${session.shop} (isPaid: ${isPaidPlan})`);
-        await admin.graphql(`
+        console.log(
+          `🏷️ Setting validation state metafield for ${session.shop} (isPaid: ${isPaidPlan})`,
+        );
+        await admin.graphql(
+          `
           mutation SetMetafield($metafields: [MetafieldsSetInput!]!) {
             metafieldsSet(metafields: $metafields) {
               metafields {
@@ -188,40 +198,46 @@ const shopify = shopifyApp({
               }
             }
           }
-        `, {
-          variables: {
-            metafields: [
-              {
-                namespace: "smartb2b",
-                key: "validation_enabled",
-                type: "single_line_text_field",
-                value: isPaidPlan ? "true" : "false",
-                ownerId: shop.id
-              },
-              {
-                namespace: "smartb2b",
-                key: "block_orders_when_credit_unavailable",
-                type: "single_line_text_field",
-                value: "false",
-                ownerId: shop.id
-              }
-            ]
-          }
-        });
+        `,
+          {
+            variables: {
+              metafields: [
+                {
+                  namespace: "smartb2b",
+                  key: "validation_enabled",
+                  type: "single_line_text_field",
+                  value: isPaidPlan ? "true" : "false",
+                  ownerId: shop.id,
+                },
+                {
+                  namespace: "smartb2b",
+                  key: "block_orders_when_credit_unavailable",
+                  type: "single_line_text_field",
+                  value: "false",
+                  ownerId: shop.id,
+                },
+              ],
+            },
+          },
+        );
 
         console.log(`✅ Store bootstrap completed for ${session.shop}`);
       } catch (error) {
         console.error("❌ Error during store bootstrap:", error);
       }
 
-      console.log(`ℹ️ Webhook registration is managed by shopify.app.toml for ${session.shop}`);
+      console.log(
+        `ℹ️ Webhook registration is managed by shopify.app.toml for ${session.shop}`,
+      );
 
       // First, debug what functions are available
       try {
         console.log("🔍 Running debug function listing...");
         const debugResult = await debugListAllShopifyFunctions(admin);
         if (debugResult.success) {
-          console.log(`✅ Debug listing completed - found ${debugResult.totalFunctions} total functions`);
+          console.log(
+            `✅ Debug listing completed - found ${debugResult.totalFunctions} total functions`,
+          );
         } else {
           console.warn(`⚠️ Debug listing failed: ${debugResult.error}`);
         }
@@ -233,23 +249,32 @@ const shopify = shopifyApp({
       try {
         const storeRecord = await prisma.store.findUnique({
           where: { shopDomain: session.shop },
-          select: { plan: true }
+          select: { plan: true },
         });
 
         if (storeRecord?.plan === "approved payment") {
-          console.log(`🚀 Registering cart validation for paid store ${session.shop}...`);
+          console.log(
+            `🚀 Registering cart validation for paid store ${session.shop}...`,
+          );
           const result = await registerCartValidationFunction(admin);
           console.log("Cart validation registration result:", result);
           if (result.success) {
             console.log(`✅ Post-install setup completed: ${result.message}`);
           } else {
-            console.warn(`⚠️ Post-install setup warning: ${result.message || result.error}`);
+            console.warn(
+              `⚠️ Post-install setup warning: ${result.message || result.error}`,
+            );
             if ("debug" in result && result.debug) {
-              console.log("🐛 Debug info:", JSON.stringify(result.debug, null, 2));
+              console.log(
+                "🐛 Debug info:",
+                JSON.stringify(result.debug, null, 2),
+              );
             }
           }
         } else {
-          console.log(`ℹ️ Ensuring cart validation is unregistered for ${storeRecord?.plan || "free"} store ${session.shop}...`);
+          console.log(
+            `ℹ️ Ensuring cart validation is unregistered for ${storeRecord?.plan || "free"} store ${session.shop}...`,
+          );
           await unregisterAllCartValidations(admin);
         }
       } catch (error) {
@@ -317,22 +342,27 @@ function createAdminGraphQLClient(
         variables?: Record<string, unknown>;
       },
     ) => {
-      return fetch(`https://${shop}/admin/api/${ApiVersion.January26}/graphql.json`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
+      return fetch(
+        `https://${shop}/admin/api/${ApiVersion.January26}/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query,
+            variables: options?.variables ?? {},
+          }),
         },
-        body: JSON.stringify({
-          query,
-          variables: options?.variables ?? {},
-        }),
-      });
+      );
     },
   };
 }
 
-export async function getAdminForShop(shop: string): Promise<AdminGraphQLClient> {
+export async function getAdminForShop(
+  shop: string,
+): Promise<AdminGraphQLClient> {
   const store = await prisma.store.findUnique({
     where: { shopDomain: shop },
     select: { accessToken: true },
