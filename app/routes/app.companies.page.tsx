@@ -122,6 +122,7 @@ export default function CompaniesPage() {
   const revalidator = useRevalidator();
   const navigate = useNavigate();
   const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
+  const syncToastShownRef = useRef(false);
   const registrationsFetcher = useFetcher<RegistrationsLoaderData>();
 
   // Controlled search input
@@ -438,9 +439,18 @@ export default function CompaniesPage() {
     }
   }, [navigation.state]);
 
+  // Reset toast flag when a new sync starts
+  useEffect(() => {
+    if (syncFetcher.state !== "idle") {
+      syncToastShownRef.current = false;
+    }
+  }, [syncFetcher.state]);
+
   // Handle sync companies response
   useEffect(() => {
-    if (syncFetcher.state !== "idle" || !syncFetcher.data) return;
+    if (syncFetcher.state !== "idle" || !syncFetcher.data || syncToastShownRef.current) return;
+
+    syncToastShownRef.current = true;
 
     const data = syncFetcher.data as ActionResponse & { syncedCount?: number };
 
