@@ -1,0 +1,284 @@
+import { describe, it, expect } from "vitest";
+import { cartValidationsGenerateRun } from "../src/cart_validations_generate_run.js";
+
+
+describe("Cart Validation Function", () => {
+  const atCheckout = {
+    buyerJourney: {
+      step: "CHECKOUT_INTERACTION",
+    },
+    shop: {
+      validationEnabled: { value: "true" },
+      blockOrdersWhenCreditUnavailable: { value: "true" },
+    },
+  };
+
+  describe("Credit validation", () => {
+    it("should allow cart when sufficient credit is available", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "50.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "100.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      expect(result.operations).toHaveLength(0);
+    });
+
+    it("should block cart when insufficient credit", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "200.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "900.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain(
+        "This order exceeds your company's available credit",
+      );
+    });
+
+    it("should block cart when credit limit is reached", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "50.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "1000.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("Company credit limit has been reached");
+    });
+
+    it("should work with non-B2B customers (no purchasing company)", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "50.00" }
+          },
+          buyerIdentity: {
+            customer: {
+              id: "gid://shopify/Customer/123"
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      expect(result.operations).toHaveLength(0);
+    });
+  });
+
+  describe("User and Company Credit validation", () => {
+    it("should allow orders with sufficient company credit", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [
+            { quantity: 1 },
+            { quantity: 2 }
+          ],
+          cost: {
+            totalAmount: { amount: "50.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "100.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      expect(result.operations).toHaveLength(0);
+    });
+
+    it("should block cart when company credit metafield is missing", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "100.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: null,
+                creditUsed: { value: "100.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("Unable to validate company credit");
+    });
+
+    it("should block cart when user-level credit is insufficient", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "120.00" }
+          },
+          buyerIdentity: {
+            customer: {
+              userCreditLimit: { value: "200.00" },
+              userCreditUsed: { value: "100.00" }
+            },
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "100.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("Insufficient user credit");
+      expect(errors[0].message).toContain("Available credit: $100.00");
+      expect(errors[0].message).toContain("Cart total: $120.00");
+    });
+  });
+
+  describe("Credit limit scenarios", () => {
+    it("should not block when store-level credit blocking is off", () => {
+      const input = {
+        ...atCheckout,
+        shop: {
+          validationEnabled: { value: "true" },
+          blockOrdersWhenCreditUnavailable: { value: "false" },
+        },
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "200.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "900.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      expect(result.operations).toHaveLength(0);
+    });
+
+    it("should block orders when credit is insufficient", () => {
+      const input = {
+        ...atCheckout,
+        cart: {
+          lines: [
+            { quantity: 1 },
+            { quantity: 3 }
+          ],
+          cost: {
+            totalAmount: { amount: "200.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "900.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      const errors = result.operations[0].validationAdd.errors;
+      expect(errors).toHaveLength(1);
+      expect(
+        errors.some((e) =>
+          e.message.includes(
+            "This order exceeds your company's available credit",
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    it("should not block during cart interaction", () => {
+      const input = {
+        buyerJourney: {
+          step: "CART_INTERACTION",
+        },
+        cart: {
+          lines: [{ quantity: 1 }],
+          cost: {
+            totalAmount: { amount: "200.00" }
+          },
+          buyerIdentity: {
+            purchasingCompany: {
+              company: {
+                creditLimit: { value: "1000.00" },
+                creditUsed: { value: "900.00" }
+              }
+            }
+          }
+        }
+      };
+
+      const result = cartValidationsGenerateRun(input);
+      expect(result.operations).toHaveLength(0);
+    });
+  });
+});
