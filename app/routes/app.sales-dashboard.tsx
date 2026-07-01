@@ -1,3 +1,4 @@
+import { Button, Text } from "@shopify/polaris";
 import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams, Link } from "react-router";
 import { useState, useEffect } from "react";
@@ -29,6 +30,7 @@ type SalesDashboardLoaderData = {
   totalPages: number;
   activeTab: string;
   filters: SalesDashboardFilters;
+  appUrl: string;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -52,7 +54,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const page = parseInt(url.searchParams.get("page") || "1", 10);
   const limit = 15;
   const skip = (page - 1) * limit;
-
+  const appUrl = process.env.SHOPIFY_APP_URL || "";
   // Get all sales users for filter dropdown
   const salesUsers = await prisma.user.findMany({
     where: { shopId: store.id, role: "SALES_USER" },
@@ -168,6 +170,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     currentPage: page,
     totalPages,
     activeTab,
+    appUrl,
     filters: { filterAgent, filterPaymentStatus, filterOrderStatus, filterCompany, filterDateFrom, filterDateTo },
   });
 };
@@ -175,7 +178,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function SalesDashboard() {
   const {
     items, metrics, salesUsers, companies,
-    totalCount, currentPage, totalPages, activeTab, filters,
+    totalCount, currentPage, totalPages, activeTab, filters, appUrl,
   } = useLoaderData<typeof loader>() as SalesDashboardLoaderData;
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -239,6 +242,7 @@ export default function SalesDashboard() {
   const hasActiveFilters = filters.filterAgent || filters.filterPaymentStatus ||
     filters.filterOrderStatus || filters.filterCompany || filters.filterDateFrom || filters.filterDateTo;
 
+      const portalLoginUrl = `${appUrl}/sales/login`;
   return (
     <div style={pageShellStyle}>
       <div style={pageHeroStyle}>
@@ -254,8 +258,30 @@ export default function SalesDashboard() {
         </p>
       </div>
 
+
       <div style={contentPanelStyle}>
         {/* Metrics Cards */}
+
+         <div style={{
+                  marginBottom: "16px",
+                  padding: "14px 18px",
+                  borderRadius: "12px",
+                  backgroundColor: "#fff0f4",
+                  border: "1px solid #f8d7e3",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  flexWrap: "wrap" as const,
+                }}>
+                  <div>
+                    <Text variant="bodyMd" fontWeight="semibold" as="span">Sales Portal Login: </Text>
+                    <Text variant="bodyMd" as="span">{portalLoginUrl}</Text>
+                  </div>
+                  <Button size="micro" onClick={() => navigator.clipboard.writeText(portalLoginUrl)}>
+                    Copy URL
+                  </Button>
+          </div>
         <div style={metricsGridStyle}>
           <div style={metricCardStyle}>
             <div style={{ ...metricIconStyle, backgroundColor: "#e0f2fe" }}>📦</div>

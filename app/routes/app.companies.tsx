@@ -410,8 +410,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         Number(entry._sum.remainingBalance ?? 0),
       ]),
     );
-    const paymentTermsNameMap = new Map(
-      paymentTermsTemplates.map((template) => [template.id, template.name]),
+    const paymentTermsNameMap = new Map<string, string>(
+      paymentTermsTemplates.map((template: { id: string; name: string }) => [template.id, template.name]),
     );
 
     const companiesWithCredit = companies.map((company) => {

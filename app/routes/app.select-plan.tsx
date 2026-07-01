@@ -216,8 +216,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     returnTo = "/app";
   }
 
-  const requestUrl = new URL(request.url);
-  console.log("Running action for select-plan route111", requestUrl);
 
   // eslint-disable-next-line no-undef
 const isTest = process.env.SHOPIFY_BILLING_TEST === "true";

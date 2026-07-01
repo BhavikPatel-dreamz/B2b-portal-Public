@@ -64,20 +64,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw new Response("Store not found", { status: 404 });
   }
 
-  const salesUsers = await prisma.user.findMany({
-    where: { shopId: store.id, role: "SALES_USER" },
-    include: {
-      invitation: true,
-      salesCompanies: { include: { company: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  const companies = await prisma.companyAccount.findMany({
-    where: { shopId: store.id },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  });
+  const [salesUsers, companies] = await Promise.all([
+    prisma.user.findMany({
+      where: { shopId: store.id, role: "SALES_USER" },
+      include: {
+        invitation: true,
+        salesCompanies: { include: { company: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.companyAccount.findMany({
+      where: { shopId: store.id },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   return Response.json({ salesUsers, companies, storeId: store.id, appUrl: process.env.SHOPIFY_APP_URL });
 };

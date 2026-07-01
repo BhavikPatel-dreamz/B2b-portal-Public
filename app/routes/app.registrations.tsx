@@ -431,7 +431,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
   }
 
-  const [pendingSubmissions, approvedSubmissions, rejectedSubmissions, companies] =
+  const [pendingSubmissions, approvedSubmissions, rejectedSubmissions, companies, formFieldConfig] =
     await Promise.all([
       prisma.registrationSubmission.findMany({
         where: { shopId: store.id, status: "PENDING", shopifyCustomerId: { not: null } },
@@ -449,6 +449,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: { shopId: store.id },
         orderBy: { name: "asc" },
       }),
+      prisma.formFieldConfig.findUnique({
+        where: { shopId: store.id },
+      }),
     ]);
 
   const submissions = [
@@ -464,10 +467,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return { ...c, locationId: loc.locationId, locationName: loc.locationName };
     }),
   );
-
-  const formFieldConfig = await prisma.formFieldConfig.findUnique({
-    where: { shopId: store.id },
-  });
 
   let formConfig = DEFAULT_CONFIG;
   if (formFieldConfig?.fields) {
