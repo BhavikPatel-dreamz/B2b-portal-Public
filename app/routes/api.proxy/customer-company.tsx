@@ -62,7 +62,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       creditUsagePercentage: companyInfo.creditUsagePercentage,
 
       // Plan status
-      plan: store.plan === "approved payment",
+      plan: store.plan !== "free",
       allowQuickOrderForUser: store.allowQuickOrderForUser,
 
       // ✅ New stats

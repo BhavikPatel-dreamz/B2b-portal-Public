@@ -884,6 +884,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Fetch credit transactions for the company with related metadata
   const creditTransactions = await getCreditTransactionsByCompany(companyId, {
     take: 5,
+    shop: session.shop,
+    accessToken: store.accessToken,
   });
 
   return Response.json({
@@ -927,11 +929,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           typeof tx.creditAmount === "object" && tx.creditAmount?.toNumber
             ? tx.creditAmount.toNumber()
             : (tx.creditAmount as number),
-        orderName: tx.orderId
-          ? `Order ${tx.orderId}`
-          : tx.shopifyOrderId
-            ? `Order ${tx.shopifyOrderId}`
-            : "—",
+        orderName: tx.orderName || tx.orderId || tx.shopifyOrderId || "—",
         createdAt: tx.createdAt.toISOString(),
         createdBy:
           tx.createdByName ||
@@ -1937,8 +1935,10 @@ export default function CompanyDashboard() {
                           textAlign: "right",
                           fontSize: 13,
                           fontWeight: 600,
+                          color: tx.amount < 0 ? "#d32f2f" : "#2e7d32",
                         }}
                       >
+                        {tx.amount < 0 ? "−" : "+"} {" "}
                         {formatCurrency(Math.abs(tx.amount), data.currencyCode)}
                       </td>
                       <td style={{ padding: 12, fontSize: 13 }}>

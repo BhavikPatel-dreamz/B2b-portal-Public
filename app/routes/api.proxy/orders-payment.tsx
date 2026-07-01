@@ -152,7 +152,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const creditTransaction = await tx.creditTransaction.create({
           data: {
             companyId: order.companyId,
-            orderId: order.id,
+            orderId: order.shopifyOrderId || order.id,
             transactionType: "payment_received",
             creditAmount: paymentAmountDecimal, // Positive amount
             previousBalance,

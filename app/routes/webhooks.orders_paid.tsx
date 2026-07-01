@@ -3,6 +3,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getStoreByDomain } from "../services/store.server";
 import prisma from "app/db.server";
+import { Decimal } from "@prisma/client/runtime/library";
 
 // Handle Shopify ORDERS_PAID webhook
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -36,12 +37,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const orderGid = `gid://shopify/Order/${orderIdNum}`;
 
-    // Find our B2B order
+    // Find our B2B order by Shopify order ID (any source)
     const order = await prisma.b2BOrder.findFirst({
       where: {
         shopId: store.id,
         shopifyOrderId: orderGid,
-        source: "Sales Portal",
+      },
+      select: {
+        id: true,
+        shopifyOrderId: true,
+        companyId: true,
+        orderTotal: true,
+        remainingBalance: true,
+        paidAmount: true,
+        paidAt: true,
+        creditUsed: true,
+        userCreditUsed: true,
+        paymentStatus: true,
+        orderStatus: true,
+        currencyCode: true,
+        customerEmail: true,
+        createdByUserId: true,
       },
     });
     if (!order) {
@@ -92,13 +108,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response();
     }
 
+    // Compute credit restoration amount BEFORE the transaction
+    const restoredAmount = order.remainingBalance.greaterThan(0)
+      ? new Decimal(order.remainingBalance)
+      : new Decimal(0);
+
+    // Get current available credit to record in the transaction log
+    const { calculateAvailableCredit } = await import("../services/creditService");
+    const creditBefore = await calculateAvailableCredit(order.companyId);
+    const previousAvailable = creditBefore?.availableCredit || new Decimal(0);
+    const newAvailable = previousAvailable.plus(restoredAmount);
+
     const paidAt = new Date();
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.b2BOrder.updateMany({
         where: {
           id: order.id,
-          source: "Sales Portal",
-          paymentStatus: "pending",
+          paymentStatus: { in: ["pending", "partial"] },
           orderStatus: { not: "cancelled" },
         },
         data: {
@@ -110,6 +136,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
       if (result.count === 0) return false;
+
+      // Record credit restoration if credit was previously deducted
+      if (restoredAmount.greaterThan(0)) {
+        await tx.creditTransaction.create({
+          data: {
+            companyId: order.companyId,
+            orderId: order.shopifyOrderId || order.id,
+            transactionType: "payment_received",
+            creditAmount: restoredAmount,
+            previousBalance: previousAvailable,
+            newBalance: newAvailable,
+            notes: `Payment received via Shopify - order fully paid. Amount restored: ${restoredAmount}`,
+            createdBy: order.createdByUserId || "system",
+          },
+        });
+      }
 
       await tx.orderPayment.create({
         data: {
@@ -137,12 +179,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return true;
     });
 
-    console.log(`Sales Portal payment confirmation processed`, {
+    console.log(`Payment confirmation processed`, {
       b2bOrderId: order.id,
       shopifyOrderId: orderGid,
       orderNumber,
       companyId: order.companyId,
       previousPaymentStatus: order.paymentStatus,
+      creditRestored: restoredAmount.toNumber(),
       updated,
     });
 

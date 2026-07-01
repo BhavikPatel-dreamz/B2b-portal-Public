@@ -11,7 +11,7 @@ import { calculateAvailableCredit } from "app/services/creditService";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const startTime = Date.now();
   try {
-    const { companyId, store } = await authenticateApiProxyWithPermissions(request);
+    const { companyId, store, shop } = await authenticateApiProxyWithPermissions(request);
 
     if (!store.accessToken) {
       return Response.json({ error: "Store access token not available" }, { status: 500 });
@@ -45,6 +45,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       getCreditTransactionsByCompany(companyAccountId, {
         take: limit,
         skip,
+        shop,
+        accessToken: store.accessToken,
       }),
       calculateAvailableCredit(companyAccountId),
       prisma.creditTransaction.aggregate({

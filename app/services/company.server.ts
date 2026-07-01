@@ -266,6 +266,8 @@ export async function getCreditTransactionsByCompany(
     orderBy?: Prisma.CreditTransactionOrderByWithRelationInput;
     take?: number;
     skip?: number;
+    shop?: string;
+    accessToken?: string;
   },
 ) {
   const where: Prisma.CreditTransactionWhereInput = { companyId };
@@ -306,7 +308,7 @@ export async function getCreditTransactionsByCompany(
               { shopifyOrderId: { in: orderIds } },
             ],
           },
-          select: { id: true, shopifyOrderId: true },
+          select: { id: true, shopifyOrderId: true, orderNumber: true },
         })
       : Promise.resolve([]),
   ]);
@@ -323,12 +325,71 @@ export async function getCreditTransactionsByCompany(
 
   // ── Map orderId/shopifyOrderId → shopifyOrderId ──────────────
   const orderMap = new Map();
+  const orderNameMap = new Map<string, string | null>();
+
+  // Start with local orderNumber as fallback
   orders.forEach((o) => {
+    if (o.id) orderNameMap.set(o.id, o.orderNumber);
     if (o.shopifyOrderId) {
+      orderNameMap.set(o.shopifyOrderId, o.orderNumber);
       orderMap.set(o.id, o.shopifyOrderId);
       orderMap.set(o.shopifyOrderId, o.shopifyOrderId);
     }
   });
+
+  // ── Fetch Shopify order names via GraphQL ────────────────────
+  if (options?.shop && options?.accessToken) {
+    const shopifyOrderGids = [
+      ...new Set(
+        orders
+          .map((o) => o.shopifyOrderId)
+          .filter((id): id is string => !!id && id.startsWith("gid://shopify/Order/")),
+      ),
+    ];
+
+    if (shopifyOrderGids.length > 0) {
+      try {
+        const nodesQuery = `
+          query GetOrderNames($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on Order {
+                id
+                name
+              }
+            }
+          }
+        `;
+
+        const response = await fetch(
+          `https://${options.shop}/admin/api/2025-01/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": options.accessToken,
+            },
+            body: JSON.stringify({
+              query: nodesQuery,
+              variables: { ids: shopifyOrderGids },
+            }),
+          },
+        );
+
+        const data = await response.json();
+
+        if (!data.errors && data.data?.nodes) {
+          for (const node of data.data.nodes) {
+            if (node?.id && node?.name) {
+              // Override the local orderNumber with the Shopify name (e.g. "#1000")
+              orderNameMap.set(node.id, node.name);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch order names from Shopify:", err);
+      }
+    }
+  }
 
   // ── Attach metadata to each transaction ─────────────────────
   return creditTransactions.map((tx) => {
@@ -336,7 +397,8 @@ export async function getCreditTransactionsByCompany(
     const finalOrderId = shopifyOrderId || tx.orderId;
     return {
       ...tx,
-      orderId: finalOrderId, // Update orderId to be the Shopify ID if we found one
+      orderId: finalOrderId,
+      orderName: tx.orderId ? (orderNameMap.get(tx.orderId) ?? finalOrderId) : null,
       createdByName: tx.createdBy ? (userMap.get(tx.createdBy) ?? null) : null,
       shopifyOrderId: finalOrderId,
     };

@@ -881,24 +881,15 @@ export const syncShopifyOrders = async (
           continue;
         }
 
-        // Shopify status is informational here. Do not let background sync
-        // change Sales Portal payment/order status; manual actions own status.
         const paymentStatus = "pending";
         const orderStatus = "payment_pending";
 
-        const isCreditOrder = true;
-        const creditUsed =  totalAmount 
-        const remainingBalance = totalAmount;
-        const paidAmount = new Decimal(0);
-
-        const syncedOrder = await prisma.b2BOrder.upsert({
+        await prisma.b2BOrder.upsert({
           where: {
             shopifyOrderId: order.id,
           },
           update: {
             orderTotal: totalAmount,
-            creditUsed,
-            remainingBalance,
             updatedAt: new Date(),
           },
           create: {
@@ -907,78 +898,15 @@ export const syncShopifyOrders = async (
             shopId: store.id,
             createdByUserId,
             orderTotal: totalAmount,
-            creditUsed,
+            creditUsed: new Decimal(0),
             userCreditUsed: new Decimal(0),
             paymentStatus,
             orderStatus,
-            remainingBalance,
-            paidAmount,
+            remainingBalance: new Decimal(0),
+            paidAmount: new Decimal(0),
             createdAt: order.createdAt ? new Date(order.createdAt) : new Date(),
           },
         });
-
-        if (isCreditOrder) {
-          const [company, creditTotals, existingTransaction] =
-            await Promise.all([
-              prisma.companyAccount.findUnique({
-                where: { id: localCompanyId },
-                select: { creditLimit: true },
-              }),
-              prisma.b2BOrder.aggregate({
-                where: {
-                  companyId: localCompanyId,
-                  id: { not: syncedOrder.id },
-                  paymentStatus: { in: ["pending", "partial"] },
-                  orderStatus: { notIn: ["cancelled", "converted", "archived"] },
-                },
-                _sum: {
-                  remainingBalance: true,
-                },
-              }),
-              prisma.creditTransaction.findFirst({
-                where: {
-                  companyId: localCompanyId,
-                  orderId: syncedOrder.id,
-                  transactionType: { in: ["order_created", "order_updated"] },
-                },
-              }),
-            ]);
-
-          const previousBalance = new Decimal(company?.creditLimit ?? 0).minus(
-            new Decimal(creditTotals._sum.remainingBalance ?? 0),
-          );
-          const newBalance = previousBalance.minus(creditUsed);
-          const transactionData = {
-            userId: createdByUserId,
-            creditAmount: creditUsed.negated(),
-            previousBalance,
-            newBalance,
-            notes: existingTransaction
-              ? `Credit synced for Shopify order ${order.name ?? order.id}`
-              : `Credit deducted for Shopify order ${order.name ?? order.id}`,
-            createdBy: createdByUserId,
-            createdAt: new Date(),
-          };
-
-          if (existingTransaction) {
-            await prisma.creditTransaction.update({
-              where: { id: existingTransaction.id },
-              data: {
-                ...transactionData,
-                transactionType: "order_updated",
-              },
-            });
-          } else {
-            await prisma.creditTransaction.create({
-              data: {
-                companyId: localCompanyId,
-                orderId: syncedOrder.id,
-                transactionType: "order_created",
-                ...transactionData,
-              },
-            });
-          }
-        }
 
         syncedCount++;
       } catch (orderError) {
