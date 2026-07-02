@@ -8,15 +8,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const formData = await request.formData();
-    const firstName = (formData.get("firstName") as string)?.trim();
-    const lastName = (formData.get("lastName") as string)?.trim();
+    const name = (formData.get("name") as string)?.trim();
     const email = (formData.get("email") as string)?.trim();
     const countryCode = (formData.get("countryCode") as string)?.trim() || "";
     const phoneInput = (formData.get("phone") as string)?.trim() || "";
     const phone = phoneInput ? `${countryCode} ${phoneInput}` : "N/A";
     const comment = (formData.get("comment") as string)?.trim();
 
-    if (!firstName || !lastName || !email || !comment) {
+    if (!name || !email || !comment) {
       return Response.json(
         { success: false, message: "All fields are required." },
         { status: 400 },
@@ -30,12 +29,12 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const subject = `Support Request from ${firstName} ${lastName}`;
+    const subject = `Support Request from ${name}`;
     const html = `
       <table width="100%" cellpadding="8" style="font-family: Arial, sans-serif; color: #303030;">
         <tr>
           <td style="font-weight: 600; color: #6b7280; width: 120px;">Name:</td>
-          <td>${firstName} ${lastName}</td>
+          <td>${name}</td>
         </tr>
         <tr>
           <td style="font-weight: 600; color: #6b7280;">Email:</td>
@@ -51,7 +50,7 @@ export async function action({ request }: ActionFunctionArgs) {
         </tr>
       </table>
     `;
-    const text = `Name: ${firstName} ${lastName}\nEmail: ${email}\nPhone: ${phone}\nComment: ${comment}`;
+    const text = `Name: ${name}\nEmail: ${email}\nPhone: ${phone}\nComment: ${comment}`;
 
     const toEmail = process.env.SMTP_FROM_EMAIL || "support@dreamzapps.com";
     

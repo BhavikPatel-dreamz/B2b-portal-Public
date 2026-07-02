@@ -204,8 +204,7 @@ const styles: Record<string, React.CSSProperties> = {
 };
 
 interface SupportFormData {
-  firstName: string;
-  lastName: string;
+  name: string;
   email: string;
   countryCode?: string;
   phone?: string;
@@ -552,40 +551,21 @@ export default function SupportForm() {
                   action="/api/support-form"
                 >
                   <div style={styles.fieldGroup}>
-                    <label style={styles.label} htmlFor="sf-firstName">
-                      First Name<span style={styles.required}>*</span>
+                    <label style={styles.label} htmlFor="sf-name">
+                      Name<span style={styles.required}>*</span>
                     </label>
                     <input
-                      id="sf-firstName"
-                      name="firstName"
+                      id="sf-name"
+                      name="name"
                       type="text"
                       required
                       style={{
                         ...styles.input,
-                        borderColor: focusedField === "firstName" ? "#007FEF" : "#d1d5db",
+                        borderColor: focusedField === "name" ? "#007FEF" : "#d1d5db",
                       }}
-                      onFocus={() => setFocusedField("firstName")}
+                      onFocus={() => setFocusedField("name")}
                       onBlur={() => setFocusedField(null)}
-                      placeholder="John"
-                    />
-                  </div>
-
-                  <div style={styles.fieldGroup}>
-                    <label style={styles.label} htmlFor="sf-lastName">
-                      Last Name<span style={styles.required}>*</span>
-                    </label>
-                    <input
-                      id="sf-lastName"
-                      name="lastName"
-                      type="text"
-                      required
-                      style={{
-                        ...styles.input,
-                        borderColor: focusedField === "lastName" ? "#007FEF" : "#d1d5db",
-                      }}
-                      onFocus={() => setFocusedField("lastName")}
-                      onBlur={() => setFocusedField(null)}
-                      placeholder="Doe"
+                      placeholder="John Doe"
                     />
                   </div>
 
