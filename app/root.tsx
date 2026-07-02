@@ -1,5 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import polarisStylesUrl from "@shopify/polaris/build/esm/styles.css?url";
+import SupportForm from "app/components/SupportForm";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStylesUrl }];
 
@@ -24,7 +25,7 @@ export default function App() {
         <Outlet />
         <ScrollRestoration />
         <Scripts />
-        <script src="https://cdn.jotfor.ms/agent/embedjs/019ecfaeeeb57d26b7268d5a50ec2091d903/embed.js" defer></script>
+        <SupportForm />
       </body>
     </html>
   );

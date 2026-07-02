@@ -163,6 +163,9 @@ export default [
     "routes/quote.$quoteId.$secureToken.tsx",
   ),
 
+  // Support form API
+  route("api/support-form", "routes/api.support-form.tsx"),
+
   // Index route
   index("routes/_index/route.tsx"),
 ] satisfies RouteConfig;
