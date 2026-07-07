@@ -987,7 +987,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Headers": "Content-Type, Accept",
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Max-Age": "86400",
       },
@@ -1032,7 +1032,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Headers": "Content-Type, Accept",
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Max-Age": "86400",
       },
