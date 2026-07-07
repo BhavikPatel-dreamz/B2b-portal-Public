@@ -1,6 +1,7 @@
 import { ActionFunctionArgs, LoaderFunction } from "react-router";
 import { getProxyParams } from "app/utils/proxy.server";
 import { authenticate } from "app/shopify.server";
+import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
 import {
   sendCustomerRegistrationApprovalEmail,
   sendRegistrationEmailForAdmin,
@@ -994,7 +995,23 @@ export const loader: LoaderFunction = async ({ request }) => {
     });
   }
 
-  const { shop, loggedInCustomerId: shopifyCustomerId } = getProxyParams(request);
+  // 1. Try Shopify App Proxy params
+  const proxyParams = getProxyParams(request);
+  let shop = proxyParams.shop;
+  let shopifyCustomerId = proxyParams.loggedInCustomerId;
+
+  // 2. Fallback: Customer Account Session auth (direct requests from extensions)
+  if (!shop) {
+    try {
+      const session = await authenticateCustomerAccountSession(request, {
+        requireCustomer: false,
+      });
+      shop = session.shop;
+      shopifyCustomerId = session.customerId || shopifyCustomerId;
+    } catch (e) {
+      console.warn("⚠️ [Registration Loader] Customer Account Session auth failed:", e);
+    }
+  }
 
   if (!shop) {
     return Response.json({ success: false, error: "Store identification failed." }, { status: 400 });
@@ -1040,14 +1057,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   let authenticatedShop: string | null = null;
-  const authenticatedCustomerId: string | null = null;
+  let authenticatedCustomerId: string | null = null;
 
+  // 1. Try Shopify App Proxy auth (requests through Shopify proxy)
   try {
     const { session } = await authenticate.public.appProxy(request);
     authenticatedShop = session.shop;
-    // Note: session for App Proxy might contain more info depending on Shopify version
   } catch (e) {
-    console.warn("⚠️ [Registration] App Proxy authentication failed or skipped:", e);
+    console.warn("⚠️ [Registration] App Proxy auth failed, trying Customer Account Session:", e);
+  }
+
+  // 2. Fallback: Customer Account Session auth (direct requests from extensions with Bearer token)
+  if (!authenticatedShop) {
+    try {
+      const { shop, customerId } = await authenticateCustomerAccountSession(request, {
+        requireCustomer: false,
+      });
+      authenticatedShop = shop;
+      authenticatedCustomerId = customerId || null;
+    } catch (e) {
+      console.warn("⚠️ [Registration] Customer Account Session auth also failed:", e);
+    }
   }
 
   try {
@@ -1096,6 +1126,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ✅ Session-based Email Fallback ("directly get")
     const loggedInCustomerId = 
+      authenticatedCustomerId ||
       url.searchParams.get("logged_in_customer_id") || 
       request.headers.get("x-shopify-customer-id") ||
       allFields.shopifyCustomerId || 
