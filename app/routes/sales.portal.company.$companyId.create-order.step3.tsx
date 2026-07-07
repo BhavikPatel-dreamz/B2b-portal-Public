@@ -39,6 +39,7 @@ import {
 } from "app/services/quote.server";
 import { sendPendingOrderPaymentRequestEmail } from "app/services/sales-order-management.server";
 import { getAdminForShop } from "app/shopify.server";
+import { canCreateOrder } from "app/services/creditService";
 import {
   assertNoShopifyUserErrors,
   retryLocalOrderSync,
@@ -47,6 +48,7 @@ import {
   verifyShopifyDraftOrder,
   verifyShopifyOrder,
 } from "app/services/shopify-order-creation.server";
+import { getThemePalette, type ThemePalette } from "app/utils/theme.server";
 
 type DraftOrderInput = {
   lineItems: SalesDraftLineItemInput[];
@@ -117,7 +119,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       where: { id: companyId },
       include: {
         shop: {
-          select: { shopName: true, shopDomain: true, accessToken: true },
+          select: {
+            shopName: true,
+            shopDomain: true,
+            accessToken: true,
+            blockOrderWhenCreditUnavailable: true,
+          },
         },
       },
     });
@@ -267,6 +274,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       shippingCost,
       taxRate,
     );
+    const shouldBlockOnCreditUnavailable =
+      company.shop.blockOrderWhenCreditUnavailable ?? false;
+    const validation = shouldBlockOnCreditUnavailable
+      ? await canCreateOrder(company.id, totals.total)
+      : { canCreate: true };
+    if (shouldBlockOnCreditUnavailable && !validation.canCreate) {
+      return Response.json(
+        {
+          error:
+            "Company credit limit has been reached. Please contact support to increase your credit limit.",
+        },
+        { status: 400 },
+      );
+    }
+
     const lineItems = buildSalesDraftLineItems(cartData, currencyCode);
     const taxLine = buildSalesDraftTaxLine(
       totals.estimatedTax,
@@ -660,7 +682,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     where: { id: companyId },
     include: {
       shop: {
-        select: { shopName: true, shopDomain: true, accessToken: true },
+        select: { shopName: true, shopDomain: true, accessToken: true, themeColor: true },
       },
     },
   });
@@ -787,6 +809,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       selectedLocation:
         companyLocations.find((location) => location.id === companyLocationId) ||
         null,
+      themeColor: company.shop.themeColor,
+      theme: getThemePalette(company.shop.themeColor),
     },
     selectedCustomer,
     user: {
@@ -803,6 +827,11 @@ export default function ReviewOrder() {
   const actionData = useActionData<ActionResponse>();
   const submit = useSubmit();
   const navigation = useNavigation();
+  
+  // Use theme palette from loader
+  const theme: ThemePalette = company.theme;
+  const styles = createStyles(theme);
+  
   const isQuoteMode = mode === "quote";
   const flowBase = isQuoteMode
     ? `/sales/portal/company/${company.id}/create-quote`
@@ -1385,7 +1414,7 @@ export default function ReviewOrder() {
                     }}
                   >
                     <span>Grand Total:</span>
-                    <span style={{ color: "#E91E63" }}>
+                    <span style={{ color: theme.accent }}>
                       {formatCurrency(grandTotal)}
                     </span>
                   </div>
@@ -1476,7 +1505,7 @@ export default function ReviewOrder() {
   );
 }
 
-const styles = {
+const createStyles = (theme: any) => ({
   container: {
     display: "flex",
     flexDirection: "column" as const,
@@ -1526,7 +1555,7 @@ const styles = {
     width: "32px",
     height: "32px",
     borderRadius: "50%",
-    backgroundColor: "#E91E63",
+    backgroundColor: theme.accent,
     color: "white",
     display: "flex",
     alignItems: "center",
@@ -1605,7 +1634,7 @@ const styles = {
     gap: "8px",
     width: "100%",
     height: "46px",
-    background: "linear-gradient(90deg, #E91E63 0%, #FF6B35 100%)",
+    background: `linear-gradient(90deg, ${theme.accent} 0%, ${theme.accentDark} 100%)`,
     color: "white",
     border: "none",
     borderRadius: "8px",
@@ -1665,4 +1694,4 @@ const styles = {
     fontSize: "18px",
     lineHeight: 1,
   },
-};
+});

@@ -107,7 +107,7 @@ model User {
   invitation        Invitation?
   salesCompanies    SalesUserCompany[]
 
-  @@unique([shopId, email])
+  @@unique([shopId, email, role])
   @@index([email])
   @@index([shopId])
   @@index([role])

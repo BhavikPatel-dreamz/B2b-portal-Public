@@ -180,7 +180,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       headers: {
         "Content-Type":
           exportType === "excel"
-            ? "application/vnd.ms-excel"
+            ? "application/vnd.ms-excel; charset=utf-8"
             : "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="sales-orders.${exportType === "excel" ? "xls" : "csv"}"`,
       },
@@ -194,6 +194,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!companies.length) return redirect("/sales/portal");
   const currentCompany =
     companies.find((item) => item.id === companyId) || companies[0];
+  const companyDetails = await prisma.companyAccount.findUnique({
+    where: { id: currentCompany.id },
+    select: { shop: { select: { themeColor: true } } },
+  });
+  const currentCompanyWithTheme = {
+    ...currentCompany,
+    themeColor: companyDetails?.shop.themeColor ?? null,
+  };
+
   const customers = Array.from(
     new Map(
       orders
@@ -215,7 +224,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       email: user.email,
     },
     accessLevel,
-    currentCompany,
+    currentCompany: currentCompanyWithTheme,
     companies,
     agents,
     customers,
@@ -425,6 +434,7 @@ export default function CentralOrderListPage() {
       activePage="orders"
       orderCount={data.summary.total}
       quoteCount={data.quoteCount}
+      themeColor={data.currentCompany.themeColor}
     >
       <SalesPortalHeader
         title="Orders"
@@ -564,12 +574,14 @@ export default function CentralOrderListPage() {
           <a
             href={`/sales/portal/orders?${params}&export=csv`}
             style={styles.exportButton}
+            download="sales-orders.csv"
           >
             Export CSV
           </a>
           <a
             href={`/sales/portal/orders?${params}&export=excel`}
             style={styles.exportButton}
+            download="sales-orders.xls"
           >
             Export Excel
           </a>
@@ -789,10 +801,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   filterButton: {
     height: 40,
-    border: 0,
+    border: "1px solid var(--sales-portal-accent)",
     borderRadius: 8,
-    background: "#111827",
-    color: "#fff",
+    background: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
     fontWeight: 600,
     cursor: "pointer",
   },
@@ -801,10 +813,14 @@ const styles: Record<string, React.CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "#6d7175",
+    color: "var(--sales-portal-accent)",
     textDecoration: "none",
     fontSize: 13,
     fontWeight: 600,
+    border: "1px solid var(--sales-portal-accent-tint)",
+    borderRadius: 8,
+    background: "var(--sales-portal-accent-lighter)",
+    padding: "0 12px",
   },
   toolbar: {
     display: "flex",
@@ -848,13 +864,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   secondaryText: { display: "block", color: "#8c9196", marginTop: 3 },
   orderLink: {
-    color: "#2c6ecb",
+    color: "var(--sales-portal-accent)",
     fontWeight: 700,
     textDecoration: "none",
     whiteSpace: "nowrap",
   },
   actionLink: {
-    color: "#2c6ecb",
+    color: "var(--sales-portal-accent)",
     fontWeight: 600,
     textDecoration: "none",
     whiteSpace: "nowrap",

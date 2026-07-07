@@ -18,6 +18,7 @@ import {
   salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
 import { getCreditSummary } from "app/services/creditService";
+import { getThemePalette, type ThemePalette } from "app/utils/theme.server";
 
 type ShopifyCompanyCustomer = {
   customerId?: string;
@@ -144,6 +145,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           accessToken: true,
           currencyCode: true,
           plan: true,
+          themeColor: true,
         },
       },
     },
@@ -360,6 +362,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       locations,
       catalogs,
       priceLists,
+      themeColor: company.shop.themeColor,
+      theme: getThemePalette(company.shop.themeColor),
     },
     user: {
       firstName: user.firstName,
@@ -392,6 +396,8 @@ export default function CreateOrderCustomerSelection() {
         priceList: { name: string; currency: string } | null;
       }>;
       priceLists: Array<{ name: string; currency: string }>;
+      themeColor?: string | null;
+      theme: ThemePalette;
     };
     user: {
       firstName: string | null;
@@ -400,6 +406,9 @@ export default function CreateOrderCustomerSelection() {
     };
     mode: "order" | "quote";
   }>();
+  
+  // Use theme palette from loader
+  const theme = company.theme;
   const [selectedLocationId, setSelectedLocationId] = useState(
     company.locations[0]?.id || "",
   );
@@ -595,11 +604,11 @@ export default function CreateOrderCustomerSelection() {
                           ...styles.adminListItem,
                           borderColor:
                             companyUser.id === selectedAdmin?.id
-                              ? "#f9a8d4"
+                              ? theme.accentTint
                               : "#e5e7eb",
                           backgroundColor:
                             companyUser.id === selectedAdmin?.id
-                              ? "#fdf4f7"
+                              ? theme.accentLighter
                               : "#ffffff",
                         }}
                       >
@@ -635,7 +644,7 @@ export default function CreateOrderCustomerSelection() {
                   to={buildStep2Url(
                     selectedAdmin.shopifyCustomerId || selectedAdmin.id,
                   )}
-                  style={styles.continueButton}
+                  style={{ ...styles.continueButton, backgroundColor: theme.accent }}
                 >
                   Continue with {selectedAdminName} →
                 </Link>
@@ -689,7 +698,7 @@ export default function CreateOrderCustomerSelection() {
                     {company.locations.length > 0 ? (
                       <div style={styles.tagList}>
                         {company.locations.map((location) => (
-                          <span key={location.id} style={styles.tag}>
+                          <span key={location.id} style={{ ...styles.tag, backgroundColor: theme.accentLighter, color: theme.accent, borderColor: theme.accentTint }}>
                             {location.name}
                           </span>
                         ))}
@@ -710,7 +719,7 @@ export default function CreateOrderCustomerSelection() {
                     {company.catalogs.length > 0 ? (
                       <div style={styles.tagList}>
                         {company.catalogs.map((cat) => (
-                          <span key={cat.id} style={styles.tag}>
+                          <span key={cat.id} style={{ ...styles.tag, backgroundColor: theme.accentLighter, color: theme.accent, borderColor: theme.accentTint }}>
                             {cat.title}
                           </span>
                         ))}
@@ -729,7 +738,7 @@ export default function CreateOrderCustomerSelection() {
                     {company.priceLists.length > 0 ? (
                       <div style={styles.tagList}>
                         {company.priceLists.map((pl) => (
-                          <span key={pl.name} style={styles.tag}>
+                          <span key={pl.name} style={{ ...styles.tag, backgroundColor: theme.accentLighter, color: theme.accent, borderColor: theme.accentTint }}>
                             {pl.name} ({pl.currency})
                           </span>
                         ))}
@@ -748,8 +757,8 @@ export default function CreateOrderCustomerSelection() {
 
         <style>{`
         button:hover:not(:disabled) {
-          border-color: #E91E63 !important;
-          background-color: #fff0f4 !important;
+          border-color: ${theme.accent} !important;
+          background-color: ${theme.accentLighter} !important;
         }
       `}</style>
       </div>
@@ -965,7 +974,6 @@ const styles = {
     marginTop: "20px",
     minHeight: "44px",
     borderRadius: "8px",
-    backgroundColor: "#E91E63",
     color: "#ffffff",
     textDecoration: "none",
     fontSize: "14px",
@@ -1117,13 +1125,11 @@ const styles = {
     gap: "8px",
   },
   tag: {
-    backgroundColor: "#fdf4f7",
-    color: "#be185d",
     padding: "4px 10px",
     borderRadius: "6px",
     fontSize: "12px",
     fontWeight: 500,
-    border: "1px solid #fbcfe8",
+    border: "1px solid",
   },
   emptyText: {
     fontSize: "13px",

@@ -80,15 +80,19 @@ export async function getUserById(id: string, shopId: string) {
 }
 
 /**
- * Get user by email within a specific shop
+ * Get user by email within a specific shop.
+ * Optionally scope by role when the same email can exist under multiple roles.
  */
-export async function getUserByEmail(email: string, shopId: string) {
-  return await prisma.user.findUnique({
+export async function getUserByEmail(
+  email: string,
+  shopId: string,
+  role?: UserRole,
+) {
+  return await prisma.user.findFirst({
     where: {
-      shopId_email: {
-        email,
-        shopId
-      }
+      email: email.trim().toLowerCase(),
+      shopId,
+      ...(role ? { role } : {}),
     },
     include: {
       shop: true,

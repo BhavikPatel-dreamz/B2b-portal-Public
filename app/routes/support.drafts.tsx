@@ -109,6 +109,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!companies.length) return redirect("/sales/portal");
   const currentCompany =
     companies.find((company) => company.id === companyId) || companies[0];
+  const companyDetails = await prisma.companyAccount.findUnique({
+    where: { id: currentCompany.id },
+    select: { shop: { select: { themeColor: true } } },
+  });
+  const currentCompanyWithTheme = {
+    ...currentCompany,
+    themeColor: companyDetails?.shop.themeColor ?? null,
+  };
 
   return Response.json({
     user: {
@@ -116,7 +124,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       lastName: user.lastName,
       email: user.email,
     },
-    currentCompany,
+    currentCompany: currentCompanyWithTheme,
     companies,
     counts: { drafts: draftCount, orders: orderCount, quotes: quoteCount },
     filters: { search, companyId },
@@ -292,6 +300,7 @@ export default function DraftListPage() {
       orderCount={data.counts.orders}
       draftCount={data.counts.drafts}
       quoteCount={data.counts.quotes}
+      themeColor={data.currentCompany.themeColor}
     >
       <SalesPortalHeader
         title="Drafts"
@@ -483,20 +492,20 @@ const styles: Record<string, React.CSSProperties> = {
   },
   filterButton: {
     minHeight: 40,
-    border: "1px solid #111827",
+    border: "1px solid var(--sales-portal-accent)",
     borderRadius: 8,
-    background: "#111827",
-    color: "#fff",
+    background: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
     padding: "0 16px",
     fontWeight: 600,
     cursor: "pointer",
   },
   clearButton: {
     minHeight: 40,
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: 8,
-    background: "#fff",
-    color: "#374151",
+    background: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent)",
     padding: "10px 16px",
     fontWeight: 600,
     textDecoration: "none",
@@ -528,7 +537,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: "#202223",
   },
-  draftLink: { color: "#2c6ecb", fontWeight: 700, textDecoration: "none" },
+  draftLink: {
+    color: "var(--sales-portal-accent)",
+    fontWeight: 700,
+    textDecoration: "none",
+  },
   secondaryText: {
     display: "block",
     color: "#6d7175",
@@ -542,7 +555,7 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap",
   },
   actionLink: {
-    color: "#2c6ecb",
+    color: "var(--sales-portal-accent)",
     textDecoration: "none",
     fontWeight: 600,
   },

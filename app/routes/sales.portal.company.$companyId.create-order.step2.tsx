@@ -43,6 +43,7 @@ import {
   ShopifyOrderCreationError,
   verifyShopifyDraftOrder,
 } from "app/services/shopify-order-creation.server";
+import { getThemePalette, type ThemePalette } from "app/utils/theme.server";
 
 type DraftCartItem = {
   variantId: string;
@@ -546,7 +547,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Fetch store's default tax rate
   const store = await prisma.store.findUnique({
     where: { id: company.shopId },
-    select: { defaultTaxRate: true },
+    select: { defaultTaxRate: true, themeColor: true },
   });
   const defaultTaxRate = store?.defaultTaxRate ? Number(store.defaultTaxRate) : 8;
 
@@ -915,6 +916,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       locations: companyLocations,
       companyContactId: companyContactId,
       defaultTaxRate: defaultTaxRate,
+      themeColor: store?.themeColor,
+      theme: getThemePalette(store?.themeColor),
     },
     selectedCustomer,
     products,
@@ -948,6 +951,10 @@ export default function CreateOrderProductCatalog() {
   const navigation = useNavigation();
   const draftFetcher = useFetcher<SaveDraftResponse>();
   const [, setUrlParams] = useSearchParams();
+  
+  // Use theme palette from loader
+  const theme: ThemePalette = company.theme;
+  const styles = createStyles(theme);
 
   // Local State for Search/Filters
   const [search, setSearch] = useState(searchParams.q || "");
@@ -978,6 +985,8 @@ export default function CreateOrderProductCatalog() {
     message?: string;
     warning?: string;
   } | null>(null);
+  const [itemAddedMessage, setItemAddedMessage] = useState<string | null>(null);
+  const itemAddedMessageTimeoutRef = useRef<number | null>(null);
   const isSavingDraft = draftFetcher.state !== "idle";
   const draftSubmitLock = useRef(false);
   const selectedCustomerShopifyId = selectedCustomer.shopifyCustomerId || selectedCustomer.id || "";
@@ -1065,6 +1074,26 @@ export default function CreateOrderProductCatalog() {
     setCustomerNotes(val);
     localStorage.setItem(`sales_cust_notes_${cartStorageScope}`, val);
   };
+
+  useEffect(() => {
+    if (!itemAddedMessage) return;
+
+    if (itemAddedMessageTimeoutRef.current) {
+      window.clearTimeout(itemAddedMessageTimeoutRef.current);
+    }
+
+    itemAddedMessageTimeoutRef.current = window.setTimeout(() => {
+      setItemAddedMessage(null);
+      itemAddedMessageTimeoutRef.current = null;
+    }, 3000);
+
+    return () => {
+      if (itemAddedMessageTimeoutRef.current) {
+        window.clearTimeout(itemAddedMessageTimeoutRef.current);
+        itemAddedMessageTimeoutRef.current = null;
+      }
+    };
+  }, [itemAddedMessage]);
 
   useEffect(() => {
     if (draftFetcher.state === "idle") {
@@ -1253,6 +1282,7 @@ export default function CreateOrderProductCatalog() {
     }
 
     saveCart(newCart);
+    setItemAddedMessage(`${product.title} added successfully`);
   };
 
   const removeFromCart = (variantId: string) => {
@@ -1661,7 +1691,7 @@ export default function CreateOrderProductCatalog() {
         subtitle={
           <>
             Step 2: Add Products for{" "}
-            <strong style={{ color: "#E91E63" }}>
+            <strong style={{ color: theme.accent }}>
               {selectedCustomer.firstName} {selectedCustomer.lastName}
             </strong>
           </>
@@ -1706,12 +1736,26 @@ export default function CreateOrderProductCatalog() {
           </button>
         </div>
       )}
+      {itemAddedMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            ...styles.statusToast,
+            backgroundColor: "#ecfdf5",
+            borderColor: "#a7f3d0",
+            color: "#065f46",
+          }}
+        >
+          {itemAddedMessage}
+        </div>
+      )}
       <main className="catalog-main" style={styles.mainContent}>
         {/* <div style={styles.pageHeader}>
           <div style={styles.headerInfo}>
             <h1 style={styles.pageTitle}>Create Order: {company.name}</h1>
             <p style={styles.pageSubtitle}>
-              Step 2: Add Products for <strong style={{ color: "#E91E63" }}>{selectedCustomer.firstName} {selectedCustomer.lastName}</strong>
+              Step 2: Add Products for <strong style={{ color: theme.accent }}>{selectedCustomer.firstName} {selectedCustomer.lastName}</strong>
             </p>
           </div>
         </div> */}
@@ -1991,7 +2035,7 @@ export default function CreateOrderProductCatalog() {
                                     }}
                                     disabled={!currentVariant?.inStock || isLoading}
                                   >
-                                    {currentVariant?.inStock ? "Add to cart" : "Out of stock"}
+                                    {currentVariant?.inStock ? "Added" : "Out of stock"}
                                   </button>
                                 </div>
                               </div>
@@ -2074,7 +2118,7 @@ export default function CreateOrderProductCatalog() {
               width: "60px",
               height: "60px",
               borderRadius: "50%",
-              background: "linear-gradient(135deg, #E91E63 0%, #FF6B35 100%)",
+              background: `linear-gradient(135deg, ${theme.accent} 0%, ${theme.accentDark} 100%)`,
               color: "white",
               border: "none",
               boxShadow: "0 10px 15px -3px rgba(233, 30, 99, 0.3), 0 4px 6px -2px rgba(233, 30, 99, 0.05)",
@@ -2095,12 +2139,12 @@ export default function CreateOrderProductCatalog() {
                 top: "-2px",
                 right: "-2px",
                 backgroundColor: "white",
-                color: "#E91E63",
+                color: theme.accent,  
                 borderRadius: "50%",
                 padding: "2px 6px",
                 fontSize: "12px",
                 fontWeight: 700,
-                border: "2px solid #E91E63",
+                border: `2px solid ${theme.accent}`,  
                 boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}>
                 {totalUnits}
@@ -2280,7 +2324,7 @@ export default function CreateOrderProductCatalog() {
   );
 }
 
-const styles = {
+const createStyles = (theme: any) => ({
   container: {
     display: "flex",
     flexDirection: "column" as const,
@@ -2332,7 +2376,7 @@ const styles = {
     width: "32px",
     height: "32px",
     borderRadius: "50%",
-    background: "linear-gradient(135deg, #E91E63 0%, #FF6B35 100%)",
+    background: `linear-gradient(135deg, ${theme.accent} 0%, ${theme.accentDark} 100%)`,
     color: "white",
     display: "flex",
     alignItems: "center",
@@ -2443,7 +2487,7 @@ const styles = {
   applyBtn: {
     width: "100%",
     height: "38px",
-    backgroundColor: "#E91E63",
+    backgroundColor: theme.accent,
     color: "white",
     border: "none",
     borderRadius: "8px",
@@ -2554,9 +2598,9 @@ const styles = {
   activeFilterChip: {
     display: "inline-flex",
     alignItems: "center",
-    border: "1px solid #fbcfe8",
-    backgroundColor: "#fdf2f8",
-    color: "#be185d",
+    border: `1px solid ${theme.accentTint}`,
+    backgroundColor: theme.accentLighter,
+    color: theme.accentDark,
     borderRadius: "999px",
     padding: "5px 10px",
     fontSize: "12px",
@@ -2635,7 +2679,7 @@ const styles = {
   listPrice: {
     display: "block",
     marginTop: "2px",
-    color: "#E91E63",
+    color: theme.accent,
     fontSize: "16px",
     fontWeight: 800,
   },
@@ -2786,17 +2830,17 @@ const styles = {
     alignItems: "center",
     fontSize: "13px",
     marginBottom: "12px",
-    backgroundColor: "#fff0f4",
+    backgroundColor: theme.accentLighter,
     padding: "6px 10px",
     borderRadius: "6px",
   },
   priceLabel: {
-    color: "#be185d",
+    color: theme.accent,
     fontWeight: 500,
   },
   priceValue: {
     fontWeight: 700,
-    color: "#E91E63",
+    color: theme.accent,
   },
   selectorGroup: {
     marginBottom: "12px",
@@ -2843,7 +2887,7 @@ const styles = {
   addToCartBtn: {
     flex: 1,
     height: "34px",
-    backgroundColor: "#E91E63",
+    backgroundColor: theme.accent,
     color: "white",
     border: "none",
     borderRadius: "6px",
@@ -2937,7 +2981,7 @@ const styles = {
   },
   subtotalVal: {
     fontSize: "16px",
-    color: "#E91E63",
+    color: theme.accent,
     fontWeight: 700,
   },
   checkoutBtn: {
@@ -2946,7 +2990,7 @@ const styles = {
     justifyContent: "center",
     width: "100%",
     height: "42px",
-    background: "linear-gradient(90deg, #E91E63 0%, #FF6B35 100%)",
+    background: `linear-gradient(90deg, ${theme.accent} 0%, ${theme.accentDark} 100%)`,
     color: "white",
     textDecoration: "none",
     borderRadius: "8px",
@@ -2969,7 +3013,7 @@ const styles = {
     width: "24px",
     height: "24px",
     border: "3px solid #f3f4f6",
-    borderTop: "3px solid #E91E63",
+    borderTop: `3px solid ${theme.accent}`,
     borderRadius: "50%",
     animation: "spin 0.8s linear infinite",
   },
@@ -3037,7 +3081,7 @@ const styles = {
     width: "40px",
     height: "40px",
     border: "3px solid #f3f4f6",
-    borderTop: "3px solid #E91E63",
+    borderTop: `3px solid ${theme.accent}`,
     borderRadius: "50%",
     animation: "spin 1s linear infinite",
   },
@@ -3045,7 +3089,7 @@ const styles = {
     marginTop: "12px",
     fontSize: "14px",
     fontWeight: 600,
-    color: "#E91E63",
+    color: theme.accent,
     fontFamily: "'Poppins', sans-serif",
   },
-};
+});

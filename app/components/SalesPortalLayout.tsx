@@ -15,6 +15,75 @@ export type SalesPortalUser = {
 
 type ActivePage = "overview" | "orders" | "drafts" | "quotes";
 
+function normalizeThemeColor(themeColor?: string | null) {
+  if (!themeColor) return "#0f172a";
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(themeColor)
+    ? themeColor
+    : "#0f172a";
+}
+
+function expandHex(hex: string) {
+  const normalized = hex.replace("#", "");
+  if (normalized.length === 3) {
+    return normalized
+      .split("")
+      .map((char) => char + char)
+      .join("");
+  }
+  return normalized;
+}
+
+function hexToRgb(hex: string) {
+  const value = expandHex(hex);
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  const clamp = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
+  return `#${[clamp(r), clamp(g), clamp(b)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function mixHexColors(first: string, second: string, ratio: number) {
+  const a = hexToRgb(first);
+  const b = hexToRgb(second);
+  return rgbToHex(
+    a.r + (b.r - a.r) * ratio,
+    a.g + (b.g - a.g) * ratio,
+    a.b + (b.b - a.b) * ratio,
+  );
+}
+
+function getContrastColor(hex: string) {
+  const { r, g, b } = hexToRgb(hex);
+  const luminance = (r * 299 + g * 587 + b * 114) / 1000;
+  return luminance >= 160 ? "#111827" : "#ffffff";
+}
+
+function getThemePalette(themeColor?: string | null) {
+  const accent = normalizeThemeColor(themeColor);
+  const accentDark = mixHexColors(accent, "#000000", 0.18);
+  const accentSoft = mixHexColors(accent, "#ffffff", 0.9);
+  const accentLighter = mixHexColors(accent, "#ffffff", 0.96);
+  const accentTint = mixHexColors(accent, "#ffffff", 0.8);
+  const rgb = hexToRgb(accent);
+
+  return {
+    accent,
+    accentDark,
+    accentSoft,
+    accentLighter,
+    accentTint,
+    contrast: getContrastColor(accent),
+    focusRing: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.18)`,
+  };
+}
+
 export function SalesPortalSidebar({
   company,
   user,
@@ -183,6 +252,7 @@ export function SalesPortalLayout({
   orderCount,
   draftCount,
   quoteCount,
+  themeColor,
   children,
 }: {
   company: SalesPortalCompany;
@@ -191,10 +261,23 @@ export function SalesPortalLayout({
   orderCount?: number;
   draftCount?: number;
   quoteCount?: number;
+  themeColor?: string | null;
   children: ReactNode;
 }) {
+  const palette = getThemePalette(themeColor);
+  const rootStyle: CSSProperties & Record<string, string> = {
+    ...styles.layout,
+  };
+  rootStyle["--sales-portal-accent"] = palette.accent;
+  rootStyle["--sales-portal-accent-dark"] = palette.accentDark;
+  rootStyle["--sales-portal-accent-soft"] = palette.accentSoft;
+  rootStyle["--sales-portal-accent-lighter"] = palette.accentLighter;
+  rootStyle["--sales-portal-accent-tint"] = palette.accentTint;
+  rootStyle["--sales-portal-accent-contrast"] = palette.contrast;
+  rootStyle["--sales-portal-focus-ring"] = palette.focusRing;
+
   return (
-    <div className="sales-portal-layout" style={styles.layout}>
+    <div className="sales-portal-layout" style={rootStyle}>
       <SalesPortalSidebar
         company={company}
         user={user}
@@ -219,9 +302,9 @@ export const salesPortalButtonStyles = {
     gap: 8,
     minHeight: 40,
     padding: "10px 18px",
-    background: "#111827",
-    color: "#fff",
-    border: "1px solid #111827",
+    background: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
+    border: "1px solid var(--sales-portal-accent)",
     borderRadius: 8,
     textDecoration: "none",
     fontSize: 14,
@@ -235,8 +318,8 @@ export const salesPortalButtonStyles = {
     minHeight: 40,
     padding: "10px 18px",
     background: "#fff",
-    color: "#111827",
-    border: "1px solid #d1d5db",
+    color: "var(--sales-portal-accent)",
+    border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: 8,
     textDecoration: "none",
     fontSize: 14,
@@ -250,8 +333,8 @@ const responsiveCss = `
   .sales-portal-main select:focus,
   .sales-portal-main textarea:focus {
     outline: none;
-    border-color: #e91e63 !important;
-    box-shadow: 0 0 0 3px rgba(233, 30, 99, 0.1);
+    border-color: var(--sales-portal-accent) !important;
+    box-shadow: 0 0 0 3px var(--sales-portal-focus-ring);
   }
   .sales-quote-table-wrap { overflow-x: auto; }
   .sales-quote-row:hover { background: #fdfdfd; }
@@ -264,12 +347,12 @@ const responsiveCss = `
   }
   @media (max-width: 860px) {
     .sales-portal-layout { display: block !important; }
-    .sales-portal-sidebar {
+  .sales-portal-sidebar {
       width: 100% !important;
       min-width: 0 !important;
       padding: 14px 16px !important;
       border-right: 0 !important;
-      border-bottom: 1px solid #eaeaea;
+      border-bottom: 1px solid var(--sales-portal-accent-tint);
     }
     .sales-portal-sidebar nav { flex-direction: row !important; overflow-x: auto; }
     .sales-portal-sidebar nav a { flex: 0 0 auto; }
@@ -303,7 +386,7 @@ const styles: Record<string, CSSProperties> = {
     width: 280,
     minWidth: 280,
     background: "#fff",
-    borderRight: "1px solid #eaeaea",
+    borderRight: "1px solid var(--sales-portal-accent-tint)",
     padding: "24px 0",
     display: "flex",
     flexDirection: "column",
@@ -320,7 +403,8 @@ const styles: Record<string, CSSProperties> = {
     fontFamily: "'Poppins', sans-serif",
     fontSize: 20,
     fontWeight: 700,
-    background: "linear-gradient(135deg, #e91e63 0%, #ff6b35 100%)",
+    background:
+      "linear-gradient(135deg, var(--sales-portal-accent) 0%, var(--sales-portal-accent-dark) 100%)",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
   },
@@ -328,8 +412,9 @@ const styles: Record<string, CSSProperties> = {
     margin: "0 16px 24px",
     padding: "14px 16px",
     borderRadius: 12,
-    background: "linear-gradient(135deg, #fdf4f7 0%, #fff7eb 100%)",
-    border: "1px solid #f8d7e3",
+    background:
+      "linear-gradient(135deg, var(--sales-portal-accent-lighter) 0%, var(--sales-portal-accent-soft) 100%)",
+    border: "1px solid var(--sales-portal-accent-tint)",
     display: "flex",
     flexDirection: "column",
     gap: 3,
@@ -341,7 +426,7 @@ const styles: Record<string, CSSProperties> = {
     color: "#8c9196",
   },
   companyName: {
-    color: "#e91e63",
+    color: "var(--sales-portal-accent)",
     fontSize: 15,
     fontFamily: "'Poppins', sans-serif",
   },
@@ -365,7 +450,11 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 14,
     fontWeight: 500,
   },
-  navItemActive: { background: "#fff0f4", color: "#e91e63", fontWeight: 600 },
+  navItemActive: {
+    background: "var(--sales-portal-accent-soft)",
+    color: "var(--sales-portal-accent)",
+    fontWeight: 600,
+  },
   navIcon: { fontSize: 16 },
   navCount: {
     marginLeft: "auto",
@@ -377,7 +466,10 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 11,
   },
   navCountActive: { background: "#fff" },
-  sidebarFooter: { padding: "16px 24px", borderTop: "1px solid #eaeaea" },
+  sidebarFooter: {
+    padding: "16px 24px",
+    borderTop: "1px solid var(--sales-portal-accent-tint)",
+  },
   userProfile: {
     display: "flex",
     alignItems: "center",
@@ -388,8 +480,9 @@ const styles: Record<string, CSSProperties> = {
     width: 36,
     height: 36,
     borderRadius: "50%",
-    background: "linear-gradient(135deg, #e91e63 0%, #ff6b35 100%)",
-    color: "#fff",
+    background:
+      "linear-gradient(135deg, var(--sales-portal-accent) 0%, var(--sales-portal-accent-dark) 100%)",
+    color: "var(--sales-portal-accent-contrast)",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -402,7 +495,7 @@ const styles: Record<string, CSSProperties> = {
     width: "100%",
     padding: "8px 14px",
     borderRadius: 8,
-    border: "1px solid #e5e7eb",
+    border: "1px solid var(--sales-portal-accent-tint)",
     background: "#fff",
     color: "#6b7280",
     fontSize: 12,
@@ -441,7 +534,7 @@ const styles: Record<string, CSSProperties> = {
     height: 40,
     padding: "0 12px",
     borderRadius: 8,
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--sales-portal-accent-tint)",
     fontSize: 13,
     fontFamily: "inherit",
     background: "#fff",

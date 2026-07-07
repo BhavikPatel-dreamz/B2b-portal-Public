@@ -53,7 +53,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   const company = await prisma.companyAccount.findUnique({
     where: { id: companyId },
-    include: { shop: { select: { shopName: true, shopDomain: true } } },
+    include: {
+      shop: {
+        select: { shopName: true, shopDomain: true, themeColor: true },
+      },
+    },
   });
   if (!company) {
     return redirect("/sales/portal");
@@ -110,6 +114,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     company: {
       id: company.id,
       name: company.name,
+      themeColor: company.shop.themeColor ?? null,
       storeName: company.shop.shopName || company.shop.shopDomain,
     },
     user: {
@@ -324,6 +329,7 @@ export default function QuoteListingPage() {
       activePage="quotes"
       orderCount={orderCount}
       quoteCount={quoteCount}
+      themeColor={company.themeColor}
     >
       <SalesPortalHeader
         title="Quotes"

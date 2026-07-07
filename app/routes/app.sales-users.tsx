@@ -101,9 +101,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const firstName = formData.get("firstName") as string;
     const lastName = formData.get("lastName") as string;
     const companyIds = formData.getAll("companyIds") as string[];
+    const normalizedEmail = email.trim().toLowerCase();
 
     const existingUser = await prisma.user.findFirst({
-      where: { email, shopId: store.id },
+      where: { email: normalizedEmail, shopId: store.id, role: "SALES_USER" },
     });
 
     if (existingUser) {
@@ -114,37 +115,49 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days valid
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        firstName,
-        lastName,
-        password: "PENDING",
-        role: "SALES_USER",
-        status: "PENDING",
-        shopId: store.id,
-        invitation: {
-          create: {
-            token,
-            shopId: store.id,
-            expiresAt,
+    try {
+      const user = await prisma.user.create({
+        data: {
+          email: normalizedEmail,
+          firstName,
+          lastName,
+          password: "PENDING",
+          role: "SALES_USER",
+          status: "PENDING",
+          shopId: store.id,
+          invitation: {
+            create: {
+              token,
+              shopId: store.id,
+              expiresAt,
+            },
+          },
+          salesCompanies: {
+            create: companyIds.map((id) => ({ companyId: id })),
           },
         },
-        salesCompanies: {
-          create: companyIds.map(id => ({ companyId: id })),
-        },
-      },
-    });
+      });
 
-    const inviteLink = `${process.env.SHOPIFY_APP_URL}/support/login?storeid=${store.id}&userid=${user.id}&token=${token}`;
-    await sendSalesUserInvitationEmail({
-      storeId: store.id,
-      email,
-      firstName,
-      inviteLink,
-    });
+      const inviteLink = `${process.env.SHOPIFY_APP_URL}/support/login?storeid=${store.id}&userid=${user.id}&token=${token}`;
+      await sendSalesUserInvitationEmail({
+        storeId: store.id,
+        email,
+        firstName,
+        inviteLink,
+      });
 
-    return Response.json({ success: true, message: "Sales User Created and Invite Sent", intent: "create" });
+      return Response.json({
+        success: true,
+        message: "Sales User Created and Invite Sent",
+        intent: "create",
+      });
+    } catch (error: any) {
+      if (error?.code === "P2002") {
+        return Response.json({ success: false, error: "Email already exists" });
+      }
+
+      throw error;
+    }
   }
 
   if (intent === "deactivate" || intent === "activate") {
@@ -398,16 +411,16 @@ export default function SalesUsers() {
               {link && (
                 <>
                   <Button size="micro" onClick={() => handleResendEmail(id)}>Resend Email</Button>
-                  <Button size="micro" onClick={() => navigator.clipboard.writeText(link)}>
+                  {/* <Button size="micro" onClick={() => navigator.clipboard.writeText(link)}>
                     Copy Invite Link
-                  </Button>
+                  </Button> */}
                 </>
               )}
-              {isApproved && (
+              {/* {isApproved && (
                 <Button size="micro" onClick={() => navigator.clipboard.writeText(portalLoginUrl)}>
                   Copy Portal Login
                 </Button>
-              )}
+              )} */}
               <Button size="micro" tone="critical" onClick={() => handleDelete(id)}>Delete</Button>
             </InlineStack>
           </IndexTable.Cell>

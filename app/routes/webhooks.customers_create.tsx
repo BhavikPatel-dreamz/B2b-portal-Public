@@ -48,7 +48,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customerGid = `gid://shopify/Customer/${customerId}`;
 
     // Check if user already exists
-    const existingUser = await getUserByEmail(customerEmail, store.id);
+    const existingUser = await getUserByEmail(customerEmail, store.id, "STORE_USER");
     if (existingUser) {
       console.info(`User with email ${customerEmail} already exists; skipping creation`);
       return new Response();

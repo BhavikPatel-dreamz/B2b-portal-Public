@@ -47,7 +47,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     where: { id: companyId },
     include: {
       shop: {
-        select: { shopName: true, shopDomain: true, accessToken: true },
+        select: {
+          shopName: true,
+          shopDomain: true,
+          themeColor: true,
+          accessToken: true,
+        },
       },
     },
   });
@@ -101,6 +106,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       id: company.id,
       name: company.name,
       creditLimit: company.creditLimit.toString(),
+      themeColor: company.shop.themeColor ?? null,
       storeName: company.shop.shopName || company.shop.shopDomain,
     },
     orders: orders.map((o) => ({
@@ -336,6 +342,7 @@ export default function OrderManageScreen() {
       id: string;
       name: string;
       creditLimit: string;
+      themeColor: string | null;
       storeName: string | null;
     };
     orders: Array<{
@@ -428,6 +435,7 @@ export default function OrderManageScreen() {
       activePage="orders"
       orderCount={orders.length}
       quoteCount={quoteCount}
+      themeColor={company.themeColor}
     >
       <SalesPortalHeader
         title="Manage Orders"

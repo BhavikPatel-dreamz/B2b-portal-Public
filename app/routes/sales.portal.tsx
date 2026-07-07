@@ -45,6 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         select: {
           shopName: true,
           shopDomain: true,
+          themeColor: true,
           accessToken: true,
           currencyCode: true,
           plan: true,
@@ -107,7 +108,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             companyRole,
           };
         })
-        .filter((u) => u.companyRole?.toLowerCase() === "location admin");
+        .filter(
+          (u: { companyRole: string | null }) =>
+            u.companyRole?.toLowerCase() === "location admin",
+        );
     }
   }
 
@@ -165,6 +169,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       creditLimit: creditLimit.toString(),
       usedCredit: usedCredit.toString(),
       availableCredit: availableCredit.toString(),
+      themeColor: company.shop.themeColor ?? null,
       storeName: company.shop.shopName || company.shop.shopDomain,
       currencyCode: company.shop.currencyCode || "USD",
       users: activeUsers,
@@ -234,6 +239,7 @@ export default function SalesPortal() {
           lastName: string | null;
           companyRole: string | null;
         }>;
+        themeColor: string | null;
       };
       recentOrders: Array<{
         id: string;
@@ -305,6 +311,7 @@ export default function SalesPortal() {
       activePage="overview"
       orderCount={orderCount}
       quoteCount={quoteCount}
+      themeColor={company.themeColor}
     >
       <div id="overview">
         <SalesPortalHeader
@@ -367,12 +374,7 @@ export default function SalesPortal() {
                 style={{
                   ...styles.progressBarFill,
                   width: `${creditPercent}%`,
-                  backgroundColor:
-                    creditPercent > 90
-                      ? "#ef4444"
-                      : creditPercent > 70
-                        ? "#f97316"
-                        : "#E91E63",
+                  backgroundColor: "var(--sales-portal-accent)",
                 }}
               />
             </div>
@@ -443,7 +445,7 @@ export default function SalesPortal() {
                     {recentOrders.map((order) => (
                       <tr key={order.id} style={styles.tr}>
                         <td style={styles.td}>
-                          <strong style={{ color: "#2c6ecb" }}>
+                          <strong style={{ color: "var(--sales-portal-accent)" }}>
                             {order.orderNumber}
                           </strong>
                         </td>
@@ -523,7 +525,7 @@ const styles = {
   progressBarBg: {
     width: "100%",
     height: "8px",
-    backgroundColor: "#f3f4f6",
+    backgroundColor: "var(--sales-portal-accent-soft)",
     borderRadius: "4px",
     overflow: "hidden",
   },
