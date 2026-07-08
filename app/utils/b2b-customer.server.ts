@@ -7235,12 +7235,10 @@ async function createOrUpdateLocalUser({
   }
 
   // Check if user already exists
-  const existingUser = await prisma.user.findUnique({
+  const existingUser = await prisma.user.findFirst({
     where: {
-      shopId_email: {
-        email: email,
-        shopId: store.id,
-      },
+      email: email,
+      shopId: store.id,
     },
   });
   const existingRegistration = await prisma.registrationSubmission.findUnique({

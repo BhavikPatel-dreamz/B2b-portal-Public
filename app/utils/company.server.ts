@@ -384,9 +384,10 @@ export const syncShopifyCompanies = async (
 
           await prisma.user.upsert({
             where: {
-              shopId_email: {
+              shopId_email_role: {
                 shopId: store.id,
                 email: effectiveContact.email,
+                role: UserRole.STORE_ADMIN,
               },
             },
             update: {
@@ -686,7 +687,7 @@ export const syncSingleB2BCustomer = async (
       // 4. Upsert User
       await prisma.user.upsert({
         where: {
-          shopId_email: { shopId: storeId, email: customer.email },
+          shopId_email_role: { shopId: storeId, email: customer.email, role: userRole },
         },
         update: {
           firstName: customer.firstName || "",
@@ -854,9 +855,10 @@ export const syncShopifyOrders = async (
         // Resolve the local user from the order's customer email
         let createdByUserId: string | undefined;
         if (order.customer?.email) {
-          const localUser = await prisma.user.findUnique({
+          const localUser = await prisma.user.findFirst({
             where: {
-              shopId_email: { shopId: store.id, email: order.customer.email },
+              shopId: store.id,
+              email: order.customer.email,
             },
             select: { id: true },
           });

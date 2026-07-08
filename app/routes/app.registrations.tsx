@@ -2009,7 +2009,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         await prisma.user.upsert({
           where: {
-            shopId_email: { shopId: store.id, email: customerEmail },
+            shopId_email_role: { shopId: store.id, email: customerEmail, role: "STORE_ADMIN" },
           },
           update: {
             firstName: RegistrationData?.firstName || null,
@@ -2421,7 +2421,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         await prisma.user.upsert({
           where: {
-            shopId_email: { shopId: store.id, email: customerEmail },
+            shopId_email_role: { shopId: store.id, email: customerEmail, role: "STORE_ADMIN" },
           },
           update: {
             firstName: registrationData.firstName || firstName || null,
