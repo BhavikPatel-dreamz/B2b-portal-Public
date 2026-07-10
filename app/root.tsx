@@ -1,6 +1,7 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import polarisStylesUrl from "@shopify/polaris/build/esm/styles.css?url";
 import SupportForm from "app/components/SupportForm";
+import PageLoader from "app/components/PageLoader";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStylesUrl }];
 
@@ -22,6 +23,7 @@ export default function App() {
         <Links />
       </head>
       <body>
+        <PageLoader />
         <Outlet />
         <ScrollRestoration />
         <Scripts />

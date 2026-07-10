@@ -62,6 +62,15 @@ model Store {
   orderConfirmationToMainAccount Boolean                  @default(false)
   allowQuickOrderForUser         Boolean                  @default(false)
   blockOrderWhenCreditUnavailable Boolean                 @default(false)
+  showDashboardPage              Boolean                  @default(true)
+  showLocationsPage              Boolean                  @default(true)
+  showUsersPage                  Boolean                  @default(true)
+  showOrdersPage                 Boolean                  @default(true)
+  showQuickOrderPage             Boolean                  @default(true)
+  showWishlistsPage              Boolean                  @default(true)
+  showCreditManagementPage       Boolean                  @default(true)
+  showNotificationsPage          Boolean                  @default(true)
+  showReportsPage                Boolean                  @default(true)
   completedSetupSteps            Json?
   setupFinished                  Boolean                  @default(false)
   plan                           String?

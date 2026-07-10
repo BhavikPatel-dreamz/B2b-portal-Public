@@ -33,6 +33,15 @@ export interface UpdateStoreInput {
   orderConfirmationToMainAccount?: boolean;
   allowQuickOrderForUser?: boolean;
   blockOrderWhenCreditUnavailable?: boolean;
+  showDashboardPage?: boolean;
+  showLocationsPage?: boolean;
+  showUsersPage?: boolean;
+  showOrdersPage?: boolean;
+  showQuickOrderPage?: boolean;
+  showWishlistsPage?: boolean;
+  showCreditManagementPage?: boolean;
+  showNotificationsPage?: boolean;
+  showReportsPage?: boolean;
   privacyPolicylink?: string | null;
   privacyPolicyContent?: string | null;
   defaultTaxRate?: number | string | null;

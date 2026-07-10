@@ -13,6 +13,7 @@ import {
   getFreePlanRegistrationsLimitMessage,
   getFreePlanUsage,
 } from "app/utils/free-plan-limits.server";
+import { syncAllCreditMetafields } from "app/services/metafieldSync.server";
 
 const CORE_FIELD_KEYS = [
   "companyName",
@@ -441,7 +442,7 @@ async function createOrFindCustomer(
   const customerNode = existingCustomer?.customers?.nodes?.[0];
 
   if (customerNode) {
-    // ✅ FIX: Check if Shopify customer is missing firstName, lastName, or phone.
+    // ✅ Check if Shopify customer is missing firstName, lastName, or phone.
     // If so, update them with the values from the registration form.
     const needsUpdate =
       (!customerNode.firstName && firstName) ||
@@ -485,8 +486,51 @@ async function createOrFindCustomer(
       ]);
 
       if (updateErrors.length > 0) {
-        // Log the warning but don't throw — registration can still proceed
         console.warn("⚠️ Customer update had errors:", updateErrors.join(", "));
+        // If the update failed and we passed a phone number, retry without the phone field
+        if (phone) {
+          console.log("🔄 Retrying customer update without phone field...");
+          const retryResponse = await admin.graphql(
+            `#graphql
+            mutation UpdateCustomerNameOnly($input: CustomerInput!) {
+              customerUpdate(input: $input) {
+                customer {
+                  id
+                  email
+                  firstName
+                  lastName
+                  phone
+                }
+                userErrors { field message }
+              }
+            }`,
+            {
+              variables: {
+                input: {
+                  id: customerNode.id,
+                  firstName: customerNode.firstName || firstName || undefined,
+                  lastName: customerNode.lastName || lastName || undefined,
+                },
+              },
+            },
+          );
+
+          const retryPayload = await retryResponse.json();
+          const retryErrors = getGraphQLMessages(retryPayload, [
+            "data",
+            "customerUpdate",
+          ]);
+
+          if (retryErrors.length === 0) {
+            const updatedCustomer = (retryPayload as any)?.data?.customerUpdate?.customer;
+            if (updatedCustomer) {
+              console.log("✅ Customer updated successfully without phone:", updatedCustomer);
+              return { customer: updatedCustomer, created: false };
+            }
+          } else {
+            console.warn("⚠️ Customer name-only update retry also failed:", retryErrors.join(", "));
+          }
+        }
       } else {
         const updatedCustomer = (
           (updatePayload as Record<string, unknown>)?.data as {
@@ -505,7 +549,7 @@ async function createOrFindCustomer(
   }
 
   // Step 2: Customer not found — create a new one
-  const createResponse = await admin.graphql(
+  let createResponse = await admin.graphql(
     `#graphql
     mutation CreateCustomer($input: CustomerInput!) {
       customerCreate(input: $input) {
@@ -531,8 +575,40 @@ async function createOrFindCustomer(
     },
   );
 
-  const createPayload = await createResponse.json();
-  const errors = getGraphQLMessages(createPayload, ["data", "customerCreate"]);
+  let createPayload = await createResponse.json();
+  let errors = getGraphQLMessages(createPayload, ["data", "customerCreate"]);
+
+  if (errors.length > 0 && phone) {
+    console.warn("⚠️ Customer create failed. Retrying without phone...", errors.join(", "));
+    createResponse = await admin.graphql(
+      `#graphql
+      mutation CreateCustomerWithoutPhone($input: CustomerInput!) {
+        customerCreate(input: $input) {
+          customer {
+            id
+            email
+            firstName
+            lastName
+            phone
+          }
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          input: {
+            email,
+            firstName,
+            lastName: lastName || undefined,
+          },
+        },
+      },
+    );
+
+    createPayload = await createResponse.json();
+    errors = getGraphQLMessages(createPayload, ["data", "customerCreate"]);
+  }
+
   if (errors.length > 0) {
     throw new Error(errors.join(", "));
   }
@@ -932,8 +1008,10 @@ async function autoApproveRegistrationSubmission({
       orderBy: { createdAt: "desc" },
     });
 
+    let userId: string;
+
     if (existingUser) {
-      await tx.user.update({
+      const updatedUser = await tx.user.update({
         where: { id: existingUser.id },
         data: {
           email,
@@ -947,8 +1025,9 @@ async function autoApproveRegistrationSubmission({
           isActive: true,
         },
       });
+      userId = updatedUser.id;
     } else {
-      await tx.user.create({
+      const newUser = await tx.user.create({
         data: {
           email,
           firstName: firstName || null,
@@ -963,6 +1042,7 @@ async function autoApproveRegistrationSubmission({
           isActive: true,
         },
       });
+      userId = newUser.id;
     }
 
     const registration = await tx.registrationSubmission.update({
@@ -978,7 +1058,7 @@ async function autoApproveRegistrationSubmission({
       },
     });
 
-    return { companyAccount, registration };
+    return { companyAccount, registration, userId };
   });
 }
 
@@ -1345,6 +1425,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       finalRegistration = result.registration;
       autoApproved = true;
+
+      if (result.userId) {
+        await syncAllCreditMetafields(
+          shop,
+          customer.id,
+          result.userId,
+          admin,
+        );
+      }
     }
 
     if (email) {

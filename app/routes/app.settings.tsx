@@ -40,6 +40,15 @@ interface LoaderData {
     orderConfirmationToMainAccount: boolean;
     allowQuickOrderForUser: boolean;
     blockOrderWhenCreditUnavailable: boolean;
+    showDashboardPage: boolean;
+    showLocationsPage: boolean;
+    showUsersPage: boolean;
+    showOrdersPage: boolean;
+    showQuickOrderPage: boolean;
+    showWishlistsPage: boolean;
+    showCreditManagementPage: boolean;
+    showNotificationsPage: boolean;
+    showReportsPage: boolean;
     defaultTaxRate: string;
     companyWelcomeEmailTemplate?: string;
     companyWelcomeEmailEnabled?: boolean;
@@ -117,6 +126,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         allowQuickOrderForUser: store.allowQuickOrderForUser ?? false,
         blockOrderWhenCreditUnavailable:
           store.blockOrderWhenCreditUnavailable ?? false,
+        showDashboardPage: store.showDashboardPage ?? true,
+        showLocationsPage: store.showLocationsPage ?? true,
+        showUsersPage: store.showUsersPage ?? true,
+        showOrdersPage: store.showOrdersPage ?? true,
+        showQuickOrderPage: store.showQuickOrderPage ?? true,
+        showWishlistsPage: store.showWishlistsPage ?? true,
+        showCreditManagementPage: store.showCreditManagementPage ?? true,
+        showNotificationsPage: store.showNotificationsPage ?? true,
+        showReportsPage: store.showReportsPage ?? true,
         defaultTaxRate: store.defaultTaxRate?.toString() || "8.00",
         companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
         companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
@@ -398,6 +416,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const blockOrderWhenCreditUnavailable =
     (formData.get("blockOrderWhenCreditUnavailable") as string | null) ===
     "true";
+  const showDashboardPage =
+    (formData.get("showDashboardPage") as string | null) === "true";
+  const showLocationsPage =
+    (formData.get("showLocationsPage") as string | null) === "true";
+  const showUsersPage =
+    (formData.get("showUsersPage") as string | null) === "true";
+  const showOrdersPage =
+    (formData.get("showOrdersPage") as string | null) === "true";
+  const showQuickOrderPage =
+    (formData.get("showQuickOrderPage") as string | null) === "true";
+  const showWishlistsPage =
+    (formData.get("showWishlistsPage") as string | null) === "true";
+  const showCreditManagementPage =
+    (formData.get("showCreditManagementPage") as string | null) === "true";
+  const showNotificationsPage =
+    (formData.get("showNotificationsPage") as string | null) === "true";
+  const showReportsPage =
+    (formData.get("showReportsPage") as string | null) === "true";
   const companyWelcomeEmailTemplate =
     (formData.get("companyWelcomeEmailTemplate") as string | null)?.trim() ||
     "";
@@ -478,6 +514,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     orderConfirmationToMainAccount,
     allowQuickOrderForUser,
     blockOrderWhenCreditUnavailable,
+    showDashboardPage,
+    showLocationsPage,
+    showUsersPage,
+    showOrdersPage,
+    showQuickOrderPage,
+    showWishlistsPage,
+    showCreditManagementPage,
+    showNotificationsPage,
+    showReportsPage,
     companyWelcomeEmailTemplate: companyWelcomeEmailTemplate || null,
     companyWelcomeEmailEnabled,
     privacyPolicylink,
@@ -713,13 +758,14 @@ const ToggleRow = ({
   );
 };
 
-type SettingsTabId = "store" | "onboarding" | "company" | "theme";
+type SettingsTabId = "store" | "onboarding" | "company" | "theme" | "pages";
 
 const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
   { id: "store", label: "Store Settings" },
   { id: "onboarding", label: "B2B Onboarding Setting" },
   { id: "company", label: "Order Setting" },
   { id: "theme", label: "Theme Setting" },
+  { id: "pages", label: "Page Visibility" },
 ];
 
 export default function SettingsPage() {
@@ -1330,6 +1376,195 @@ export default function SettingsPage() {
                     Edit Invoice Template
                   </Link>
                 </div> */}
+              </div>
+
+              {/* ── Page Visibility Settings ──────────────────────────────── */}
+              <div style={{ display: activeTab === "pages" ? "grid" : "none", gap: 16 }}>
+                <div style={{ display: "grid" }}>
+                  <ToggleRow
+                    name="showDashboardPage"
+                    title="Dashboard Home"
+                    description="Show or hide the Dashboard page in the B2B portal sidebar."
+                    defaultChecked={store?.showDashboardPage ?? true}
+                    borderBottom
+                  />
+                  <ToggleRow
+                    name="showLocationsPage"
+                    title="Locations"
+                    description="Show or hide the Locations page in the B2B portal sidebar."
+                    defaultChecked={store?.showLocationsPage ?? true}
+                    borderBottom
+                  />
+                  <ToggleRow
+                    name="showUsersPage"
+                    title="Users"
+                    description="Show or hide the Users page in the B2B portal sidebar."
+                    defaultChecked={store?.showUsersPage ?? true}
+                    borderBottom
+                  />
+                  <ToggleRow
+                    name="showOrdersPage"
+                    title="Orders"
+                    description="Show or hide the Orders page in the B2B portal sidebar."
+                    defaultChecked={store?.showOrdersPage ?? true}
+                    borderBottom
+                  />
+                  <ToggleRow
+                    name="showQuickOrderPage"
+                    title="Quick Order"
+                    description="Show or hide the Quick Order page in the B2B portal sidebar."
+                    defaultChecked={store?.showQuickOrderPage ?? true}
+                    borderBottom
+                  />
+                  <ToggleRow
+                    name="showWishlistsPage"
+                    title="Wishlists"
+                    description="Show or hide the Wishlists page in the B2B portal sidebar."
+                    defaultChecked={store?.showWishlistsPage ?? true}
+                    borderBottom
+                  />
+                  <ToggleRow
+                    name="showNotificationsPage"
+                    title="Notifications"
+                    description="Show or hide the Notifications page in the B2B portal sidebar."
+                    defaultChecked={store?.showNotificationsPage ?? true}
+                    borderBottom
+                  />
+
+                  {/* Credit Management - Only for paid plan */}
+                  {isFreePlan ? (
+                    <div
+                      style={{
+                        padding: "22px 0",
+                        borderBottom: "1px solid #e3e3e3",
+                        opacity: 0.6,
+                      }}
+                    >
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontWeight: 600, fontSize: 15, color: "#8c9196" }}>
+                            Credit Management
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: "#fff",
+                              background: "#6d7175",
+                              padding: "2px 8px",
+                              borderRadius: 4,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Pro
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 14, color: "#6d7175", lineHeight: 1.5 }}>
+                          Show or hide the Credit Management page in the B2B portal sidebar.
+                          <br />
+                          <span style={{ color: "#d97706", fontWeight: 500 }}>
+                            Upgrade to a paid plan to enable this feature.
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <ToggleRow
+                      name="showCreditManagementPage"
+                      title="Credit Management"
+                      description="Show or hide the Credit Management page in the B2B portal sidebar."
+                      defaultChecked={store?.showCreditManagementPage ?? true}
+                      borderBottom
+                    />
+                  )}
+
+                  {/* Reports - Only for paid plan */}
+                  {isFreePlan ? (
+                    <div
+                      style={{
+                        padding: "22px 0",
+                      }}
+                    >
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontWeight: 600, fontSize: 15, color: "#8c9196" }}>
+                            Reports
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: "#fff",
+                              background: "#6d7175",
+                              padding: "2px 8px",
+                              borderRadius: 4,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Pro
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 14, color: "#6d7175", lineHeight: 1.5 }}>
+                          Show or hide the Reports page in the B2B portal sidebar.
+                          <br />
+                          <span style={{ color: "#d97706", fontWeight: 500 }}>
+                            Upgrade to a paid plan to enable this feature.
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <ToggleRow
+                      name="showReportsPage"
+                      title="Reports"
+                      description="Show or hide the Reports page in the B2B portal sidebar."
+                      defaultChecked={store?.showReportsPage ?? true}
+                    />
+                  )}
+                </div>
+
+                {/* Upgrade prompt for free plan users */}
+                {isFreePlan && (
+                  <div
+                    style={{
+                      padding: 16,
+                      borderRadius: 12,
+                      border: "1px solid #f1c40f",
+                      background: "linear-gradient(180deg, #fffdf2 0%, #fff7db 100%)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      <span style={{ fontSize: 20 }}>✨</span>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "#202223" }}>
+                          Credit Management & Reports are Pro features
+                        </div>
+                        <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
+                          Upgrade to a paid plan to access Credit Management and Reports pages for your B2B portal.
+                        </div>
+                        <Link
+                          to="/app/select-plan?returnTo=%2Fapp%2Fsettings"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            marginTop: 10,
+                            padding: "8px 14px",
+                            borderRadius: 8,
+                            background: "#202223",
+                            color: "#fff",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            textDecoration: "none",
+                          }}
+                        >
+                          Upgrade Plan
+                          <span>→</span>
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
                    {isFreePlan  ? (

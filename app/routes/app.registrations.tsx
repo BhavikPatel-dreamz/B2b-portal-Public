@@ -2404,6 +2404,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
 
+        // ── Update customer name in Shopify on approval ──
+        if (customerId && (firstName || lastName)) {
+          try {
+            console.log(`🔄 Updating Shopify customer name on approval: ${firstName} ${lastName}`);
+            await admin.graphql(
+              `#graphql
+              mutation UpdateCustomerNameOnApproval($input: CustomerInput!) {
+                customerUpdate(input: $input) {
+                  customer {
+                    id
+                  }
+                  userErrors { field message }
+                }
+              }`,
+              {
+                variables: {
+                  input: {
+                    id: customerId,
+                    firstName: firstName || undefined,
+                    lastName: lastName || undefined,
+                  },
+                },
+              },
+            );
+          } catch (err) {
+            console.warn("⚠️ Failed to update customer name in Shopify during approval:", err);
+          }
+        }
+
         const assignmentResult = await assignCompanyToCustomer(
           admin,
           customerId,

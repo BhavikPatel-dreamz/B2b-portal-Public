@@ -65,6 +65,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       plan: store.plan !== "free",
       allowQuickOrderForUser: store.allowQuickOrderForUser,
 
+      // Page visibility settings
+      showDashboardPage: store.showDashboardPage ?? true,
+      showLocationsPage: store.showLocationsPage ?? true,
+      showUsersPage: store.showUsersPage ?? true,
+      showOrdersPage: store.showOrdersPage ?? true,
+      showQuickOrderPage: store.showQuickOrderPage ?? true,
+      showWishlistsPage: store.showWishlistsPage ?? true,
+      showCreditManagementPage: store.showCreditManagementPage ?? true,
+      showNotificationsPage: store.showNotificationsPage ?? true,
+      showReportsPage: store.showReportsPage ?? true,
+
       // ✅ New stats
       currentMonthOrderCount: companyInfo.currentMonthOrderCount,
       pendingDraftOrderCount: companyInfo.pendingDraftOrderCount,
@@ -156,6 +167,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       companyName: company.companyName,
       plan: store.plan === "approved payment",
       allowQuickOrderForUser: store.allowQuickOrderForUser,
+
+      // Page visibility settings
+      showDashboardPage: store.showDashboardPage ?? true,
+      showLocationsPage: store.showLocationsPage ?? true,
+      showUsersPage: store.showUsersPage ?? true,
+      showOrdersPage: store.showOrdersPage ?? true,
+      showQuickOrderPage: store.showQuickOrderPage ?? true,
+      showWishlistsPage: store.showWishlistsPage ?? true,
+      showCreditManagementPage: store.showCreditManagementPage ?? true,
+      showNotificationsPage: store.showNotificationsPage ?? true,
+      showReportsPage: store.showReportsPage ?? true,
     });
   } catch (error) {
     console.error("Proxy error:", error);
