@@ -73,11 +73,6 @@ export function cartValidationsGenerateRun(input) {
     const rawCreditUsed = company.creditUsed?.value;
     const companyCreditUsed = parseDecimal(rawCreditUsed) ?? 0;
 
-    // Log when creditUsed data is missing for debugging
-    if (rawCreditUsed == null || rawCreditUsed === "") {
-      console.warn("[Cart Validation] Company creditUsed is missing for company:", company);
-    }
-
     // Company credit not configured
     if (companyCreditLimit == null || companyCreditLimit <= 0) {
       errors.push({
@@ -89,10 +84,14 @@ export function cartValidationsGenerateRun(input) {
 
       // Company limit fully exhausted
       if (companyCreditUsed >= companyCreditLimit) {
-        errors.push({
-          message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
-          target: "$.cart",
-        });
+        if (blockOrdersWhenCreditUnavailable) {
+          errors.push({
+            message: "Company credit limit has been reached. Please contact support to increase your credit limit.",
+            target: "$.cart",
+          });
+        } else {
+          // Soft warning - do not block if feature is disabled
+        }
       }
 
       // Cart exceeds available company credit
@@ -105,13 +104,9 @@ export function cartValidationsGenerateRun(input) {
             target: "$.cart",
           });
         } else {
-          // 🟡 Soft warning — order proceeds but admin is notified
+          // Soft warning — order proceeds but admin is notified
           // Do not add a blocking validation error so the order is allowed.
           // Customer can pay via credit card or cash on delivery
-          console.warn(
-            `[Cart Validation] Soft warning: company available credit $${companyAvailableCredit.toFixed(2)} is less than cart total $${cartTotal.toFixed(2)}. Order allowed - customer can use credit card or cash on delivery.`,
-            { company }
-          );
         }
       }
     }
@@ -129,26 +124,26 @@ export function cartValidationsGenerateRun(input) {
 
       // User limit fully exhausted
       if (userCreditUsed >= userCreditLimit) {
-        errors.push({
-          message: "Your user credit limit has been reached. Please contact your company administrator.",
-          target: "$.cart",
-        });
+        if (blockOrdersWhenCreditUnavailable) {
+          errors.push({
+            message: "Your user credit limit has been reached. Please contact your company administrator.",
+            target: "$.cart",
+          });
+        } else {
+          // Soft warning - do not block if feature is disabled
+        }
       }
 
       // Cart exceeds user available credit
       else if (cartTotal > userAvailableCredit) {
         if (blockOrdersWhenCreditUnavailable) {
-          // 🔴 Hard block — order is stopped
+          // Hard block — order is stopped
           errors.push({
             message: `Insufficient user credit. Available credit: $${userAvailableCredit.toFixed(2)}, Cart total: $${cartTotal.toFixed(2)}. Please use credit card or cash on delivery to complete this order.`,
             target: "$.cart",
           });
         } else {
-          // 🟡 Soft warning — order proceeds but admin is notified
-          console.warn(
-            `[Cart Validation] Soft warning: user available credit $${userAvailableCredit.toFixed(2)} is less than cart total $${cartTotal.toFixed(2)}. Order allowed - customer can use credit card or cash on delivery.`,
-            { customer }
-          );
+          // Soft warning — order proceeds but admin is notified
         }
       }
     }
