@@ -1,6 +1,5 @@
 import { type LoaderFunctionArgs } from "react-router";
 import { validateB2BCustomerAccess } from "../../utils/proxy.server";
-import { getStoreByDomain } from "../../services/store.server";
 import { apiVersion } from "../../shopify.server";
 import {
   buildFiltersFromEdges,
@@ -78,7 +77,7 @@ type ProductResponse = {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { shop } = await validateB2BCustomerAccess(request);
+  const { shop, store } = await validateB2BCustomerAccess(request);
   const url = new URL(request.url);
 
   const search = url.searchParams.get("q")?.trim() || "";
@@ -125,7 +124,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const shopifySearchQuery = queryFilters.join(" ");
 
-  const store = await getStoreByDomain(shop);
   if (!store || !store.accessToken) {
     throw new Error("Store not found");
   }

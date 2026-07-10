@@ -1,7 +1,6 @@
 import { LoaderFunctionArgs } from "react-router";
 
-import { getProxyParams } from "app/utils/proxy.server";
-import { getStoreByDomain } from "app/services/store.server";
+import { getCachedProxyStore, getProxyParams } from "app/utils/proxy.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
@@ -15,7 +14,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       );
     }
 
-    const store = await getStoreByDomain(shop);
+    const store = await getCachedProxyStore(shop);
     if (!store) {
       return Response.json(
         { error: "Store not found or unauthorized" },

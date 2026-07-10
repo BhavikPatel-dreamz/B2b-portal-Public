@@ -1,9 +1,12 @@
 import { type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import prisma from "../../db.server";
 import type { Prisma } from "@prisma/client";
-import { getStoreByDomain } from "../../services/store.server";
-import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
-import { getProxyParams, validateB2BCustomerAccess } from "../../utils/proxy.server";
+import {
+  getCachedCustomerCompanyInfo,
+  getCachedProxyStore,
+  getProxyParams,
+  validateB2BCustomerAccess,
+} from "../../utils/proxy.server";
 
 interface ShopifyCustomer {
   id: string;
@@ -78,7 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.log("🐢 Cache MISS → fetching from DB");
 
     // ── SLOW PATH — run DB queries ───────────────────────────
-    const store = await getStoreByDomain(shop);
+    const store = await getCachedProxyStore(shop);
 
     const user = await prisma.user.findFirst({
       where: { shopifyCustomerId: `gid://shopify/Customer/${customerId}` },
@@ -178,15 +181,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const formData = await request.formData();
     const actionType = formData.get("action");
-    const { customerId, shop } = await validateB2BCustomerAccess(request);
-
-       const store = await getStoreByDomain(shop);
+    const { customerId, shop, store } = await validateB2BCustomerAccess(request);
 
         if (!store || !store.accessToken) {
         throw new Response("Store not found or no access token available during admin check", { status: 404 });
        }
     // Step 3: Get customer company info
-    const companyInfo = await getCustomerCompanyInfo(customerId, shop, store.accessToken);
+    const companyInfo = await getCachedCustomerCompanyInfo(customerId, shop, store.accessToken);
       const adminReceiverId = companyInfo?.companies.map((company: ShopifyCustomer) => company.mainContact.id) || [];
 
     try {

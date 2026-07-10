@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../../shopify.server";
-import { getStoreByDomain } from "../../services/store.server";
+import { getCachedProxyStore } from "../../utils/proxy.server";
 import prisma from "../../db.server";
 import { Decimal } from "@prisma/client/runtime/library";
 import { Prisma } from "@prisma/client";
@@ -41,7 +41,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const validOffset = Math.max(0, offset);
 
     // Get store
-    const store = await getStoreByDomain(shop);
+    const store = await getCachedProxyStore(shop);
     if (!store || !store.accessToken) {
       return Response.json({ error: "Store not found" }, { status: 404 });
     }

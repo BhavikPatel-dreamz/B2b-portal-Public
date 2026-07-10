@@ -1,7 +1,9 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { getStoreByDomain } from "../../services/store.server";
-import { getCustomerCompanyInfo } from "../../utils/b2b-customer.server";
-import { getProxyParams } from "app/utils/proxy.server";
+import {
+  getCachedCustomerCompanyInfo,
+  getCachedProxyStore,
+  getProxyParams,
+} from "app/utils/proxy.server";
 
 /**
  * Loader function to handle GET requests for current user company information
@@ -20,7 +22,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     // Get the store to get the access token
-    const store = await getStoreByDomain(shop);
+    const store = await getCachedProxyStore(shop);
     if (!store || !store.accessToken) {
       return Response.json(
         { error: "Store not found or unauthorized" },
@@ -29,7 +31,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     // Fetch customer company information
-    const companyInfo = await getCustomerCompanyInfo(
+    const companyInfo = await getCachedCustomerCompanyInfo(
       customerId,
       shop,
       store.accessToken,
@@ -119,7 +121,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Get the store to get the access token
-    const store = await getStoreByDomain(shop);
+    const store = await getCachedProxyStore(shop);
     if (!store || !store.accessToken) {
       return Response.json(
         { error: "Store not found or unauthorized" },
@@ -128,7 +130,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Fetch company info using the store's access token
-    const companyInfo = await getCustomerCompanyInfo(
+    const companyInfo = await getCachedCustomerCompanyInfo(
       customerId,
       shop,
       store.accessToken,

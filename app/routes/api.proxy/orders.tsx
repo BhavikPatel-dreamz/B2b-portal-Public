@@ -1,10 +1,12 @@
 import type { ActionFunctionArgs } from "react-router";
-import { getStoreByDomain } from "../../services/store.server";
 import {
-  getCustomerCompanyInfo,
   getAdvancedCompanyOrders
 } from "../../utils/b2b-customer.server";
-import { getProxyParams } from "app/utils/proxy.server";
+import {
+  getCachedCustomerCompanyInfo,
+  getCachedProxyStore,
+  getProxyParams,
+} from "app/utils/proxy.server";
 import prisma from "app/db.server";
 
 interface OrderRequestFilters {
@@ -95,13 +97,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // ── STEP 1: Get store (DB — fast) ───────────────────────
-  const store = await getStoreByDomain(shop);
+  const store = await getCachedProxyStore(shop);
   if (!store || !store.accessToken) {
     return Response.json({ error: "Store not found" }, { status: 404 });
   }
 
   // ── STEP 2: Get Company Info ───────────────────────────
-  const companyInfo = await getCustomerCompanyInfo(customerId, shop, store.accessToken);
+  const companyInfo = await getCachedCustomerCompanyInfo(
+    customerId,
+    shop,
+    store.accessToken,
+  );
 
   if (!companyInfo.hasCompany || !companyInfo.companies?.length) {
     return Response.json(

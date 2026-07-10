@@ -96,6 +96,17 @@ export async function getStoreByDomain(shopDomain: string) {
 }
 
 /**
+ * Get store scalar fields only.
+ * API proxy requests mostly need access token/settings, so avoid loading users
+ * on hot storefront paths.
+ */
+export async function getStoreByDomainForProxy(shopDomain: string) {
+  return await prisma.store.findUnique({
+    where: { shopDomain },
+  });
+}
+
+/**
  * Get store by ID
  */
 export async function getStoreById(id: string) {

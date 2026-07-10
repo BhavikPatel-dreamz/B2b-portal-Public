@@ -1,6 +1,108 @@
 import { redirect } from "react-router";
-import { getStoreByDomain } from "../services/store.server";
+import {
+  getStoreByDomain,
+  getStoreByDomainForProxy,
+} from "../services/store.server";
 import { checkCustomerIsB2BInShopifyByREST, getCustomerCompanyInfo } from "./b2b-customer.server";
+
+type ProxyStore = NonNullable<Awaited<ReturnType<typeof getStoreByDomainForProxy>>>;
+type CustomerCompanyInfo = Awaited<ReturnType<typeof getCustomerCompanyInfo>>;
+
+type ProxyCacheGlobal = typeof globalThis & {
+  __apiProxyStoreCache?: Map<
+    string,
+    { data: ProxyStore | null; timestamp: number }
+  >;
+  __apiProxyStorePending?: Map<string, Promise<ProxyStore | null>>;
+  __apiProxyCompanyInfoCache?: Map<
+    string,
+    { data: CustomerCompanyInfo; timestamp: number }
+  >;
+  __apiProxyCompanyInfoPending?: Map<string, Promise<CustomerCompanyInfo>>;
+};
+
+const proxyCacheGlobal = globalThis as ProxyCacheGlobal;
+const proxyStoreCache: Map<
+  string,
+  { data: ProxyStore | null; timestamp: number }
+> =
+  proxyCacheGlobal.__apiProxyStoreCache ??
+  (proxyCacheGlobal.__apiProxyStoreCache = new Map());
+const proxyStorePending: Map<string, Promise<ProxyStore | null>> =
+  proxyCacheGlobal.__apiProxyStorePending ??
+  (proxyCacheGlobal.__apiProxyStorePending = new Map());
+const proxyCompanyInfoCache: Map<
+  string,
+  { data: CustomerCompanyInfo; timestamp: number }
+> =
+  proxyCacheGlobal.__apiProxyCompanyInfoCache ??
+  (proxyCacheGlobal.__apiProxyCompanyInfoCache = new Map());
+const proxyCompanyInfoPending: Map<string, Promise<CustomerCompanyInfo>> =
+  proxyCacheGlobal.__apiProxyCompanyInfoPending ??
+  (proxyCacheGlobal.__apiProxyCompanyInfoPending = new Map());
+
+const PROXY_STORE_CACHE_TTL_MS = 30_000;
+const PROXY_COMPANY_INFO_CACHE_TTL_MS = 10_000;
+
+export async function getCachedProxyStore(shop: string) {
+  const cached = proxyStoreCache.get(shop);
+  const now = Date.now();
+
+  if (cached && now - cached.timestamp < PROXY_STORE_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  const pending = proxyStorePending.get(shop);
+  if (pending) {
+    return pending;
+  }
+
+  const lookup = getStoreByDomainForProxy(shop)
+    .then((store) => {
+      proxyStoreCache.set(shop, { data: store, timestamp: Date.now() });
+      return store;
+    })
+    .finally(() => {
+      proxyStorePending.delete(shop);
+    });
+
+  proxyStorePending.set(shop, lookup);
+  return lookup;
+}
+
+export async function getCachedCustomerCompanyInfo(
+  customerId: string,
+  shop: string,
+  accessToken: string,
+) {
+  const cacheKey = `${shop}:${customerId}`;
+  const cached = proxyCompanyInfoCache.get(cacheKey);
+  const now = Date.now();
+
+  if (cached && now - cached.timestamp < PROXY_COMPANY_INFO_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  const pending = proxyCompanyInfoPending.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const lookup = getCustomerCompanyInfo(customerId, shop, accessToken)
+    .then((companyInfo) => {
+      proxyCompanyInfoCache.set(cacheKey, {
+        data: companyInfo,
+        timestamp: Date.now(),
+      });
+      return companyInfo;
+    })
+    .finally(() => {
+      proxyCompanyInfoPending.delete(cacheKey);
+    });
+
+  proxyCompanyInfoPending.set(cacheKey, lookup);
+  return lookup;
+}
 
 /**
  * Gets proxy parameters from the request URL
@@ -80,6 +182,7 @@ export async function requireLoggedInCustomer(request: Request): Promise<string>
 export async function validateB2BCustomerAccess(request: Request): Promise<{
   customerId: string;
   shop: string;
+  store: ProxyStore;
 }> {
   // Step 1: Require customer to be logged in
   const customerId = await requireLoggedInCustomer(request);
@@ -93,7 +196,7 @@ export async function validateB2BCustomerAccess(request: Request): Promise<{
   }
 
   // Step 3: Check Shopify directly for B2B access (company or B2B tags)
-  const store = await getStoreByDomain(shop);
+  const store = await getCachedProxyStore(shop);
 
   if (store && store.accessToken) {
 
@@ -101,12 +204,16 @@ export async function validateB2BCustomerAccess(request: Request): Promise<{
 
     // 1. Check B2B access using GraphQL (CompanyContact association)
     // This is the primary method for B2B customers
-    const customerCompanyInfo = await getCustomerCompanyInfo(customerId, shop, store.accessToken);
+    const customerCompanyInfo = await getCachedCustomerCompanyInfo(
+      customerId,
+      shop,
+      store.accessToken,
+    );
     ///console.log("Customer company info:", JSON.stringify(customerCompanyInfo, null, 2));
 
     if (customerCompanyInfo.hasCompany) {
       console.log("✅ Customer has B2B access via CompanyContact!");
-      return { customerId, shop };
+      return { customerId, shop, store };
     }
 
     // 2. Fallback: Check Shopify directly using REST API (Tags or Metafields)
@@ -139,7 +246,7 @@ export async function validateB2BCustomerAccess(request: Request): Promise<{
     throw redirect("/apps/b2b-portal/registration");
   }
 
-  return { customerId, shop };
+  return { customerId, shop, store };
 }
 
 /**
@@ -235,7 +342,7 @@ export async function authenticateApiProxyRequest(request: Request) {
     }
 
     // Step 5: Get store from database
-    const store = await getStoreByDomain(shop);
+    const store = await getCachedProxyStore(shop);
     if (!store || !store.accessToken) {
       throw Response.json(
         { error: "Store not found or unauthorized" },
@@ -244,7 +351,7 @@ export async function authenticateApiProxyRequest(request: Request) {
     }
 
     // Step 6: Validate customer has B2B/company access
-    const companyInfo = await getCustomerCompanyInfo(
+    const companyInfo = await getCachedCustomerCompanyInfo(
       customerId,
       shop,
       store.accessToken

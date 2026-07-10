@@ -2,7 +2,6 @@ import { type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router";
 import prisma from "../../db.server";
 import { validateB2BCustomerAccess } from "../../utils/proxy.server";
 import { apiVersion } from "../../shopify.server";
-import { getStoreByDomain } from "../../services/store.server";
 
 
 // ============================================================
@@ -122,7 +121,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 // ============================================================
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { customerId, shop } = await validateB2BCustomerAccess(request);
+  const { customerId, shop, store } = await validateB2BCustomerAccess(request);
   const formData   = await request.formData();
   const actionType = formData.get("action");
 
@@ -195,8 +194,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return { error: "Wishlist not found or access denied" };
         }
 
-        const store = await getStoreByDomain(shop);
-        if (!store || !store.accessToken) throw new Error("Store not found");
+        if (!store.accessToken) throw new Error("Store not found");
 
         const items = JSON.parse(itemsJson);
         const results = [];
