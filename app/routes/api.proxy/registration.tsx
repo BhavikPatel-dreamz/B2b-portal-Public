@@ -15,20 +15,6 @@ import {
 } from "app/utils/free-plan-limits.server";
 import { syncAllCreditMetafields } from "app/services/metafieldSync.server";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Max-Age": "86400",
-};
-
-function corsResponse(data: unknown, init?: ResponseInit) {
-  return Response.json(data, {
-    ...init,
-    headers: { ...CORS_HEADERS, ...init?.headers },
-  });
-}
-
 const CORE_FIELD_KEYS = [
   "companyName",
   "email",
@@ -481,51 +467,49 @@ async function createOrFindCustomer(
           }
         }`,
         {
-      variables: {
-        input: {
-          id: customerNode.id,
-          acceptsMarketing: true,
-          // Only fill in fields that are currently blank in Shopify
-          firstName: customerNode.firstName || firstName || undefined,
-          lastName: customerNode.lastName || lastName || undefined,
-          phone: customerNode.phone || phone || undefined,
-        },
-      },
-    },
-  );
-
-  const updatePayload = await updateResponse.json();
-  const updateErrors = getGraphQLMessages(updatePayload, [
-    "data",
-    "customerUpdate",
-  ]);
-
-  if (updateErrors.length > 0) {
-    console.warn("⚠️ Customer update had errors:", updateErrors.join(", "));
-    // If the update failed and we passed a phone number, retry without the phone field
-    if (phone) {
-      console.log("🔄 Retrying customer update without phone field...");
-      const retryResponse = await admin.graphql(
-        `#graphql
-        mutation UpdateCustomerNameOnly($input: CustomerInput!) {
-          customerUpdate(input: $input) {
-            customer {
-              id
-              email
-              firstName
-              lastName
-              phone
-            }
-            userErrors { field message }
-          }
-        }`,
-        {
           variables: {
             input: {
               id: customerNode.id,
-              acceptsMarketing: true,
+              // Only fill in fields that are currently blank in Shopify
               firstName: customerNode.firstName || firstName || undefined,
               lastName: customerNode.lastName || lastName || undefined,
+              phone: customerNode.phone || phone || undefined,
+            },
+          },
+        },
+      );
+
+      const updatePayload = await updateResponse.json();
+      const updateErrors = getGraphQLMessages(updatePayload, [
+        "data",
+        "customerUpdate",
+      ]);
+
+      if (updateErrors.length > 0) {
+        console.warn("⚠️ Customer update had errors:", updateErrors.join(", "));
+        // If the update failed and we passed a phone number, retry without the phone field
+        if (phone) {
+          console.log("🔄 Retrying customer update without phone field...");
+          const retryResponse = await admin.graphql(
+            `#graphql
+            mutation UpdateCustomerNameOnly($input: CustomerInput!) {
+              customerUpdate(input: $input) {
+                customer {
+                  id
+                  email
+                  firstName
+                  lastName
+                  phone
+                }
+                userErrors { field message }
+              }
+            }`,
+            {
+              variables: {
+                input: {
+                  id: customerNode.id,
+                  firstName: customerNode.firstName || firstName || undefined,
+                  lastName: customerNode.lastName || lastName || undefined,
                 },
               },
             },
@@ -583,7 +567,6 @@ async function createOrFindCustomer(
       variables: {
         input: {
           email,
-          acceptsMarketing: true,
           firstName,
           lastName: lastName || undefined,
           phone,
@@ -615,7 +598,6 @@ async function createOrFindCustomer(
         variables: {
           input: {
             email,
-            acceptsMarketing: true,
             firstName,
             lastName: lastName || undefined,
           },
@@ -1083,7 +1065,14 @@ async function autoApproveRegistrationSubmission({
 export const loader: LoaderFunction = async ({ request }) => {
   // ✅ Handle OPTIONS preflight
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
   }
 
   // 1. Try Shopify App Proxy params
@@ -1105,16 +1094,16 @@ export const loader: LoaderFunction = async ({ request }) => {
   }
 
   if (!shop) {
-    return corsResponse({ success: false, error: "Store identification failed." }, { status: 400 });
+    return Response.json({ success: false, error: "Store identification failed." }, { status: 400 });
   }
 
   if (!shopifyCustomerId) {
-    return corsResponse({ success: false, error: "Shopify customer ID is required." }, { status: 400 });
+    return Response.json({ success: false, error: "Shopify customer ID is required." }, { status: 400 });
   }
 
   const store = await getStoreByDomain(shop);
   if (!store) {
-    return corsResponse({ success: false, error: "Store not found." }, { status: 404 });
+    return Response.json({ success: false, error: "Store not found." }, { status: 404 });
   }
 
   const data = await prisma.registrationSubmission.findFirst({
@@ -1124,7 +1113,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     },
   });
 
-  return corsResponse({
+  return Response.json({
     success: true,
     message: "Registration details fetched successfully.",
     data,
@@ -1137,7 +1126,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   
   // ✅ Handle OPTIONS preflight
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
   }
 
   let authenticatedShop: string | null = null;
@@ -1169,15 +1165,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const shop = authenticatedShop || url.searchParams.get("shop");
 
     if (!shop) {
-      return corsResponse({ success: false, error: "Store identification failed." }, { status: 400 });
+      return Response.json({ success: false, error: "Store identification failed." }, { status: 400 });
     }
 
     const store = await getStoreByDomain(shop);
     if (!store) {
-      return corsResponse({ success: false, error: "Store not found." }, { status: 404 });
+      return Response.json({ success: false, error: "Store not found." }, { status: 404 });
     }
     if (!store.accessToken) {
-      return corsResponse(
+      return Response.json(
         { success: false, error: "Store access token is missing." },
         { status: 400 },
       );
@@ -1284,7 +1280,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ✅ Basic validation
     if (!companyName) {
-      return corsResponse(
+      return Response.json(
         { success: false, error: "Company name is required." },
         { status: 400 },
       );
@@ -1294,7 +1290,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? "Could not retrieve your account email. Please ensure you are logged in or contact support."
         : "Email is required. Please log in to your account first.";
       
-      return corsResponse(
+      return Response.json(
         { success: false, error: errorMsg },
         { status: 400 },
       );
@@ -1302,7 +1298,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return corsResponse({ success: false, error: "Invalid email format." }, { status: 400 });
+      return Response.json({ success: false, error: "Invalid email format." }, { status: 400 });
     }
 
     // ✅ Duplicate email check
@@ -1312,7 +1308,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("✅ Existing Registration:", existing);
 
     if (existing) {
-      return corsResponse({ success: false, error: "Email already registered." }, { status: 409 });
+      return Response.json({ success: false, error: "Email already registered." }, { status: 409 });
     }
 
     const { location, customFields } = parseFormFields(allFields);
@@ -1345,7 +1341,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
 
       if (hasDuplicatePhone) {
-        return corsResponse(
+        return Response.json(
           { success: false, error: "Phone number already registered." },
           { status: 409 },
         );
@@ -1357,7 +1353,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (RegistrationData?.companyName === companyName) {
-      return corsResponse({ success: false, error: "Company already registered." }, { status: 409 });
+      return Response.json({ success: false, error: "Company already registered." }, { status: 409 });
     }
 
     // ✅ FIX: createOrFindCustomer now updates existing customer if firstName/lastName/phone are null
@@ -1372,7 +1368,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const usage = await getFreePlanUsage(store.id);
 
       if (usage.registrationLimitReached) {
-        return corsResponse(
+        return Response.json(
           {
             success: false,
             error: getFreePlanRegistrationsLimitMessage(),
@@ -1486,6 +1482,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
 
+        
         if (emailResult.success) {
           console.log("✅ Customer registration email sent successfully");
         } else {
@@ -1497,7 +1494,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    return corsResponse({
+    return Response.json({
       success: true,
       message: autoApproved
         ? "Registration submitted and approved successfully!"
@@ -1517,6 +1514,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch (error) {
     const message = extractErrorMessage(error);
     console.error("❌ Registration error:", error);
-    return corsResponse({ success: false, error: message }, { status: 500 });
+    return Response.json({ success: false, error: message }, { status: 500 });
   }
 };
