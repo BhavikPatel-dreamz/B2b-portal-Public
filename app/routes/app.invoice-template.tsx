@@ -267,8 +267,30 @@ const INVOICE_VARIABLES = [
   { variable: "{{shippingAddress}}", description: "Shipping address" },
 ];
 
+// ── CACHE for invoice template loader ──────────────────────────
+declare global {
+  var __invoiceTemplateCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const invoiceTemplateCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__invoiceTemplateCache ?? (globalThis.__invoiceTemplateCache = new Map());
+
+const INVOICE_TEMPLATE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+
+  // ── CACHE CHECK ──
+  const cacheKey = `invoice-template-${session.shop}`;
+  const cached = invoiceTemplateCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < INVOICE_TEMPLATE_CACHE_TTL) {
+    console.log(`⚡ Invoice template cache HIT → ${cacheKey}`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Invoice template cache MISS → querying DB");
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
@@ -284,12 +306,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw new Response("Store not found", { status: 404 });
   }
 
-  return Response.json({
+  const result = {
     shopName: store.shopName || session.shop,
     logo: store.logo || "",
     contactEmail: store.contactEmail || "",
     invoiceTemplate: store.invoiceTemplate || DEFAULT_INVOICE_TEMPLATE,
-  } satisfies LoaderData);
+  } satisfies LoaderData;
+
+  invoiceTemplateCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return Response.json(result);
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

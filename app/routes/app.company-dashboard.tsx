@@ -822,6 +822,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
+// ── CACHE for company dashboard loader ──────────────────────────
+declare global {
+  var __companyDashboardCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const companyDashboardCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__companyDashboardCache ??
+  (globalThis.__companyDashboardCache = new Map());
+
+const COMPANY_DASHBOARD_CACHE_TTL = 30 * 1000; // 30 seconds
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
@@ -829,6 +842,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!companyId) {
     throw new Response("Company ID is required", { status: 400 });
   }
+
+  // ── CACHE CHECK ──
+  const cacheKey = `company-dashboard-${session.shop}-${companyId}`;
+  const cached = companyDashboardCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < COMPANY_DASHBOARD_CACHE_TTL) {
+    console.log(`⚡ Company dashboard cache HIT → ${cacheKey}`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Company dashboard cache MISS → querying DB + Shopify");
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
@@ -888,7 +911,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     accessToken: store.accessToken,
   });
 
-  return Response.json({
+  const result = {
     isFreePlan,
     company: {
       id: dashboardData.company.id,
@@ -951,7 +974,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     totalUsers: dashboardData.totalUsers,
     pendingOrderCount: 0,
     currencyCode: store.currencyCode || "USD",
-  } satisfies LoaderData);
+  } satisfies LoaderData;
+
+  // Store in cache
+  companyDashboardCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return Response.json(result);
 };
 
 function getCreditStatusColor(

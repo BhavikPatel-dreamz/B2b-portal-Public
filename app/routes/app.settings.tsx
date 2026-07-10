@@ -91,8 +91,30 @@ function sanitizeNonNegativeDecimal(value: string) {
   return value.startsWith("-") ? value.replace(/^-+/, "") : value;
 }
 
+// ── CACHE for settings loader ───────────────────────────────────
+declare global {
+  var __settingsCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const settingsCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__settingsCache ?? (globalThis.__settingsCache = new Map());
+
+const SETTINGS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+
+  // ── CACHE CHECK ──
+  const cacheKey = `settings-${session.shop}`;
+  const cached = settingsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < SETTINGS_CACHE_TTL) {
+    console.log(`⚡ Settings cache HIT → ${cacheKey}`);
+    return Response.json(cached.data, { status: 200 });
+  }
+
+  console.log("🐢 Settings cache MISS → querying DB");
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
@@ -107,49 +129,50 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const freePlanUsage =
     store.plan === "free" ? await getFreePlanUsage(store.id) : undefined;
 
-  return Response.json(
-    {
-      storeMissing: false,
-      store: {
-        shopDomain: store.shopDomain,
-        plan: store.plan || "",
-        shopName: store.shopName || "",
-        logo: store.logo || "",
-        submissionEmail: store.submissionEmail || "",
-        contactEmail: store.contactEmail || "",
-        themeColor: store.themeColor || "",
-        autoApproveB2BOnboarding: store.autoApproveB2BOnboarding ?? false,
-        defaultCompanyCreditLimit:
-          store.defaultCompanyCreditLimit?.toString() || "",
-        orderConfirmationToMainAccount:
-          store.orderConfirmationToMainAccount ?? false,
-        allowQuickOrderForUser: store.allowQuickOrderForUser ?? false,
-        blockOrderWhenCreditUnavailable:
-          store.blockOrderWhenCreditUnavailable ?? false,
-        showDashboardPage: store.showDashboardPage ?? true,
-        showLocationsPage: store.showLocationsPage ?? true,
-        showUsersPage: store.showUsersPage ?? true,
-        showOrdersPage: store.showOrdersPage ?? true,
-        showQuickOrderPage: store.showQuickOrderPage ?? true,
-        showWishlistsPage: store.showWishlistsPage ?? true,
-        showCreditManagementPage: store.showCreditManagementPage ?? true,
-        showNotificationsPage: store.showNotificationsPage ?? true,
-        showReportsPage: store.showReportsPage ?? true,
-        defaultTaxRate: store.defaultTaxRate?.toString() || "8.00",
-        companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
-        companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
-        privacyPolicylink: store.privacyPolicylink || "",
-        privacyPolicyContent: store.privacyPolicyContent || "",
-        freePlanUsage: freePlanUsage
-          ? {
-              companyCount: freePlanUsage.companyCount,
-              registrationCount: freePlanUsage.registrationCount,
-            }
-          : undefined,
-      },
-    } satisfies LoaderData,
-    { status: 200 },
-  );
+  const result = {
+    storeMissing: false,
+    store: {
+      shopDomain: store.shopDomain,
+      plan: store.plan || "",
+      shopName: store.shopName || "",
+      logo: store.logo || "",
+      submissionEmail: store.submissionEmail || "",
+      contactEmail: store.contactEmail || "",
+      themeColor: store.themeColor || "",
+      autoApproveB2BOnboarding: store.autoApproveB2BOnboarding ?? false,
+      defaultCompanyCreditLimit:
+        store.defaultCompanyCreditLimit?.toString() || "",
+      orderConfirmationToMainAccount:
+        store.orderConfirmationToMainAccount ?? false,
+      allowQuickOrderForUser: store.allowQuickOrderForUser ?? false,
+      blockOrderWhenCreditUnavailable:
+        store.blockOrderWhenCreditUnavailable ?? false,
+      showDashboardPage: store.showDashboardPage ?? true,
+      showLocationsPage: store.showLocationsPage ?? true,
+      showUsersPage: store.showUsersPage ?? true,
+      showOrdersPage: store.showOrdersPage ?? true,
+      showQuickOrderPage: store.showQuickOrderPage ?? true,
+      showWishlistsPage: store.showWishlistsPage ?? true,
+      showCreditManagementPage: store.showCreditManagementPage ?? true,
+      showNotificationsPage: store.showNotificationsPage ?? true,
+      showReportsPage: store.showReportsPage ?? true,
+      defaultTaxRate: store.defaultTaxRate?.toString() || "8.00",
+      companyWelcomeEmailTemplate: store.companyWelcomeEmailTemplate || "",
+      companyWelcomeEmailEnabled: store.companyWelcomeEmailEnabled !== false,
+      privacyPolicylink: store.privacyPolicylink || "",
+      privacyPolicyContent: store.privacyPolicyContent || "",
+      freePlanUsage: freePlanUsage
+        ? {
+            companyCount: freePlanUsage.companyCount,
+            registrationCount: freePlanUsage.registrationCount,
+          }
+        : undefined,
+    },
+  } satisfies LoaderData;
+
+  settingsCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return Response.json(result, { status: 200 });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

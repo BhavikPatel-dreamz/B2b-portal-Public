@@ -490,8 +490,30 @@ function validateEmailAddress(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+// ── CACHE for notification form loader ─────────────────────────
+declare global {
+  var __notificationFormCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const notificationFormCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__notificationFormCache ?? (globalThis.__notificationFormCache = new Map());
+
+const NOTIFICATION_FORM_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+
+  // ── CACHE CHECK ──
+  const cacheKey = `notification-form-${session.shop}`;
+  const cached = notificationFormCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < NOTIFICATION_FORM_CACHE_TTL) {
+    console.log(`⚡ Notification form cache HIT → ${cacheKey}`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Notification form cache MISS → querying DB");
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
@@ -578,13 +600,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ),
   };
 
-  return Response.json({
+  const result = {
     storeName: store.shopName || session.shop,
     storeLogo: store.logo || "",
     contactEmail: store.contactEmail || "",
     smtpSettings,
     templates,
-  } satisfies LoaderData);
+  } satisfies LoaderData;
+
+  notificationFormCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return Response.json(result);
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

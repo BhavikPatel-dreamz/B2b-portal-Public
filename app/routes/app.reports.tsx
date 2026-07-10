@@ -83,6 +83,18 @@ const getDateRange = (filter: string, start?: string | null, end?: string | null
   return startDate ? { gte: startDate } : undefined;
 };
 
+// ── CACHE for reports loader ────────────────────────────────────
+declare global {
+  var __reportsCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const reportsCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__reportsCache ?? (globalThis.__reportsCache = new Map());
+
+const REPORTS_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
@@ -91,6 +103,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const end = url.searchParams.get("end");
   const page = parseInt(url.searchParams.get("page") || "1", 10);
   const pageSize = 10;
+
+  // ── CACHE CHECK ──
+  const cacheKey = `reports-${session.shop}-${filter}-${start}-${end}-${page}`;
+  const cached = reportsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < REPORTS_CACHE_TTL) {
+    console.log(`⚡ Reports cache HIT → ${cacheKey}`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Reports cache MISS → querying DB + Shopify");
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
@@ -287,7 +309,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .slice(0, 10));
   }
 
-  return Response.json({
+  const result = {
     totalB2BOrders: generalStats?._count?.id || 0,
     totalB2BRevenue: Number(generalStats?._sum?.orderTotal || 0),
     quickOrderCount: quickOrderStats?._count?.id || 0,
@@ -304,7 +326,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       totalCount: totalCompaniesCount,
       totalPages,
     },
-  });
+  };
+
+  reportsCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return Response.json(result);
 };
 
 export default function Reports() {

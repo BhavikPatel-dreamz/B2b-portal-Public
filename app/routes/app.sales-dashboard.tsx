@@ -33,8 +33,32 @@ type SalesDashboardLoaderData = {
   appUrl: string;
 };
 
+// ── CACHE for sales dashboard loader ───────────────────────────
+declare global {
+  var __salesDashboardCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const salesDashboardCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__salesDashboardCache ?? (globalThis.__salesDashboardCache = new Map());
+
+const SALES_DASHBOARD_CACHE_TTL = 30 * 1000; // 30 seconds
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+
+  // ── CACHE CHECK ──
+  const url = new URL(request.url);
+  const cacheKey = `sales-dashboard-${session.shop}-${url.search}`;
+  const cached = salesDashboardCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < SALES_DASHBOARD_CACHE_TTL) {
+    console.log(`⚡ Sales dashboard cache HIT → ${cacheKey}`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Sales dashboard cache MISS → querying DB");
+
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
   });
@@ -43,7 +67,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw new Response("Store not found", { status: 404 });
   }
 
-  const url = new URL(request.url);
   const filterAgent = url.searchParams.get("agent") || "";
   const filterPaymentStatus = url.searchParams.get("paymentStatus") || "";
   const filterOrderStatus = url.searchParams.get("orderStatus") || "";
@@ -151,7 +174,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const totalRevenue = Number(revenueResult._sum.orderTotal ?? 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  return Response.json({
+  const result = {
     items: items.map(o => ({
       ...o,
       orderTotal: o.orderTotal.toString(),
@@ -172,7 +195,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     activeTab,
     appUrl,
     filters: { filterAgent, filterPaymentStatus, filterOrderStatus, filterCompany, filterDateFrom, filterDateTo },
-  });
+  };
+
+  salesDashboardCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return Response.json(result);
 };
 
 export default function SalesDashboard() {

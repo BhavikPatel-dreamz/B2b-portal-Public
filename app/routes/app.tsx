@@ -1,5 +1,6 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Outlet, useLoaderData, useRouteError } from "react-router";
+import type { ShouldRevalidateFunctionArgs } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
@@ -25,7 +26,26 @@ function requiresPlan(pathname: string) {
   return pathname.startsWith("/app") && !PLAN_EXEMPT_PATHS.has(pathname);
 }
 
+// ── IN-MEMORY CACHE for app layout data ─────────────────────────
+declare global {
+  var __appLayoutCache:
+    | Map<string, { data: { apiKey: string; showSalesLinks: boolean }; timestamp: number }>
+    | undefined;
+}
+
+const appLayoutCache: Map<string, { data: { apiKey: string; showSalesLinks: boolean }; timestamp: number }> =
+  globalThis.__appLayoutCache ?? (globalThis.__appLayoutCache = new Map());
+
+const APP_LAYOUT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const cacheKey = "app-layout";
+  const cached = appLayoutCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < APP_LAYOUT_CACHE_TTL) {
+    console.log("⚡ App layout cache HIT");
+    return Response.json(cached.data);
+  }
+
   const { billing, redirect, session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
   const store = await prisma.store.findUnique({
@@ -76,9 +96,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", showSalesLinks };
+  const result = { apiKey: process.env.SHOPIFY_API_KEY || "", showSalesLinks };
+
+  // Store in cache
+  appLayoutCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return result;
 };
+
+// ── SKIP REVALIDATION on client-side GET navigations ────────────
+export function shouldRevalidate({
+  formMethod,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  if (formMethod && formMethod !== "GET") {
+    return defaultShouldRevalidate;
+  }
+  return false;
+}
 
 export default function App() {
   const { apiKey, showSalesLinks } = useLoaderData<typeof loader>();

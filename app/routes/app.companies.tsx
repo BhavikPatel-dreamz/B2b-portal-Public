@@ -199,26 +199,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
     const limit = 10;
     const skip = (page - 1) * limit;
-    const shopFromUrl = url.searchParams.get("shop") || "";
 
-    if (shopFromUrl) {
-      const cacheKey = `admin-companies-${shopFromUrl}-${activeTab}-${page}-${searchQuery}-${sortField}-${sortDirection}`;
-      const cached = cache.get(cacheKey);
+    // Authenticate first (fast — session lookup in DB)
+    const { admin, session } = await authenticate.admin(request);
+    const shop = session.shop;
 
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`⚡ Cache HIT (skipped all DB calls) → ${cacheKey}`);
-        console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
-        return Response.json(cached.data);
-      }
+    // Always check cache after auth, regardless of URL params
+    const cacheKey = `admin-companies-${shop}-${activeTab}-${page}-${searchQuery}-${sortField}-${sortDirection}`;
+    const cached = cache.get(cacheKey);
+
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log(`⚡ Cache HIT (skipped all DB calls) → ${cacheKey}`);
+      console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+      return Response.json(cached.data);
     }
 
-    // ── SLOW PATH — run auth + all DB queries 
-    console.log("🐢 Cache MISS → running auth + DB");
-
-    const { admin, session } = await authenticate.admin(request);
-    const shop = session.shop; // authoritative shop from session
-
-    const cacheKey = `admin-companies-${shop}-${activeTab}-${page}-${searchQuery}-${sortField}-${sortDirection}`;
+    // ── SLOW PATH — run all DB queries 
+    console.log("🐢 Cache MISS → running DB queries");
 
     const store = await getStoreForShop(shop);
 

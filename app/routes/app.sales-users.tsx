@@ -53,8 +53,30 @@ type SalesUsersLoaderData = {
   appUrl: string;
 };
 
+// ── CACHE for sales users loader ────────────────────────────────
+declare global {
+  var __salesUsersCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const salesUsersCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__salesUsersCache ?? (globalThis.__salesUsersCache = new Map());
+
+const SALES_USERS_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+
+  // ── CACHE CHECK ──
+  const cacheKey = `sales-users-${session.shop}`;
+  const cached = salesUsersCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < SALES_USERS_CACHE_TTL) {
+    console.log(`⚡ Sales users cache HIT → ${cacheKey}`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Sales users cache MISS → querying DB");
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
@@ -80,7 +102,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
   ]);
 
-  return Response.json({ salesUsers, companies, storeId: store.id, appUrl: process.env.SHOPIFY_APP_URL });
+  const result = { salesUsers, companies, storeId: store.id, appUrl: process.env.SHOPIFY_APP_URL };
+
+  salesUsersCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+  return Response.json(result);
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

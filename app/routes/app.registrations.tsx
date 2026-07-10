@@ -415,10 +415,34 @@ async function getCompanyLocation(
 
 
 
+// ── CACHE for registrations loader ──────────────────────────────
+declare global {
+  var __registrationsCache:
+    | Map<string, { data: unknown; timestamp: number }>
+    | undefined;
+}
+
+const registrationsCache: Map<string, { data: unknown; timestamp: number }> =
+  globalThis.__registrationsCache ??
+  (globalThis.__registrationsCache = new Map());
+
+const REGISTRATIONS_CACHE_TTL = 15 * 1000; // 15 seconds
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const startTime = Date.now();
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // ── CACHE CHECK ──
+  const cacheKey = `registrations-${shop}`;
+  const cached = registrationsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < REGISTRATIONS_CACHE_TTL) {
+    console.log(`⚡ Registrations cache HIT → ${cacheKey}`);
+    console.log(`🚀 API Time: ${Date.now() - startTime}ms`);
+    return Response.json(cached.data);
+  }
+
+  console.log("🐢 Registrations cache MISS → querying DB");
 
   const store = await prisma.store.findUnique({
     where: { shopDomain: shop },
@@ -509,7 +533,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   console.log(`🚀 Registration loader time: ${Date.now() - startTime}ms`);
 
-  return Response.json({
+  const loaderResult = {
     submissions: submissions.map((s) => ({
       ...s,
       createdAt: s.createdAt.toISOString(),
@@ -527,7 +551,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     priceLists,
     storeMissing: false,
     isFreePlan: store.plan === "free",
-  });
+  };
+
+  // Store in cache
+  registrationsCache.set(cacheKey, { data: loaderResult, timestamp: Date.now() });
+
+  return Response.json(loaderResult);
 };
 
 const parseForm = async (request: Request) => {
