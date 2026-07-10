@@ -467,49 +467,51 @@ async function createOrFindCustomer(
           }
         }`,
         {
+      variables: {
+        input: {
+          id: customerNode.id,
+          acceptsMarketing: true,
+          // Only fill in fields that are currently blank in Shopify
+          firstName: customerNode.firstName || firstName || undefined,
+          lastName: customerNode.lastName || lastName || undefined,
+          phone: customerNode.phone || phone || undefined,
+        },
+      },
+    },
+  );
+
+  const updatePayload = await updateResponse.json();
+  const updateErrors = getGraphQLMessages(updatePayload, [
+    "data",
+    "customerUpdate",
+  ]);
+
+  if (updateErrors.length > 0) {
+    console.warn("⚠️ Customer update had errors:", updateErrors.join(", "));
+    // If the update failed and we passed a phone number, retry without the phone field
+    if (phone) {
+      console.log("🔄 Retrying customer update without phone field...");
+      const retryResponse = await admin.graphql(
+        `#graphql
+        mutation UpdateCustomerNameOnly($input: CustomerInput!) {
+          customerUpdate(input: $input) {
+            customer {
+              id
+              email
+              firstName
+              lastName
+              phone
+            }
+            userErrors { field message }
+          }
+        }`,
+        {
           variables: {
             input: {
               id: customerNode.id,
-              // Only fill in fields that are currently blank in Shopify
+              acceptsMarketing: true,
               firstName: customerNode.firstName || firstName || undefined,
               lastName: customerNode.lastName || lastName || undefined,
-              phone: customerNode.phone || phone || undefined,
-            },
-          },
-        },
-      );
-
-      const updatePayload = await updateResponse.json();
-      const updateErrors = getGraphQLMessages(updatePayload, [
-        "data",
-        "customerUpdate",
-      ]);
-
-      if (updateErrors.length > 0) {
-        console.warn("⚠️ Customer update had errors:", updateErrors.join(", "));
-        // If the update failed and we passed a phone number, retry without the phone field
-        if (phone) {
-          console.log("🔄 Retrying customer update without phone field...");
-          const retryResponse = await admin.graphql(
-            `#graphql
-            mutation UpdateCustomerNameOnly($input: CustomerInput!) {
-              customerUpdate(input: $input) {
-                customer {
-                  id
-                  email
-                  firstName
-                  lastName
-                  phone
-                }
-                userErrors { field message }
-              }
-            }`,
-            {
-              variables: {
-                input: {
-                  id: customerNode.id,
-                  firstName: customerNode.firstName || firstName || undefined,
-                  lastName: customerNode.lastName || lastName || undefined,
                 },
               },
             },
@@ -567,6 +569,7 @@ async function createOrFindCustomer(
       variables: {
         input: {
           email,
+          acceptsMarketing: true,
           firstName,
           lastName: lastName || undefined,
           phone,
@@ -598,6 +601,7 @@ async function createOrFindCustomer(
         variables: {
           input: {
             email,
+            acceptsMarketing: true,
             firstName,
             lastName: lastName || undefined,
           },

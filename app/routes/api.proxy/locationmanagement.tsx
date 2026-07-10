@@ -285,7 +285,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           { field: "address2",   value: address2,   message: "Apartment, suite, etc is required" },
           { field: "recipient",  value: recipient,  message: "Company/Attention is required" },
           { field: "city",       value: city,       message: "City is required" },
-          { field: "province",   value: province,   message: "Province/State is required" },
           { field: "country",    value: country,    message: "Country is required" },
           { field: "zip",        value: zip,        message: "Zip/Postal code is required" },
         ];
@@ -320,7 +319,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             address1: address1 || "",
             address2: address2 || "",
             city: city || "",
-            province: province || "GJ",
+            province: province || "",
             zip: zip || "",
             phone: phone && phone.trim() !== "" ? phone : "",
             recipient: recipient || "",
