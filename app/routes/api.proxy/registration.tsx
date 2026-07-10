@@ -15,6 +15,20 @@ import {
 } from "app/utils/free-plan-limits.server";
 import { syncAllCreditMetafields } from "app/services/metafieldSync.server";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Max-Age": "86400",
+};
+
+function corsResponse(data: unknown, init?: ResponseInit) {
+  return Response.json(data, {
+    ...init,
+    headers: { ...CORS_HEADERS, ...init?.headers },
+  });
+}
+
 const CORE_FIELD_KEYS = [
   "companyName",
   "email",
@@ -1069,14 +1083,7 @@ async function autoApproveRegistrationSubmission({
 export const loader: LoaderFunction = async ({ request }) => {
   // ✅ Handle OPTIONS preflight
   if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
   // 1. Try Shopify App Proxy params
@@ -1098,16 +1105,16 @@ export const loader: LoaderFunction = async ({ request }) => {
   }
 
   if (!shop) {
-    return Response.json({ success: false, error: "Store identification failed." }, { status: 400 });
+    return corsResponse({ success: false, error: "Store identification failed." }, { status: 400 });
   }
 
   if (!shopifyCustomerId) {
-    return Response.json({ success: false, error: "Shopify customer ID is required." }, { status: 400 });
+    return corsResponse({ success: false, error: "Shopify customer ID is required." }, { status: 400 });
   }
 
   const store = await getStoreByDomain(shop);
   if (!store) {
-    return Response.json({ success: false, error: "Store not found." }, { status: 404 });
+    return corsResponse({ success: false, error: "Store not found." }, { status: 404 });
   }
 
   const data = await prisma.registrationSubmission.findFirst({
@@ -1117,7 +1124,7 @@ export const loader: LoaderFunction = async ({ request }) => {
     },
   });
 
-  return Response.json({
+  return corsResponse({
     success: true,
     message: "Registration details fetched successfully.",
     data,
@@ -1130,14 +1137,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   
   // ✅ Handle OPTIONS preflight
   if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
   let authenticatedShop: string | null = null;
@@ -1169,15 +1169,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const shop = authenticatedShop || url.searchParams.get("shop");
 
     if (!shop) {
-      return Response.json({ success: false, error: "Store identification failed." }, { status: 400 });
+      return corsResponse({ success: false, error: "Store identification failed." }, { status: 400 });
     }
 
     const store = await getStoreByDomain(shop);
     if (!store) {
-      return Response.json({ success: false, error: "Store not found." }, { status: 404 });
+      return corsResponse({ success: false, error: "Store not found." }, { status: 404 });
     }
     if (!store.accessToken) {
-      return Response.json(
+      return corsResponse(
         { success: false, error: "Store access token is missing." },
         { status: 400 },
       );
@@ -1284,7 +1284,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ✅ Basic validation
     if (!companyName) {
-      return Response.json(
+      return corsResponse(
         { success: false, error: "Company name is required." },
         { status: 400 },
       );
@@ -1294,7 +1294,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? "Could not retrieve your account email. Please ensure you are logged in or contact support."
         : "Email is required. Please log in to your account first.";
       
-      return Response.json(
+      return corsResponse(
         { success: false, error: errorMsg },
         { status: 400 },
       );
@@ -1302,7 +1302,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return Response.json({ success: false, error: "Invalid email format." }, { status: 400 });
+      return corsResponse({ success: false, error: "Invalid email format." }, { status: 400 });
     }
 
     // ✅ Duplicate email check
@@ -1312,7 +1312,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("✅ Existing Registration:", existing);
 
     if (existing) {
-      return Response.json({ success: false, error: "Email already registered." }, { status: 409 });
+      return corsResponse({ success: false, error: "Email already registered." }, { status: 409 });
     }
 
     const { location, customFields } = parseFormFields(allFields);
@@ -1345,7 +1345,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
 
       if (hasDuplicatePhone) {
-        return Response.json(
+        return corsResponse(
           { success: false, error: "Phone number already registered." },
           { status: 409 },
         );
@@ -1357,7 +1357,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (RegistrationData?.companyName === companyName) {
-      return Response.json({ success: false, error: "Company already registered." }, { status: 409 });
+      return corsResponse({ success: false, error: "Company already registered." }, { status: 409 });
     }
 
     // ✅ FIX: createOrFindCustomer now updates existing customer if firstName/lastName/phone are null
@@ -1372,7 +1372,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const usage = await getFreePlanUsage(store.id);
 
       if (usage.registrationLimitReached) {
-        return Response.json(
+        return corsResponse(
           {
             success: false,
             error: getFreePlanRegistrationsLimitMessage(),
@@ -1497,7 +1497,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    return Response.json({
+    return corsResponse({
       success: true,
       message: autoApproved
         ? "Registration submitted and approved successfully!"
@@ -1517,6 +1517,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } catch (error) {
     const message = extractErrorMessage(error);
     console.error("❌ Registration error:", error);
-    return Response.json({ success: false, error: message }, { status: 500 });
+    return corsResponse({ success: false, error: message }, { status: 500 });
   }
 };
