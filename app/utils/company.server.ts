@@ -591,8 +591,191 @@ export const syncShopifyUsers = async (
   store: StoreRef,
   companyId?: string,
 ) => {
-  // ... (existing code)
+  try {
+    let targetShopifyCompanyId: string | null = null;
+    let localCompanyName = "Unknown Company";
+
+    if (companyId) {
+      const localCompany = await prisma.companyAccount.findUnique({
+        where: { id: companyId },
+        select: { id: true, shopifyCompanyId: true, name: true },
+      });
+
+      if (localCompany?.shopifyCompanyId) {
+        targetShopifyCompanyId = localCompany.shopifyCompanyId;
+        localCompanyName = localCompany.name || localCompanyName;
+      } else if (companyId.startsWith("gid://")) {
+        targetShopifyCompanyId = companyId;
+      }
+    }
+
+    if (!targetShopifyCompanyId) {
+      return {
+        success: false,
+        syncedCount: 0,
+        message: "Company not found or missing Shopify company ID",
+        errors: ["Company not found or missing Shopify company ID"],
+      };
+    }
+
+    const query = `
+      query GetCompanyContacts($id: ID!) {
+        company(id: $id) {
+          id
+          name
+          contacts(first: 100) {
+            edges {
+              node {
+                id
+                title
+                customer {
+                  id
+                  email
+                  firstName
+                  lastName
+                }
+                roleAssignments(first: 10) {
+                  edges {
+                    node {
+                      role {
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await admin.graphql(query, {
+      variables: { id: targetShopifyCompanyId },
+    });
+    const payload = await response.json();
+    const contacts =
+      payload?.data?.company?.contacts?.edges?.map(
+        (edge: { node: Record<string, unknown> }) => edge.node,
+      ) || [];
+
+    let syncedCount = 0;
+
+    for (const contact of contacts) {
+      const customer = contact.customer as
+        | {
+            id?: string;
+            email?: string | null;
+            firstName?: string | null;
+            lastName?: string | null;
+          }
+        | undefined;
+
+      if (!customer?.email) continue;
+
+      const normalizedEmail = customer.email.trim().toLowerCase();
+      const roleAssignments = (
+        (
+          contact.roleAssignments as
+            | { edges?: Array<{ node?: { role?: { name?: string } } }> }
+            | undefined
+        )?.edges || []
+      )
+        .map((edge) => edge.node?.role?.name)
+        .filter(Boolean) as string[];
+
+      const isAdmin =
+        roleAssignments.some((name) => /admin/i.test(name)) ||
+        (contact.title as string | undefined)?.toLowerCase().includes("admin");
+      const role = isAdmin ? UserRole.STORE_ADMIN : UserRole.STORE_USER;
+      const companyRole = isAdmin ? "admin" : "member";
+      const shopifyCustomerId = customer.id || null;
+
+      await prisma.user.upsert({
+        where: {
+          shopId_email_role: {
+            shopId: store.id,
+            email: normalizedEmail,
+            role,
+          },
+        },
+        update: {
+          firstName: customer.firstName || null,
+          lastName: customer.lastName || null,
+          shopifyCustomerId,
+          companyId,
+          companyRole,
+          role,
+          isActive: true,
+          status: UserStatus.APPROVED,
+        },
+        create: {
+          email: normalizedEmail,
+          firstName: customer.firstName || null,
+          lastName: customer.lastName || null,
+          password: "",
+          shopifyCustomerId,
+          shopId: store.id,
+          companyId,
+          companyRole,
+          role,
+          status: UserStatus.APPROVED,
+          isActive: true,
+        },
+      });
+
+      await prisma.registrationSubmission.upsert({
+        where: {
+          shopId_email: {
+            shopId: store.id,
+            email: normalizedEmail,
+          },
+        },
+        update: {
+          email: normalizedEmail,
+          companyName: localCompanyName,
+          firstName: customer.firstName || "",
+          lastName: customer.lastName || "",
+          shopifyCustomerId,
+          status: UserStatus.APPROVED,
+          shopId: store.id,
+        },
+        create: {
+          shopId: store.id,
+          email: normalizedEmail,
+          companyName: localCompanyName,
+          firstName: customer.firstName || "",
+          lastName: customer.lastName || "",
+          shopifyCustomerId,
+          status: UserStatus.APPROVED,
+          contactTitle: (contact.title as string | undefined) || "",
+          workflowCompleted: true,
+        },
+      });
+
+      syncedCount += 1;
+    }
+
+    return {
+      success: true,
+      syncedCount,
+      message:
+        syncedCount > 0
+          ? `Synced ${syncedCount} users successfully`
+          : "No users found to sync",
+      errors: [],
+    };
+  } catch (error) {
+    console.error("Error syncing Shopify users:", error);
+    return {
+      success: false,
+      syncedCount: 0,
+      message: "Failed to sync users",
+      errors: [error instanceof Error ? error.message : "Unknown sync error"],
+    };
+  }
 };
+
 
 /**
  * Sync a single Shopify B2B customer and their associated companies.
