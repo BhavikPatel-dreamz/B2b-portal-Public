@@ -502,6 +502,11 @@ const notificationFormCache: Map<string, { data: unknown; timestamp: number }> =
 
 const NOTIFICATION_FORM_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
+function clearNotificationFormCache(shop: string) {
+  const cacheKey = `notification-form-${shop}`;
+  notificationFormCache.delete(cacheKey);
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
@@ -890,6 +895,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
+    clearNotificationFormCache(session.shop);
+
     return Response.json({
       success: true,
       message: enabled
@@ -951,6 +958,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         data: { shopId: store.id, ...toggleData },
       });
     }
+
+    clearNotificationFormCache(session.shop);
 
     return Response.json({
       success: true,
@@ -1038,6 +1047,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         data: { shopId: store.id, ...allData },
       });
     }
+
+    clearNotificationFormCache(session.shop);
 
     return Response.json({
       success: true,
@@ -1152,6 +1163,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
+    clearNotificationFormCache(session.shop);
+
     return Response.json({
       success: true,
       message: scheduleEnabled
@@ -1214,6 +1227,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } else {
     await prisma.emailTemplates.create({ data: { shopId: store.id, ...data } });
   }
+
+  clearNotificationFormCache(session.shop);
 
   return Response.json({
     success: true,
@@ -1444,21 +1459,28 @@ export default function NotificationForm() {
       typeof toggleFetcher.data.enabled !== "boolean"
     )
       return;
-    setTemplateValues((prev) => ({
-      ...prev,
-      "customer-application-received": {
-        ...prev["customer-application-received"],
-        enabled: toggleFetcher.data!.enabled!,
-      },
-      "customer-application-approved": {
-        ...prev["customer-application-approved"],
-        enabled: toggleFetcher.data!.enabled!,
-      },
-      "customer-application-rejected": {
-        ...prev["customer-application-rejected"],
-        enabled: toggleFetcher.data!.enabled!,
-      },
-    }));
+    setTemplateValues((prev) => {
+      const nextEnabled = toggleFetcher.data!.enabled!;
+      const allSame = customerTemplates.every(
+        (item) => prev[item.id].enabled === nextEnabled,
+      );
+      if (allSame) return prev;
+      return {
+        ...prev,
+        "customer-application-received": {
+          ...prev["customer-application-received"],
+          enabled: nextEnabled,
+        },
+        "customer-application-approved": {
+          ...prev["customer-application-approved"],
+          enabled: nextEnabled,
+        },
+        "customer-application-rejected": {
+          ...prev["customer-application-rejected"],
+          enabled: nextEnabled,
+        },
+      };
+    });
   }, [toggleFetcher.data]);
 
   useEffect(() => {
@@ -1467,29 +1489,37 @@ export default function NotificationForm() {
       typeof adminToggleFetcher.data.enabled !== "boolean"
     )
       return;
-    setTemplateValues((prev) => ({
-      ...prev,
-      "admin-application-received": {
-        ...prev["admin-application-received"],
-        enabled: adminToggleFetcher.data!.enabled!,
-      },
-    }));
+    setTemplateValues((prev) => {
+      const nextEnabled = adminToggleFetcher.data!.enabled!;
+      if (prev["admin-application-received"].enabled === nextEnabled) return prev;
+      return {
+        ...prev,
+        "admin-application-received": {
+          ...prev["admin-application-received"],
+          enabled: nextEnabled,
+        },
+      };
+    });
   }, [adminToggleFetcher.data]);
 
   // Handle individual template toggles
   useEffect(
     () => {
       TEMPLATE_ITEMS.forEach((item) => {
-        const fetcher = templateToggleFetchers[item.id];
-        if (!fetcher.data?.success || typeof fetcher.data.enabled !== "boolean")
-          return;
-        setTemplateValues((prev) => ({
-          ...prev,
-          [item.id]: { ...prev[item.id], enabled: fetcher.data!.enabled! },
-        }));
+        const f = templateToggleFetchers[item.id];
+        if (!f.data?.success || typeof f.data.enabled !== "boolean") return;
+        setTemplateValues((prev) => {
+          if (prev[item.id].enabled === f.data!.enabled) return prev;
+          return { ...prev, [item.id]: { ...prev[item.id], enabled: f.data!.enabled! } };
+        });
       });
     },
-    Object.values(templateToggleFetchers).map((f) => f.data),
+    [
+      templateToggleFetchers["customer-application-received"].data,
+      templateToggleFetchers["customer-application-approved"].data,
+      templateToggleFetchers["customer-application-rejected"].data,
+      templateToggleFetchers["admin-application-received"].data,
+    ],
   );
 
   useEffect(() => {
