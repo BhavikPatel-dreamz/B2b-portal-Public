@@ -1547,7 +1547,7 @@ export default function SettingsPage() {
                 </div>
 
                 {/* Upgrade prompt for free plan users */}
-                {isFreePlan && (
+                {/* {isFreePlan && (
                   <div
                     style={{
                       padding: 16,
@@ -1587,7 +1587,7 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
               </div>
 
                    {isFreePlan  ? (

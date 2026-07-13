@@ -2,6 +2,7 @@ import { Prisma, UserRole, UserStatus } from "@prisma/client";
 import prisma from "../db.server";
 import { sendCompanyWelcomeEmail } from "../services/notification.server";
 import { Decimal } from "@prisma/client/runtime/library";
+import { FREE_PLAN_MAX_COMPANIES } from "./free-plan-limits.server";
 
 type ShopifyAdminClient = {
   graphql: (
@@ -151,10 +152,11 @@ export const syncShopifyCompanies = async (
   try {
     const storeSettings = await prisma.store.findUnique({
       where: { id: store.id },
-      select: { defaultCompanyCreditLimit: true },
+      select: { defaultCompanyCreditLimit: true, plan: true },
     });
     const defaultCompanyCreditLimit =
       storeSettings?.defaultCompanyCreditLimit ?? new Prisma.Decimal(0);
+    const isFreePlan = storeSettings?.plan === "free";
 
     // Step 1: Fetch all Shopify B2B companies with pagination
     let allCompanies: ShopifyCompanyNode[] = [];
@@ -240,6 +242,11 @@ export const syncShopifyCompanies = async (
 
       hasNextPage = data?.pageInfo?.hasNextPage || false;
       cursor = data?.pageInfo?.endCursor || null;
+    }
+
+    // Free plan: cap at the allowed number of companies
+    if (isFreePlan && allCompanies.length > FREE_PLAN_MAX_COMPANIES) {
+      allCompanies = allCompanies.slice(0, FREE_PLAN_MAX_COMPANIES);
     }
 
     let syncedCount = 0;
