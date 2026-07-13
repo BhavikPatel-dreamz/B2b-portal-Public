@@ -1,8 +1,8 @@
 import { renderToString } from "react-dom/server";
+import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 
-// 1. Define your styles as a constant
-const styles = {
+ const styles = {
   index: { padding: "50px 0" },
   container: { maxWidth: "800px", margin: "0 auto" },
   heading: { fontSize: "32px", marginBottom: "20px" },
@@ -11,8 +11,7 @@ const styles = {
   listItem: { marginBottom: "15px" },
 };
 
-// 2. Your JSX Component (JavaScript version)
-function FrontendLandingPage({ customerId, shop }) {
+function FrontendLandingPage({ customerId, shop }: { customerId: string; shop: string }) {
   return (
     <div style={styles.index}>
       <div id="shopify-company-app-root"></div>
@@ -37,7 +36,7 @@ function FrontendLandingPage({ customerId, shop }) {
             } else {
               const container = document.getElementById('shopify-company-app-root');
               if (container) {
-                container.innerHTML = '<p style="color: orange;">Initialization failed.2222</p>';
+                container.innerHTML = '<p style="color: orange;">Initialization failed.</p>';
               }
             }
           `,
@@ -47,30 +46,46 @@ function FrontendLandingPage({ customerId, shop }) {
   );
 }
 
-// 3. The Loader that returns the Page for App Proxy
-export const loader = async ({ request }) => {
- 
-  await authenticate.public.appProxy(request);
-   const url = new URL(request.url);
-        const customerId = url.searchParams.get('logged_in_customer_id');
-        const shop = url.searchParams.get('shop');
-      
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const url = new URL(request.url);
+  const shop = url.searchParams.get('shop');
+  const customerId = url.searchParams.get('logged_in_customer_id');
 
-  if (!customerId || !shop) {
-    return new Response("Unauthorized", { status: 401 });
+  if (!shop) {
+    console.error("[smartb2b] Missing shop parameter in proxy request");
+    return new Response("Missing shop parameter", { status: 400 });
   }
 
-  
- const htmlContent = renderToString(
-  <FrontendLandingPage 
-    customerId={customerId} 
-    shop={shop} 
-  />
-);
+  if (!customerId) {
+    console.log(`[smartb2b] No logged_in_customer_id for shop=${shop}, redirecting to login`);
+    const loginUrl = `https://${shop}/account/login?return_to=${encodeURIComponent(url.href)}`;
+    return new Response(null, {
+      status: 302,
+      headers: { Location: loginUrl },
+    });
+  }
+
+  try {
+    await authenticate.public.appProxy(request);
+  } catch (error) {
+    console.error(`[smartb2b] App proxy authentication failed for shop=${shop}, customerId=${customerId}:`, error);
+    const loginUrl = `https://${shop}/account/login?return_to=${encodeURIComponent(url.href)}`;
+    return new Response(null, {
+      status: 302,
+      headers: { Location: loginUrl },
+    });
+  }
+
+  const htmlContent = renderToString(
+    <FrontendLandingPage
+      customerId={customerId}
+      shop={shop}
+    />
+  );
 
   return new Response(htmlContent, {
     headers: {
-      "Content-Type": "application/liquid",
+      "Content-Type": "text/html; charset=utf-8",
     },
   });
 };
