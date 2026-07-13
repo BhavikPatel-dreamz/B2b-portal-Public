@@ -59,9 +59,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!customerId) {
     console.log(`[smartb2b] No logged_in_customer_id for shop=${shop}, redirecting to login`);
     const loginUrl = `https://${shop}/account/login?return_to=${encodeURIComponent(url.href)}`;
-    return new Response(null, {
-      status: 302,
-      headers: { Location: loginUrl },
+    const redirectHtml = `<!DOCTYPE html><html><head><script>window.top.location.href=${JSON.stringify(loginUrl)};</script></head><body></body></html>`;
+    return new Response(redirectHtml, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   }
 
@@ -70,9 +70,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch (error) {
     console.error(`[smartb2b] App proxy authentication failed for shop=${shop}, customerId=${customerId}:`, error);
     const loginUrl = `https://${shop}/account/login?return_to=${encodeURIComponent(url.href)}`;
-    return new Response(null, {
-      status: 302,
-      headers: { Location: loginUrl },
+    const redirectHtml = `<!DOCTYPE html><html><head><script>window.top.location.href=${JSON.stringify(loginUrl)};</script></head><body></body></html>`;
+    return new Response(redirectHtml, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   }
 
