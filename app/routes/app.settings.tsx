@@ -1501,49 +1501,13 @@ export default function SettingsPage() {
                     />
                   )}
 
-                  {/* Reports - Only for paid plan */}
-                  {isFreePlan ? (
-                    <div
-                      style={{
-                        padding: "22px 0",
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: 6 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontWeight: 600, fontSize: 15, color: "#8c9196" }}>
-                            Reports
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: "#fff",
-                              background: "#6d7175",
-                              padding: "2px 8px",
-                              borderRadius: 4,
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            Pro
-                          </span>
-                        </div>
-                        <span style={{ fontSize: 14, color: "#6d7175", lineHeight: 1.5 }}>
-                          Show or hide the Reports page in the B2B portal sidebar.
-                          <br />
-                          <span style={{ color: "#d97706", fontWeight: 500 }}>
-                            Upgrade to a paid plan to enable this feature.
-                          </span>
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <ToggleRow
-                      name="showReportsPage"
-                      title="Reports"
-                      description="Show or hide the Reports page in the B2B portal sidebar."
-                      defaultChecked={store?.showReportsPage ?? true}
-                    />
-                  )}
+                  {/* Reports */}
+                  <ToggleRow
+                    name="showReportsPage"
+                    title="Reports"
+                    description="Show or hide the Reports page in the B2B portal sidebar."
+                    defaultChecked={store?.showReportsPage ?? true}
+                  />
                 </div>
 
                 {/* Upgrade prompt for free plan users */}
@@ -1560,10 +1524,10 @@ export default function SettingsPage() {
                       <span style={{ fontSize: 20 }}>✨</span>
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: "#202223" }}>
-                          Credit Management & Reports are Pro features
+                          Credit Management is a Pro feature
                         </div>
                         <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 4 }}>
-                          Upgrade to a paid plan to access Credit Management and Reports pages for your B2B portal.
+                          Upgrade to a paid plan to access Credit Management page for your B2B portal.
                         </div>
                         <Link
                           to="/app/select-plan?returnTo=%2Fapp%2Fsettings"
