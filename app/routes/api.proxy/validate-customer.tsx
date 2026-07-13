@@ -21,6 +21,7 @@ import { syncSingleB2BCustomer } from "app/utils/company.server";
  * - isLoggedIn: boolean - if customer is logged in via Shopify
  * - hasB2BAccess: boolean - if customer has B2B/company access
  * - customerId: string - Shopify customer ID
+ * - shopDomain: string - the shop domain (used as fallback for shop resolution on custom domains)
  * - redirectTo: string - where to redirect if no access
  */
 
@@ -44,6 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         hasB2BAccess: false,
         customerStatus: null,
         customerId: null,
+        shopDomain: shop || null,
         redirectTo: "/account/login",
         message: "Please log in to access the B2B portal",
       });
@@ -56,6 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         hasB2BAccess: false,
         customerId: loggedInCustomerId,
         customerStatus: null,
+        shopDomain: null,
         redirectTo: "/apps/b2b-portal/registration",
         message: "Shop parameter missing",
       });
@@ -70,6 +73,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         hasB2BAccess: false,
         customerId: loggedInCustomerId,
         customerStatus: null,
+        shopDomain: shop,
         redirectTo: "/apps/b2b-portal/registration",
         message: "Store not found or not configured",
       });
@@ -156,6 +160,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         customerName,
         isDisable: true,
         customerStatus: registration?.status || user?.status || null,
+        shopDomain: shop,
         redirectTo: "/apps/b2b-portal/registration",
         message:
           "Your company account has been deactivated. Please contact the support team.",
@@ -183,6 +188,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           customerId: loggedInCustomerId,
           customerName,
           customerStatus: status,
+          shopDomain: shop,
           accessMethod,
           ...additionalInfo,
           message: "Access granted",
@@ -204,6 +210,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           customerId: loggedInCustomerId,
           customerName,
           customerStatus: status,
+          shopDomain: shop,
           redirectTo: "/apps/b2b-portal/registration",
           message,
           alreadySubmitted: true,
@@ -250,6 +257,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           customerId: loggedInCustomerId,
           customerName: `${newUser?.firstName || ""} ${newUser?.lastName || ""}`.trim(),
           customerStatus: "APPROVED",
+          shopDomain: shop,
           accessMethod,
           ...additionalInfo,
           message: "Access granted (auto-onboarded)",
@@ -263,6 +271,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         hasB2BAccess: false,
         customerId: loggedInCustomerId,
         customerStatus: null,
+        shopDomain: shop,
         redirectTo: "/apps/b2b-portal/registration",
         message: "Please complete registration to access the B2B portal",
       });
@@ -287,6 +296,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           customerStatus: status,
           customerId: loggedInCustomerId,
           customerName,
+          shopDomain: shop,
           redirectTo: "/apps/b2b-portal/registration",
           message,
           alreadySubmitted: true,
@@ -299,6 +309,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         hasB2BAccess: false,
         customerStatus: null,
         customerId: loggedInCustomerId,
+        shopDomain: shop,
         redirectTo: "/apps/b2b-portal/registration",
         message: "No B2B access. Please register for B2B account.",
       });
@@ -310,6 +321,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         isLoggedIn: false,
         hasB2BAccess: false,
         customerId: null,
+        shopDomain: null,
         redirectTo: "/apps/b2b-portal/registration",
         message: "Error validating customer access",
         error: error instanceof Error ? error.message : "Unknown error",
