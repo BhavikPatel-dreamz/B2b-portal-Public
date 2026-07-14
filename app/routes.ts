@@ -68,6 +68,7 @@ export default [
     route("customer-detail", "routes/api.proxy/customer-detail.tsx"),
     route("shipping-zones", "routes/api.proxy/shipping-zones.tsx"),
     route("item-purchase-report", "routes/api.proxy/item-purchase-report.tsx"),
+    route("request-quote", "routes/api.proxy/request-quote.tsx"),
     route("spend-report", "routes/api.proxy/spend-report.tsx"),
   ]),
 
@@ -81,6 +82,8 @@ export default [
     route("invoice-template", "routes/app.invoice-template.tsx"),
     route("registration-form", "routes/app.registration-form.tsx"),
     route("notifications", "routes/app.notification-form.tsx"),
+    route("quotes", "routes/app.quotes.tsx"),
+    route("quotes/:quoteId", "routes/app.quotes.$quoteId.tsx"),
     route("sales-users", "routes/app.sales-users.tsx"),
     route("sales-dashboard", "routes/app.sales-dashboard.tsx"),
     route("companies/:companyId", "routes/app.company-dashboard.tsx"),
