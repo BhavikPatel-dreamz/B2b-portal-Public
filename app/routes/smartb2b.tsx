@@ -1,55 +1,62 @@
-import { renderToString } from "react-dom/server";
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 
- const styles = {
-  index: { padding: "50px 0" },
-  container: { maxWidth: "800px", margin: "0 auto" },
-  heading: { fontSize: "32px", marginBottom: "20px" },
-  text: { fontSize: "18px", color: "#555", marginBottom: "30px" },
-  list: { listStyle: "none", padding: 0 },
-  listItem: { marginBottom: "15px" },
-};
+function getHtmlContent(customerId: string, shop: string) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+  <title>Smart B2B</title>
+  <link rel="stylesheet" href="https://smartb2b.dynamicdreamz.com/embed.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; width: 100%; -webkit-text-size-adjust: 100%; }
+    body {
+      background-color: #B8BABB;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    #shopify-company-app-root {
+      width: 100%;
+      min-height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="shopify-company-app-root"></div>
 
-function FrontendLandingPage({ customerId, shop }: { customerId: string; shop: string }) {
-  return (
-    <div style={styles.index}>
-      <div id="shopify-company-app-root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script type="module" src="https://smartb2b.dynamicdreamz.com/embed.js"></script>
+  <script src="https://unpkg.com/@shopify/app-bridge-react/umd/index.umd.production.min.js"></script>
 
-      <link rel="stylesheet" href="https://smartb2b.dynamicdreamz.com/embed.css"/>
-
-      <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-      <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-      <script type="module" src="https://smartb2b.dynamicdreamz.com/embed.js"></script>
-      <script src="https://unpkg.com/@shopify/app-bridge-react/umd/index.umd.production.min.js"></script>
-
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-            if (window.ShopifyCompanyApp && window.ShopifyCompanyApp.init) {
-              window.ShopifyCompanyApp.init({
-                containerId: 'shopify-company-app-root',
-                proxyUrl: '/apps/b2b-portal-public-3/api/proxy',
-                customerId: ${JSON.stringify(customerId)},
-                shop: ${JSON.stringify(shop)}
-              });
-            } else {
-              const container = document.getElementById('shopify-company-app-root');
-              if (container) {
-                container.innerHTML = '<p style="color: orange;">Initialization failed.</p>';
-              }
-            }
-          `,
-        }}
-      />
-    </div>
-  );
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      if (window.ShopifyCompanyApp && window.ShopifyCompanyApp.init) {
+        window.ShopifyCompanyApp.init({
+          containerId: 'shopify-company-app-root',
+          proxyUrl: '/apps/b2b-portal-public-3/api/proxy',
+          customerId: ${JSON.stringify(customerId)},
+          shop: ${JSON.stringify(shop)}
+        });
+      } else {
+        var container = document.getElementById('shopify-company-app-root');
+        if (container) {
+          container.innerHTML = '<p style="color: orange; padding: 20px;">Initialization failed.</p>';
+        }
+      }
+    });
+  </script>
+</body>
+</html>`;
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
-  const shop = url.searchParams.get('shop');
-  const customerId = url.searchParams.get('logged_in_customer_id');
+  const shop = url.searchParams.get("shop");
+  const customerId = url.searchParams.get("logged_in_customer_id");
 
   if (!shop) {
     console.error("[smartb2b] Missing shop parameter in proxy request");
@@ -76,12 +83,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  const htmlContent = renderToString(
-    <FrontendLandingPage
-      customerId={customerId}
-      shop={shop}
-    />
-  );
+  const htmlContent = getHtmlContent(customerId, shop);
 
   return new Response(htmlContent, {
     headers: {
