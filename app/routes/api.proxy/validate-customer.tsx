@@ -7,6 +7,11 @@ import {
 } from "app/utils/b2b-customer.server";
 import prisma from "app/db.server";
 import { syncSingleB2BCustomer } from "app/utils/company.server";
+import {
+  deserializeConfig,
+  DEFAULT_CONFIG,
+  type StoredConfig,
+} from "../../utils/form-config.shared";
 
 /**
  * API endpoint to validate if a customer is logged in and has B2B/company access
@@ -24,6 +29,40 @@ import { syncSingleB2BCustomer } from "app/utils/company.server";
  * - shopDomain: string - the shop domain (used as fallback for shop resolution on custom domains)
  * - redirectTo: string - where to redirect if no access
  */
+
+// ============================================================
+// 📦 HELPER — fetch registration form config for a store
+// ============================================================
+
+async function getRegistrationFormConfig(storeId: string) {
+  const formFieldConfig = await prisma.formFieldConfig.findUnique({
+    where: { shopId: storeId },
+    select: { fields: true },
+  });
+
+  let config = DEFAULT_CONFIG;
+  if (formFieldConfig?.fields) {
+    try {
+      const stored = formFieldConfig.fields as unknown as StoredConfig;
+      if (
+        Array.isArray(stored) &&
+        stored.length > 0 &&
+        stored.every(
+          (g) =>
+            g.step?.id &&
+            g.step?.label &&
+            Array.isArray(g.fields) &&
+            g.fields.every((f) => f.key && f.label && f.type !== undefined),
+        )
+      ) {
+        config = deserializeConfig(stored);
+      }
+    } catch {
+      config = DEFAULT_CONFIG;
+    }
+  }
+  return config;
+}
 
 // ============================================================
 // 📦 LOADER — GET request
@@ -274,6 +313,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         shopDomain: shop,
         redirectTo: "/apps/b2b-portal/registration",
         message: "Please complete registration to access the B2B portal",
+        formConfig: await getRegistrationFormConfig(store.id),
       });
     } else {
       // No B2B access in Shopify
@@ -312,6 +352,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         shopDomain: shop,
         redirectTo: "/apps/b2b-portal/registration",
         message: "No B2B access. Please register for B2B account.",
+        formConfig: await getRegistrationFormConfig(store.id),
       });
     }
   } catch (error) {

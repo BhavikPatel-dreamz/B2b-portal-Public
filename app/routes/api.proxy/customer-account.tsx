@@ -98,7 +98,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ) {
       return Response.json({
         message: "Your account is not a customer. Please contact the support team.",
-        redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
       });
     }
 
@@ -111,10 +110,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         );
 
         if (customerCompanyInfo.hasCompany) {
-          return Response.json({
-            message: "Your B2B account is already active.",
-            redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
-          });
+          if (userData || customerRecord) {
+            return Response.json({
+              message: "Your B2B account is already active.",
+              redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
+            });
+          }
         }
 
         const b2bCheck = await checkCustomerIsB2BInShopifyByREST(
@@ -124,21 +125,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         );
 
         if (b2bCheck.success && b2bCheck.hasAccess) {
-          return Response.json({
-            message: "Your B2B account is already active.",
-            redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
-          });
+          if (userData || customerRecord) {
+            return Response.json({
+              message: "Your B2B account is already active.",
+              redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
+            });
+          }
         }
       } catch (error) {
         console.error("❌ Error checking Shopify B2B access:", error);
       }
-    }
- 
-    if (customerRecord?.status === "APPROVED") {
-      return Response.json({
-        message: "Your account is approved, but B2B access is not yet configured in Shopify.",
-        redirectTo: `https://${store.shopDomain}/apps/b2b-portal-public-3/smartb2b`,
-      });
     }
  
     if (customerRecord?.status === "REJECTED") {

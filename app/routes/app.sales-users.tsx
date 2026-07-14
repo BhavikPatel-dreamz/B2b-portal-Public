@@ -274,11 +274,18 @@ export default function SalesUsers() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const toggleModal = useCallback(() => {
-    setIsModalOpen((open) => !open);
-    if (isModalOpen) {
-      setErrorMessage("");
-    }
-  }, [isModalOpen]);
+    setIsModalOpen((open) => {
+      if (!open) {
+        // Opening modal — pre-select all companies
+        setSelectedCompanyIds(companies.map((c) => c.id));
+        setCompanySearch("");
+        setCompanyPickerPage(1);
+      } else {
+        setErrorMessage("");
+      }
+      return !open;
+    });
+  }, [companies]);
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
