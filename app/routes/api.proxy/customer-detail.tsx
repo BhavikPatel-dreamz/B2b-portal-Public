@@ -1,5 +1,5 @@
 import { LoaderFunctionArgs } from "react-router";
-import { authenticate, unauthenticated } from "../../shopify.server";
+import { unauthenticated } from "../../shopify.server";
 import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
 
 type CustomerDetailPayload = {
@@ -42,41 +42,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   try {
-    // Try App Proxy auth first (for SmartB2B dashboard iframe calls)
-    let shop: string | null = null;
-    let customerGid: string | null = null;
-    let numericCustomerId: string | null = null;
-
-    const url = new URL(request.url);
-    const proxyShop = url.searchParams.get("shop");
-    const proxyCustomerId = url.searchParams.get("logged_in_customer_id");
-
-    if (proxyShop && proxyCustomerId) {
-      // App Proxy request from SmartB2B dashboard
-      try {
-        await authenticate.public.appProxy(request);
-        shop = proxyShop;
-        numericCustomerId = proxyCustomerId;
-        customerGid = `gid://shopify/Customer/${proxyCustomerId}`;
-      } catch {
-        // Not an app proxy request, try customer account auth
-      }
-    }
-
-    // Fall back to Customer Account session auth
-    if (!shop) {
-      const session = await authenticateCustomerAccountSession(request);
-      shop = session.shop;
-      customerGid = session.customerGid ?? null;
-      numericCustomerId = session.customerId ?? null;
-    }
+    const { shop, customerGid, customerId: numericCustomerId } =
+      await authenticateCustomerAccountSession(request);
 
     if (!shop) {
       return Response.json({ error: "Missing shop" }, { status: 400 });
-    }
-
-    if (!customerGid || !numericCustomerId) {
-      return Response.json({ error: "Missing customer ID" }, { status: 400 });
     }
 
     const { admin } = await unauthenticated.admin(shop);
