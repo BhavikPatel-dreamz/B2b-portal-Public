@@ -62,6 +62,7 @@ export default [
     ),
     route("validate-customer", "routes/api.proxy/validate-customer.tsx"),
     route("wishlist", "routes/api.proxy/wishlist.tsx"),
+    route("smart-wishlist", "routes/api.proxy/smart-wishlist.tsx"),
     route("privacy-policy", "routes/api.proxy/privacy-policy.tsx"),
     route("customer-account", "routes/api.proxy/customer-account.tsx"),
     route("customer-detail", "routes/api.proxy/customer-detail.tsx"),
