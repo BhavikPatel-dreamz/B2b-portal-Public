@@ -95,13 +95,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  const companyId = bodyCompanyId;
-  if (!companyId) {
+  // Resolve local CompanyAccount from Shopify company GID
+  const rawCompanyId = bodyCompanyId || "";
+  const shopifyCompanyId = rawCompanyId.startsWith("gid://shopify/")
+    ? rawCompanyId
+    : `gid://shopify/Company/${rawCompanyId}`;
+
+  const localCompany = await prisma.companyAccount.findFirst({
+    where: {
+      shopId: store.id,
+      OR: [
+        { id: rawCompanyId },
+        { shopifyCompanyId: rawCompanyId },
+        { shopifyCompanyId },
+      ],
+    },
+    select: { id: true, name: true },
+  });
+
+  if (!localCompany) {
     return Response.json(
-      { error: "Company ID is required." },
-      { status: 400 },
+      { error: "Company not found. Please sync companies first." },
+      { status: 404 },
     );
   }
+
+  const companyId = localCompany.id;
 
   // Resolve customer ID from body or proxy
   const rawCustomerId = bodyCustomerId || url.searchParams.get("logged_in_customer_id") || "";
@@ -253,10 +272,140 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     },
   });
 
+  // ── Create Shopify Draft Order ──────────────────────────────
+  let shopifyDraftOrderId: string | null = null;
+  try {
+    const fullCompany = await prisma.companyAccount.findUnique({
+      where: { id: localCompany.id },
+      include: { shop: true },
+    });
+    if (fullCompany?.shopifyCompanyId && fullCompany.shop?.accessToken) {
+      // Resolve B2B context (company location + contact)
+      const baseMetaQuery = `
+        query GetBaseMeta($companyId: ID!) {
+          company(id: $companyId) {
+            locations(first: 10) { nodes { id } }
+            contacts(first: 50) {
+              edges {
+                node {
+                  id
+                  customer { id }
+                  roleAssignments(first: 5) {
+                    edges { node { companyLocation { id } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+      const baseMetaRes = await fetch(
+        `https://${fullCompany.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": fullCompany.shop.accessToken,
+          },
+          body: JSON.stringify({
+            query: baseMetaQuery,
+            variables: { companyId: fullCompany.shopifyCompanyId },
+          }),
+        },
+      );
+      const baseMetaData = await baseMetaRes.json();
+      const contacts = (baseMetaData.data?.company?.contacts?.edges || []) as any[];
+      const matchCustGid = `gid://shopify/Customer/${numericId || ""}`;
+      const matchedContact = contacts.find(
+        (e: any) => e.node.customer?.id === matchCustGid,
+      );
+      const companyLocationId =
+        matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id ||
+        baseMetaData.data?.company?.locations?.nodes?.[0]?.id ||
+        "";
+      const companyContactId = matchedContact?.node?.id || "";
+
+      if (companyLocationId && companyContactId) {
+        const draftLineItems = items.map((item) => ({
+          variantId: item.variantId,
+          quantity: item.quantity,
+          priceOverride: {
+            amount: (Number(item.price) || 0).toFixed(2),
+            currencyCode: (item.currencyCode || currencyCode).toUpperCase(),
+          },
+        }));
+
+        const draftInput: any = {
+          lineItems: draftLineItems,
+          note: notes || `Quote ${quoteNumber}`,
+          customAttributes: [
+            { key: "_source", value: "B2B Portal Quote" },
+            { key: "Quote Number", value: quoteNumber },
+          ],
+          presentmentCurrencyCode: currencyCode,
+          taxExempt: true,
+          purchasingEntity: {
+            purchasingCompany: {
+              companyId: fullCompany.shopifyCompanyId,
+              companyLocationId,
+              companyContactId,
+            },
+          },
+        };
+
+        const draftRes = await fetch(
+          `https://${fullCompany.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": fullCompany.shop.accessToken,
+            },
+            body: JSON.stringify({
+              query: `mutation CreateDraft($input: DraftOrderInput!) {
+                draftOrderCreate(input: $input) {
+                  draftOrder { id invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
+                  userErrors { field message }
+                }
+              }`,
+              variables: { input: draftInput },
+            }),
+          },
+        );
+        const draftData = await draftRes.json();
+        const draftErrors = draftData.data?.draftOrderCreate?.userErrors || [];
+        if (!draftData.errors?.length && !draftErrors.length) {
+          shopifyDraftOrderId =
+            draftData.data?.draftOrderCreate?.draftOrder?.id || null;
+        }
+      }
+    }
+  } catch {
+    // Draft order creation is best-effort — quote still created locally
+  }
+
+  if (shopifyDraftOrderId) {
+    await prisma.quote.update({
+      where: { id: quote.id },
+      data: { shopifyDraftOrderId },
+    });
+    await prisma.quoteActivity.create({
+      data: {
+        quoteId: quote.id,
+        companyId,
+        customerEmail: resolvedEmail,
+        action: "Shopify Draft Created",
+        message: `Shopify Draft Order ${shopifyDraftOrderId} created.`,
+        metadata: { draftOrderId: shopifyDraftOrderId },
+      },
+    });
+  }
+
   return Response.json({
     success: true,
     quoteId: quote.id,
     quoteNumber: quote.quoteNumber,
+    shopifyDraftOrderId,
     message: "Quote request submitted. Your team will review it shortly.",
   });
 };
