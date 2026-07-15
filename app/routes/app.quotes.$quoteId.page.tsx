@@ -213,7 +213,7 @@ export default function AdminQuoteDetailPage() {
       <div style={styles.content}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
           {/* Main Column */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0, overflow: "hidden" }}>
             {/* Customer Info */}
             <div style={styles.card}>
               <h3 style={styles.cardTitle}>Customer Information</h3>
@@ -796,6 +796,8 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #e3e7ec",
     borderRadius: 12,
     padding: 18,
+    minWidth: 0,
+    overflow: "hidden",
   },
   cardTitle: {
     fontSize: 15,
@@ -816,7 +818,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 2,
   },
   link: { color: "#2c6ecb", textDecoration: "none", fontWeight: 600 },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" },
   th: {
     textAlign: "left",
     padding: "10px 12px",
