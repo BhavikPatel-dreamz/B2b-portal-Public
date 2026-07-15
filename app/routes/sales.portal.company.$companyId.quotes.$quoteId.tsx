@@ -395,34 +395,33 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         );
       }
 
-      const toAmount = (val: any): string => {
-        if (val == null) return "0";
-        if (typeof val === "object" && val.amount !== undefined) return val.amount;
-        return String(val);
-      };
-      const lineItems = (draft.lineItems?.nodes || []).map((item: any) => ({
-        title: item.title,
-        variantTitle: item.variantTitle,
-        sku: item.sku,
-        quantity: item.quantity,
-        originalUnitPrice: toAmount(item.originalUnitPrice),
-        discountedTotal: toAmount(item.discountedTotal),
-      }));
-
+      // Build invoice data from quote (preserves original prices + discounts)
       return Response.json({
         success: true,
         invoiceData: {
-          name: draft.name,
-          createdAt: draft.createdAt,
-          currencyCode: draft.currencyCode,
-          customer: draft.customer,
-          lineItems,
-          subtotal: toAmount(draft.subtotalPrice),
-          totalDiscounts: toAmount(draft.totalDiscounts),
-          totalTax: toAmount(draft.totalTax),
-          totalShipping: "0",
-          totalPrice: toAmount(draft.totalPrice),
-          invoiceSentAt: draft.invoiceSentAt,
+          name: label,
+          createdAt: quote.createdAt.toISOString(),
+          currencyCode: quote.currencyCode,
+          customer: {
+            firstName: quote.customerFirstName,
+            lastName: quote.customerLastName,
+            email: quote.customerEmail,
+          },
+          lineItems: quote.items.map((item: any) => ({
+            title: item.productTitle,
+            variantTitle: item.variantTitle,
+            sku: item.sku,
+            quantity: item.quantity,
+            originalUnitPrice: Number(item.unitPrice).toFixed(2),
+            discount: Number(item.discount || 0).toFixed(2),
+            discountedTotal: (Number(item.unitPrice) * item.quantity - Number(item.discount || 0)).toFixed(2),
+          })),
+          subtotal: quote.subtotal.toString(),
+          totalDiscounts: quote.discountTotal.toString(),
+          totalTax: quote.taxAmount.toString(),
+          totalShipping: quote.shippingAmount.toString(),
+          totalPrice: quote.totalAmount.toString(),
+          invoiceSentAt: null,
         },
       });
     }
@@ -994,6 +993,7 @@ export default function QuoteDetailPage() {
                     <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>SKU</th>
                     <th style={{ textAlign: "center", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Qty</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Unit Price</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Discount</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Total</th>
                   </tr>
                 </thead>
@@ -1008,6 +1008,9 @@ export default function QuoteDetailPage() {
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "center" }}>{item.quantity}</td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right" }}>
                         {fmtMoney(item.originalUnitPrice, invoiceData.currencyCode)}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", color: Number(item.discount) > 0 ? "#b91b1b" : undefined }}>
+                        {Number(item.discount) > 0 ? `-${fmtMoney(item.discount, invoiceData.currencyCode)}` : "–"}
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", fontWeight: 600 }}>
                         {fmtMoney(item.discountedTotal, invoiceData.currencyCode)}

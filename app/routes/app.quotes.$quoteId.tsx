@@ -133,8 +133,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     // ── APPLY ORDER DISCOUNT ──────────────────────────────────
     if (intent === "apply_order_discount") {
-      if (quote.status !== "draft") {
-        return Response.json({ error: "Only draft quotes can be edited." }, { status: 400 });
+      if (!["draft", "sent"].includes(quote.status)) {
+        return Response.json({ error: "Only draft or sent quotes can have discounts edited." }, { status: 400 });
       }
       const discountAmount = parseFloat(String(formData.get("discountAmount") || "0"));
       const discountType = String(formData.get("discountType") || "FIXED_AMOUNT");
@@ -166,8 +166,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     // ── REMOVE ORDER DISCOUNT ─────────────────────────────────
     if (intent === "remove_order_discount") {
-      if (quote.status !== "draft") {
-        return Response.json({ error: "Only draft quotes can be edited." }, { status: 400 });
+      if (!["draft", "sent"].includes(quote.status)) {
+        return Response.json({ error: "Only draft or sent quotes can have discounts edited." }, { status: 400 });
       }
       await prisma.quote.update({
         where: { id: quoteId },
@@ -192,29 +192,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         return Response.json({ error: "Company Shopify credentials not found." }, { status: 400 });
       }
 
-      let draftInvoiceUrl: string | null = null;
+      // ── Recalculate totals so discount/subtotal/total are up to date ──
+      await recalculateQuoteTotals(quoteId);
+      const freshQuote = await prisma.quote.findFirst({
+        where: { id: quoteId, shopId: store.id },
+        include: { items: true, company: { include: { shop: true } } },
+      });
+      if (!freshQuote) return Response.json({ error: "Quote not found after recalculation" }, { status: 404 });
 
-      // ── Delete old draft order if it exists (to apply updated prices/discounts) ──
-      if (quote.shopifyDraftOrderId) {
-        try {
-          await fetch(
-            `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Shopify-Access-Token": company.shop.accessToken,
-              },
-              body: JSON.stringify({
-                query: `mutation DraftOrderDelete($id: ID!) { draftOrderDelete(id: $id) { deletedDraftOrderId userErrors { message } } }`,
-                variables: { id: quote.shopifyDraftOrderId },
-              }),
-            },
-          );
-        } catch {
-          // Best-effort deletion — continue to create new draft order
-        }
-      }
+      // Sync recalculated totals onto the local quote object so the rest of the handler uses fresh values
+      quote.subtotal = freshQuote.subtotal;
+      quote.discountTotal = freshQuote.discountTotal;
+      quote.taxAmount = freshQuote.taxAmount;
+      quote.totalAmount = freshQuote.totalAmount;
+
+      let draftInvoiceUrl: string | null = null;
 
       // ── Resolve B2B context ──
       const baseMetaQuery = `
@@ -338,16 +330,51 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       };
       if (appliedDiscount) draftInput.appliedDiscount = appliedDiscount;
 
-      const draftRes = await fetch(
-        `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
-        {
+      let draftOrderId: string;
+      let draftOrderName: string | null = null;
+      const shopApiBase = `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`;
+      const shopApiHeaders = {
+        "Content-Type": "application/json" as const,
+        "X-Shopify-Access-Token": company.shop.accessToken,
+      };
+
+      if (quote.shopifyDraftOrderId) {
+        // ── Update existing draft order ──
+        const updateRes = await fetch(shopApiBase, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": company.shop.accessToken,
-          },
+          headers: shopApiHeaders,
           body: JSON.stringify({
-            query: `mutation CreateDraft($input: DraftOrderInput!) {
+            query: `mutation DraftOrderUpdate($id: ID!, $input: DraftOrderInput!) {
+              draftOrderUpdate(id: $id, input: $input) {
+                draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
+                userErrors { field message }
+              }
+            }`,
+            variables: { id: quote.shopifyDraftOrderId, input: draftInput },
+          }),
+        });
+        const updateData = await updateRes.json();
+        const updateErrors = updateData.data?.draftOrderUpdate?.userErrors || [];
+        if (updateData.errors?.length || updateErrors.length) {
+          return Response.json(
+            { error: updateData.errors?.[0]?.message || updateErrors[0]?.message || "Draft order update failed" },
+            { status: 400 },
+          );
+        }
+        const updatedDraft = updateData.data?.draftOrderUpdate?.draftOrder;
+        if (!updatedDraft?.id) {
+          return Response.json({ error: "Failed to update draft order" }, { status: 400 });
+        }
+        draftOrderId = updatedDraft.id;
+        draftOrderName = updatedDraft.name || null;
+        draftInvoiceUrl = updatedDraft.invoiceUrl || null;
+      } else {
+        // ── Create new draft order ──
+        const createRes = await fetch(shopApiBase, {
+          method: "POST",
+          headers: shopApiHeaders,
+          body: JSON.stringify({
+            query: `mutation DraftOrderCreate($input: DraftOrderInput!) {
               draftOrderCreate(input: $input) {
                 draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
                 userErrors { field message }
@@ -355,88 +382,57 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             }`,
             variables: { input: draftInput },
           }),
-        },
-      );
-      const draftData = await draftRes.json();
-      const draftErrors = draftData.data?.draftOrderCreate?.userErrors || [];
-      if (draftData.errors?.length || draftErrors.length) {
-        return Response.json(
-          { error: draftData.errors?.[0]?.message || draftErrors[0]?.message || "Draft order creation failed" },
-          { status: 400 },
-        );
-      }
-      const newDraft = draftData.data?.draftOrderCreate?.draftOrder;
-      if (!newDraft?.id) {
-        return Response.json({ error: "Failed to create draft order" }, { status: 400 });
-      }
-      const draftOrderId = newDraft.id;
-      draftInvoiceUrl = newDraft.invoiceUrl || null;
-
-      // Fetch full draft order details for local storage
-      let savedInvoiceData = null;
-      try {
-        const detailRes = await fetch(
-          `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Shopify-Access-Token": company.shop.accessToken,
-            },
-            body: JSON.stringify({
-              query: `query GetDraftOrder($id: ID!) {
-                draftOrder(id: $id) {
-                  id name createdAt currencyCode
-                  customer { firstName lastName email }
-                  lineItems(first: 50) {
-                    nodes { title variantTitle sku quantity
-                      originalUnitPrice { amount currencyCode }
-                      discountedTotal { amount currencyCode }
-                    }
-                  }
-                  subtotalPrice { amount currencyCode }
-                  totalDiscounts { amount currencyCode }
-                  totalTax { amount currencyCode }
-                  totalShippingMoney { amount currencyCode }
-                  totalPrice { amount currencyCode }
-                  invoiceSentAt
-                }
-              }`,
-              variables: { id: draftOrderId },
-            }),
-          },
-        );
-        const detailData = await detailRes.json();
-        const d = detailData.data?.draftOrder;
-        if (d) {
-          savedInvoiceData = {
-            name: d.name,
-            createdAt: d.createdAt,
-            currencyCode: d.currencyCode,
-            customer: d.customer,
-            lineItems: (d.lineItems?.nodes || []).map((item: any) => ({
-              title: item.title,
-              variantTitle: item.variantTitle,
-              sku: item.sku,
-              quantity: item.quantity,
-              originalUnitPrice: item.originalUnitPrice?.amount || "0",
-              discountedTotal: item.discountedTotal?.amount || "0",
-            })),
-            subtotal: d.subtotalPrice?.amount || "0",
-            totalDiscounts: d.totalDiscounts?.amount || "0",
-            totalTax: d.totalTax?.amount || "0",
-            totalShipping: d.totalShippingMoney?.amount || "0",
-            totalPrice: d.totalPrice?.amount || "0",
-          };
+        });
+        const createData = await createRes.json();
+        const createErrors = createData.data?.draftOrderCreate?.userErrors || [];
+        if (createData.errors?.length || createErrors.length) {
+          return Response.json(
+            { error: createData.errors?.[0]?.message || createErrors[0]?.message || "Draft order creation failed" },
+            { status: 400 },
+          );
         }
-      } catch { /* best-effort */ }
+        const newDraft = createData.data?.draftOrderCreate?.draftOrder;
+        if (!newDraft?.id) {
+          return Response.json({ error: "Failed to create draft order" }, { status: 400 });
+        }
+        draftOrderId = newDraft.id;
+        draftOrderName = newDraft.name || null;
+        draftInvoiceUrl = newDraft.invoiceUrl || null;
+      }
+
+      // Build invoice data from quote (preserves original prices + discounts)
+      const savedInvoiceData = {
+        name: draftOrderName || quote.quoteNumber,
+        createdAt: new Date().toISOString(),
+        currencyCode: quote.currencyCode,
+        customer: {
+          firstName: quote.customerFirstName,
+          lastName: quote.customerLastName,
+          email: quote.customerEmail,
+        },
+        lineItems: quote.items.map((item: any) => ({
+          title: item.productTitle,
+          variantTitle: item.variantTitle,
+          sku: item.sku,
+          quantity: item.quantity,
+          originalUnitPrice: Number(item.unitPrice).toFixed(2),
+          discount: Number(item.discount || 0).toFixed(2),
+          discountedTotal: (Number(item.unitPrice) * item.quantity - Number(item.discount || 0)).toFixed(2),
+        })),
+        subtotal: quote.subtotal.toString(),
+        totalDiscounts: quote.discountTotal.toString(),
+        totalTax: quote.taxAmount.toString(),
+        totalShipping: quote.shippingAmount.toString(),
+        totalPrice: quote.totalAmount.toString(),
+        invoiceSentAt: null as string | null,
+      };
 
       // Save draft order ID, name, and invoice data on the quote
       await prisma.quote.update({
         where: { id: quoteId },
         data: {
           shopifyDraftOrderId: draftOrderId,
-          shopifyDraftOrderName: newDraft.name || null,
+          shopifyDraftOrderName: draftOrderName,
           invoiceData: savedInvoiceData,
         },
       });
@@ -462,9 +458,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const invoiceErrors = invoiceData.data?.draftOrderInvoiceSend?.userErrors || [];
       const invoiceUrl = invoiceData.data?.draftOrderInvoiceSend?.draftOrder?.invoiceUrl || draftInvoiceUrl;
 
+      const invoiceSentAt = new Date().toISOString();
       await prisma.quote.update({
         where: { id: quoteId },
-        data: { status: "sent", sentAt: new Date() },
+        data: {
+          status: "sent",
+          sentAt: new Date(),
+          invoiceData: { ...savedInvoiceData, invoiceSentAt },
+        },
       });
 
       await logQuoteActivity({
@@ -796,34 +797,33 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         );
       }
 
-      const toAmount = (val: any): string => {
-        if (val == null) return "0";
-        if (typeof val === "object" && val.amount !== undefined) return val.amount;
-        return String(val);
-      };
-      const lineItems = (draft.lineItems?.nodes || []).map((item: any) => ({
-        title: item.title,
-        variantTitle: item.variantTitle,
-        sku: item.sku,
-        quantity: item.quantity,
-        originalUnitPrice: toAmount(item.originalUnitPrice),
-        discountedTotal: toAmount(item.discountedTotal),
-      }));
-
+      // Build invoice data from quote (preserves original prices + discounts)
       return Response.json({
         success: true,
         invoiceData: {
-          name: draft.name,
-          createdAt: draft.createdAt,
-          currencyCode: draft.currencyCode,
-          customer: draft.customer,
-          lineItems,
-          subtotal: toAmount(draft.subtotalPrice),
-          totalDiscounts: toAmount(draft.totalDiscounts),
-          totalTax: toAmount(draft.totalTax),
-          totalShipping: "0",
-          totalPrice: toAmount(draft.totalPrice),
-          invoiceSentAt: draft.invoiceSentAt,
+          name: label,
+          createdAt: quote.createdAt.toISOString(),
+          currencyCode: quote.currencyCode,
+          customer: {
+            firstName: quote.customerFirstName,
+            lastName: quote.customerLastName,
+            email: quote.customerEmail,
+          },
+          lineItems: quote.items.map((item: any) => ({
+            title: item.productTitle,
+            variantTitle: item.variantTitle,
+            sku: item.sku,
+            quantity: item.quantity,
+            originalUnitPrice: Number(item.unitPrice).toFixed(2),
+            discount: Number(item.discount || 0).toFixed(2),
+            discountedTotal: (Number(item.unitPrice) * item.quantity - Number(item.discount || 0)).toFixed(2),
+          })),
+          subtotal: quote.subtotal.toString(),
+          totalDiscounts: quote.discountTotal.toString(),
+          totalTax: quote.taxAmount.toString(),
+          totalShipping: quote.shippingAmount.toString(),
+          totalPrice: quote.totalAmount.toString(),
+          invoiceSentAt: null,
         },
       });
     }

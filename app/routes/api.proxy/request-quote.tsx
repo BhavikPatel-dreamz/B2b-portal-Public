@@ -71,7 +71,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } = body as {
     items: Array<{
       productId?: string;
-      productTitle: string;
+      productTitle?: string;
+      title?: string;
       variantId: string;
       variantTitle?: string;
       sku?: string;
@@ -253,7 +254,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       items: {
         create: items.map((item) => ({
           productId: item.productId || null,
-          productTitle: item.productTitle || "Product",
+          productTitle: item.productTitle || item.title || "Product",
           variantId: item.variantId,
           variantTitle: item.variantTitle || null,
           sku: item.sku || null,
@@ -388,64 +389,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shopifyDraftOrderName =
             draftData.data?.draftOrderCreate?.draftOrder?.name || null;
 
-          // Fetch full draft order details for local storage
+          // Build invoice data from quote items (preserves original prices)
           if (shopifyDraftOrderId) {
-            try {
-              const detailRes = await fetch(
-                `https://${fullCompany.shop.shopDomain}/admin/api/2025-01/graphql.json`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "X-Shopify-Access-Token": fullCompany.shop.accessToken,
-                  },
-                  body: JSON.stringify({
-                    query: `query GetDraftOrder($id: ID!) {
-                      draftOrder(id: $id) {
-                        id name createdAt currencyCode
-                        customer { firstName lastName email }
-                        lineItems(first: 50) {
-                          nodes { title variantTitle sku quantity
-                            originalUnitPrice { amount currencyCode }
-                            discountedTotal { amount currencyCode }
-                          }
-                        }
-                        subtotalPrice { amount currencyCode }
-                        totalDiscounts { amount currencyCode }
-                        totalTax { amount currencyCode }
-                        totalShippingMoney { amount currencyCode }
-                        totalPrice { amount currencyCode }
-                        invoiceSentAt
-                      }
-                    }`,
-                    variables: { id: shopifyDraftOrderId },
-                  }),
-                },
-              );
-              const detailData = await detailRes.json();
-              const d = detailData.data?.draftOrder;
-              if (d) {
-                invoiceData = {
-                  name: d.name,
-                  createdAt: d.createdAt,
-                  currencyCode: d.currencyCode,
-                  customer: d.customer,
-                  lineItems: (d.lineItems?.nodes || []).map((item: any) => ({
-                    title: item.title,
-                    variantTitle: item.variantTitle,
-                    sku: item.sku,
-                    quantity: item.quantity,
-                    originalUnitPrice: item.originalUnitPrice?.amount || "0",
-                    discountedTotal: item.discountedTotal?.amount || "0",
-                  })),
-                  subtotal: d.subtotalPrice?.amount || "0",
-                  totalDiscounts: d.totalDiscounts?.amount || "0",
-                  totalTax: d.totalTax?.amount || "0",
-                  totalShipping: d.totalShippingMoney?.amount || "0",
-                  totalPrice: d.totalPrice?.amount || "0",
-                };
-              }
-            } catch { /* best-effort */ }
+            invoiceData = {
+              name: shopifyDraftOrderName || `Q-${datePart}-${String(count + 1).padStart(4, "0")}`,
+              createdAt: new Date().toISOString(),
+              currencyCode,
+              customer: {
+                firstName: resolvedFirstName || null,
+                lastName: resolvedLastName || null,
+                email: resolvedEmail,
+              },
+              lineItems: quote.items.map((item: any) => ({
+                title: item.productTitle,
+                variantTitle: item.variantTitle,
+                sku: item.sku,
+                quantity: item.quantity,
+                originalUnitPrice: Number(item.unitPrice).toFixed(2),
+                discount: "0",
+                discountedTotal: (Number(item.unitPrice) * item.quantity).toFixed(2),
+              })),
+              subtotal: subtotal.toFixed(2),
+              totalDiscounts: "0",
+              totalTax: "0",
+              totalShipping: "0",
+              totalPrice: subtotal.toFixed(2),
+            };
           }
         }
       }

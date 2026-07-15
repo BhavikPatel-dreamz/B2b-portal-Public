@@ -70,6 +70,7 @@ export default function AdminQuoteDetailPage() {
   const [invoiceData, setInvoiceData] = useState<any>(null);
 
   const isSubmitting = navigation.state !== "idle";
+  const submittingIntent = isSubmitting ? String(navigation.formData?.get("intent") || "") : "";
 
   useEffect(() => {
     if (actionData?.invoiceData) {
@@ -88,6 +89,7 @@ export default function AdminQuoteDetailPage() {
 
   const isDraft = quote.status === "draft";
   const canEdit = isDraft;
+  const canEditDiscount = isDraft || quote.status === "sent";
   const canConvert = ["approved", "sent", "viewed"].includes(quote.status);
 
   return (
@@ -145,7 +147,18 @@ export default function AdminQuoteDetailPage() {
                   disabled={isSubmitting}
                   style={{ ...styles.btn, background: "#005bd3", color: "white" }}
                 >
-                  {isSubmitting ? "Sending..." : "Send Invoice"}
+                  {submittingIntent === "send_invoice" ? "Sending..." : "Send Invoice"}
+                </button>
+              </Form>
+            )}
+            {!canEdit && quote.shopifyDraftOrderId && (
+              <Form method="post" style={{ display: "inline" }}>
+                <input type="hidden" name="intent" value="send_invoice" />
+                <button
+                  disabled={isSubmitting}
+                  style={{ ...styles.btn, background: "#005bd3", color: "white" }}
+                >
+                  {submittingIntent === "send_invoice" ? "Updating..." : "Update Invoice"}
                 </button>
               </Form>
             )}
@@ -156,7 +169,7 @@ export default function AdminQuoteDetailPage() {
                   disabled={isSubmitting}
                   style={{ ...styles.btn, background: "#166534", color: "white" }}
                 >
-                  {isSubmitting ? "Creating..." : "Create Order (Manual)"}
+                  {submittingIntent === "create_order_manual" ? "Creating..." : "Create Order (Manual)"}
                 </button>
               </Form>
             )}
@@ -167,7 +180,7 @@ export default function AdminQuoteDetailPage() {
                   disabled={isSubmitting}
                   style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0" }}
                 >
-                  {isSubmitting ? "Loading..." : "Preview Invoice"}
+                  {submittingIntent === "preview_invoice" ? "Loading..." : "Preview Invoice"}
                 </button>
               </Form>
             )}
@@ -236,7 +249,7 @@ export default function AdminQuoteDetailPage() {
             <div style={styles.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                 <h3 style={{ ...styles.cardTitle, margin: 0 }}>Line Items ({quote.items.length})</h3>
-                {canEdit && (
+                {canEditDiscount && (
                   <button
                     type="button"
                     onClick={() => setShowDiscountForm(!showDiscountForm)}
@@ -248,7 +261,7 @@ export default function AdminQuoteDetailPage() {
               </div>
 
               {/* Order Discount Form */}
-              {showDiscountForm && canEdit && (
+              {showDiscountForm && canEditDiscount && (
                 <div style={styles.discountForm}>
                   <Form method="post" style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                     <input type="hidden" name="intent" value="apply_order_discount" />
@@ -294,7 +307,7 @@ export default function AdminQuoteDetailPage() {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={styles.th}>Product</th>
+                    <th style={{ ...styles.th, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }}>Product</th>
                     <th style={styles.th}>SKU</th>
                     <th style={{ ...styles.th, textAlign: "center" }}>Qty</th>
                     <th style={{ ...styles.th, textAlign: "right" }}>Unit Price</th>
@@ -306,14 +319,14 @@ export default function AdminQuoteDetailPage() {
                 <tbody>
                   {quote.items.map((item: any) => (
                     <tr key={item.id} style={{ borderTop: "1px solid #eef1f4" }}>
-                      <td style={styles.td}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <td style={{ ...styles.td, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                           {item.image && (
-                            <img src={item.image} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: "cover" }} />
+                            <img src={item.image} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />
                           )}
-                          <div>
-                            <div style={{ fontWeight: 600 }}>{item.productTitle}</div>
-                            {item.variantTitle && <div style={{ fontSize: 12, color: "#5c5f62" }}>{item.variantTitle}</div>}
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.productTitle}</div>
+                            {item.variantTitle && <div style={{ fontSize: 12, color: "#5c5f62", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.variantTitle}</div>}
                           </div>
                         </div>
                       </td>
@@ -687,6 +700,7 @@ export default function AdminQuoteDetailPage() {
                     <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>SKU</th>
                     <th style={{ textAlign: "center", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Qty</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Unit Price</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Discount</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Total</th>
                   </tr>
                 </thead>
@@ -701,6 +715,9 @@ export default function AdminQuoteDetailPage() {
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "center" }}>{item.quantity}</td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right" }}>
                         {fmtMoney(item.originalUnitPrice, invoiceData.currencyCode)}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", color: Number(item.discount) > 0 ? "#b91b1b" : undefined }}>
+                        {Number(item.discount) > 0 ? `-${fmtMoney(item.discount, invoiceData.currencyCode)}` : "–"}
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", fontWeight: 600 }}>
                         {fmtMoney(item.discountedTotal, invoiceData.currencyCode)}

@@ -49,6 +49,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         (attr) => attr.name === "_sales_agent_user_id",
       )?.value || null;
 
+    // Quote invoices are draft orders created to send price quotes — NOT real orders.
+    // Skip credit deduction so the company's balance is not reduced.
+    if (orderSource === "B2B Portal Quote") {
+      console.log(
+        "ℹ️ Draft order is a quote invoice (B2B Portal Quote) — skipping credit deduction.",
+      );
+      return new Response("OK", { status: 200 });
+    }
+
     // Validate required fields from the payload
     if (!draftOrder.id || !draftOrder.total_price) {
       console.log("❌ Invalid draft order payload - missing required fields");
