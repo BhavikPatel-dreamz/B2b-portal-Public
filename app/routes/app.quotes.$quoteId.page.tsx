@@ -10,7 +10,7 @@ import {
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { useEffect } from "react";
 
-function fmtMoney(amount: string | number, currency = "USD") {
+function fmtMoney(amount: string | number, currency: string) {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency,
@@ -250,7 +250,7 @@ export default function AdminQuoteDetailPage() {
                         onChange={(e) => setDiscountType(e.target.value)}
                         style={styles.select}
                       >
-                        <option value="FIXED_AMOUNT">Fixed Amount ($)</option>
+                        <option value="FIXED_AMOUNT">Fixed Amount ({quote.currencyCode})</option>
                         <option value="PERCENTAGE">Percentage (%)</option>
                       </select>
                     </div>

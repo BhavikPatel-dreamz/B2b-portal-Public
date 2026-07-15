@@ -20,7 +20,7 @@ function formatDisplayDate(value: string) {
   }).format(new Date(value));
 }
 
-function formatCurrency(amount: string, currency = "USD") {
+function formatCurrency(amount: string, currency: string) {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency,

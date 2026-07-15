@@ -292,7 +292,7 @@ export default function QuoteListingPage() {
   const actionData = useActionData<any>();
   const navigation = useNavigation();
 
-  const fmtMoney = (amount: string, currency = "USD") =>
+  const fmtMoney = (amount: string, currency: string) =>
     new Intl.NumberFormat(undefined, {
       style: "currency",
       currency,

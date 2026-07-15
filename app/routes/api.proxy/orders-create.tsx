@@ -21,6 +21,7 @@ interface OrderItem {
   quantity: number;
   price: number;
   title?: string;
+  currencyCode?: string;
 }
 
 interface CreateOrderRequest {
@@ -29,6 +30,7 @@ interface CreateOrderRequest {
   shop: string;
   orderItems: OrderItem[];
   totalAmount: number;
+  currencyCode?: string;
   shippingAddress?: {
     firstName?: string;
     lastName?: string;
@@ -53,6 +55,7 @@ async function createShopifyDraftOrder(
     lineItems: Array<{ variantId: string; quantity: number }>;
     shippingAddress?: Prisma.InputJsonValue;
     note?: string;
+    currencyCode?: string;
   }
 ) {
   const mutation = `
@@ -84,6 +87,7 @@ async function createShopifyDraftOrder(
     lineItems: Array<{ variantId: string; quantity: number }>;
     shippingAddress?: Prisma.InputJsonValue;
     note?: string;
+    presentmentCurrencyCode?: string;
   } = {
     customerId: orderData.customerId,
     lineItems,
@@ -95,6 +99,10 @@ async function createShopifyDraftOrder(
 
   if (orderData.note) {
     input.note = orderData.note;
+  }
+
+  if (orderData.currencyCode) {
+    input.presentmentCurrencyCode = orderData.currencyCode.toUpperCase();
   }
 
   try {
@@ -140,7 +148,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const requestData: CreateOrderRequest = await request.json();
-    const { companyId, customerId, shop, orderItems, totalAmount, shippingAddress, notes } =
+    const { companyId, customerId, shop, orderItems, totalAmount, currencyCode, shippingAddress, notes } =
       requestData;
 
     // Validate required fields
@@ -309,6 +317,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         note: notes
           ? `B2B Order #${b2bOrder.id}\n${notes}`
           : `B2B Order #${b2bOrder.id}`,
+        currencyCode: currencyCode || orderItems.find((item) => item.currencyCode)?.currencyCode,
       });
 
       if (!shopifyResult.success) {
