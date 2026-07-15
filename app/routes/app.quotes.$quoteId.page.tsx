@@ -635,7 +635,7 @@ export default function AdminQuoteDetailPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #e3e7ec" }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Invoice Preview — {invoiceData.name}</h3>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Invoice Preview — {quote.shopifyDraftOrderName || quote.quoteNumber}</h3>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <button
                   type="button"
@@ -658,7 +658,7 @@ export default function AdminQuoteDetailPage() {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>INVOICE</h2>
-                  <p style={{ margin: "4px 0 0", color: "#5c5f62", fontSize: 13 }}>{invoiceData.name}</p>
+                  <p style={{ margin: "4px 0 0", color: "#5c5f62", fontSize: 13 }}>{quote.shopifyDraftOrderName || quote.quoteNumber}</p>
                 </div>
                 <div style={{ textAlign: "right", fontSize: 13, color: "#5c5f62" }}>
                   <p style={{ margin: 0 }}><strong>Date:</strong> {invoiceData.createdAt ? new Date(invoiceData.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "–"}</p>

@@ -209,7 +209,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     },
   });
-  const quoteNumber = `Q-${datePart}-${String(count + 1).padStart(4, "0")}`;
+  const seq = String(count + 1).padStart(4, "0");
+  const rand = crypto.randomBytes(2).toString("hex");
+  let quoteNumber = `Q-${datePart}-${seq}-${rand}`;
+  const exists = await prisma.quote.findUnique({ where: { quoteNumber } });
+  if (exists) {
+    quoteNumber = `Q-${datePart}-${seq}-${crypto.randomBytes(3).toString("hex")}`;
+  }
 
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 30);

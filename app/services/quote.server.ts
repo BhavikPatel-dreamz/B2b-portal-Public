@@ -138,8 +138,14 @@ async function generateQuoteNumber(shopId: string) {
       },
     },
   });
-  const suffix = String(count + 1).padStart(4, "0");
-  return `Q-${datePart}-${suffix}`;
+  const seq = String(count + 1).padStart(4, "0");
+  const rand = crypto.randomBytes(2).toString("hex");
+  const base = `Q-${datePart}-${seq}-${rand}`;
+  const exists = await prisma.quote.findUnique({ where: { quoteNumber: base } });
+  if (exists) {
+    return `Q-${datePart}-${seq}-${crypto.randomBytes(3).toString("hex")}`;
+  }
+  return base;
 }
 
 function generateSecureToken() {
@@ -490,6 +496,7 @@ export async function convertQuoteToOrder({
     quantity: item.quantity,
     price: item.unitPrice.toString(),
     currencyCode: item.currencyCode,
+    discount: item.discount.toString(),
   }));
   const lineItems = buildSalesDraftLineItems(cartData, quote.currencyCode);
   const taxLine = buildSalesDraftTaxLine(
@@ -701,6 +708,8 @@ export async function convertQuoteToOrder({
       status: "converted",
       convertedAt: new Date(),
       convertedOrderId: order.id,
+      shopifyDraftOrderId: createdOrder.id,
+      shopifyDraftOrderName: createdOrder.name || quote.shopifyDraftOrderName,
     },
   });
   await logQuoteActivity({

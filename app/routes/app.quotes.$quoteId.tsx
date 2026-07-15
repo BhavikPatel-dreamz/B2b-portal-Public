@@ -192,165 +192,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         return Response.json({ error: "Company Shopify credentials not found." }, { status: 400 });
       }
 
-      let draftOrderId = quote.shopifyDraftOrderId;
       let draftInvoiceUrl: string | null = null;
 
-      if (!draftOrderId) {
-        // ── Resolve B2B context ──
-        const baseMetaQuery = `
-          query GetBaseMeta($companyId: ID!) {
-            company(id: $companyId) {
-              locations(first: 10) { nodes { id } }
-              contacts(first: 50) {
-                edges {
-                  node {
-                    id
-                    customer { id }
-                    roleAssignments(first: 5) {
-                      edges { node { companyLocation { id } } }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `;
-        const baseMetaRes = await fetch(
-          `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Shopify-Access-Token": company.shop.accessToken,
-            },
-            body: JSON.stringify({
-              query: baseMetaQuery,
-              variables: { companyId: company.shopifyCompanyId },
-            }),
-          },
-        );
-        const baseMetaData = await baseMetaRes.json();
-        const contacts = (baseMetaData.data?.company?.contacts?.edges || []) as any[];
-        const matchCustGid = `gid://shopify/Customer/${quote.customerShopifyId}`;
-        const matchedContact = contacts.find((e: any) => e.node.customer?.id === matchCustGid);
-        const companyLocationId =
-          matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id ||
-          baseMetaData.data?.company?.locations?.nodes?.[0]?.id ||
-          "";
-        const companyContactId = matchedContact?.node?.id || "";
-
-        if (!companyLocationId || !companyContactId) {
-          return Response.json({ error: "B2B context missing. Customer is not a company contact." }, { status: 400 });
-        }
-
-        // ── Build line items ──
-        const lineItems = quote.items.map((item) => ({
-          variantId: item.variantId,
-          quantity: item.quantity,
-          priceOverride: {
-            amount: Number(item.unitPrice).toFixed(2),
-            currencyCode: item.currencyCode,
-          },
-        }));
-
-        // Tax line
-        if (Number(quote.taxAmount) > 0) {
-          lineItems.push({
-            variantId: undefined as any,
-            quantity: 1,
-            priceOverride: undefined as any,
-            title: `Estimated Tax (${Number(quote.taxRate).toFixed(2)}%)`,
-            originalUnitPriceWithCurrency: {
-              amount: Number(quote.taxAmount).toFixed(2),
-              currencyCode: quote.currencyCode,
-            },
-            taxable: false,
-            requiresShipping: false,
-          } as any);
-        }
-
-        // Shipping line
-        if (Number(quote.shippingAmount) > 0) {
-          (lineItems as any[]).push({
-            title: "Shipping",
-            quantity: 1,
-            originalUnitPriceWithCurrency: {
-              amount: Number(quote.shippingAmount).toFixed(2),
-              currencyCode: quote.currencyCode,
-            },
-            taxable: false,
-            requiresShipping: false,
-          });
-        }
-
-        const appliedDiscount =
-          Number(quote.discountTotal) > 0
-            ? {
-                value: Number(quote.discountTotal),
-                valueType: "FIXED_AMOUNT" as const,
-                title: quote.discountType === "PERCENTAGE"
-                  ? `Quote Discount (${quote.discountAmount}%)`
-                  : "Quote Discount",
-              }
-            : undefined;
-
-        const draftInput: any = {
-          lineItems,
-          note: quote.customerNotes || `Quote ${quote.quoteNumber}`,
-          customAttributes: [
-            { key: "_source", value: "B2B Portal Quote" },
-            { key: "Quote Number", value: quote.quoteNumber },
-          ],
-          presentmentCurrencyCode: quote.currencyCode,
-          taxExempt: true,
-          purchasingEntity: {
-            purchasingCompany: {
-              companyId: company.shopifyCompanyId,
-              companyLocationId,
-              companyContactId,
-            },
-          },
-        };
-        if (appliedDiscount) draftInput.appliedDiscount = appliedDiscount;
-
-        const draftRes = await fetch(
-          `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Shopify-Access-Token": company.shop.accessToken,
-            },
-            body: JSON.stringify({
-              query: `mutation CreateDraft($input: DraftOrderInput!) {
-                draftOrderCreate(input: $input) {
-                  draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
-                  userErrors { field message }
-                }
-              }`,
-              variables: { input: draftInput },
-            }),
-          },
-        );
-        const draftData = await draftRes.json();
-        const draftErrors = draftData.data?.draftOrderCreate?.userErrors || [];
-        if (draftData.errors?.length || draftErrors.length) {
-          return Response.json(
-            { error: draftData.errors?.[0]?.message || draftErrors[0]?.message || "Draft order creation failed" },
-            { status: 400 },
-          );
-        }
-        const newDraft = draftData.data?.draftOrderCreate?.draftOrder;
-        if (!newDraft?.id) {
-          return Response.json({ error: "Failed to create draft order" }, { status: 400 });
-        }
-        draftOrderId = newDraft.id;
-        draftInvoiceUrl = newDraft.invoiceUrl || null;
-
-        // Fetch full draft order details for local storage
-        let savedInvoiceData = null;
+      // ── Delete old draft order if it exists (to apply updated prices/discounts) ──
+      if (quote.shopifyDraftOrderId) {
         try {
-          const detailRes = await fetch(
+          await fetch(
             `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
             {
               method: "POST",
@@ -359,63 +206,240 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 "X-Shopify-Access-Token": company.shop.accessToken,
               },
               body: JSON.stringify({
-                query: `query GetDraftOrder($id: ID!) {
-                  draftOrder(id: $id) {
-                    id name createdAt currencyCode
-                    customer { firstName lastName email }
-                    lineItems(first: 50) {
-                      nodes { title variantTitle sku quantity
-                        originalUnitPrice { amount currencyCode }
-                        discountedTotal { amount currencyCode }
-                      }
-                    }
-                    subtotalPrice { amount currencyCode }
-                    totalDiscounts { amount currencyCode }
-                    totalTax { amount currencyCode }
-                    totalShippingMoney { amount currencyCode }
-                    totalPrice { amount currencyCode }
-                    invoiceSentAt
-                  }
-                }`,
-                variables: { id: draftOrderId },
+                query: `mutation DraftOrderDelete($id: ID!) { draftOrderDelete(id: $id) { deletedDraftOrderId userErrors { message } } }`,
+                variables: { id: quote.shopifyDraftOrderId },
               }),
             },
           );
-          const detailData = await detailRes.json();
-          const d = detailData.data?.draftOrder;
-          if (d) {
-            savedInvoiceData = {
-              name: d.name,
-              createdAt: d.createdAt,
-              currencyCode: d.currencyCode,
-              customer: d.customer,
-              lineItems: (d.lineItems?.nodes || []).map((item: any) => ({
-                title: item.title,
-                variantTitle: item.variantTitle,
-                sku: item.sku,
-                quantity: item.quantity,
-                originalUnitPrice: item.originalUnitPrice?.amount || "0",
-                discountedTotal: item.discountedTotal?.amount || "0",
-              })),
-              subtotal: d.subtotalPrice?.amount || "0",
-              totalDiscounts: d.totalDiscounts?.amount || "0",
-              totalTax: d.totalTax?.amount || "0",
-              totalShipping: d.totalShippingMoney?.amount || "0",
-              totalPrice: d.totalPrice?.amount || "0",
-            };
-          }
-        } catch { /* best-effort */ }
+        } catch {
+          // Best-effort deletion — continue to create new draft order
+        }
+      }
 
-        // Save draft order ID, name, and invoice data on the quote
-        await prisma.quote.update({
-          where: { id: quoteId },
-          data: {
-            shopifyDraftOrderId: draftOrderId,
-            shopifyDraftOrderName: newDraft.name || null,
-            invoiceData: savedInvoiceData,
+      // ── Resolve B2B context ──
+      const baseMetaQuery = `
+        query GetBaseMeta($companyId: ID!) {
+          company(id: $companyId) {
+            locations(first: 10) { nodes { id } }
+            contacts(first: 50) {
+              edges {
+                node {
+                  id
+                  customer { id }
+                  roleAssignments(first: 5) {
+                    edges { node { companyLocation { id } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+      const baseMetaRes = await fetch(
+        `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": company.shop.accessToken,
           },
+          body: JSON.stringify({
+            query: baseMetaQuery,
+            variables: { companyId: company.shopifyCompanyId },
+          }),
+        },
+      );
+      const baseMetaData = await baseMetaRes.json();
+      const contacts = (baseMetaData.data?.company?.contacts?.edges || []) as any[];
+      const matchCustGid = `gid://shopify/Customer/${quote.customerShopifyId}`;
+      const matchedContact = contacts.find((e: any) => e.node.customer?.id === matchCustGid);
+      const companyLocationId =
+        matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id ||
+        baseMetaData.data?.company?.locations?.nodes?.[0]?.id ||
+        "";
+      const companyContactId = matchedContact?.node?.id || "";
+
+      if (!companyLocationId || !companyContactId) {
+        return Response.json({ error: "B2B context missing. Customer is not a company contact." }, { status: 400 });
+      }
+
+      // ── Build line items with current prices/discounts ──
+      const lineItems = quote.items.map((item) => {
+        const basePrice = Number(item.unitPrice) || 0;
+        const itemDiscount = Math.max(0, Number(item.discount) || 0);
+        const discountedPrice = Math.max(0, basePrice * item.quantity - itemDiscount) / item.quantity;
+        return {
+          variantId: item.variantId,
+          quantity: item.quantity,
+          priceOverride: {
+            amount: discountedPrice.toFixed(2),
+            currencyCode: item.currencyCode,
+          },
+        };
+      });
+
+      // Tax line
+      if (Number(quote.taxAmount) > 0) {
+        lineItems.push({
+          variantId: undefined as any,
+          quantity: 1,
+          priceOverride: undefined as any,
+          title: `Estimated Tax (${Number(quote.taxRate).toFixed(2)}%)`,
+          originalUnitPriceWithCurrency: {
+            amount: Number(quote.taxAmount).toFixed(2),
+            currencyCode: quote.currencyCode,
+          },
+          taxable: false,
+          requiresShipping: false,
+        } as any);
+      }
+
+      // Shipping line
+      if (Number(quote.shippingAmount) > 0) {
+        (lineItems as any[]).push({
+          title: "Shipping",
+          quantity: 1,
+          originalUnitPriceWithCurrency: {
+            amount: Number(quote.shippingAmount).toFixed(2),
+            currencyCode: quote.currencyCode,
+          },
+          taxable: false,
+          requiresShipping: false,
         });
       }
+
+      const appliedDiscount =
+        Number(quote.discountTotal) > 0
+          ? {
+              value: Number(quote.discountTotal),
+              valueType: "FIXED_AMOUNT" as const,
+              title: quote.discountType === "PERCENTAGE"
+                ? `Quote Discount (${quote.discountAmount}%)`
+                : "Quote Discount",
+            }
+          : undefined;
+
+      const draftInput: any = {
+        lineItems,
+        note: quote.customerNotes || `Quote ${quote.quoteNumber}`,
+        customAttributes: [
+          { key: "_source", value: "B2B Portal Quote" },
+          { key: "Quote Number", value: quote.quoteNumber },
+        ],
+        presentmentCurrencyCode: quote.currencyCode,
+        taxExempt: true,
+        purchasingEntity: {
+          purchasingCompany: {
+            companyId: company.shopifyCompanyId,
+            companyLocationId,
+            companyContactId,
+          },
+        },
+      };
+      if (appliedDiscount) draftInput.appliedDiscount = appliedDiscount;
+
+      const draftRes = await fetch(
+        `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": company.shop.accessToken,
+          },
+          body: JSON.stringify({
+            query: `mutation CreateDraft($input: DraftOrderInput!) {
+              draftOrderCreate(input: $input) {
+                draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
+                userErrors { field message }
+              }
+            }`,
+            variables: { input: draftInput },
+          }),
+        },
+      );
+      const draftData = await draftRes.json();
+      const draftErrors = draftData.data?.draftOrderCreate?.userErrors || [];
+      if (draftData.errors?.length || draftErrors.length) {
+        return Response.json(
+          { error: draftData.errors?.[0]?.message || draftErrors[0]?.message || "Draft order creation failed" },
+          { status: 400 },
+        );
+      }
+      const newDraft = draftData.data?.draftOrderCreate?.draftOrder;
+      if (!newDraft?.id) {
+        return Response.json({ error: "Failed to create draft order" }, { status: 400 });
+      }
+      const draftOrderId = newDraft.id;
+      draftInvoiceUrl = newDraft.invoiceUrl || null;
+
+      // Fetch full draft order details for local storage
+      let savedInvoiceData = null;
+      try {
+        const detailRes = await fetch(
+          `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": company.shop.accessToken,
+            },
+            body: JSON.stringify({
+              query: `query GetDraftOrder($id: ID!) {
+                draftOrder(id: $id) {
+                  id name createdAt currencyCode
+                  customer { firstName lastName email }
+                  lineItems(first: 50) {
+                    nodes { title variantTitle sku quantity
+                      originalUnitPrice { amount currencyCode }
+                      discountedTotal { amount currencyCode }
+                    }
+                  }
+                  subtotalPrice { amount currencyCode }
+                  totalDiscounts { amount currencyCode }
+                  totalTax { amount currencyCode }
+                  totalShippingMoney { amount currencyCode }
+                  totalPrice { amount currencyCode }
+                  invoiceSentAt
+                }
+              }`,
+              variables: { id: draftOrderId },
+            }),
+          },
+        );
+        const detailData = await detailRes.json();
+        const d = detailData.data?.draftOrder;
+        if (d) {
+          savedInvoiceData = {
+            name: d.name,
+            createdAt: d.createdAt,
+            currencyCode: d.currencyCode,
+            customer: d.customer,
+            lineItems: (d.lineItems?.nodes || []).map((item: any) => ({
+              title: item.title,
+              variantTitle: item.variantTitle,
+              sku: item.sku,
+              quantity: item.quantity,
+              originalUnitPrice: item.originalUnitPrice?.amount || "0",
+              discountedTotal: item.discountedTotal?.amount || "0",
+            })),
+            subtotal: d.subtotalPrice?.amount || "0",
+            totalDiscounts: d.totalDiscounts?.amount || "0",
+            totalTax: d.totalTax?.amount || "0",
+            totalShipping: d.totalShippingMoney?.amount || "0",
+            totalPrice: d.totalPrice?.amount || "0",
+          };
+        }
+      } catch { /* best-effort */ }
+
+      // Save draft order ID, name, and invoice data on the quote
+      await prisma.quote.update({
+        where: { id: quoteId },
+        data: {
+          shopifyDraftOrderId: draftOrderId,
+          shopifyDraftOrderName: newDraft.name || null,
+          invoiceData: savedInvoiceData,
+        },
+      });
 
       // ── Send invoice via Shopify ──
       const sendInvoiceRes = await fetch(
@@ -725,6 +749,39 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
                 }
               }`,
               variables: { query: `name:${label}` },
+            }),
+          });
+          const data = await res.json();
+          draft = data.data?.orders?.nodes?.[0] || null;
+        } catch { /* continue to next step */ }
+      }
+
+      // Fallback: search by quote number in order note
+      if (!draft && quote.quoteNumber) {
+        try {
+          const res = await fetch(shopUrl, {
+            method: "POST",
+            headers: gqlHeaders,
+            body: JSON.stringify({
+              query: `query SearchOrderByNote($query: String!) {
+                orders(first: 1, query: $query) {
+                  nodes {
+                    id name createdAt currencyCode
+                    customer { firstName lastName email }
+                    lineItems(first: 50) {
+                      nodes { title variantTitle sku quantity
+                        originalUnitPrice
+                        discountedTotal
+                      }
+                    }
+                    subtotalPrice
+                    totalDiscounts
+                    totalTax
+                    totalPrice
+                  }
+                }
+              }`,
+              variables: { query: `note:${quote.quoteNumber}` },
             }),
           });
           const data = await res.json();

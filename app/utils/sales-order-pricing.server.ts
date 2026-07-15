@@ -3,6 +3,7 @@ export type SalesCartItem = {
   quantity: number;
   price: string | number;
   currencyCode?: string | null;
+  discount?: string | number;
   productId?: string;
   productTitle?: string;
   variantTitle?: string;
@@ -57,14 +58,19 @@ export function getCartCurrency(cartData: SalesCartItem[], fallback = "USD") {
 }
 
 export function buildSalesDraftLineItems(cartData: SalesCartItem[], currencyCode: string): SalesDraftLineItemInput[] {
-  return cartData.map((item) => ({
-    variantId: item.variantId,
-    quantity: item.quantity,
-    priceOverride: {
-      amount: normalizeMoneyAmount(item.price),
-      currencyCode,
-    },
-  }));
+  return cartData.map((item) => {
+    const basePrice = Number(item.price) || 0;
+    const itemDiscount = Math.max(0, Number(item.discount) || 0);
+    const discountedPrice = Math.max(0, basePrice * item.quantity - itemDiscount) / item.quantity;
+    return {
+      variantId: item.variantId,
+      quantity: item.quantity,
+      priceOverride: {
+        amount: normalizeMoneyAmount(discountedPrice),
+        currencyCode,
+      },
+    };
+  });
 }
 
 export function buildSalesDraftTaxLine(
