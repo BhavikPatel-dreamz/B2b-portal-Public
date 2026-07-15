@@ -386,7 +386,9 @@ model Quote {
   cancelledAt       DateTime?
   convertedAt       DateTime?
   convertedOrderId  String?
-  shopifyDraftOrderId String?
+  shopifyDraftOrderId   String?
+  shopifyDraftOrderName String?
+  invoiceData           Json?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   shop              Store           @relation("StoreQuotes", fields: [shopId], references: [id], onDelete: Cascade)

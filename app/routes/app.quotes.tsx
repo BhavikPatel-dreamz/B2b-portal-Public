@@ -126,7 +126,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return Response.json({
     quotes: quotes.map((q) => ({
       id: q.id,
-      quoteNumber: q.quoteNumber,
+      quoteNumber: q.shopifyDraftOrderName || q.shopifyDraftOrderId || q.quoteNumber,
       title: q.title,
       status: q.status,
       totalAmount: q.totalAmount.toString(),

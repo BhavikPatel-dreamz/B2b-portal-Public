@@ -36,6 +36,7 @@ type ActionResponse = {
   success?: boolean;
   message?: string;
   error?: string;
+  invoiceData?: any;
 };
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -204,6 +205,195 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return Response.json({ success: true, message: "Quote cancelled." });
     }
 
+    if (intent === "preview_invoice") {
+      if (!quote.shopifyDraftOrderId) {
+        return Response.json(
+          { error: `No draft order linked to this quote (${quote.shopifyDraftOrderName || quote.quoteNumber}). Send the invoice first.` },
+          { status: 400 },
+        );
+      }
+
+      const label = quote.shopifyDraftOrderName || quote.quoteNumber;
+
+      // Use locally stored invoice data (no Shopify API call)
+      if (quote.invoiceData) {
+        const inv = quote.invoiceData as any;
+        return Response.json({
+          success: true,
+          invoiceData: {
+            name: inv.name || label,
+            createdAt: inv.createdAt,
+            currencyCode: inv.currencyCode,
+            customer: inv.customer,
+            lineItems: inv.lineItems || [],
+            subtotal: inv.subtotal || "0",
+            totalDiscounts: inv.totalDiscounts || "0",
+            totalTax: inv.totalTax || "0",
+            totalShipping: inv.totalShipping || "0",
+            totalPrice: inv.totalPrice || "0",
+            invoiceSentAt: inv.invoiceSentAt || null,
+          },
+        });
+      }
+
+      // Fallback: query Shopify (legacy quotes without stored data)
+      const shop = await prisma.store.findFirst({
+        where: { companyAccounts: { some: { id: companyId } } },
+        select: { shopDomain: true, accessToken: true },
+      });
+      if (!shop?.accessToken) {
+        return Response.json({ error: "Shop not found." }, { status: 400 });
+      }
+
+      const gqlHeaders = {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": shop.accessToken,
+      };
+      const shopUrl = `https://${shop.shopDomain}/admin/api/2025-01/graphql.json`;
+
+      let draft: any = null;
+      let rawId = quote.shopifyDraftOrderId || "";
+      let draftOrderId = rawId;
+      if (!draftOrderId.startsWith("gid://")) {
+        const num = draftOrderId.replace(/[^0-9]/g, "");
+        if (num) draftOrderId = `gid://shopify/DraftOrder/${num}`;
+      }
+
+      try {
+        const res = await fetch(shopUrl, {
+          method: "POST",
+          headers: gqlHeaders,
+          body: JSON.stringify({
+            query: `query GetDraftOrder($id: ID!) {
+              draftOrder(id: $id) {
+                id name createdAt currencyCode
+                customer { firstName lastName email }
+                lineItems(first: 50) {
+                  nodes { title variantTitle sku quantity
+                    originalUnitPrice { amount currencyCode }
+                    discountedTotal { amount currencyCode }
+                  }
+                }
+                subtotalPrice { amount currencyCode }
+                totalDiscounts { amount currencyCode }
+                totalTax { amount currencyCode }
+                totalShippingMoney { amount currencyCode }
+                totalPrice { amount currencyCode }
+                invoiceSentAt
+              }
+            }`,
+            variables: { id: draftOrderId },
+          }),
+        });
+        const data = await res.json();
+        draft = data.data?.draftOrder;
+      } catch { /* continue */ }
+
+      if (!draft) {
+        try {
+          let orderId = draftOrderId;
+          if (orderId.includes("DraftOrder")) {
+            orderId = orderId.replace("DraftOrder", "Order");
+          }
+          const res = await fetch(shopUrl, {
+            method: "POST",
+            headers: gqlHeaders,
+            body: JSON.stringify({
+              query: `query GetOrder($id: ID!) {
+                order(id: $id) {
+                  id name createdAt currencyCode
+                  customer { firstName lastName email }
+                  lineItems(first: 50) {
+                    nodes { title variantTitle sku quantity
+                      originalUnitPrice
+                      discountedTotal
+                    }
+                  }
+                  subtotalPrice
+                  totalDiscounts
+                  totalTax
+                  totalPrice
+                }
+              }`,
+              variables: { id: orderId },
+            }),
+          });
+          const data = await res.json();
+          draft = data.data?.order;
+        } catch { /* continue */ }
+      }
+
+      if (!draft && label && label.startsWith("#")) {
+        try {
+          const res = await fetch(shopUrl, {
+            method: "POST",
+            headers: gqlHeaders,
+            body: JSON.stringify({
+              query: `query SearchOrder($query: String!) {
+                orders(first: 1, query: $query) {
+                  nodes {
+                    id name createdAt currencyCode
+                    customer { firstName lastName email }
+                    lineItems(first: 50) {
+                      nodes { title variantTitle sku quantity
+                        originalUnitPrice
+                        discountedTotal
+                      }
+                    }
+                    subtotalPrice
+                    totalDiscounts
+                    totalTax
+                    totalPrice
+                  }
+                }
+              }`,
+              variables: { query: `name:${label}` },
+            }),
+          });
+          const data = await res.json();
+          draft = data.data?.orders?.nodes?.[0] || null;
+        } catch { /* continue */ }
+      }
+
+      if (!draft) {
+        return Response.json(
+          { error: `Could not load invoice for "${label}". Please check the order on Shopify admin.` },
+          { status: 400 },
+        );
+      }
+
+      const toAmount = (val: any): string => {
+        if (val == null) return "0";
+        if (typeof val === "object" && val.amount !== undefined) return val.amount;
+        return String(val);
+      };
+      const lineItems = (draft.lineItems?.nodes || []).map((item: any) => ({
+        title: item.title,
+        variantTitle: item.variantTitle,
+        sku: item.sku,
+        quantity: item.quantity,
+        originalUnitPrice: toAmount(item.originalUnitPrice),
+        discountedTotal: toAmount(item.discountedTotal),
+      }));
+
+      return Response.json({
+        success: true,
+        invoiceData: {
+          name: draft.name,
+          createdAt: draft.createdAt,
+          currencyCode: draft.currencyCode,
+          customer: draft.customer,
+          lineItems,
+          subtotal: toAmount(draft.subtotalPrice),
+          totalDiscounts: toAmount(draft.totalDiscounts),
+          totalTax: toAmount(draft.totalTax),
+          totalShipping: "0",
+          totalPrice: toAmount(draft.totalPrice),
+          invoiceSentAt: draft.invoiceSentAt,
+        },
+      });
+    }
+
     if (intent === "duplicate_quote") {
       const duplicate = await prisma.quote.create({
         data: {
@@ -309,13 +499,18 @@ export default function QuoteDetailPage() {
     type: "success" | "error";
     message: string;
   } | null>(initialSuccessMessage ? { type: "success", message: initialSuccessMessage } : null);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoiceData, setInvoiceData] = useState<any>(null);
 
   useEffect(() => {
     if (navigation.state === "idle") submissionLock.current = false;
   }, [navigation.state]);
 
   useEffect(() => {
-    if (actionData?.error) {
+    if (actionData?.invoiceData) {
+      setInvoiceData(actionData.invoiceData);
+      setShowInvoiceModal(true);
+    } else if (actionData?.error) {
       setNotification({ type: "error", message: actionData.error });
     } else if (actionData?.success) {
       setNotification({
@@ -401,17 +596,19 @@ export default function QuoteDetailPage() {
                   : quote.status === "draft" ? "Send Quote" : "Resend Quote"}
               </button>
             </Form>
-            <Form method="post" onSubmit={guardSubmission}>
-              <input type="hidden" name="intent" value="duplicate_quote" />
-              <button
-                disabled={isSubmitting}
-                aria-busy={pendingIntent === "duplicate_quote"}
-                style={disabledButtonStyle(styles.secondaryBtn, isSubmitting)}
-              >
-                {pendingIntent === "duplicate_quote" && <Spinner dark />}
-                {pendingIntent === "duplicate_quote" ? "Duplicating..." : "Duplicate"}
-              </button>
-            </Form>
+            {quote.shopifyDraftOrderId && (
+              <Form method="post" onSubmit={guardSubmission}>
+                <input type="hidden" name="intent" value="preview_invoice" />
+                <button
+                  disabled={isSubmitting}
+                  aria-busy={pendingIntent === "preview_invoice"}
+                  style={disabledButtonStyle(styles.secondaryBtn, isSubmitting)}
+                >
+                  {pendingIntent === "preview_invoice" && <Spinner dark />}
+                  {pendingIntent === "preview_invoice" ? "Loading..." : "Preview Invoice"}
+                </button>
+              </Form>
+            )}
             {quote.status === "approved" && (
               <Form method="post" onSubmit={guardSubmission}>
                 <input type="hidden" name="intent" value="convert_quote" />
@@ -682,6 +879,134 @@ export default function QuoteDetailPage() {
           .sales-quote-info-grid, .sales-quote-delivery-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
       `}</style>
+
+      {/* Invoice Preview Modal */}
+      {showInvoiceModal && invoiceData && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.5)",
+          }}
+          onClick={() => { setShowInvoiceModal(false); setInvoiceData(null); }}
+        >
+          <div
+            style={{
+              position: "relative",
+              width: "90vw",
+              maxWidth: 800,
+              maxHeight: "90vh",
+              background: "#fff",
+              borderRadius: 12,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #e3e7ec" }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Invoice Preview — {invoiceData.name}</h3>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid transparent", fontWeight: 600, fontSize: 12, cursor: "pointer", background: "#005bd3", color: "#fff" }}
+                >
+                  Print / Save PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowInvoiceModal(false); setInvoiceData(null); }}
+                  style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#5c5f62", padding: "0 4px", lineHeight: 1 }}
+                >
+                  &times;
+                </button>
+              </div>
+            </div>
+            <div style={{ padding: "24px 32px", overflowY: "auto", flex: 1 }}>
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>INVOICE</h2>
+                  <p style={{ margin: "4px 0 0", color: "#5c5f62", fontSize: 13 }}>{invoiceData.name}</p>
+                </div>
+                <div style={{ textAlign: "right", fontSize: 13, color: "#5c5f62" }}>
+                  <p style={{ margin: 0 }}><strong>Date:</strong> {invoiceData.createdAt ? new Date(invoiceData.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "–"}</p>
+                  {invoiceData.invoiceSentAt && (
+                    <p style={{ margin: "2px 0 0" }}><strong>Sent:</strong> {new Date(invoiceData.invoiceSentAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Customer */}
+              {invoiceData.customer && (
+                <div style={{ marginBottom: 24, fontSize: 13 }}>
+                  <strong>Bill To:</strong>
+                  <p style={{ margin: "4px 0 0" }}>
+                    {[invoiceData.customer.firstName, invoiceData.customer.lastName].filter(Boolean).join(" ")}
+                  </p>
+                  {invoiceData.customer.email && <p style={{ margin: "2px 0 0", color: "#5c5f62" }}>{invoiceData.customer.email}</p>}
+                </div>
+              )}
+
+              {/* Line Items Table */}
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 24 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Product</th>
+                    <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>SKU</th>
+                    <th style={{ textAlign: "center", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Qty</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Unit Price</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(invoiceData.lineItems || []).map((item: any, idx: number) => (
+                    <tr key={idx}>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0" }}>
+                        {item.title}
+                        {item.variantTitle && <span style={{ color: "#5c5f62" }}> — {item.variantTitle}</span>}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", color: "#5c5f62" }}>{item.sku || "–"}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "center" }}>{item.quantity}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right" }}>
+                        {fmtMoney(item.originalUnitPrice, invoiceData.currencyCode)}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", fontWeight: 600 }}>
+                        {fmtMoney(item.discountedTotal, invoiceData.currencyCode)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Totals */}
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ width: 280, fontSize: 13 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Subtotal</span><span>{fmtMoney(invoiceData.subtotal, invoiceData.currencyCode)}</span></div>
+                  {Number(invoiceData.totalDiscounts) > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Discount</span><span style={{ color: "#b91b1b" }}>-{fmtMoney(invoiceData.totalDiscounts, invoiceData.currencyCode)}</span></div>
+                  )}
+                  {Number(invoiceData.totalShipping) > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Shipping</span><span>{fmtMoney(invoiceData.totalShipping, invoiceData.currencyCode)}</span></div>
+                  )}
+                  {Number(invoiceData.totalTax) > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Tax</span><span>{fmtMoney(invoiceData.totalTax, invoiceData.currencyCode)}</span></div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, borderTop: "2px solid #e3e7ec", marginTop: 8, paddingTop: 8 }}>
+                    <span>Total</span>
+                    <span>{fmtMoney(invoiceData.totalPrice, invoiceData.currencyCode)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </SalesPortalLayout>
   );
 }

@@ -324,7 +324,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             body: JSON.stringify({
               query: `mutation CreateDraft($input: DraftOrderInput!) {
                 draftOrderCreate(input: $input) {
-                  draftOrder { id invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
+                  draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
                   userErrors { field message }
                 }
               }`,
@@ -347,10 +347,73 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         draftOrderId = newDraft.id;
         draftInvoiceUrl = newDraft.invoiceUrl || null;
 
-        // Save draft order ID on the quote
+        // Fetch full draft order details for local storage
+        let savedInvoiceData = null;
+        try {
+          const detailRes = await fetch(
+            `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": company.shop.accessToken,
+              },
+              body: JSON.stringify({
+                query: `query GetDraftOrder($id: ID!) {
+                  draftOrder(id: $id) {
+                    id name createdAt currencyCode
+                    customer { firstName lastName email }
+                    lineItems(first: 50) {
+                      nodes { title variantTitle sku quantity
+                        originalUnitPrice { amount currencyCode }
+                        discountedTotal { amount currencyCode }
+                      }
+                    }
+                    subtotalPrice { amount currencyCode }
+                    totalDiscounts { amount currencyCode }
+                    totalTax { amount currencyCode }
+                    totalShippingMoney { amount currencyCode }
+                    totalPrice { amount currencyCode }
+                    invoiceSentAt
+                  }
+                }`,
+                variables: { id: draftOrderId },
+              }),
+            },
+          );
+          const detailData = await detailRes.json();
+          const d = detailData.data?.draftOrder;
+          if (d) {
+            savedInvoiceData = {
+              name: d.name,
+              createdAt: d.createdAt,
+              currencyCode: d.currencyCode,
+              customer: d.customer,
+              lineItems: (d.lineItems?.nodes || []).map((item: any) => ({
+                title: item.title,
+                variantTitle: item.variantTitle,
+                sku: item.sku,
+                quantity: item.quantity,
+                originalUnitPrice: item.originalUnitPrice?.amount || "0",
+                discountedTotal: item.discountedTotal?.amount || "0",
+              })),
+              subtotal: d.subtotalPrice?.amount || "0",
+              totalDiscounts: d.totalDiscounts?.amount || "0",
+              totalTax: d.totalTax?.amount || "0",
+              totalShipping: d.totalShippingMoney?.amount || "0",
+              totalPrice: d.totalPrice?.amount || "0",
+            };
+          }
+        } catch { /* best-effort */ }
+
+        // Save draft order ID, name, and invoice data on the quote
         await prisma.quote.update({
           where: { id: quoteId },
-          data: { shopifyDraftOrderId: draftOrderId },
+          data: {
+            shopifyDraftOrderId: draftOrderId,
+            shopifyDraftOrderName: newDraft.name || null,
+            invoiceData: savedInvoiceData,
+          },
         });
       }
 
@@ -519,6 +582,193 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (intent === "delete_quote") {
       await prisma.quote.delete({ where: { id: quoteId } });
       return Response.json({ success: true, message: "Quote deleted." });
+    }
+
+    // ── PREVIEW INVOICE ──────────────────────────────────────
+    if (intent === "preview_invoice") {
+      if (!quote.shopifyDraftOrderId) {
+        return Response.json(
+          { error: `No draft order linked to this quote (${quote.shopifyDraftOrderName || quote.quoteNumber}). Send the invoice first.` },
+          { status: 400 },
+        );
+      }
+
+      const label = quote.shopifyDraftOrderName || quote.quoteNumber;
+
+      // Use locally stored invoice data (no Shopify API call)
+      if (quote.invoiceData) {
+        const inv = quote.invoiceData as any;
+        return Response.json({
+          success: true,
+          invoiceData: {
+            name: inv.name || label,
+            createdAt: inv.createdAt,
+            currencyCode: inv.currencyCode,
+            customer: inv.customer,
+            lineItems: inv.lineItems || [],
+            subtotal: inv.subtotal || "0",
+            totalDiscounts: inv.totalDiscounts || "0",
+            totalTax: inv.totalTax || "0",
+            totalShipping: inv.totalShipping || "0",
+            totalPrice: inv.totalPrice || "0",
+            invoiceSentAt: inv.invoiceSentAt || null,
+          },
+        });
+      }
+
+      // Fallback: query Shopify (legacy quotes without stored data)
+      const company = quote.company;
+      if (!company.shop?.accessToken) {
+        return Response.json({ error: "Shop credentials not found." }, { status: 400 });
+      }
+
+      const gqlHeaders = {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": company.shop.accessToken,
+      };
+      const shopUrl = `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`;
+
+      let draft: any = null;
+      let rawId = quote.shopifyDraftOrderId || "";
+      let draftOrderId = rawId;
+      if (!draftOrderId.startsWith("gid://")) {
+        const num = draftOrderId.replace(/[^0-9]/g, "");
+        if (num) draftOrderId = `gid://shopify/DraftOrder/${num}`;
+      }
+
+      try {
+        const res = await fetch(shopUrl, {
+          method: "POST",
+          headers: gqlHeaders,
+          body: JSON.stringify({
+            query: `query GetDraftOrder($id: ID!) {
+              draftOrder(id: $id) {
+                id name createdAt currencyCode
+                customer { firstName lastName email }
+                lineItems(first: 50) {
+                  nodes { title variantTitle sku quantity
+                    originalUnitPrice { amount currencyCode }
+                    discountedTotal { amount currencyCode }
+                  }
+                }
+                subtotalPrice { amount currencyCode }
+                totalDiscounts { amount currencyCode }
+                totalTax { amount currencyCode }
+                totalShippingMoney { amount currencyCode }
+                totalPrice { amount currencyCode }
+                invoiceSentAt
+              }
+            }`,
+            variables: { id: draftOrderId },
+          }),
+        });
+        const data = await res.json();
+        draft = data.data?.draftOrder;
+      } catch { /* continue to next step */ }
+
+      if (!draft) {
+        try {
+          let orderId = draftOrderId;
+          if (orderId.includes("DraftOrder")) {
+            orderId = orderId.replace("DraftOrder", "Order");
+          }
+          const res = await fetch(shopUrl, {
+            method: "POST",
+            headers: gqlHeaders,
+            body: JSON.stringify({
+              query: `query GetOrder($id: ID!) {
+                order(id: $id) {
+                  id name createdAt currencyCode
+                  customer { firstName lastName email }
+                  lineItems(first: 50) {
+                    nodes { title variantTitle sku quantity
+                      originalUnitPrice
+                      discountedTotal
+                    }
+                  }
+                  subtotalPrice
+                  totalDiscounts
+                  totalTax
+                  totalPrice
+                }
+              }`,
+              variables: { id: orderId },
+            }),
+          });
+          const data = await res.json();
+          draft = data.data?.order;
+        } catch { /* continue to next step */ }
+      }
+
+      if (!draft && label && label.startsWith("#")) {
+        try {
+          const res = await fetch(shopUrl, {
+            method: "POST",
+            headers: gqlHeaders,
+            body: JSON.stringify({
+              query: `query SearchOrder($query: String!) {
+                orders(first: 1, query: $query) {
+                  nodes {
+                    id name createdAt currencyCode
+                    customer { firstName lastName email }
+                    lineItems(first: 50) {
+                      nodes { title variantTitle sku quantity
+                        originalUnitPrice
+                        discountedTotal
+                      }
+                    }
+                    subtotalPrice
+                    totalDiscounts
+                    totalTax
+                    totalPrice
+                  }
+                }
+              }`,
+              variables: { query: `name:${label}` },
+            }),
+          });
+          const data = await res.json();
+          draft = data.data?.orders?.nodes?.[0] || null;
+        } catch { /* continue to next step */ }
+      }
+
+      if (!draft) {
+        return Response.json(
+          { error: `Could not load invoice for "${label}". Please check the order on Shopify admin.` },
+          { status: 400 },
+        );
+      }
+
+      const toAmount = (val: any): string => {
+        if (val == null) return "0";
+        if (typeof val === "object" && val.amount !== undefined) return val.amount;
+        return String(val);
+      };
+      const lineItems = (draft.lineItems?.nodes || []).map((item: any) => ({
+        title: item.title,
+        variantTitle: item.variantTitle,
+        sku: item.sku,
+        quantity: item.quantity,
+        originalUnitPrice: toAmount(item.originalUnitPrice),
+        discountedTotal: toAmount(item.discountedTotal),
+      }));
+
+      return Response.json({
+        success: true,
+        invoiceData: {
+          name: draft.name,
+          createdAt: draft.createdAt,
+          currencyCode: draft.currencyCode,
+          customer: draft.customer,
+          lineItems,
+          subtotal: toAmount(draft.subtotalPrice),
+          totalDiscounts: toAmount(draft.totalDiscounts),
+          totalTax: toAmount(draft.totalTax),
+          totalShipping: "0",
+          totalPrice: toAmount(draft.totalPrice),
+          invoiceSentAt: draft.invoiceSentAt,
+        },
+      });
     }
 
     // ── DUPLICATE ─────────────────────────────────────────────

@@ -273,7 +273,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   // ── Create Shopify Draft Order ──────────────────────────────
-  let shopifyDraftOrderId: string | null = null;
+      let shopifyDraftOrderId: string | null = null;
+      let shopifyDraftOrderName: string | null = null;
+      let invoiceData: any = null;
   try {
     const fullCompany = await prisma.companyAccount.findUnique({
       where: { id: localCompany.id },
@@ -364,7 +366,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             body: JSON.stringify({
               query: `mutation CreateDraft($input: DraftOrderInput!) {
                 draftOrderCreate(input: $input) {
-                  draftOrder { id invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
+                  draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
                   userErrors { field message }
                 }
               }`,
@@ -377,6 +379,68 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (!draftData.errors?.length && !draftErrors.length) {
           shopifyDraftOrderId =
             draftData.data?.draftOrderCreate?.draftOrder?.id || null;
+          shopifyDraftOrderName =
+            draftData.data?.draftOrderCreate?.draftOrder?.name || null;
+
+          // Fetch full draft order details for local storage
+          if (shopifyDraftOrderId) {
+            try {
+              const detailRes = await fetch(
+                `https://${fullCompany.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-Shopify-Access-Token": fullCompany.shop.accessToken,
+                  },
+                  body: JSON.stringify({
+                    query: `query GetDraftOrder($id: ID!) {
+                      draftOrder(id: $id) {
+                        id name createdAt currencyCode
+                        customer { firstName lastName email }
+                        lineItems(first: 50) {
+                          nodes { title variantTitle sku quantity
+                            originalUnitPrice { amount currencyCode }
+                            discountedTotal { amount currencyCode }
+                          }
+                        }
+                        subtotalPrice { amount currencyCode }
+                        totalDiscounts { amount currencyCode }
+                        totalTax { amount currencyCode }
+                        totalShippingMoney { amount currencyCode }
+                        totalPrice { amount currencyCode }
+                        invoiceSentAt
+                      }
+                    }`,
+                    variables: { id: shopifyDraftOrderId },
+                  }),
+                },
+              );
+              const detailData = await detailRes.json();
+              const d = detailData.data?.draftOrder;
+              if (d) {
+                invoiceData = {
+                  name: d.name,
+                  createdAt: d.createdAt,
+                  currencyCode: d.currencyCode,
+                  customer: d.customer,
+                  lineItems: (d.lineItems?.nodes || []).map((item: any) => ({
+                    title: item.title,
+                    variantTitle: item.variantTitle,
+                    sku: item.sku,
+                    quantity: item.quantity,
+                    originalUnitPrice: item.originalUnitPrice?.amount || "0",
+                    discountedTotal: item.discountedTotal?.amount || "0",
+                  })),
+                  subtotal: d.subtotalPrice?.amount || "0",
+                  totalDiscounts: d.totalDiscounts?.amount || "0",
+                  totalTax: d.totalTax?.amount || "0",
+                  totalShipping: d.totalShippingMoney?.amount || "0",
+                  totalPrice: d.totalPrice?.amount || "0",
+                };
+              }
+            } catch { /* best-effort */ }
+          }
         }
       }
     }
@@ -387,7 +451,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (shopifyDraftOrderId) {
     await prisma.quote.update({
       where: { id: quote.id },
-      data: { shopifyDraftOrderId },
+      data: { shopifyDraftOrderId, shopifyDraftOrderName, invoiceData },
     });
     await prisma.quoteActivity.create({
       data: {
@@ -406,6 +470,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     quoteId: quote.id,
     quoteNumber: quote.quoteNumber,
     shopifyDraftOrderId,
+    shopifyDraftOrderName,
     message: "Quote request submitted. Your team will review it shortly.",
   });
 };

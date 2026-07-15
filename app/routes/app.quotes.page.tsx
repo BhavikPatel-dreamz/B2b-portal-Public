@@ -278,7 +278,7 @@ export default function QuotesPage() {
 
       <div style={contentPanelStyle}>
         {/* Status summary bar */}
-        <div
+        {/* <div
           style={{
             display: "flex",
             gap: 8,
@@ -320,7 +320,7 @@ export default function QuotesPage() {
               {s} ({statusCounts[s] || 0})
             </Link>
           ))}
-        </div>
+        </div> */}
 
         {/* Toolbar */}
         <div style={toolbarStyle}>

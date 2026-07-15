@@ -66,11 +66,16 @@ export default function AdminQuoteDetailPage() {
   );
   const [discountType, setDiscountType] = useState(quote.discountType || "FIXED_AMOUNT");
   const [showEditForm, setShowEditForm] = useState(false);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoiceData, setInvoiceData] = useState<any>(null);
 
   const isSubmitting = navigation.state !== "idle";
 
   useEffect(() => {
-    if (actionData?.success) {
+    if (actionData?.invoiceData) {
+      setInvoiceData(actionData.invoiceData);
+      setShowInvoiceModal(true);
+    } else if (actionData?.success) {
       shopify.toast.show?.(actionData.message || "Done");
       setEditingItem(null);
       setShowDiscountForm(false);
@@ -114,7 +119,7 @@ export default function AdminQuoteDetailPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, padding: "0 15px 15px" }}>
           <div>
             <h2 style={styles.heroTitle}>
-              {quote.quoteNumber}
+              {quote.shopifyDraftOrderName || quote.shopifyDraftOrderId || quote.quoteNumber}
               <span
                 style={{
                   marginLeft: 12,
@@ -155,12 +160,17 @@ export default function AdminQuoteDetailPage() {
                 </button>
               </Form>
             )}
-            <Form method="post" style={{ display: "inline" }}>
-              <input type="hidden" name="intent" value="duplicate_quote" />
-              <button disabled={isSubmitting} style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0" }}>
-                Duplicate
-              </button>
-            </Form>
+            {quote.shopifyDraftOrderId && (
+              <Form method="post" style={{ display: "inline" }}>
+                <input type="hidden" name="intent" value="preview_invoice" />
+                <button
+                  disabled={isSubmitting}
+                  style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0" }}
+                >
+                  {isSubmitting ? "Loading..." : "Preview Invoice"}
+                </button>
+              </Form>
+            )}
             {isDraft && (
               <Form method="post" style={{ display: "inline" }}>
                 <input type="hidden" name="intent" value="cancel_quote" />
@@ -548,7 +558,7 @@ export default function AdminQuoteDetailPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#5c5f62" }}>Quote #</span>
-                  <span style={{ fontWeight: 600 }}>{quote.quoteNumber}</span>
+                  <span style={{ fontWeight: 600 }}>{quote.shopifyDraftOrderId || quote.quoteNumber}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#5c5f62" }}>Status</span>
@@ -595,6 +605,134 @@ export default function AdminQuoteDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Invoice Preview Modal */}
+      {showInvoiceModal && invoiceData && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.5)",
+          }}
+          onClick={() => { setShowInvoiceModal(false); setInvoiceData(null); }}
+        >
+          <div
+            style={{
+              position: "relative",
+              width: "90vw",
+              maxWidth: 800,
+              maxHeight: "90vh",
+              background: "#fff",
+              borderRadius: 12,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #e3e7ec" }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Invoice Preview — {invoiceData.name}</h3>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  style={{ ...styles.btn, background: "#005bd3", color: "#fff", padding: "6px 12px", fontSize: 12 }}
+                >
+                  Print / Save PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowInvoiceModal(false); setInvoiceData(null); }}
+                  style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#5c5f62", padding: "0 4px", lineHeight: 1 }}
+                >
+                  &times;
+                </button>
+              </div>
+            </div>
+            <div style={{ padding: "24px 32px", overflowY: "auto", flex: 1 }}>
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>INVOICE</h2>
+                  <p style={{ margin: "4px 0 0", color: "#5c5f62", fontSize: 13 }}>{invoiceData.name}</p>
+                </div>
+                <div style={{ textAlign: "right", fontSize: 13, color: "#5c5f62" }}>
+                  <p style={{ margin: 0 }}><strong>Date:</strong> {invoiceData.createdAt ? new Date(invoiceData.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "–"}</p>
+                  {invoiceData.invoiceSentAt && (
+                    <p style={{ margin: "2px 0 0" }}><strong>Sent:</strong> {new Date(invoiceData.invoiceSentAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Customer */}
+              {invoiceData.customer && (
+                <div style={{ marginBottom: 24, fontSize: 13 }}>
+                  <strong>Bill To:</strong>
+                  <p style={{ margin: "4px 0 0" }}>
+                    {[invoiceData.customer.firstName, invoiceData.customer.lastName].filter(Boolean).join(" ")}
+                  </p>
+                  {invoiceData.customer.email && <p style={{ margin: "2px 0 0", color: "#5c5f62" }}>{invoiceData.customer.email}</p>}
+                </div>
+              )}
+
+              {/* Line Items Table */}
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 24 }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Product</th>
+                    <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>SKU</th>
+                    <th style={{ textAlign: "center", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Qty</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Unit Price</th>
+                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(invoiceData.lineItems || []).map((item: any, idx: number) => (
+                    <tr key={idx}>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0" }}>
+                        {item.title}
+                        {item.variantTitle && <span style={{ color: "#5c5f62" }}> — {item.variantTitle}</span>}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", color: "#5c5f62" }}>{item.sku || "–"}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "center" }}>{item.quantity}</td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right" }}>
+                        {fmtMoney(item.originalUnitPrice, invoiceData.currencyCode)}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", fontWeight: 600 }}>
+                        {fmtMoney(item.discountedTotal, invoiceData.currencyCode)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Totals */}
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ width: 280, fontSize: 13 }}>
+                  <div style={styles.summaryRow}><span>Subtotal</span><span>{fmtMoney(invoiceData.subtotal, invoiceData.currencyCode)}</span></div>
+                  {Number(invoiceData.totalDiscounts) > 0 && (
+                    <div style={styles.summaryRow}><span>Discount</span><span style={{ color: "#b91b1b" }}>-{fmtMoney(invoiceData.totalDiscounts, invoiceData.currencyCode)}</span></div>
+                  )}
+                  {Number(invoiceData.totalShipping) > 0 && (
+                    <div style={styles.summaryRow}><span>Shipping</span><span>{fmtMoney(invoiceData.totalShipping, invoiceData.currencyCode)}</span></div>
+                  )}
+                  {Number(invoiceData.totalTax) > 0 && (
+                    <div style={styles.summaryRow}><span>Tax</span><span>{fmtMoney(invoiceData.totalTax, invoiceData.currencyCode)}</span></div>
+                  )}
+                  <div style={{ ...styles.summaryRow, fontWeight: 700, fontSize: 15, borderTop: "2px solid #e3e7ec", marginTop: 8, paddingTop: 8 }}>
+                    <span>Total</span>
+                    <span>{fmtMoney(invoiceData.totalPrice, invoiceData.currencyCode)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
