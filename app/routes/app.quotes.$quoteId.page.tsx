@@ -73,9 +73,7 @@ export default function AdminQuoteDetailPage() {
       setShowInvoiceModal(true);
     } else if (actionData?.success) {
       shopify.toast.show?.(actionData.message || "Done");
-      setEditingItem(null);
       setShowDiscountForm(false);
-      setShowEditForm(false);
       revalidator.revalidate();
     } else if (actionData?.error) {
       shopify.toast.show?.(actionData.error, { isError: true });
