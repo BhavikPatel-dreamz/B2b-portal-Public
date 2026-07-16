@@ -256,35 +256,37 @@ export default function AdminQuoteDetailPage() {
               {/* Order Discount Form */}
               {showDiscountForm && canEditDiscount && (
                 <div style={styles.discountForm}>
-                  <Form method="post" style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <input type="hidden" name="intent" value="apply_order_discount" />
-                    <div>
-                      <label style={styles.label}>Type</label>
-                      <select
-                        name="discountType"
-                        value={discountType}
-                        onChange={(e) => setDiscountType(e.target.value)}
-                        style={styles.select}
-                      >
-                        <option value="FIXED_AMOUNT">Fixed Amount ({quote.currencyCode})</option>
-                        <option value="PERCENTAGE">Percentage (%)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={styles.label}>Amount</label>
-                      <input
-                        name="discountAmount"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={discountValue}
-                        onChange={(e) => setDiscountValue(e.target.value)}
-                        style={styles.input}
-                      />
-                    </div>
-                    <button type="submit" disabled={isSubmitting} style={{ ...styles.btn, background: "#005bd3", color: "white" }}>
-                      Apply
-                    </button>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <Form method="post" style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                      <input type="hidden" name="intent" value="apply_order_discount" />
+                      <div>
+                        <label style={styles.label}>Type</label>
+                        <select
+                          name="discountType"
+                          value={discountType}
+                          onChange={(e) => setDiscountType(e.target.value)}
+                          style={styles.select}
+                        >
+                          <option value="FIXED_AMOUNT">Fixed Amount ({quote.currencyCode})</option>
+                          <option value="PERCENTAGE">Percentage (%)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={styles.label}>Amount</label>
+                        <input
+                          name="discountAmount"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={discountValue}
+                          onChange={(e) => setDiscountValue(e.target.value)}
+                          style={styles.input}
+                        />
+                      </div>
+                      <button type="submit" disabled={isSubmitting} style={{ ...styles.btn, background: "#005bd3", color: "white" }}>
+                        Apply
+                      </button>
+                    </Form>
                     {Number(quote.discountTotal) > 0 && (
                       <Form method="post" style={{ display: "inline" }}>
                         <input type="hidden" name="intent" value="remove_order_discount" />
@@ -293,7 +295,7 @@ export default function AdminQuoteDetailPage() {
                         </button>
                       </Form>
                     )}
-                  </Form>
+                  </div>
                 </div>
               )}
 
@@ -304,7 +306,6 @@ export default function AdminQuoteDetailPage() {
                     <th style={styles.th}>SKU</th>
                     <th style={{ ...styles.th, textAlign: "center" }}>Qty</th>
                     <th style={{ ...styles.th, textAlign: "right" }}>Unit Price</th>
-                    <th style={{ ...styles.th, textAlign: "right" }}>Discount</th>
                     <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
                   </tr>
                 </thead>
@@ -328,9 +329,6 @@ export default function AdminQuoteDetailPage() {
                       </td>
                       <td style={{ ...styles.td, textAlign: "right" }}>
                         {fmtMoney(item.unitPrice, item.currencyCode)}
-                      </td>
-                      <td style={{ ...styles.td, textAlign: "right" }}>
-                        {Number(item.discount) > 0 ? fmtMoney(item.discount, item.currencyCode) : "–"}
                       </td>
                       <td style={{ ...styles.td, textAlign: "right", fontWeight: 600 }}>
                         {fmtMoney(item.totalPrice, item.currencyCode)}
