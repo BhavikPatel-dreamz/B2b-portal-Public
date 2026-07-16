@@ -215,27 +215,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
       const label = quote.shopifyDraftOrderName || quote.quoteNumber;
 
-      // Use locally stored invoice data (no Shopify API call)
-      if (quote.invoiceData) {
-        const inv = quote.invoiceData as any;
-        return Response.json({
-          success: true,
-          invoiceData: {
-            name: inv.name || label,
-            createdAt: inv.createdAt,
-            currencyCode: inv.currencyCode,
-            customer: inv.customer,
-            lineItems: inv.lineItems || [],
-            subtotal: inv.subtotal || "0",
-            totalDiscounts: inv.totalDiscounts || "0",
-            totalTax: inv.totalTax || "0",
-            totalShipping: inv.totalShipping || "0",
-            totalPrice: inv.totalPrice || "0",
-            invoiceSentAt: inv.invoiceSentAt || null,
-          },
-        });
-      }
-
       // Fallback: query Shopify (legacy quotes without stored data)
       const shop = await prisma.store.findFirst({
         where: { companyAccounts: { some: { id: companyId } } },

@@ -56,16 +56,11 @@ export default function AdminQuoteDetailPage() {
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
 
-  const [editingItem, setEditingItem] = useState<string | null>(null);
-  const [editPrice, setEditPrice] = useState("");
-  const [editDiscount, setEditDiscount] = useState("");
-  const [editQty, setEditQty] = useState("");
   const [showDiscountForm, setShowDiscountForm] = useState(false);
   const [discountValue, setDiscountValue] = useState(
     quote.discountType === "PERCENTAGE" ? String(quote.discountAmount) : String(quote.discountAmount),
   );
   const [discountType, setDiscountType] = useState(quote.discountType || "FIXED_AMOUNT");
-  const [showEditForm, setShowEditForm] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceData, setInvoiceData] = useState<any>(null);
 
@@ -313,7 +308,6 @@ export default function AdminQuoteDetailPage() {
                     <th style={{ ...styles.th, textAlign: "right" }}>Unit Price</th>
                     <th style={{ ...styles.th, textAlign: "right" }}>Discount</th>
                     <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
-                    {canEdit && <th style={{ ...styles.th, textAlign: "right" }}>Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -332,161 +326,22 @@ export default function AdminQuoteDetailPage() {
                       </td>
                       <td style={styles.td}>{item.sku || "–"}</td>
                       <td style={{ ...styles.td, textAlign: "center" }}>
-                        {editingItem === item.id ? (
-                          <input
-                            type="number"
-                            min="1"
-                            value={editQty}
-                            onChange={(e) => setEditQty(e.target.value)}
-                            style={{ ...styles.input, width: 60, textAlign: "center" }}
-                          />
-                        ) : (
-                          item.quantity
-                        )}
+                        {item.quantity}
                       </td>
                       <td style={{ ...styles.td, textAlign: "right" }}>
-                        {editingItem === item.id ? (
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={editPrice}
-                            onChange={(e) => setEditPrice(e.target.value)}
-                            style={{ ...styles.input, width: 100, textAlign: "right" }}
-                          />
-                        ) : (
-                          fmtMoney(item.unitPrice, item.currencyCode)
-                        )}
+                        {fmtMoney(item.unitPrice, item.currencyCode)}
                       </td>
                       <td style={{ ...styles.td, textAlign: "right" }}>
-                        {editingItem === item.id ? (
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={editDiscount}
-                            onChange={(e) => setEditDiscount(e.target.value)}
-                            style={{ ...styles.input, width: 100, textAlign: "right" }}
-                          />
-                        ) : (
-                          Number(item.discount) > 0 ? fmtMoney(item.discount, item.currencyCode) : "–"
-                        )}
+                        {Number(item.discount) > 0 ? fmtMoney(item.discount, item.currencyCode) : "–"}
                       </td>
                       <td style={{ ...styles.td, textAlign: "right", fontWeight: 600 }}>
                         {fmtMoney(item.totalPrice, item.currencyCode)}
                       </td>
-                      {canEdit && (
-                        <td style={{ ...styles.td, textAlign: "right" }}>
-                          {editingItem === item.id ? (
-                            <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                              <Form method="post" style={{ display: "inline" }}>
-                                <input type="hidden" name="intent" value="update_line_item" />
-                                <input type="hidden" name="itemId" value={item.id} />
-                                <input type="hidden" name="unitPrice" value={editPrice} />
-                                <input type="hidden" name="itemDiscount" value={editDiscount} />
-                                <input type="hidden" name="quantity" value={editQty} />
-                                <button
-                                  type="submit"
-                                  disabled={isSubmitting}
-                                  style={{ ...styles.smallBtn, background: "#005bd3", color: "white" }}
-                                >
-                                  Save
-                                </button>
-                              </Form>
-                              <button
-                                type="button"
-                                onClick={() => setEditingItem(null)}
-                                style={{ ...styles.smallBtn, background: "#fff", border: "1px solid #c9ccd0" }}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingItem(item.id);
-                                setEditPrice(String(Number(item.unitPrice)));
-                                setEditDiscount(String(Number(item.discount) || 0));
-                                setEditQty(String(item.quantity));
-                              }}
-                              style={{ ...styles.smallBtn, background: "#fff", border: "1px solid #c9ccd0" }}
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </td>
-                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-
-            {/* Notes */}
-            {(quote.customerNotes || quote.internalNotes || canEdit) && (
-              <div style={styles.card}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h3 style={{ ...styles.cardTitle, margin: 0 }}>Notes</h3>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => setShowEditForm(!showEditForm)}
-                      style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
-                    >
-                      {showEditForm ? "Hide" : "Edit"}
-                    </button>
-                  )}
-                </div>
-                {showEditForm && canEdit ? (
-                  <Form method="post" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-                    <input type="hidden" name="intent" value="update_quote" />
-                    <div>
-                      <label style={styles.label}>Title</label>
-                      <input name="title" defaultValue={quote.title} style={styles.inputFull} />
-                    </div>
-                    <div>
-                      <label style={styles.label}>Customer Notes</label>
-                      <textarea name="customerNotes" defaultValue={quote.customerNotes || ""} rows={3} style={styles.textarea} />
-                    </div>
-                    <div>
-                      <label style={styles.label}>Internal Notes</label>
-                      <textarea name="internalNotes" defaultValue={quote.internalNotes || ""} rows={3} style={styles.textarea} />
-                    </div>
-                    <div>
-                      <label style={styles.label}>Expires At</label>
-                      <input
-                        name="expiresAt"
-                        type="date"
-                        defaultValue={quote.expiresAt ? new Date(quote.expiresAt).toISOString().slice(0, 10) : ""}
-                        style={styles.inputFull}
-                      />
-                    </div>
-                    <button type="submit" disabled={isSubmitting} style={{ ...styles.btn, background: "#005bd3", color: "white", alignSelf: "flex-start" }}>
-                      Save Notes
-                    </button>
-                  </Form>
-                ) : (
-                  <div style={{ marginTop: 10 }}>
-                    {quote.customerNotes && (
-                      <div style={{ marginBottom: 8 }}>
-                        <span style={styles.label}>Customer Notes</span>
-                        <p style={{ margin: 0 }}>{quote.customerNotes}</p>
-                      </div>
-                    )}
-                    {quote.internalNotes && (
-                      <div>
-                        <span style={styles.label}>Internal Notes</span>
-                        <p style={{ margin: 0 }}>{quote.internalNotes}</p>
-                      </div>
-                    )}
-                    {!quote.customerNotes && !quote.internalNotes && (
-                      <p style={{ color: "#5c5f62", margin: 0 }}>No notes.</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Activity */}
             <div style={styles.card}>
