@@ -243,7 +243,7 @@ export type CartMetafieldArgs = {
  */
 export type CartCost = {
   __typename?: 'CartCost';
-  /** The amount for the customer to pay at checkout, excluding taxes and discounts. */
+  /** The amount, before taxes and cart-level discounts, for the customer to pay. */
   subtotalAmount: MoneyV2;
   /** The total amount for the customer to pay at checkout. */
   totalAmount: MoneyV2;
@@ -347,7 +347,7 @@ export type CartLine = {
    * gift wrapping requests, or custom product details. Attributes are stored as key-value pairs.
    *
    * Cart line attributes are equivalent to the
-   * [`line_item`](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/selling-plans)
+   * [`line_item`](https://shopify.dev/docs/api/liquid/objects/line_item)
    * object in Liquid.
    */
   attribute?: Maybe<Attribute>;
@@ -361,6 +361,11 @@ export type CartLine = {
   id: Scalars['ID']['output'];
   /** The item that the customer intends to purchase. */
   merchandise: Merchandise;
+  /**
+   * The [nested relationship](https://shopify.dev/docs/apps/build/product-merchandising/nested-cart-lines)
+   * between this line and its parent line, if any.
+   */
+  parentRelationship?: Maybe<CartLineParentRelationship>;
   /** The quantity of the item that the customer intends to purchase. */
   quantity: Scalars['Int']['output'];
   /**
@@ -393,7 +398,7 @@ export type CartLineCost = {
    */
   amountPerQuantity: MoneyV2;
   /**
-   * The cost of a single unit before any discounts are applied. This field is used to calculate and display
+   * The `compareAt` price of a single unit before any discounts are applied. This field is used to calculate and display
    * savings for customers. For example, if a product's `compareAtAmountPerQuantity` is $25 and its current price
    * is $20, then the customer sees a $5 discount. This value can change based on the buyer's identity and is
    * `null` when the value is hidden from buyers.
@@ -407,6 +412,13 @@ export type CartLineCost = {
   subtotalAmount: MoneyV2;
   /** The total cost of items in a cart. */
   totalAmount: MoneyV2;
+};
+
+/** Represents the relationship between a cart line and its parent line. */
+export type CartLineParentRelationship = {
+  __typename?: 'CartLineParentRelationship';
+  /** The parent line in the relationship. */
+  parent: CartLine;
 };
 
 /** The fetch target result. Your Function must return this data structure when generating the request. */
@@ -520,6 +532,10 @@ export type CompanyLocation = HasMetafields & {
   metafield?: Maybe<Metafield>;
   /** The name of the company location. */
   name: Scalars['String']['output'];
+  /** The number of orders placed at this company location. */
+  ordersCount: Scalars['Int']['output'];
+  /** The total amount spent at this company location. */
+  totalSpent: MoneyV2;
   /**
    * The date and time ([ISO 8601 format](http://en.wikipedia.org/wiki/ISO_8601))
    * at which the company location was last modified.
@@ -1497,7 +1513,7 @@ export type DeliverableCartLine = {
    * gift wrapping requests, or custom product details. Attributes are stored as key-value pairs.
    *
    * Cart line attributes are equivalent to the
-   * [`line_item`](https://shopify.dev/docs/apps/build/purchase-options/subscriptions/selling-plans)
+   * [`line_item`](https://shopify.dev/docs/api/liquid/objects/line_item)
    * object in Liquid.
    */
   attribute?: Maybe<Attribute>;
@@ -2433,7 +2449,11 @@ export type Metafield = {
   value: Scalars['String']['output'];
 };
 
-/** A precise monetary value and its associated currency. For example, 12.99 USD. */
+/**
+ * A precise monetary value and its associated currency. Combines a decimal amount
+ * with a three-letter currency code to express prices, costs, and other financial
+ * values throughout the API. For example, 12.99 USD.
+ */
 export type MoneyV2 = {
   __typename?: 'MoneyV2';
   /**
