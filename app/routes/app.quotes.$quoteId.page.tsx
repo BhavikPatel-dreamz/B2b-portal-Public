@@ -344,7 +344,7 @@ export default function AdminQuoteDetailPage() {
             <div style={styles.card}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <h3 style={styles.cardTitle}>Activity</h3>
-                {quote.activities?.length > 10 && (
+                {quote.activities?.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowAllActivities((v) => !v)}
@@ -357,44 +357,55 @@ export default function AdminQuoteDetailPage() {
                       color: "#2c6ecb",
                       lineHeight: 1,
                     }}
-                    title={showAllActivities ? "Show less" : "Show all"}
+                    title={showAllActivities ? "Collapse" : "Expand"}
                   >
                     {showAllActivities ? "\u25B2" : "\u25BC"}
                   </button>
                 )}
               </div>
-              {quote.activities?.length ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                  {(showAllActivities ? quote.activities : quote.activities.slice(0, 10)).map((act: any, idx: number, arr: any[]) => (
-                    <div
-                      key={act.id}
-                      style={{
-                        display: "flex",
-                        gap: 12,
-                        padding: "10px 0",
-                        borderBottom: idx < arr.length - 1 ? "1px solid #f3f4f6" : "none",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: "50%",
-                          background: "#2c6ecb",
-                          marginTop: 6,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{act.action}</div>
-                        {act.message && <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 2 }}>{act.message}</div>}
-                        <div style={{ fontSize: 12, color: "#8c9196", marginTop: 2 }}>{fmtDateTime(act.createdAt)}</div>
-                      </div>
+              {showAllActivities && (
+                quote.activities?.length ? (
+                  <div
+                    className="hide-scrollbar"
+                    style={{
+                      maxHeight: 440,
+                      overflowY: "auto",
+                      paddingRight: 4,
+                    }}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {quote.activities.map((act: any, idx: number, arr: any[]) => (
+                        <div
+                          key={act.id}
+                          style={{
+                            display: "flex",
+                            gap: 12,
+                            padding: "10px 0",
+                            borderBottom: idx < arr.length - 1 ? "1px solid #f3f4f6" : "none",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              background: "#2c6ecb",
+                              marginTop: 6,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{act.action}</div>
+                            {act.message && <div style={{ fontSize: 13, color: "#5c5f62", marginTop: 2 }}>{act.message}</div>}
+                            <div style={{ fontSize: 12, color: "#8c9196", marginTop: 2 }}>{fmtDateTime(act.createdAt)}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p style={{ color: "#5c5f62", margin: 0 }}>No activity yet.</p>
+                  </div>
+                ) : (
+                  <p style={{ color: "#5c5f62", margin: 0 }}>No activity yet.</p>
+                )
               )}
             </div>
           </div>
@@ -443,7 +454,7 @@ export default function AdminQuoteDetailPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#5c5f62" }}>Quote #</span>
-                  <span style={{ fontWeight: 600 }}>{quote.shopifyDraftOrderId || quote.quoteNumber}</span>
+                  <span style={{ fontWeight: 600 }}>{quote.shopifyDraftOrderName || quote.shopifyDraftOrderId || quote.quoteNumber}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#5c5f62" }}>Status</span>
@@ -572,7 +583,6 @@ export default function AdminQuoteDetailPage() {
                     <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>SKU</th>
                     <th style={{ textAlign: "center", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Qty</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Unit Price</th>
-                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Discount</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Total</th>
                   </tr>
                 </thead>
@@ -587,9 +597,6 @@ export default function AdminQuoteDetailPage() {
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "center" }}>{item.quantity}</td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right" }}>
                         {fmtMoney(item.originalUnitPrice, invoiceData.currencyCode)}
-                      </td>
-                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", color: Number(item.discount) > 0 ? "#b91b1b" : undefined }}>
-                        {Number(item.discount) > 0 ? `-${fmtMoney(item.discount, invoiceData.currencyCode)}` : "–"}
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", fontWeight: 600 }}>
                         {fmtMoney(item.discountedTotal, invoiceData.currencyCode)}

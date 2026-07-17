@@ -764,7 +764,7 @@ export default function QuoteDetailPage() {
           <div className="sales-quote-card" style={styles.card}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <h2 style={styles.cardTitle}>Activity History</h2>
-              {quote.activities.length > 10 && (
+              {quote.activities.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowAllActivities((v) => !v)}
@@ -777,24 +777,36 @@ export default function QuoteDetailPage() {
                     color: "#2c6ecb",
                     lineHeight: 1,
                   }}
-                  title={showAllActivities ? "Show less" : "Show all"}
+                  title={showAllActivities ? "Collapse" : "Expand"}
                 >
                   {showAllActivities ? "\u25B2" : "\u25BC"}
                 </button>
               )}
             </div>
-            <div style={styles.timeline}>
-              {(showAllActivities ? quote.activities : quote.activities.slice(0, 10)).map((activity: any) => (
-                <div key={activity.id} style={styles.activity}>
-                  <strong>{activity.action}</strong>
-                  <span>{fmtDate(activity.createdAt)}</span>
-                  {activity.message && <p>{activity.message}</p>}
+            {showAllActivities && (
+              quote.activities.length ? (
+                <div
+                  className="hide-scrollbar"
+                  style={{
+                    maxHeight: 440,
+                    overflowY: "auto",
+                    paddingRight: 4,
+                  }}
+                >
+                  <div style={styles.timeline}>
+                    {quote.activities.map((activity: any) => (
+                      <div key={activity.id} style={styles.activity}>
+                        <strong>{activity.action}</strong>
+                        <span>{fmtDate(activity.createdAt)}</span>
+                        {activity.message && <p>{activity.message}</p>}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-              {!quote.activities.length && (
+              ) : (
                 <p style={styles.muted}>No activity yet.</p>
-              )}
-            </div>
+              )
+            )}
           </div>
         </section>
 
@@ -993,7 +1005,6 @@ export default function QuoteDetailPage() {
                     <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>SKU</th>
                     <th style={{ textAlign: "center", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Qty</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Unit Price</th>
-                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Discount</th>
                     <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Total</th>
                   </tr>
                 </thead>
@@ -1008,9 +1019,6 @@ export default function QuoteDetailPage() {
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "center" }}>{item.quantity}</td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right" }}>
                         {fmtMoney(item.originalUnitPrice, invoiceData.currencyCode)}
-                      </td>
-                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", color: Number(item.discount) > 0 ? "#b91b1b" : undefined }}>
-                        {Number(item.discount) > 0 ? `-${fmtMoney(item.discount, invoiceData.currencyCode)}` : "–"}
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", fontWeight: 600 }}>
                         {fmtMoney(item.discountedTotal, invoiceData.currencyCode)}
