@@ -65,7 +65,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       // Plan status
       plan: store.plan !== "free",
-      allowQuickOrderForUser: store.allowQuickOrderForUser,
 
       // Page visibility settings
       showDashboardPage: store.showDashboardPage ?? true,
@@ -168,8 +167,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       locationsCount: company.locationsCount,
       companyName: company.companyName,
       plan: store.plan === "approved payment",
-      allowQuickOrderForUser: store.allowQuickOrderForUser,
-
       // Page visibility settings
       showDashboardPage: store.showDashboardPage ?? true,
       showLocationsPage: store.showLocationsPage ?? true,

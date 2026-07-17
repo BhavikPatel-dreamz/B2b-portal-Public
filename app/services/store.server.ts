@@ -31,7 +31,7 @@ export interface UpdateStoreInput {
   autoApproveB2BOnboarding?: boolean;
   defaultCompanyCreditLimit?: number | string | null;
   orderConfirmationToMainAccount?: boolean;
-  allowQuickOrderForUser?: boolean;
+
   blockOrderWhenCreditUnavailable?: boolean;
   showDashboardPage?: boolean;
   showLocationsPage?: boolean;
@@ -526,7 +526,6 @@ export async function uninstallStore(shopDomain: string) {
       completedSetupSteps: [],
       autoApproveB2BOnboarding: false,
       orderConfirmationToMainAccount: false,
-      allowQuickOrderForUser: false,
       blockOrderWhenCreditUnavailable: false,
       companyWelcomeEmailEnabled: false,
       smtpSecure: false,
@@ -553,7 +552,6 @@ export async function deleteStore(shopDomain: string) {
       completedSetupSteps: [],
       autoApproveB2BOnboarding: false,
       orderConfirmationToMainAccount: false,
-      allowQuickOrderForUser: false,
       blockOrderWhenCreditUnavailable: false,
       contactEmail: null,
       submissionEmail: null,

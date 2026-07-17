@@ -56,6 +56,7 @@ export default function AdminQuoteDetailPage() {
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
 
+  const [showAllActivities, setShowAllActivities] = useState(false);
   const [showDiscountForm, setShowDiscountForm] = useState(false);
   const [discountValue, setDiscountValue] = useState(
     quote.discountType === "PERCENTAGE" ? String(quote.discountAmount) : String(quote.discountAmount),
@@ -341,17 +342,37 @@ export default function AdminQuoteDetailPage() {
 
             {/* Activity */}
             <div style={styles.card}>
-              <h3 style={styles.cardTitle}>Activity</h3>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h3 style={styles.cardTitle}>Activity</h3>
+                {quote.activities?.length > 10 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllActivities((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "2px 6px",
+                      fontSize: 16,
+                      color: "#2c6ecb",
+                      lineHeight: 1,
+                    }}
+                    title={showAllActivities ? "Show less" : "Show all"}
+                  >
+                    {showAllActivities ? "\u25B2" : "\u25BC"}
+                  </button>
+                )}
+              </div>
               {quote.activities?.length ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                  {quote.activities.map((act: any, idx: number) => (
+                  {(showAllActivities ? quote.activities : quote.activities.slice(0, 10)).map((act: any, idx: number, arr: any[]) => (
                     <div
                       key={act.id}
                       style={{
                         display: "flex",
                         gap: 12,
                         padding: "10px 0",
-                        borderBottom: idx < quote.activities.length - 1 ? "1px solid #f3f4f6" : "none",
+                        borderBottom: idx < arr.length - 1 ? "1px solid #f3f4f6" : "none",
                       }}
                     >
                       <div

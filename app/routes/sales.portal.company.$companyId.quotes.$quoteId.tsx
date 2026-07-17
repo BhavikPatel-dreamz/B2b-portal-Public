@@ -511,6 +511,7 @@ export default function QuoteDetailPage() {
     message: string;
   } | null>(initialSuccessMessage ? { type: "success", message: initialSuccessMessage } : null);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [showAllActivities, setShowAllActivities] = useState(false);
   const [invoiceData, setInvoiceData] = useState<any>(null);
 
   useEffect(() => {
@@ -761,9 +762,29 @@ export default function QuoteDetailPage() {
           </div>
 
           <div className="sales-quote-card" style={styles.card}>
-            <h2 style={styles.cardTitle}>Activity History</h2>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h2 style={styles.cardTitle}>Activity History</h2>
+              {quote.activities.length > 10 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllActivities((v) => !v)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "2px 6px",
+                    fontSize: 16,
+                    color: "#2c6ecb",
+                    lineHeight: 1,
+                  }}
+                  title={showAllActivities ? "Show less" : "Show all"}
+                >
+                  {showAllActivities ? "\u25B2" : "\u25BC"}
+                </button>
+              )}
+            </div>
             <div style={styles.timeline}>
-              {quote.activities.map((activity: any) => (
+              {(showAllActivities ? quote.activities : quote.activities.slice(0, 10)).map((activity: any) => (
                 <div key={activity.id} style={styles.activity}>
                   <strong>{activity.action}</strong>
                   <span>{fmtDate(activity.createdAt)}</span>

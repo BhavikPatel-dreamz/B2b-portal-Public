@@ -38,7 +38,7 @@ interface LoaderData {
     autoApproveB2BOnboarding: boolean;
     defaultCompanyCreditLimit: string;
     orderConfirmationToMainAccount: boolean;
-    allowQuickOrderForUser: boolean;
+
     blockOrderWhenCreditUnavailable: boolean;
     showDashboardPage: boolean;
     showLocationsPage: boolean;
@@ -144,7 +144,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         store.defaultCompanyCreditLimit?.toString() || "",
       orderConfirmationToMainAccount:
         store.orderConfirmationToMainAccount ?? false,
-      allowQuickOrderForUser: store.allowQuickOrderForUser ?? false,
+
       blockOrderWhenCreditUnavailable:
         store.blockOrderWhenCreditUnavailable ?? false,
       showDashboardPage: store.showDashboardPage ?? true,
@@ -434,8 +434,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const orderConfirmationToMainAccount =
     (formData.get("orderConfirmationToMainAccount") as string | null) ===
     "true";
-  const allowQuickOrderForUser =
-    (formData.get("allowQuickOrderForUser") as string | null) === "true";
+
   const blockOrderWhenCreditUnavailable =
     (formData.get("blockOrderWhenCreditUnavailable") as string | null) ===
     "true";
@@ -535,7 +534,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     defaultCompanyCreditLimit:
       defaultCompanyCreditLimitRaw === "" ? null : defaultCompanyCreditLimitRaw,
     orderConfirmationToMainAccount,
-    allowQuickOrderForUser,
+
     blockOrderWhenCreditUnavailable,
     showDashboardPage,
     showLocationsPage,
@@ -1249,13 +1248,7 @@ export default function SettingsPage() {
                     defaultChecked={store?.orderConfirmationToMainAccount}
                     borderBottom
                   />
-                  <ToggleRow
-                    name="allowQuickOrderForUser"
-                    title="Allow quick order for user"
-                    description="Control whether quick order is available for B2B users."
-                    defaultChecked={store?.allowQuickOrderForUser}
-                    borderBottom
-                  />
+
 
                   {/* Block orders toggle — always visible, locked on free plan */}
                   <div className="plan-lock-wrapper">
