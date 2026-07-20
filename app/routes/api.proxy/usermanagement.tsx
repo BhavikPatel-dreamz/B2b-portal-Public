@@ -596,6 +596,51 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           );
         }
 
+        // Ensure a corresponding local `user` record exists (or is updated).
+        try {
+          const normalizedEmail = (email || "").trim().toLowerCase();
+          const localCompany = await prisma.companyAccount.findFirst({
+            where: { shopifyCompanyId: companyId, shopId: store.id },
+            select: { id: true },
+          });
+
+          const isAdmin = Array.isArray(locationRoles) &&
+            locationRoles.some((lr: any) => typeof lr?.roleName === "string" && /admin/i.test(lr.roleName));
+
+          const userRole = isAdmin ? "STORE_ADMIN" : "STORE_USER";
+
+          await prisma.user.upsert({
+            where: {
+              shopId_email_role: { shopId: store.id, email: normalizedEmail, role: userRole },
+            },
+            update: {
+              firstName: firstName || null,
+              lastName: lastName || null,
+              shopifyCustomerId: result.customerId || null,
+              companyId: localCompany?.id || null,
+              companyRole: isAdmin ? "admin" : "member",
+              role: userRole,
+              isActive: true,
+              status: "APPROVED",
+            },
+            create: {
+              email: normalizedEmail,
+              firstName: firstName || null,
+              lastName: lastName || null,
+              password: "",
+              shopifyCustomerId: result.customerId || null,
+              shopId: store.id,
+              companyId: localCompany?.id || null,
+              companyRole: isAdmin ? "admin" : "member",
+              role: userRole,
+              status: "APPROVED",
+              isActive: true,
+            },
+          });
+        } catch (upsertErr) {
+          console.warn("Failed to upsert local user after create:", upsertErr);
+        }
+
         await sendEmployeeAssignmentEmail({
           contactName: `${firstName} ${lastName}`,
           email,
