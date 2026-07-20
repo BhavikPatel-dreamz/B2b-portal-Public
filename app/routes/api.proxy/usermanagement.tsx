@@ -542,16 +542,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const [firstName, ...lastNameParts] = name.trim().split(" ");
         const lastName = lastNameParts.join(" ");
 
+        const isCompanyAdminRole = (roleName: string | undefined) => {
+          const normalized = roleName?.trim().toLowerCase() || "";
+          return (
+            normalized === "company admin" ||
+            normalized === "admin"
+          );
+        };
+
         // Prevent creating a second company admin: if the incoming role
-        // indicates an admin assignment (roleName contains "admin"),
-        // ensure the company doesn't already have a STORE_ADMIN locally.
+        // contains a true company admin assignment, ensure the company doesn't
+        // already have a STORE_ADMIN locally.
         try {
           const isCreatingAdmin = Array.isArray(locationRoles) &&
-            locationRoles.some((lr: any) => {
-              if (!lr) return false;
-              if (typeof lr.roleName === "string" && /admin/i.test(lr.roleName)) return true;
-              return false;
-            });
+            locationRoles.some((lr: any) => isCompanyAdminRole(lr?.roleName));
 
           if (isCreatingAdmin) {
             const localCompany = await prisma.companyAccount.findFirst({
@@ -604,8 +608,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             select: { id: true },
           });
 
+          const isCompanyAdminRole = (roleName: string | undefined) => {
+            const normalized = roleName?.trim().toLowerCase() || "";
+            return normalized === "company admin" || normalized === "admin";
+          };
+
           const isAdmin = Array.isArray(locationRoles) &&
-            locationRoles.some((lr: any) => typeof lr?.roleName === "string" && /admin/i.test(lr.roleName));
+            locationRoles.some((lr: any) => isCompanyAdminRole(lr?.roleName));
 
           const userRole = isAdmin ? "STORE_ADMIN" : "STORE_USER";
 
