@@ -93,8 +93,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     if (
       userData &&
-      userData.shopifyCustomerId === customerGid &&
-      userData.role !== "STORE_ADMIN"
+      userData.shopifyCustomerId === customerGid
     ) {
       return Response.json({
         message: "Your account is not a customer. Please contact the support team.",
