@@ -2413,6 +2413,7 @@ export async function createCompanyCustomer(
         shopifyCustomerId: customerId,
         shopifyCompanyId: companyId,
         shopName,
+        companyRole: customerData.locationRoles?.[0]?.roleName || "member",
       });
     } catch (dbError) {
       console.error("❌ Error creating/updating local user:", dbError);
@@ -7204,6 +7205,7 @@ async function createOrUpdateLocalUser({
   shopifyCustomerId,
   shopifyCompanyId,
   shopName,
+  companyRole,
 }: {
   email: string;
   firstName: string;
@@ -7212,6 +7214,7 @@ async function createOrUpdateLocalUser({
   shopifyCompanyId: string;
   shopName: string;
   userCreditLimit?: number;
+  companyRole?: string;
 }) {
   // Get the store information
   const store = await getStoreByDomain(shopName);
@@ -7295,7 +7298,7 @@ async function createOrUpdateLocalUser({
       status: "APPROVED", // Auto-approve B2B users created through this flow
       shopId: store.id,
       companyId: companyAccount?.id || null,
-      companyRole: "member", // Default role
+      companyRole: companyRole || "member",
       shopifyCustomerId: shopifyCustomerId, // Link to Shopify customer
       userCreditLimit: userCreditLimit || 0,
     });
@@ -7311,6 +7314,7 @@ async function createOrUpdateLocalUser({
         firstName: firstName || existingUser.firstName,
         lastName: lastName || existingUser.lastName,
         userCreditLimit: userCreditLimit || existingUser.userCreditLimit,
+        companyRole: companyRole || existingUser.companyRole,
         status: "APPROVED", // Ensure they're approved
       },
     });

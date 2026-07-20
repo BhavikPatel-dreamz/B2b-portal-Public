@@ -542,6 +542,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const [firstName, ...lastNameParts] = name.trim().split(" ");
         const lastName = lastNameParts.join(" ");
 
+        // Prevent creating a second company admin: if the incoming role
+        // indicates an admin assignment (roleName contains "admin"),
+        // ensure the company doesn't already have a STORE_ADMIN locally.
+        try {
+          const isCreatingAdmin = Array.isArray(locationRoles) &&
+            locationRoles.some((lr: any) => {
+              if (!lr) return false;
+              if (typeof lr.roleName === "string" && /admin/i.test(lr.roleName)) return true;
+              return false;
+            });
+
+          if (isCreatingAdmin) {
+            const localCompany = await prisma.companyAccount.findFirst({
+              where: { shopifyCompanyId: companyId },
+              select: { id: true },
+            });
+
+            if (localCompany) {
+              const existingAdmin = await prisma.user.findFirst({
+                where: { companyId: localCompany.id, role: "STORE_ADMIN" },
+                select: { id: true, email: true },
+              });
+
+              if (existingAdmin) {
+                return Response.json(
+                  { success: false, error: "A company admin already exists. Only one admin is allowed per company." },
+                  { status: 400 },
+                );
+              }
+            }
+          }
+        } catch (checkErr) {
+          console.warn("Failed to validate existing admin before create:", checkErr);
+          // fall through and attempt creation — don't block on the check failing
+        }
+
         const result = await createCompanyCustomer(
           companyId, shop, store.accessToken,
           {
