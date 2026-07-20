@@ -75,6 +75,7 @@ model Store {
   setupFinished                  Boolean                  @default(false)
   plan                           String?
   planKey                        String?
+  customPlanKey                  String?
   currencyCode                   String?                  @default("USD")
   invoiceTemplate                String?
   defaultTaxRate                 Decimal?                 @db.Decimal(5, 2) @default(8.00)

@@ -11,6 +11,7 @@ import { PLAN_99 } from "app/billing-plans.shared";
 import {
   syncStoreSubscriptionState,
   getStorePlanValue,
+  isCustomPlanKey,
 } from "app/services/store.server";
 import prisma from "app/db.server";
 import { clearAdminCompaniesCache } from "./app.companies";
@@ -88,7 +89,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       clearDashboardStatsCache(session.shop);
     }
 
-    const hasPlanAccess = billingState.hasActivePayment || store?.plan === "free";
+    const hasCustomPlan = isCustomPlanKey(store?.planKey);
+    const hasPlanAccess = billingState.hasActivePayment || store?.plan === "free" || hasCustomPlan;
 
     if (!hasPlanAccess) {
       const returnTo = url.pathname + url.search;

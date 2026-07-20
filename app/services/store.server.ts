@@ -146,6 +146,70 @@ export async function updateStore(id: string, data: UpdateStoreInput) {
   });
 }
 
+export interface CustomStorePlan {
+  name: string;
+  amount: number;
+  label: string;
+  description?: string;
+}
+
+export const CUSTOM_PLAN_PREFIX = "custom:";
+
+export function parseCustomPlanKey(
+  planKey?: string | null,
+): CustomStorePlan | null {
+  if (!planKey) return null;
+  const normalized = planKey.trim();
+  if (!normalized.toLowerCase().startsWith(CUSTOM_PLAN_PREFIX)) return null;
+
+  const payload = normalized.slice(CUSTOM_PLAN_PREFIX.length);
+  if (!payload) return null;
+
+  let planName = "Custom plan";
+  let amount: number | null = null;
+  let description = "Store-specific custom plan";
+
+  if (payload.includes("&") || payload.includes("=")) {
+    const params = new URLSearchParams(payload);
+    const amountValue = params.get("amount");
+    const nameValue = params.get("name");
+    const descValue = params.get("description");
+    if (amountValue) {
+      const parsed = Number(amountValue);
+      amount = Number.isNaN(parsed) ? null : parsed;
+    }
+    if (nameValue) {
+      planName = nameValue;
+    }
+    if (descValue) {
+      description = descValue;
+    }
+  } else if (payload.includes(":")) {
+    const [amountPart, ...nameParts] = payload.split(":");
+    const parsed = Number(amountPart);
+    amount = Number.isNaN(parsed) ? null : parsed;
+    if (nameParts.length) {
+      planName = nameParts.join(":");
+    }
+  } else {
+    const parsed = Number(payload);
+    amount = Number.isNaN(parsed) ? null : parsed;
+  }
+
+  if (amount === null) return null;
+
+  return {
+    name: planName || "Custom plan",
+    amount,
+    label: `$${amount.toFixed(0)} / month`,
+    description,
+  };
+}
+
+export function isCustomPlanKey(planKey?: string | null) {
+  return parseCustomPlanKey(planKey) !== null;
+}
+
 export function getStorePlanValue(subscriptionName?: string | null) {
   if (subscriptionName === FREE_PLAN) {
     return "free";
@@ -503,7 +567,7 @@ export async function uninstallStore(shopDomain: string) {
       prisma.wishlist.deleteMany({ where: { shop: shopDomain } }),
       prisma.formFieldConfig.deleteMany({ where: { shopId: store.id } }),
       prisma.b2BOrder.deleteMany({ where: { shopId: store.id } }),
-      
+
       // Reset all email notification toggles
       prisma.emailTemplates.updateMany({
         where: { shopId: store.id },
