@@ -7,11 +7,11 @@ import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
 import { APP_BILLING_PLANS, getIsTestBilling } from "app/utils/billing.server";
-import { PLAN_99 } from "app/billing-plans.shared";
+import { FREE_PLAN, PAID_PLAN, PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
 import {
   syncStoreSubscriptionState,
   getStorePlanValue,
-  isCustomPlanKey,
+  hasCustomPlanConfiguration,
 } from "app/services/store.server";
 import prisma from "app/db.server";
 import { clearAdminCompaniesCache } from "./app.companies";
@@ -40,20 +40,35 @@ const appLayoutCache: Map<string, { data: { apiKey: string; showSalesLinks: bool
 const APP_LAYOUT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const cacheKey = "app-layout";
+  const { billing, redirect, session, admin } = await authenticate.admin(request);
+  const cacheKey = `app-layout-${session.shop}`;
   const cached = appLayoutCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < APP_LAYOUT_CACHE_TTL) {
-    console.log("⚡ App layout cache HIT");
+    console.log("⚡ App layout cache HIT", cacheKey);
     return Response.json(cached.data);
   }
-
-  const { billing, redirect, session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
-    select: { plan: true, planKey: true },
+    select: { plan: true, planKey: true, customPlanKey: true, customPlanActive: true, customAmount: true },
   });
-  let showSalesLinks = store?.plan === PLAN_99;
+  const hasCustomPlan = hasCustomPlanConfiguration(
+    store?.customPlanKey,
+    store?.planKey,
+    store?.customAmount,
+    store?.customPlanActive,
+  );
+
+  const normalizePlanName = (planName?: string | null) => {
+    if (planName === "approved payment") {
+      return PAID_PLAN;
+    }
+    return planName || "free";
+  };
+
+  let showSalesLinks =
+    [PLAN_99, CUSTOM_PLAN].includes(normalizePlanName(store?.plan)) ||
+    hasCustomPlan;
 
   if (requiresPlan(url.pathname)) {
     const billingState = await billing.check({
@@ -63,8 +78,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const activeSubscription = billingState.appSubscriptions?.find((s) => s.status === "ACTIVE");
     const currentPlan = getStorePlanValue(activeSubscription?.name);
-    const currentPlanName = activeSubscription?.name ?? store?.plan ?? "free";
-    showSalesLinks = currentPlanName === PLAN_99;
+    const currentPlanName = normalizePlanName(activeSubscription?.name ?? store?.plan ?? "free");
+    const storedPlanName = normalizePlanName(store?.plan);
 
     if (billingState.hasActivePayment) {
       // Only sync if plan changed or wasn"t previously synced
@@ -89,8 +104,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       clearDashboardStatsCache(session.shop);
     }
 
-    const hasCustomPlan = isCustomPlanKey(store?.planKey);
-    const hasPlanAccess = billingState.hasActivePayment || store?.plan === "free" || hasCustomPlan;
+    const hasCustomPlan = hasCustomPlanConfiguration(
+      store?.customPlanKey,
+      store?.planKey,
+      store?.customAmount,
+      store?.customPlanActive,
+    );
+    const planNameForLinks = activeSubscription?.name || (hasCustomPlan ? CUSTOM_PLAN : storedPlanName);
+    const normalizedLinkPlanName = normalizePlanName(planNameForLinks);
+    showSalesLinks =
+      normalizedLinkPlanName === PLAN_99 ||
+      normalizedLinkPlanName === CUSTOM_PLAN ||
+      hasCustomPlan;
+    const hasPlanAccess =
+      billingState.hasActivePayment ||
+      normalizedLinkPlanName === FREE_PLAN ||
+      normalizedLinkPlanName === PAID_PLAN ||
+      normalizedLinkPlanName === PLAN_99 ||
+      normalizedLinkPlanName === CUSTOM_PLAN ||
+      hasCustomPlan;
 
     if (!hasPlanAccess) {
       const returnTo = url.pathname + url.search;
@@ -105,6 +137,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return result;
 };
+
+export function clearAppLayoutCache(shopDomain: string) {
+  const key = `app-layout-${shopDomain}`;
+  appLayoutCache.delete(key);
+  console.log("🧹 App layout cache cleared for:", key);
+}
+
 
 // ── SKIP REVALIDATION on client-side GET navigations ────────────
 export function shouldRevalidate({

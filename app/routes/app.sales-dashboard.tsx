@@ -4,6 +4,8 @@ import { useLoaderData, useSearchParams, Link } from "react-router";
 import { useState, useEffect } from "react";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
+import { PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
+import { hasCustomPlanConfiguration } from "app/services/store.server";
 
 type SalesDashboardFilters = {
   filterAgent: string;
@@ -46,7 +48,39 @@ const salesDashboardCache: Map<string, { data: unknown; timestamp: number }> =
 const SALES_DASHBOARD_CACHE_TTL = 30 * 1000; // 30 seconds
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, redirect } = await authenticate.admin(request);
+
+  // ── Check plan access ──
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: session.shop },
+  });
+
+  const hasCustomPlan = hasCustomPlanConfiguration(
+    store?.customPlanKey,
+    store?.planKey,
+    store?.customAmount,
+    store?.customPlanActive,
+  );
+
+  const normalizePlanName = (planName?: string | null) => {
+    if (planName === "approved payment") {
+      return "Paid subscription";
+    }
+    return planName || "free";
+  };
+
+  const currentPlanName = normalizePlanName(store?.plan);
+  
+  // Only PLAN_99 and CUSTOM_PLAN are allowed
+  const hasAccess =
+    currentPlanName === PLAN_99 ||
+    currentPlanName === CUSTOM_PLAN ||
+    hasCustomPlan;
+
+  if (!hasAccess) {
+    const returnTo = new URL(request.url).pathname + new URL(request.url).search;
+    return redirect("/app/select-plan?returnTo=" + encodeURIComponent(returnTo));
+  }
 
   // ── CACHE CHECK ──
   const url = new URL(request.url);
@@ -58,10 +92,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   console.log("🐢 Sales dashboard cache MISS → querying DB");
-
-  const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
-  });
 
   if (!store) {
     throw new Response("Store not found", { status: 404 });

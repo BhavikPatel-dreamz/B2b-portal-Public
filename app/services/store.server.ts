@@ -1,5 +1,10 @@
 import prisma from "../db.server";
-import { FREE_PLAN, PAID_PLAN, PLAN_99 } from "../billing-plans.shared";
+import {
+  FREE_PLAN,
+  PAID_PLAN,
+  PLAN_99,
+  CUSTOM_PLAN,
+} from "../billing-plans.shared";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { registerCartValidationFunction } from "./cartValidationRegistration.server";
 
@@ -155,6 +160,44 @@ export interface CustomStorePlan {
 
 export const CUSTOM_PLAN_PREFIX = "custom:";
 
+export function getCustomPlanConfig(
+  customPlanKey?: string | null,
+  planKey?: string | null,
+  customAmount?: number | null,
+  customPlanActive?: boolean | null,
+): CustomStorePlan | null {
+  const parsed =
+    parseCustomPlanKey(customPlanKey) || parseCustomPlanKey(planKey);
+  const amountValue =
+    parsed?.amount ??
+    (typeof customAmount === "number" && customAmount > 0
+      ? customAmount
+      : null);
+
+  if (amountValue === null) {
+    return null;
+  }
+
+  return {
+    name: parsed?.name || "Custom Plan",
+    amount: amountValue,
+    label: `$${amountValue.toFixed(0)} / month`,
+    description: parsed?.description || "All app features",
+  };
+}
+
+export function hasCustomPlanConfiguration(
+  customPlanKey?: string | null,
+  planKey?: string | null,
+  customAmount?: number | null,
+  customPlanActive?: boolean | null,
+) {
+  return Boolean(
+    customPlanActive ||
+    getCustomPlanConfig(customPlanKey, planKey, customAmount, customPlanActive),
+  );
+}
+
 export function parseCustomPlanKey(
   planKey?: string | null,
 ): CustomStorePlan | null {
@@ -219,7 +262,11 @@ export function getStorePlanValue(subscriptionName?: string | null) {
     return "approved payment";
   }
 
-  return null;
+  if (subscriptionName === CUSTOM_PLAN) {
+    return CUSTOM_PLAN;
+  }
+
+  return subscriptionName ?? null;
 }
 
 type AppSubscriptionSummary = {
@@ -402,7 +449,8 @@ export async function syncStoreSubscriptionState(
   // For Shopify's Paid subscription, we need to check if it's Plan 99 or regular paid
   // Store the subscription name directly to preserve tier information
   const plan = activeSubscription?.name ? activeSubscription.name : "free";
-  const isPaid = plan === PAID_PLAN || plan === PLAN_99;
+  const isPaid = plan === PAID_PLAN || plan === PLAN_99 || plan === CUSTOM_PLAN;
+  const isCustom = plan === CUSTOM_PLAN;
 
   const store = await prisma.store.findUnique({
     where: { shopDomain },
@@ -414,6 +462,7 @@ export async function syncStoreSubscriptionState(
     data: {
       plan: plan,
       planKey: activeSubscription?.id ?? null,
+      customPlanActive: isCustom,
       updatedAt: new Date(),
     },
   });
@@ -456,14 +505,23 @@ export async function syncStoreSubscriptionStateFast(
     appSubscriptions.find((subscription) => subscription.status === "ACTIVE") ||
     null;
 
+  if (!activeSubscription) {
+    console.log(
+      `⚡ Fast sync: no active subscription found for ${shopDomain}. Preserving existing store plan state.`,
+    );
+    return null;
+  }
+
   // Store the subscription name directly to preserve tier information (PAID_PLAN vs PLAN_99)
-  const plan = activeSubscription?.name ? activeSubscription.name : "free";
+  const plan = activeSubscription.name ? activeSubscription.name : "free";
+  const isCustom = plan === CUSTOM_PLAN;
 
   const updatedStore = await prisma.store.updateMany({
     where: { shopDomain },
     data: {
       plan: plan,
-      planKey: activeSubscription?.id ?? null,
+      planKey: activeSubscription.id ?? null,
+      customPlanActive: isCustom,
       updatedAt: new Date(),
     },
   });
@@ -508,6 +566,9 @@ export async function setStoreFreePlan(
     data: {
       plan: "free",
       planKey: "free",
+      customPlanKey: null,
+      customAmount: null,
+      customPlanActive: false,
       updatedAt: new Date(),
     },
   });

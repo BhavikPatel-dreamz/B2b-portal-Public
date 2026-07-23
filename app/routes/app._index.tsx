@@ -18,6 +18,7 @@ import { countRegistrations } from "../services/registration.server";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearSelectPlanCache } from "./app.select-plan"; 
 import { getFreePlanUsage } from "app/utils/free-plan-limits.server";
+import { hasCustomPlanConfiguration } from "app/services/store.server";
 
 
 type Tutorial = {
@@ -107,8 +108,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const pendingRegistrations = await countRegistrations(store.id, "PENDING");
 
-  // ✅ Check DB first — if paid, skip billing API call entirely
-  let isFreePlan = store.plan === "free";
+  const hasCustomPlan = hasCustomPlanConfiguration(
+    store.customPlanKey,
+    store.planKey,
+    store.customAmount,
+    store.customPlanActive,
+  );
+  // ✅ Check DB first — if paid or custom plan, skip billing API call entirely
+  let isFreePlan = store.plan === "free" && !hasCustomPlan;
 
   if (isFreePlan) {
     try {
@@ -117,7 +124,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         process.env.NODE_ENV !== "production";
 
       const { hasActivePayment, appSubscriptions } = await billing.check({
-        plans: [PAID_PLAN], // import from billing-plans.shared
+        plans: [PAID_PLAN] as any, // import from billing-plans.shared
         isTest,
       });
 

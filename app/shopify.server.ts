@@ -7,10 +7,9 @@ import {
   BillingInterval,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
-import type { Session } from "@shopify/shopify-api";
 import { Prisma } from "@prisma/client";
 import prisma from "./db.server";
-import { PAID_PLAN, PLAN_99 } from "./billing-plans.shared";
+import { PAID_PLAN, PLAN_99, CUSTOM_PLAN } from "./billing-plans.shared";
 import { upsertStore } from "./services/store.server";
 import { sendAppWelcomeEmail } from "./utils/email";
 import {
@@ -33,7 +32,9 @@ class PrismaSessionStorageWithStore extends PrismaSessionStorage<
   typeof prisma
 > {
   // Upsert store record whenever Shopify saves a session (install or token refresh)
-  async storeSession(session: Session) {
+  async storeSession(
+    session: Parameters<PrismaSessionStorage<typeof prisma>["storeSession"]>[0],
+  ) {
     const saved = await super.storeSession(session);
     if (!saved) return saved;
 
@@ -81,6 +82,15 @@ const shopify = shopifyApp({
       lineItems: [
         {
           amount: 99,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
+    },
+    [CUSTOM_PLAN]: {
+      lineItems: [
+        {
+          amount: 1,
           currencyCode: "USD",
           interval: BillingInterval.Every30Days,
         },

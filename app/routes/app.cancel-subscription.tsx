@@ -1,9 +1,10 @@
-import { PAID_PLAN } from "app/billing-plans.shared";
-import { ActionFunctionArgs,redirect } from "react-router";
+import { PAID_PLAN, PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
+import { ActionFunctionArgs, redirect } from "react-router";
 import { setStoreFreePlan } from "app/services/store.server";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
-import { clearSelectPlanCache } from "./app.select-plan"; 
+import { clearSelectPlanCache } from "./app.select-plan";
+import { clearAppLayoutCache } from "./app";
 
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -14,7 +15,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const isTest = process.env.SHOPIFY_BILLING_TEST === "true";
 
   const billingCheck = await billing.check({
-    plans: [PAID_PLAN],
+    plans: [PAID_PLAN, PLAN_99, CUSTOM_PLAN],
     isTest,
   });
 
@@ -26,6 +27,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!billingCheck.hasActivePayment || !activeSubscription) {
     await setStoreFreePlan(session.shop, admin);
     clearSelectPlanCache(session.shop);
+    clearAppLayoutCache(session.shop);
     clearAdminCompaniesCache(session.shop);
     clearDashboardStatsCache(session.shop);
     return { ok: false, message: "No active subscription found to cancel. Store has been downgraded to free plan." };
@@ -41,6 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   await setStoreFreePlan(session.shop, admin);
   clearSelectPlanCache(session.shop);
+  clearAppLayoutCache(session.shop);
   clearAdminCompaniesCache(session.shop);
   clearDashboardStatsCache(session.shop);
 

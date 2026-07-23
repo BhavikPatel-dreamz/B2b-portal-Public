@@ -1,24 +1,11 @@
-import {
-  Page,
-  Layout,
-  Card,
-  IndexTable,
-  Button,
-  Modal,
-  FormLayout,
-  TextField,
-  Badge,
-  Text,
-  BlockStack,
-  InlineStack,
-} from "@shopify/polaris";
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { useLoaderData, useFetcher, Link } from "react-router";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { Button, Text } from "@shopify/polaris";
+import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useSearchParams, Link } from "react-router";
+import { useState, useEffect } from "react";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
-import { sendSalesUserInvitationEmail } from "app/utils/email";
-import crypto from "crypto";
+import { PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
+import { hasCustomPlanConfiguration } from "app/services/store.server";
 
 const COMPANY_PICKER_LARGE_LIST_THRESHOLD = 100;
 const COMPANY_PICKER_PAGE_SIZE = 50;
@@ -66,7 +53,39 @@ const salesUsersCache: Map<string, { data: unknown; timestamp: number }> =
 const SALES_USERS_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, redirect, billing } = await authenticate.admin(request);
+
+  // ── Check plan access ──
+  const store = await prisma.store.findUnique({
+    where: { shopDomain: session.shop },
+  });
+
+  const hasCustomPlan = hasCustomPlanConfiguration(
+    store?.customPlanKey,
+    store?.planKey,
+    store?.customAmount,
+    store?.customPlanActive,
+  );
+
+  const normalizePlanName = (planName?: string | null) => {
+    if (planName === "approved payment") {
+      return "Paid subscription";
+    }
+    return planName || "free";
+  };
+
+  const currentPlanName = normalizePlanName(store?.plan);
+  
+  // Only PLAN_99 and CUSTOM_PLAN are allowed
+  const hasAccess =
+    currentPlanName === PLAN_99 ||
+    currentPlanName === CUSTOM_PLAN ||
+    hasCustomPlan;
+
+  if (!hasAccess) {
+    const returnTo = new URL(request.url).pathname + new URL(request.url).search;
+    return redirect("/app/select-plan?returnTo=" + encodeURIComponent(returnTo));
+  }
 
   // ── CACHE CHECK ──
   const cacheKey = `sales-users-${session.shop}`;
@@ -77,10 +96,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   console.log("🐢 Sales users cache MISS → querying DB");
-
-  const store = await prisma.store.findUnique({
-    where: { shopDomain: session.shop },
-  });
 
   if (!store) {
     throw new Response("Store not found", { status: 404 });
