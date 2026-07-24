@@ -1,6 +1,6 @@
 import { Button, Text } from "@shopify/polaris";
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSearchParams, Link } from "react-router";
+import { useLoaderData, useSearchParams, useFetcher, Link } from "react-router";
 import { useState, useEffect } from "react";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
