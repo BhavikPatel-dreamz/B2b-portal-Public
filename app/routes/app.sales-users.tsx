@@ -4,10 +4,11 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useSearchParams, useFetcher, Link, } from "react-router";
 import { useState, useEffect, useCallback ,useMemo} from "react";
 import prisma from "app/db.server";
-import { authenticate } from "app/shopify.server";
+import { authenticate, getAdminForShop } from "app/shopify.server";
 import { PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
 import { hasCustomPlanConfiguration } from "app/services/store.server";
 import { sendSalesUserInvitationEmail } from "app/utils/email";
+import { syncCompaniesFromShopify } from "app/services/company.server";
 
 const COMPANY_PICKER_LARGE_LIST_THRESHOLD = 100;
 const COMPANY_PICKER_PAGE_SIZE = 50;
@@ -103,7 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw new Response("Store not found", { status: 404 });
   }
 
-  const [salesUsers, companies] = await Promise.all([
+  const [salesUsers, companiesRaw] = await Promise.all([
     prisma.user.findMany({
       where: { shopId: store.id, role: "SALES_USER" },
       include: {
@@ -118,6 +119,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderBy: { name: "asc" },
     }),
   ]);
+
+  // Remove duplicate companies by name (keep first occurrence)
+  const seenNames = new Map<string, boolean>();
+  const companies = companiesRaw.filter((company) => {
+    const normalizedName = company.name.trim().toLowerCase();
+    if (seenNames.has(normalizedName)) {
+      console.log(`⚠️ Skipping duplicate company: ${company.name} (ID: ${company.id})`);
+      return false;
+    }
+    seenNames.set(normalizedName, true);
+    return true;
+  });
 
   const result = { salesUsers, companies, storeId: store.id, appUrl: process.env.SHOPIFY_APP_URL };
 
@@ -189,6 +202,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         inviteLink,
       });
 
+      // Clear the cache so new user shows up immediately
+      const cacheKey = `sales-users-${session.shop}`;
+      salesUsersCache.delete(cacheKey);
+
       return Response.json({
         success: true,
         message: "Sales User Created and Invite Sent",
@@ -209,6 +226,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { id: userId, shopId: store.id },
       data: { isActive: intent === "activate" },
     });
+    
+    // Clear the cache so changes show up immediately
+    const cacheKey = `sales-users-${session.shop}`;
+    salesUsersCache.delete(cacheKey);
+    
     return Response.json({ success: true, message: `User ${intent}d` });
   }
 
@@ -217,6 +239,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await prisma.user.delete({
       where: { id: userId, shopId: store.id },
     });
+    
+    // Clear the cache so deletion shows up immediately
+    const cacheKey = `sales-users-${session.shop}`;
+    salesUsersCache.delete(cacheKey);
+    
     return Response.json({ success: true, message: "User deleted" });
   }
 
@@ -250,6 +277,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
+    // Clear the cache so changes show up immediately
+    const cacheKey = `sales-users-${session.shop}`;
+    salesUsersCache.delete(cacheKey);
+
     return Response.json({ success: true, message: "Link Generated and Invite Sent" });
   }
 
@@ -268,9 +299,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         firstName: user.firstName || "there",
         inviteLink,
       });
+      
+      // Clear the cache so changes show up immediately
+      const cacheKey = `sales-users-${session.shop}`;
+      salesUsersCache.delete(cacheKey);
+      
       return Response.json({ success: true, message: "Email Resent Successfully" });
     }
     return Response.json({ success: false, error: "Active invitation not found" });
+  }
+
+  if (intent === "sync_companies") {
+    try {
+      const admin = await getAdminForShop(session.shop);
+      const result = await syncCompaniesFromShopify(store.id, admin);
+      
+      // Clear the cache so new companies show up immediately
+      const cacheKey = `sales-users-${session.shop}`;
+      salesUsersCache.delete(cacheKey);
+      
+      return Response.json({
+        success: true,
+        intent: "sync_companies",
+        createdCount: result.createdCount,
+        updatedCount: result.updatedCount,
+        totalSynced: result.totalSynced,
+        message: result.message,
+      });
+    } catch (error: any) {
+      console.error("Error syncing companies:", error);
+      return Response.json({
+        success: false,
+        error: error.message || "Failed to sync companies from Shopify",
+      });
+    }
   }
 
   return Response.json({ success: false, error: "Unknown intent" });
@@ -281,6 +343,10 @@ export default function SalesUsers() {
     useLoaderData<typeof loader>() as unknown as SalesUsersLoaderData;
   const fetcher = useFetcher();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [isClient, setIsClient] = useState(false);
   
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -289,6 +355,11 @@ export default function SalesUsers() {
   const [companySearch, setCompanySearch] = useState("");
   const [companyPickerPage, setCompanyPickerPage] = useState(1);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Ensure IndexTable only renders on client to avoid SSR hydration mismatch
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const toggleModal = useCallback(() => {
     setIsModalOpen((open) => {
@@ -307,6 +378,7 @@ export default function SalesUsers() {
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
       if (fetcher.data?.success && fetcher.data?.intent === "create") {
+        setIsCreating(false);
         setIsModalOpen(false);
         setFirstName("");
         setLastName("");
@@ -315,8 +387,19 @@ export default function SalesUsers() {
         setCompanySearch("");
         setCompanyPickerPage(1);
         setErrorMessage("");
+      } else if (fetcher.data?.success && fetcher.data?.intent === "sync_companies") {
+        setSyncMessage(fetcher.data.message);
+        setIsSyncing(false);
+        // Clear message after 3 seconds
+        setTimeout(() => setSyncMessage(""), 3000);
       } else if (fetcher.data?.error) {
-        setErrorMessage(fetcher.data.error);
+        if (fetcher.data?.intent === "sync_companies") {
+          setSyncMessage(`Error: ${fetcher.data.error}`);
+          setIsSyncing(false);
+        } else {
+          setErrorMessage(fetcher.data.error);
+          setIsCreating(false);
+        }
       }
     }
   }, [fetcher.state, fetcher.data]);
@@ -339,12 +422,9 @@ export default function SalesUsers() {
       setErrorMessage("Last name is required");
       return;
     }
-    if (selectedCompanyIds.length === 0) {
-      setErrorMessage("Please select at least one company");
-      return;
-    }
 
     setErrorMessage(""); // Clear any previous errors
+    setIsCreating(true);
     const formData = new FormData();
     formData.append("intent", "create");
     formData.append("email", email);
@@ -383,6 +463,15 @@ export default function SalesUsers() {
         { method: "post" }
       );
     }
+  };
+
+  const handleSyncCompanies = () => {
+    setIsSyncing(true);
+    setSyncMessage("");
+    fetcher.submit(
+      { intent: "sync_companies" },
+      { method: "post" }
+    );
   };
 
   const normalizedCompanySearch = companySearch.trim().toLowerCase();
@@ -638,7 +727,8 @@ export default function SalesUsers() {
           </Button>
         </div>
 
-        <Card padding="0">
+        {isClient && (
+          <Card padding="0">
             <IndexTable
               resourceName={{ singular: "user", plural: "users" }}
               itemCount={salesUsers.length}
@@ -654,6 +744,7 @@ export default function SalesUsers() {
               {rowMarkup}
             </IndexTable>
           </Card>
+        )}
       <Modal
         open={isModalOpen}
         onClose={toggleModal}
@@ -661,12 +752,13 @@ export default function SalesUsers() {
         primaryAction={{
           content: "Create",
           onAction: handleCreate,
-          loading: fetcher.state !== "idle",
+          loading: isCreating,
         }}
         secondaryActions={[
           {
             content: "Cancel",
             onAction: toggleModal,
+            disabled: isCreating,
           },
         ]}
       >
@@ -824,6 +916,60 @@ export default function SalesUsers() {
               )}
             </BlockStack>
           </FormLayout>
+          
+          <div style={{
+            padding: "16px 0",
+            borderTop: "1px solid #dfe3e8",
+            marginTop: "16px",
+          }}>
+            <div style={{
+              padding: "12px 16px",
+              borderRadius: "8px",
+              backgroundColor: "#f0f7ff",
+              border: "1px solid #bfdbfe",
+              marginBottom: "12px",
+            }}>
+              <Text variant="bodySm" tone="subdued" as="span">
+                💡 If companies from Shopify are not showing in the list above, click the sync button below to fetch them.
+              </Text>
+            </div>
+            {syncMessage && (
+              <div style={{
+                padding: "12px 16px",
+                marginBottom: "12px",
+                borderRadius: "6px",
+                backgroundColor: syncMessage.includes("Error") ? "#fef2f2" : "#f0fdf4",
+                border: syncMessage.includes("Error") ? "1px solid #fecaca" : "1px solid #bbf7d0",
+                color: syncMessage.includes("Error") ? "#dc2626" : "#15803d",
+                fontSize: "13px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}>
+                <svg
+                  viewBox="0 0 20 20"
+                  style={{ width: "18px", height: "18px", flexShrink: 0 }}
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                {syncMessage}
+              </div>
+            )}
+            <Button
+              onClick={handleSyncCompanies}
+              disabled={isSyncing}
+              loading={isSyncing}
+              variant="secondary"
+              fullWidth
+            >
+              {isSyncing ? "Syncing Companies..." : "Sync Companies from Shopify"}
+            </Button>
+          </div>
         </Modal.Section>
       </Modal>
       </div>

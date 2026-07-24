@@ -343,7 +343,9 @@ export async function getCreditTransactionsByCompany(
       ...new Set(
         orders
           .map((o) => o.shopifyOrderId)
-          .filter((id): id is string => !!id && id.startsWith("gid://shopify/Order/")),
+          .filter(
+            (id): id is string => !!id && id.startsWith("gid://shopify/Order/"),
+          ),
       ),
     ];
 
@@ -398,7 +400,9 @@ export async function getCreditTransactionsByCompany(
     return {
       ...tx,
       orderId: finalOrderId,
-      orderName: tx.orderId ? (orderNameMap.get(tx.orderId) ?? finalOrderId) : null,
+      orderName: tx.orderId
+        ? (orderNameMap.get(tx.orderId) ?? finalOrderId)
+        : null,
       createdByName: tx.createdBy ? (userMap.get(tx.createdBy) ?? null) : null,
       shopifyOrderId: finalOrderId,
     };
@@ -576,7 +580,9 @@ export async function getCompanyDashboardData(
     ...order,
     // Use Shopify order name (#1008) if available, fallback to GID tail
     shopifyOrderName: order.shopifyOrderId
-      ? (orderNameMap.get(order.shopifyOrderId) ?? order.shopifyOrderId.split("/").pop() ?? order.shopifyOrderId)
+      ? (orderNameMap.get(order.shopifyOrderId) ??
+        order.shopifyOrderId.split("/").pop() ??
+        order.shopifyOrderId)
       : null,
     newBalance: order.shopifyOrderId
       ? orderToBalanceMap.get(order.shopifyOrderId) || order.remainingBalance
@@ -585,7 +591,6 @@ export async function getCompanyDashboardData(
       ? orderToNotesMap.get(order.shopifyOrderId)
       : null,
   }));
-
 
   // Get order statistics
   const [totalOrders, paidOrders, unpaidOrders, pendingOrders] =
@@ -770,7 +775,12 @@ export async function getCompanyOrders(
 
     const cleanCompanyId = extractId(shopifyCompanyId);
 
-    console.log("Querying company_id:", cleanCompanyId, "from:", shopifyCompanyId);
+    console.log(
+      "Querying company_id:",
+      cleanCompanyId,
+      "from:",
+      shopifyCompanyId,
+    );
 
     const query = `
       query getCompanyOrders($query: String!) {
@@ -1273,4 +1283,134 @@ export async function getCompanyMetafield(
   }
 
   return data.data?.company?.metafield || null;
+}
+
+/**
+ * Sync companies from Shopify to the database
+ */
+export async function syncCompaniesFromShopify(shopId: string, admin: any) {
+  try {
+    // GraphQL query to fetch all companies from Shopify
+    const query = `
+      query {
+        companies(first: 250) {
+          edges {
+            node {
+              id
+              name
+              externalId
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    `;
+
+    const response = await admin.graphql(query);
+    const data = await response.json();
+
+    if (data.errors) {
+      const errorMessage = data.errors[0]?.message || "Unknown error occurred";
+      throw new Error(`Failed to sync companies from Shopify: ${errorMessage}`);
+    }
+
+    const companies = data.data?.companies?.edges || [];
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    // Deduplicate companies by Shopify ID
+    const seenShopifyIds = new Set<string>();
+    const uniqueCompanies = companies.filter((edge) => {
+      const shopifyId = edge.node.id.replace("gid://shopify/Company/", "");
+      if (seenShopifyIds.has(shopifyId)) {
+        console.log(
+          `⚠️ Skipping duplicate company from Shopify: ${edge.node.name}`,
+        );
+        return false;
+      }
+      seenShopifyIds.add(shopifyId);
+      return true;
+    });
+
+    // Get all existing companies to avoid creating duplicates by name
+    const existingCompanies = await getCompaniesByShop(shopId);
+    const existingCompanyNameMap = new Map<string, string>(); // normalized name -> id
+    existingCompanies.forEach((comp) => {
+      const normalizedName = comp.name.trim().toLowerCase();
+      existingCompanyNameMap.set(normalizedName, comp.id);
+    });
+
+    // Upsert each company into the database
+    for (const edge of uniqueCompanies) {
+      const company = edge.node;
+      const shopifyCompanyId = company.id.replace("gid://shopify/Company/", "");
+      const normalizedName = company.name.trim().toLowerCase();
+
+      try {
+        // First, check if company with this Shopify ID already exists
+        const existingByShopifyId = await getCompanyByShopifyId(
+          shopId,
+          shopifyCompanyId,
+        );
+
+        if (existingByShopifyId) {
+          console.log(
+            `ℹ️ Company already synced from Shopify: ${company.name}`,
+          );
+          updatedCount++;
+          continue;
+        }
+
+        // Check if company with same name already exists (but no Shopify ID)
+        const existingCompanyId = existingCompanyNameMap.get(normalizedName);
+
+        if (existingCompanyId) {
+          // Company with this name exists, update it with the Shopify ID
+          console.log(
+            `ℹ️ Linking Shopify ID to existing company: ${company.name}`,
+          );
+          try {
+            await updateCompany(existingCompanyId, {
+              shopifyCompanyId,
+            });
+            updatedCount++;
+          } catch (updateError: any) {
+            // If update fails due to unique constraint, skip it
+            if (updateError?.code === "P2002") {
+              console.log(
+                `⚠️ Shopify ID already linked to another company: ${company.name}`,
+              );
+            } else {
+              throw updateError;
+            }
+          }
+          continue;
+        }
+
+        // Create new company with Shopify ID
+        const result = await upsertCompany(shopId, shopifyCompanyId, {
+          name: company.name,
+        });
+
+        createdCount++;
+        existingCompanyNameMap.set(normalizedName, result.id);
+      } catch (error) {
+        console.error(`Failed to sync company ${company.name}:`, error);
+      }
+    }
+
+    return {
+      success: true,
+      message: `Synced ${uniqueCompanies.length} unique companies from Shopify. Created: ${createdCount}, Updated: ${updatedCount}`,
+      createdCount,
+      updatedCount,
+      totalSynced: uniqueCompanies.length,
+    };
+  } catch (error: any) {
+    console.error("Error syncing companies from Shopify:", error);
+    throw new Error(error.message || "Failed to sync companies from Shopify");
+  }
 }
