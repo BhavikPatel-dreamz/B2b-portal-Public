@@ -169,6 +169,7 @@ export default [
 
   // Support form API
   route("api/support-form", "routes/api.support-form.tsx"),
+  route("api/company-customers", "routes/api.company-customers.tsx"),
 
   // Index route
   index("routes/_index/route.tsx"),

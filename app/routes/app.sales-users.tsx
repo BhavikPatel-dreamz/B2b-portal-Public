@@ -8,7 +8,7 @@ import { authenticate, getAdminForShop } from "app/shopify.server";
 import { PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
 import { hasCustomPlanConfiguration } from "app/services/store.server";
 import { sendSalesUserInvitationEmail } from "app/utils/email";
-import { syncCompaniesFromShopify } from "app/services/company.server";
+import { syncCompaniesFromShopify, syncCompaniesAndDetails } from "app/services/company.server";
 
 const COMPANY_PICKER_LARGE_LIST_THRESHOLD = 100;
 const COMPANY_PICKER_PAGE_SIZE = 50;
@@ -186,6 +186,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               token,
               shopId: store.id,
               expiresAt,
+              isActive: true,
             },
           },
           salesCompanies: {
@@ -220,6 +221,65 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
+  if (intent === "update") {
+    const userId = formData.get("userId") as string;
+    const email = formData.get("email") as string;
+    const firstName = formData.get("firstName") as string;
+    const lastName = formData.get("lastName") as string;
+    const companyIds = formData.getAll("companyIds") as string[];
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check if email is already taken by another user
+    const existingUser = await prisma.user.findFirst({
+      where: { 
+        email: normalizedEmail, 
+        shopId: store.id, 
+        role: "SALES_USER",
+        NOT: { id: userId },
+      },
+    });
+
+    if (existingUser) {
+      return Response.json({ success: false, error: "Email already exists" });
+    }
+
+    try {
+      // Update user
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          email: normalizedEmail,
+          firstName,
+          lastName,
+        },
+      });
+
+      // Update company assignments
+      // First, delete existing assignments
+      await prisma.salesUserCompany.deleteMany({
+        where: { userId },
+      });
+
+      // Then create new assignments
+      await prisma.salesUserCompany.createMany({
+        data: companyIds.map((companyId) => ({ userId, companyId })),
+      });
+
+      // Clear the cache so changes show up immediately
+      const cacheKey = `sales-users-${session.shop}`;
+      salesUsersCache.delete(cacheKey);
+
+      return Response.json({
+        success: true,
+        message: "Sales User Updated Successfully",
+        intent: "update",
+      });
+    } catch (error: any) {
+      console.error("Error updating user:", error);
+      return Response.json({ success: false, error: "Failed to update user" });
+    }
+  }
+
   if (intent === "deactivate" || intent === "activate") {
     const userId = formData.get("userId") as string;
     await prisma.user.update({
@@ -236,6 +296,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "delete") {
     const userId = formData.get("userId") as string;
+    
+    // Check if user has created any orders
+    const ordersCount = await prisma.b2BOrder.count({
+      where: { createdByUserId: userId },
+    });
+    
+    if (ordersCount > 0) {
+      return Response.json({ 
+        error: `Cannot delete user. They have ${ordersCount} order(s) associated with them. Please handle their orders before deleting.`,
+        intent: "delete"
+      }, { status: 400 });
+    }
+    
+    // Check if user has created any quotes
+    const quotesCount = await prisma.quote.count({
+      where: { salesAgentId: userId },
+    });
+    
+    if (quotesCount > 0) {
+      return Response.json({ 
+        error: `Cannot delete user. They have ${quotesCount} quote(s) associated with them. Please handle their quotes before deleting.`,
+        intent: "delete"
+      }, { status: 400 });
+    }
+    
     await prisma.user.delete({
       where: { id: userId, shopId: store.id },
     });
@@ -244,7 +329,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const cacheKey = `sales-users-${session.shop}`;
     salesUsersCache.delete(cacheKey);
     
-    return Response.json({ success: true, message: "User deleted" });
+    return Response.json({ success: true, message: "User deleted", intent: "delete" });
   }
 
   if (intent === "generate_link") {
@@ -312,12 +397,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "sync_companies") {
     try {
       const admin = await getAdminForShop(session.shop);
-      const result = await syncCompaniesFromShopify(store.id, admin);
-      
+      // Use the extended sync which also fetches customers & locations
+      const result = await syncCompaniesAndDetails(store.id, admin);
+
       // Clear the cache so new companies show up immediately
       const cacheKey = `sales-users-${session.shop}`;
       salesUsersCache.delete(cacheKey);
-      
+
       return Response.json({
         success: true,
         intent: "sync_companies",
@@ -325,6 +411,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         updatedCount: result.updatedCount,
         totalSynced: result.totalSynced,
         message: result.message,
+        companiesWithCustomers: result.companiesWithCustomers,
+        companiesWithLocations: result.companiesWithLocations,
       });
     } catch (error: any) {
       console.error("Error syncing companies:", error);
@@ -343,10 +431,14 @@ export default function SalesUsers() {
     useLoaderData<typeof loader>() as unknown as SalesUsersLoaderData;
   const fetcher = useFetcher();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [isClient, setIsClient] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -355,6 +447,14 @@ export default function SalesUsers() {
   const [companySearch, setCompanySearch] = useState("");
   const [companyPickerPage, setCompanyPickerPage] = useState(1);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const [editEmail, setEditEmail] = useState("");
+  const [editFirstName, setEditFirstName] = useState("");
+  const [editLastName, setEditLastName] = useState("");
+  const [editSelectedCompanyIds, setEditSelectedCompanyIds] = useState<string[]>([]);
+  const [editCompanySearch, setEditCompanySearch] = useState("");
+  const [editCompanyPickerPage, setEditCompanyPickerPage] = useState(1);
+  const [editErrorMessage, setEditErrorMessage] = useState("");
 
   // Ensure IndexTable only renders on client to avoid SSR hydration mismatch
   useEffect(() => {
@@ -375,6 +475,29 @@ export default function SalesUsers() {
     });
   }, [companies]);
 
+  const toggleEditModal = useCallback((user?: SalesUserRow) => {
+    setIsEditModalOpen((open) => {
+      if (!open && user) {
+        // Opening edit modal — populate with user data
+        setEditingUserId(user.id);
+        setEditFirstName(user.firstName || "");
+        setEditLastName(user.lastName || "");
+        setEditEmail(user.email);
+        setEditSelectedCompanyIds(user.salesCompanies.map((sc) => {
+          const company = companies.find((c) => c.name === sc.company.name);
+          return company ? company.id : "";
+        }).filter(Boolean));
+        setEditCompanySearch("");
+        setEditCompanyPickerPage(1);
+        setEditErrorMessage("");
+      } else {
+        setEditErrorMessage("");
+        setEditingUserId(null);
+      }
+      return !open;
+    });
+  }, [companies]);
+
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
       if (fetcher.data?.success && fetcher.data?.intent === "create") {
@@ -387,15 +510,35 @@ export default function SalesUsers() {
         setCompanySearch("");
         setCompanyPickerPage(1);
         setErrorMessage("");
+      } else if (fetcher.data?.success && fetcher.data?.intent === "update") {
+        setIsUpdating(false);
+        setIsEditModalOpen(false);
+        setEditingUserId(null);
+        setEditFirstName("");
+        setEditLastName("");
+        setEditEmail("");
+        setEditSelectedCompanyIds([]);
+        setEditCompanySearch("");
+        setEditCompanyPickerPage(1);
+        setEditErrorMessage("");
       } else if (fetcher.data?.success && fetcher.data?.intent === "sync_companies") {
         setSyncMessage(fetcher.data.message);
         setIsSyncing(false);
         // Clear message after 3 seconds
         setTimeout(() => setSyncMessage(""), 3000);
+      } else if (fetcher.data?.success && fetcher.data?.intent === "delete") {
+        setDeleteError("");
+        // Reload or refresh the page to show updated user list
+        window.location.reload();
       } else if (fetcher.data?.error) {
         if (fetcher.data?.intent === "sync_companies") {
           setSyncMessage(`Error: ${fetcher.data.error}`);
           setIsSyncing(false);
+        } else if (fetcher.data?.intent === "update") {
+          setEditErrorMessage(fetcher.data.error);
+          setIsUpdating(false);
+        } else if (fetcher.data?.intent === "delete") {
+          setDeleteError(fetcher.data.error);
         } else {
           setErrorMessage(fetcher.data.error);
           setIsCreating(false);
@@ -407,6 +550,10 @@ export default function SalesUsers() {
   useEffect(() => {
     setCompanyPickerPage(1);
   }, [companySearch]);
+
+  useEffect(() => {
+    setEditCompanyPickerPage(1);
+  }, [editCompanySearch]);
 
   const handleCreate = () => {
     // Validate required fields
@@ -431,6 +578,38 @@ export default function SalesUsers() {
     formData.append("firstName", firstName);
     formData.append("lastName", lastName);
     selectedCompanyIds.forEach(id => formData.append("companyIds", id));
+
+    fetcher.submit(formData, { method: "post" });
+  };
+
+  const handleEdit = (user: SalesUserRow) => {
+    toggleEditModal(user);
+  };
+
+  const handleUpdate = () => {
+    // Validate required fields
+    if (!editEmail.trim()) {
+      setEditErrorMessage("Email is required");
+      return;
+    }
+    if (!editFirstName.trim()) {
+      setEditErrorMessage("First name is required");
+      return;
+    }
+    if (!editLastName.trim()) {
+      setEditErrorMessage("Last name is required");
+      return;
+    }
+
+    setEditErrorMessage(""); // Clear any previous errors
+    setIsUpdating(true);
+    const formData = new FormData();
+    formData.append("intent", "update");
+    formData.append("userId", editingUserId || "");
+    formData.append("email", editEmail);
+    formData.append("firstName", editFirstName);
+    formData.append("lastName", editLastName);
+    editSelectedCompanyIds.forEach(id => formData.append("companyIds", id));
 
     fetcher.submit(formData, { method: "post" });
   };
@@ -514,6 +693,46 @@ export default function SalesUsers() {
     setSelectedCompanyIds([]);
   };
 
+  const selectAllEditCompanies = () => {
+    const filteredCompanyIds = filteredEditCompanies.map((company) => company.id);
+    setEditSelectedCompanyIds((current) => Array.from(new Set([...current, ...filteredCompanyIds])));
+  };
+
+  const clearAllEditCompanies = () => {
+    setEditSelectedCompanyIds([]);
+  };
+
+  const toggleEditCompanySelection = (companyId: string) => {
+    setEditSelectedCompanyIds((current) =>
+      current.includes(companyId)
+        ? current.filter((id) => id !== companyId)
+        : [...current, companyId],
+    );
+  };
+
+  const normalizedEditCompanySearch = editCompanySearch.trim().toLowerCase();
+  const filteredEditCompanies = useMemo(
+    () =>
+      companies.filter((company) =>
+        company.name.toLowerCase().includes(normalizedEditCompanySearch),
+      ),
+    [companies, normalizedEditCompanySearch],
+  );
+  const shouldPaginateEditCompanyPicker =
+    companies.length >= COMPANY_PICKER_LARGE_LIST_THRESHOLD &&
+    filteredEditCompanies.length > COMPANY_PICKER_PAGE_SIZE;
+  const totalEditCompanyPages = Math.max(
+    1,
+    Math.ceil(filteredEditCompanies.length / COMPANY_PICKER_PAGE_SIZE),
+  );
+  const visibleEditCompanies = shouldPaginateEditCompanyPicker
+    ? filteredEditCompanies.slice(
+        (editCompanyPickerPage - 1) * COMPANY_PICKER_PAGE_SIZE,
+        editCompanyPickerPage * COMPANY_PICKER_PAGE_SIZE,
+      )
+    : filteredEditCompanies;
+  const editSelectedCompanyCount = editSelectedCompanyIds.length;
+
   const portalLoginUrl = `${appUrl}/sales/login`;
 
   const rowMarkup = salesUsers.map(
@@ -541,6 +760,7 @@ export default function SalesUsers() {
           </IndexTable.Cell>
           <IndexTable.Cell>
             <InlineStack gap="200" align="start">
+              <Button size="micro" onClick={() => handleEdit({ id, email, firstName, lastName, status, isActive, invitation, salesCompanies })}>Edit</Button>
               <Button size="micro" onClick={() => handleToggleStatus(id, isActive)} tone={isActive ? "critical" : "success"}>
                 {isActive ? "Deactivate" : "Activate"}
               </Button>
@@ -697,11 +917,29 @@ export default function SalesUsers() {
         </Link>
         <div style={pageHeroTitleStyle}>
           Sales Users
-          <Button variant="primary" onClick={toggleModal}>Create Sales User</Button>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <Button onClick={handleSyncCompanies} loading={isSyncing} disabled={isSyncing} variant="secondary">
+              {isSyncing ? "Syncing..." : "Sync All Companies"}
+            </Button>
+            <Button variant="primary" onClick={toggleModal}>Create Sales User</Button>
+          </div>
         </div>
         <p style={pageHeroTextStyle}>
           Manage sales users, assign them to companies, and control their access.
         </p>
+        {deleteError && (
+          <div style={{ padding: "12px 16px", backgroundColor: "#fce4e6", border: "1px solid #f08080", borderRadius: "4px", color: "#c23030", marginTop: "12px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+              <div style={{ flex: 1 }}>{deleteError}</div>
+              <button 
+                onClick={() => setDeleteError("")}
+                style={{ background: "none", border: "none", color: "#c23030", cursor: "pointer", fontSize: "16px", padding: "0" }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       
       <div style={contentPanelStyle}>
@@ -969,6 +1207,154 @@ export default function SalesUsers() {
             >
               {isSyncing ? "Syncing Companies..." : "Sync Companies from Shopify"}
             </Button>
+          </div>
+        </Modal.Section>
+      </Modal>
+      
+      {/* Edit Sales User Modal */}
+      <Modal open={isEditModalOpen} onClose={() => {
+        setIsEditModalOpen(false);
+        setEditingUserId(null);
+        setEditFirstName("");
+        setEditLastName("");
+        setEditEmail("");
+        setEditSelectedCompanyIds([]);
+        setEditCompanySearch("");
+        setEditCompanyPickerPage(1);
+        setEditErrorMessage("");
+      }} title="Edit Sales User">
+        <Modal.Section>
+          <div style={{ paddingBottom: "16px" }}>
+            <FormLayout>
+              {editErrorMessage && (
+                <div style={{ padding: "12px", backgroundColor: "#fce4e6", border: "1px solid #f08080", borderRadius: "4px", color: "#c23030", marginBottom: "12px" }}>
+                  {editErrorMessage}
+                </div>
+              )}
+              
+              <TextField
+                label="Email"
+                type="email"
+                value={editEmail}
+                onChange={setEditEmail}
+                disabled={isUpdating}
+                autoComplete="email"
+              />
+              
+              <TextField
+                label="First Name"
+                value={editFirstName}
+                onChange={setEditFirstName}
+                disabled={isUpdating}
+                autoComplete="given-name"
+              />
+              
+              <TextField
+                label="Last Name"
+                value={editLastName}
+                onChange={setEditLastName}
+                disabled={isUpdating}
+                autoComplete="family-name"
+              />
+              
+              <div>
+                <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <Text variant="headingMd" as="h3">Companies</Text>
+                  <Text variant="bodySm" as="p">{editSelectedCompanyCount} selected</Text>
+                </div>
+                
+                <TextField
+                  placeholder="Search companies..."
+                  value={editCompanySearch}
+                  onChange={setEditCompanySearch}
+                  disabled={isUpdating}
+                  label=""
+                  autoComplete="off"
+                  connectedRight={
+                    <Button
+                      variant="plain"
+                      size="micro"
+                      onClick={editSelectedCompanyIds.length === visibleEditCompanies.length && visibleEditCompanies.length > 0 ? clearAllEditCompanies : selectAllEditCompanies}
+                      disabled={isUpdating || visibleEditCompanies.length === 0}
+                    >
+                      {editSelectedCompanyIds.length === visibleEditCompanies.length && visibleEditCompanies.length > 0 ? "Clear All" : "Select All"}
+                    </Button>
+                  }
+                />
+                
+                {visibleEditCompanies.length > 0 ? (
+                  <div style={{ border: "1px solid #e1e4e8", borderRadius: "4px", maxHeight: "300px", overflowY: "auto", marginTop: "8px" }}>
+                    {visibleEditCompanies.map((company) => (
+                      <div key={company.id} style={{ padding: "8px 12px", borderBottom: "1px solid #e1e4e8", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <input
+                          type="checkbox"
+                          checked={editSelectedCompanyIds.includes(company.id)}
+                          onChange={() => toggleEditCompanySelection(company.id)}
+                          disabled={isUpdating}
+                        />
+                        <span>{company.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: "12px", textAlign: "center", color: "#666", marginTop: "8px" }}>
+                    {editCompanySearch ? "No companies found" : "No companies available"}
+                  </div>
+                )}
+                
+                {shouldPaginateEditCompanyPicker && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
+                    <Button
+                      variant="plain"
+                      size="micro"
+                      onClick={() => setEditCompanyPickerPage(p => Math.max(1, p - 1))}
+                      disabled={editCompanyPickerPage === 1 || isUpdating}
+                    >
+                      Previous
+                    </Button>
+                    <Text variant="bodySm" as="p">Page {editCompanyPickerPage} of {totalEditCompanyPages}</Text>
+                    <Button
+                      variant="plain"
+                      size="micro"
+                      onClick={() => setEditCompanyPickerPage(p => Math.min(totalEditCompanyPages, p + 1))}
+                      disabled={editCompanyPickerPage === totalEditCompanyPages || isUpdating}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </div>
+              
+              <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
+                <Button
+                  variant="primary"
+                  onClick={handleUpdate}
+                  disabled={isUpdating}
+                  loading={isUpdating}
+                  fullWidth
+                >
+                  {isUpdating ? "Updating..." : "Update"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditingUserId(null);
+                    setEditFirstName("");
+                    setEditLastName("");
+                    setEditEmail("");
+                    setEditSelectedCompanyIds([]);
+                    setEditCompanySearch("");
+                    setEditCompanyPickerPage(1);
+                    setEditErrorMessage("");
+                  }}
+                  disabled={isUpdating}
+                  fullWidth
+                >
+                  Cancel
+                </Button>
+              </div>
+            </FormLayout>
           </div>
         </Modal.Section>
       </Modal>

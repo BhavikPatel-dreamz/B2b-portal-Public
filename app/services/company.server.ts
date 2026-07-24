@@ -2,7 +2,10 @@ import prisma from "../db.server";
 import { Prisma } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { parseCredit } from "../utils/company.server";
-import { getCompanyCustomers } from "app/utils/b2b-customer.server";
+import {
+  getCompanyCustomers,
+  getCompanyLocations,
+} from "app/utils/b2b-customer.server";
 import { syncCompanyCreditMetafields } from "./metafieldSync.server";
 
 export interface CreateCompanyInput {
@@ -1413,4 +1416,97 @@ export async function syncCompaniesFromShopify(shopId: string, admin: any) {
     console.error("Error syncing companies from Shopify:", error);
     throw new Error(error.message || "Failed to sync companies from Shopify");
   }
+}
+
+/**
+ * Sync companies and fetch their customers & locations from Shopify to ensure
+ * dashboard data is current. This does not modify local company records
+ * beyond what `syncCompaniesFromShopify` does — it simply queries Shopify
+ * for each company to surface missing customers/locations and returns a
+ * summary for the caller.
+ */
+export async function syncCompaniesAndDetails(shopId: string, admin: any) {
+  // First, ensure company records are linked/created
+  const syncResult = await syncCompaniesFromShopify(shopId, admin);
+
+  // Next, fetch store domain & access token to call helper functions that
+  // use the REST/GraphQL Admin API via fetch
+  const store = await prisma.store.findUnique({ where: { id: shopId } });
+  if (!store) {
+    return {
+      success: false,
+      message: "Store not found",
+      createdCount: syncResult.createdCount || 0,
+      updatedCount: syncResult.updatedCount || 0,
+      totalSynced: syncResult.totalSynced || 0,
+    };
+  }
+
+  const companies = await getCompaniesByShop(shopId);
+
+  let companiesWithCustomers = 0;
+  let companiesWithLocations = 0;
+  let totalCustomers = 0;
+  let totalLocations = 0;
+  const errors: string[] = [];
+
+  for (const comp of companies) {
+    const shopifyCompanyId = comp.shopifyCompanyId;
+    if (!shopifyCompanyId) continue;
+
+    const companyGid = shopifyCompanyId.startsWith("gid://")
+      ? shopifyCompanyId
+      : `gid://shopify/Company/${shopifyCompanyId}`;
+
+    try {
+      const customersData = await getCompanyCustomers(
+        companyGid,
+        store.shopDomain,
+        store.accessToken || "",
+        { first: 1 },
+      );
+
+      if (
+        customersData &&
+        Array.isArray(customersData.customers) &&
+        customersData.customers.length > 0
+      ) {
+        companiesWithCustomers++;
+        totalCustomers += customersData.customers.length;
+      }
+
+      const locationsData = await getCompanyLocations(
+        companyGid,
+        store.shopDomain,
+        store.accessToken || "",
+      );
+
+      if (
+        locationsData &&
+        Array.isArray(locationsData.locations) &&
+        locationsData.locations.length > 0
+      ) {
+        companiesWithLocations++;
+        totalLocations += locationsData.locations.length;
+      }
+    } catch (err: any) {
+      console.error(`Error fetching details for company ${comp.id}:`, err);
+      errors.push(`Company ${comp.id}: ${err?.message || String(err)}`);
+    }
+  }
+
+  return {
+    success: true,
+    message:
+      `Synced companies. Companies with customers: ${companiesWithCustomers}, companies with locations: ${companiesWithLocations}` +
+      (errors.length ? `; Errors: ${errors.join("; ")}` : ""),
+    createdCount: syncResult.createdCount || 0,
+    updatedCount: syncResult.updatedCount || 0,
+    totalSynced: syncResult.totalSynced || 0,
+    companiesWithCustomers,
+    companiesWithLocations,
+    totalCustomers,
+    totalLocations,
+    errors,
+  };
 }

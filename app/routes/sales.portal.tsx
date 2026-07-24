@@ -1,4 +1,4 @@
-import { redirect, useLoaderData, Link } from "react-router";
+import { redirect, useLoaderData, Link, Form } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import type { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
@@ -29,12 +29,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     companyId = user.salesCompanies[0].companyId;
   }
 
+  // If no company is available, return a dashboard with no company
   if (!companyId) {
-    return redirect("/sales/portal");
+    return Response.json({
+      user: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+      },
+      company: null,
+      recentOrders: [],
+      orderCount: 0,
+      quoteCount: 0,
+      allCompanies: user.salesCompanies.map((sc) => ({
+        id: sc.company.id,
+        name: sc.company.name,
+      })),
+    });
   }
 
   if (!hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/portal");
+    throw new Response("You do not have access to this company.", { 
+      status: 403 
+    });
   }
 
   // Get full company data
@@ -55,7 +73,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!company) {
-    return redirect("/sales/portal");
+    throw new Response("Company not found.", { 
+      status: 404 
+    });
   }
 
   // Fetch real-time users directly from Shopify (fixes the issue where Shopify users aren't synced locally)
@@ -240,7 +260,7 @@ export default function SalesPortal() {
           companyRole: string | null;
         }>;
         themeColor: string | null;
-      };
+      } | null;
       recentOrders: Array<{
         id: string;
         orderNumber: string;
@@ -254,6 +274,30 @@ export default function SalesPortal() {
       quoteCount: number;
       allCompanies: Array<{ id: string; name: string }>;
     }>();
+
+  // If no company assigned, show empty state
+  if (!company) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.card}>
+          <div style={styles.emptyStateIcon}>🏢</div>
+          <h2 style={styles.emptyStateTitle}>Welcome, {user.firstName || "Sales Agent"}!</h2>
+          <p style={styles.emptyStateMessage}>
+            No companies have been assigned to your account yet.
+          </p>
+          <p style={styles.emptyStateSubtext}>
+            Please contact your administrator to get assigned to a company.
+          </p>
+          <Form method="post" style={styles.logoutForm}>
+            <input type="hidden" name="intent" value="logout" />
+            <button type="submit" style={styles.logoutBtn}>
+              Sign Out
+            </button>
+          </Form>
+        </div>
+      </div>
+    );
+  }
 
   const formatDate = (iso: string) =>
     new Intl.DateTimeFormat("en-IN", {
@@ -590,5 +634,61 @@ const styles = {
     color: "#5c5f62",
     textAlign: "center" as const,
     gap: "8px",
+  },
+  container: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "100vh",
+    backgroundColor: "#f9fafb",
+    padding: "20px",
+  },
+  centerCard: {
+    backgroundColor: "white",
+    borderRadius: "12px",
+    padding: "48px",
+    maxWidth: "500px",
+    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.07)",
+    border: "1px solid #e5e7eb",
+  },
+  emptyStateIcon: {
+    fontSize: "64px",
+    marginBottom: "24px",
+    display: "block",
+  },
+  emptyStateTitle: {
+    fontSize: "28px",
+    fontWeight: 600,
+    color: "#1f2937",
+    margin: "0 0 16px 0",
+    fontFamily: "'Poppins', sans-serif",
+  },
+  emptyStateMessage: {
+    fontSize: "16px",
+    color: "#4b5563",
+    margin: "0 0 8px 0",
+    lineHeight: 1.6,
+  },
+  emptyStateSubtext: {
+    fontSize: "14px",
+    color: "#6b7280",
+    margin: "0 0 32px 0",
+    lineHeight: 1.6,
+  },
+  logoutForm: {
+    display: "flex",
+    gap: "8px",
+  },
+  logoutBtn: {
+    flex: 1,
+    padding: "12px 24px",
+    backgroundColor: "#ef4444",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "14px",
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "background-color 0.2s",
   },
 };

@@ -23,7 +23,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
-  if (!session || new Date() > new Date(session.expiresAt)) {
+  if (!session) {
+    return redirect("/support/login?error=unauthorized");
+  }
+
+  // Check session expiration with proper date comparison
+  const now = new Date().getTime();
+  const expiresAtTime = new Date(session.expiresAt).getTime();
+  
+  if (now > expiresAtTime) {
     return redirect("/support/login?error=expired");
   }
 
