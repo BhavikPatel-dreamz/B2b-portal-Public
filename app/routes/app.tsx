@@ -17,6 +17,21 @@ import prisma from "app/db.server";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearDashboardStatsCache } from "app/utils/dashboard-cache.server";
 
+const SALES_ONLY_STORES = new Set([
+  "staging-labor-law-center.myshopify.com",
+]);
+
+const SALES_ONLY_ALLOWED_PATHS = new Set([
+  "/app/sales-users",
+  "/app/sales-dashboard",
+]);
+
+const SALES_ONLY_EXEMPT_PATHS = new Set([
+  "/app/select-plan",
+  "/app/cancel-subscription",
+  "/app/billing-example",
+]);
+
 const PLAN_EXEMPT_PATHS = new Set([
   "/app/select-plan",
   "/app/cancel-subscription",
@@ -30,24 +45,30 @@ function requiresPlan(pathname: string) {
 // ── IN-MEMORY CACHE for app layout data ─────────────────────────
 declare global {
   var __appLayoutCache:
-    | Map<string, { data: { apiKey: string; showSalesLinks: boolean }; timestamp: number }>
+    | Map<string, { data: { apiKey: string; showSalesLinks: boolean; salesOnlyStore: boolean }; timestamp: number }>
     | undefined;
 }
 
-const appLayoutCache: Map<string, { data: { apiKey: string; showSalesLinks: boolean }; timestamp: number }> =
+const appLayoutCache: Map<string, { data: { apiKey: string; showSalesLinks: boolean; salesOnlyStore: boolean }; timestamp: number }> =
   globalThis.__appLayoutCache ?? (globalThis.__appLayoutCache = new Map());
 
 const APP_LAYOUT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, redirect, session, admin } = await authenticate.admin(request);
+  const url = new URL(request.url);
+
+  // Sales-only store: redirect non-allowed pages immediately (before cache)
+  if (SALES_ONLY_STORES.has(session.shop) && !SALES_ONLY_ALLOWED_PATHS.has(url.pathname) && !SALES_ONLY_EXEMPT_PATHS.has(url.pathname)) {
+    return redirect("/app/sales-dashboard");
+  }
+
   const cacheKey = `app-layout-${session.shop}`;
   const cached = appLayoutCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < APP_LAYOUT_CACHE_TTL) {
     console.log("⚡ App layout cache HIT", cacheKey);
     return Response.json(cached.data);
   }
-  const url = new URL(request.url);
   const store = await prisma.store.findUnique({
     where: { shopDomain: session.shop },
     select: { plan: true, planKey: true, customPlanKey: true, customPlanActive: true, customAmount: true },
@@ -130,7 +151,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  const result = { apiKey: process.env.SHOPIFY_API_KEY || "", showSalesLinks };
+  const isSalesOnlyStore = SALES_ONLY_STORES.has(session.shop);
+
+  const result = { apiKey: process.env.SHOPIFY_API_KEY || "", showSalesLinks, salesOnlyStore: isSalesOnlyStore };
 
   // Store in cache
   appLayoutCache.set(cacheKey, { data: result, timestamp: Date.now() });
@@ -157,23 +180,23 @@ export function shouldRevalidate({
 }
 
 export default function App() {
-  const { apiKey, showSalesLinks } = useLoaderData<typeof loader>();
+  const { apiKey, showSalesLinks, salesOnlyStore } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
       <PolarisAppProvider i18n={enTranslations}>
         <s-app-nav>
-          <s-link href="/app/home">Home</s-link>
-          <s-link href="/app/reports">Reports</s-link>
-          <s-link href="/app/companies">B2B Companies</s-link>
+          {!salesOnlyStore && <s-link href="/app/home">Home</s-link>}
+          {!salesOnlyStore && <s-link href="/app/reports">Reports</s-link>}
+          {!salesOnlyStore && <s-link href="/app/companies">B2B Companies</s-link>}
           {/* <s-link href="/app/companies?tab=pending">Registrations</s-link> */}
-          <s-link href="/app/registration-form">Registrations Form</s-link>
-          <s-link href="/app/settings">Settings</s-link>
-          <s-link href="/app/notifications">Email Template</s-link>
-          {showSalesLinks && <s-link href="/app/sales-users">Sales Users</s-link>}
-          {showSalesLinks && <s-link href="/app/sales-dashboard">Sales Dashboard</s-link>}
-          <s-link href="/app/select-plan">Select Plan</s-link>
-          <s-link href="/app/quotes">Quotes</s-link>
+          {!salesOnlyStore && <s-link href="/app/registration-form">Registrations Form</s-link>}
+          {!salesOnlyStore && <s-link href="/app/settings">Settings</s-link>}
+          {!salesOnlyStore && <s-link href="/app/notifications">Email Template</s-link>}
+          {(salesOnlyStore || showSalesLinks) && <s-link href="/app/sales-users">Sales Users</s-link>}
+          {(salesOnlyStore || showSalesLinks) && <s-link href="/app/sales-dashboard">Sales Dashboard</s-link>}
+          {!salesOnlyStore && <s-link href="/app/select-plan">Select Plan</s-link>}
+          {!salesOnlyStore && <s-link href="/app/quotes">Quotes</s-link>}
         </s-app-nav>
         <Outlet />
       </PolarisAppProvider>
