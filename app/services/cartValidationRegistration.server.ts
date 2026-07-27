@@ -13,9 +13,7 @@ interface CartValidationFunction {
 
 interface CartValidation {
   id: string;
-  function: {
-    id: string;
-  };
+  title: string;
 }
 
 /**
@@ -212,17 +210,14 @@ export async function unregisterAllCartValidations(admin: AdminApiContext) {
   try {
     console.log("🧹 Unregistering all cart validations...");
 
-    // Find all validations using the correct query field 'validations'
+    // Find all validations using the 'validations' query
+    // Note: 'function' field was removed from Validation type in recent API versions
     const validationsQuery = `
       query {
         validations(first: 50) {
           nodes {
             id
             title
-            function {
-              id
-              handle
-            }
           }
         }
       }
@@ -237,13 +232,11 @@ export async function unregisterAllCartValidations(admin: AdminApiContext) {
 
     const allValidations = data.data?.validations?.nodes || [];
     
-    // Filter for validations related to our app/extension
-    // We target those with our specific function handle or those containing our title patterns
+    // Filter for validations related to our app/extension by title patterns
     const validationsToRemove = allValidations.filter((v: any) => 
-      v.function?.handle === "cart-checkout-validation" ||
       v.title?.toLowerCase().includes("b2b") ||
       v.title?.toLowerCase().includes("cart validation") ||
-      v.title?.toLowerCase().includes("centralcleaning") // Catch the alternative example title
+      v.title?.toLowerCase().includes("centralcleaning")
     );
 
     console.log(`🗑️ Found ${validationsToRemove.length} relevant validations to remove (out of ${allValidations.length} total)`);

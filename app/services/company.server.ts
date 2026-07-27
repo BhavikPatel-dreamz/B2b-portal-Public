@@ -1,7 +1,11 @@
 import prisma from "../db.server";
 import { Prisma } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
-import { parseCredit } from "../utils/company.server";
+import {
+  parseCredit,
+  syncShopifyUsers,
+  syncShopifyCompanies,
+} from "app/utils/company.server";
 import {
   getCompanyCustomers,
   getCompanyLocations,
@@ -1039,23 +1043,26 @@ export async function getCompanyOrders(
         });
 
         if (!existingOrder) {
+          const orderData: any = {
+            shopifyOrderId,
+            company: { connect: { id: companyId } },
+            shop: { connect: { id: shopId } },
+            orderStatus: order.displayFulfillmentStatus || "unfulfilled",
+            orderTotal: parseFloat(
+              order.totalPriceSet?.shopMoney?.amount || "0",
+            ),
+            createdAt: new Date(order.createdAt),
+            creditUsed: 0,
+            userCreditUsed: 0,
+            remainingBalance: 0,
+          };
+
+          if (userId) {
+            orderData.createdByUser = { connect: { id: userId } };
+          }
+
           await prisma.b2BOrder.create({
-            data: {
-              shopifyOrderId,
-              company: { connect: { id: companyId } },
-              shop: { connect: { id: shopId } },
-              orderStatus: order.displayFulfillmentStatus || "unfulfilled",
-              orderTotal: parseFloat(
-                order.totalPriceSet?.shopMoney?.amount || "0",
-              ),
-              createdAt: new Date(order.createdAt),
-              ...(userId && {
-                createdByUser: { connect: { id: userId } },
-              }),
-              creditUsed: 0,
-              userCreditUsed: 0,
-              remainingBalance: 0,
-            },
+            data: orderData,
           });
         }
       } catch (error) {
@@ -1232,7 +1239,7 @@ export async function updateCompanyMetafield(
     variables,
   });
 
-  const data = await response.json();
+  const data = (await response.json()) as any;
 
   if (data.errors || data.data?.metafieldsSet?.userErrors?.length > 0) {
     const errorMessage =
@@ -1254,6 +1261,12 @@ export async function getCompanyMetafield(
   namespace: string,
   key: string,
 ) {
+  const normalizedId = shopifyCompanyId.startsWith("gid://")
+    ? shopifyCompanyId
+    : shopifyCompanyId.match(/(\d+)$/)
+      ? `gid://shopify/Company/${shopifyCompanyId.match(/(\d+)$/)![1]}`
+      : shopifyCompanyId;
+
   const query = `
     query CompanyMetafield($ownerId: ID!, $namespace: String!, $key: String!) {
       company(id: $ownerId) {
@@ -1269,7 +1282,7 @@ export async function getCompanyMetafield(
   `;
 
   const variables = {
-    ownerId: shopifyCompanyId,
+    ownerId: normalizedId,
     namespace,
     key,
   };
@@ -1278,7 +1291,7 @@ export async function getCompanyMetafield(
     variables,
   });
 
-  const data = await response.json();
+  const data = (await response.json()) as any;
 
   if (data.errors) {
     const errorMessage = data.errors[0]?.message || "Unknown error occurred";
@@ -1326,7 +1339,7 @@ export async function syncCompaniesFromShopify(shopId: string, admin: any) {
 
     // Deduplicate companies by Shopify ID
     const seenShopifyIds = new Set<string>();
-    const uniqueCompanies = companies.filter((edge) => {
+    const uniqueCompanies = companies.filter((edge: any) => {
       const shopifyId = edge.node.id.replace("gid://shopify/Company/", "");
       if (seenShopifyIds.has(shopifyId)) {
         console.log(
@@ -1427,7 +1440,11 @@ export async function syncCompaniesFromShopify(shopId: string, admin: any) {
  */
 export async function syncCompaniesAndDetails(shopId: string, admin: any) {
   // First, ensure company records are linked/created
-  const syncResult = await syncCompaniesFromShopify(shopId, admin);
+  const syncResult = (await syncShopifyCompanies(
+    admin,
+    { id: shopId },
+    null,
+  )) as any;
 
   // Next, fetch store domain & access token to call helper functions that
   // use the REST/GraphQL Admin API via fetch
@@ -1438,7 +1455,7 @@ export async function syncCompaniesAndDetails(shopId: string, admin: any) {
       message: "Store not found",
       createdCount: syncResult.createdCount || 0,
       updatedCount: syncResult.updatedCount || 0,
-      totalSynced: syncResult.totalSynced || 0,
+      totalSynced: syncResult.syncedCount || 0,
     };
   }
 
@@ -1448,6 +1465,8 @@ export async function syncCompaniesAndDetails(shopId: string, admin: any) {
   let companiesWithLocations = 0;
   let totalCustomers = 0;
   let totalLocations = 0;
+  let companiesWithSyncedUsers = 0;
+  let usersSynced = 0;
   const errors: string[] = [];
 
   for (const comp of companies) {
@@ -1489,6 +1508,16 @@ export async function syncCompaniesAndDetails(shopId: string, admin: any) {
         companiesWithLocations++;
         totalLocations += locationsData.locations.length;
       }
+
+      const userSyncResult = await syncShopifyUsers(admin, store, comp.id);
+      if (userSyncResult.success) {
+        companiesWithSyncedUsers++;
+        usersSynced += userSyncResult.syncedCount || 0;
+      } else {
+        errors.push(
+          `Company ${comp.id} user sync failed: ${userSyncResult.message || userSyncResult.errors?.join(", ") || "unknown"}`,
+        );
+      }
     } catch (err: any) {
       console.error(`Error fetching details for company ${comp.id}:`, err);
       errors.push(`Company ${comp.id}: ${err?.message || String(err)}`);
@@ -1498,15 +1527,17 @@ export async function syncCompaniesAndDetails(shopId: string, admin: any) {
   return {
     success: true,
     message:
-      `Synced companies. Companies with customers: ${companiesWithCustomers}, companies with locations: ${companiesWithLocations}` +
+      `Synced companies. Companies with customers: ${companiesWithCustomers}, companies with locations: ${companiesWithLocations}, companies with user sync: ${companiesWithSyncedUsers}` +
       (errors.length ? `; Errors: ${errors.join("; ")}` : ""),
-    createdCount: syncResult.createdCount || 0,
-    updatedCount: syncResult.updatedCount || 0,
-    totalSynced: syncResult.totalSynced || 0,
+    createdCount: 0,
+    updatedCount: 0,
+    totalSynced: syncResult.syncedCount || 0,
     companiesWithCustomers,
     companiesWithLocations,
+    companiesWithSyncedUsers,
+    usersSynced,
+    errors,
     totalCustomers,
     totalLocations,
-    errors,
   };
 }

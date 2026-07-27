@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { sendCompanyWelcomeEmail } from "../services/notification.server";
 import { Decimal } from "@prisma/client/runtime/library";
 import { FREE_PLAN_MAX_COMPANIES } from "./free-plan-limits.server";
+import { getCompanyLocations } from "./b2b-customer.server";
 
 type ShopifyAdminClient = {
   graphql: (
@@ -17,27 +18,7 @@ type StoreRef = {
   id: string;
 };
 
-// type ShopifyCompanyNode = {
-//   id: string;
-//   name: string;
-//   externalId?: string | null;
-//   mainContact?: {
-//     id: string;
-//     customer?: {
-//       id: string;
-//       email?: string | null;
-//       firstName?: string | null;
-//       lastName?: string | null;
-//       phone?: string | null;
-//     } | null;
-//   } | null;
-//   locations?: {
-//     nodes: Array<{
-//       id: string;
-//       name: string;
-//     }>;
-//   } | null;
-// };
+
 
 type ShopifyCustomerNode = {
   id: string;
@@ -783,7 +764,6 @@ export const syncShopifyUsers = async (
   }
 };
 
-
 /**
  * Sync a single Shopify B2B customer and their associated companies.
  * This is used for on-the-fly onboarding when a B2B user logs in.
@@ -831,13 +811,20 @@ export const syncSingleB2BCustomer = async (
     `;
 
     const response = await admin.graphql(query, {
-      variables: { id: shopifyCustomerId.startsWith("gid://") ? shopifyCustomerId : `gid://shopify/Customer/${shopifyCustomerId}` },
+      variables: {
+        id: shopifyCustomerId.startsWith("gid://")
+          ? shopifyCustomerId
+          : `gid://shopify/Customer/${shopifyCustomerId}`,
+      },
     });
     const result = await response.json();
     const customer = result?.data?.customer as ShopifyCustomerNode;
 
     if (!customer || !customer.email) {
-      return { success: false, error: "Customer not found in Shopify or missing email" };
+      return {
+        success: false,
+        error: "Customer not found in Shopify or missing email",
+      };
     }
 
     const profiles = customer.companyContactProfiles || [];
@@ -871,13 +858,18 @@ export const syncSingleB2BCustomer = async (
       });
 
       // 3. Determine roles
-      const isMainContact = shopifyCompany.mainContact?.customer?.id === customer.id;
+      const isMainContact =
+        shopifyCompany.mainContact?.customer?.id === customer.id;
       const userRole = isMainContact ? "STORE_ADMIN" : "STORE_USER";
 
       // 4. Upsert User
       await prisma.user.upsert({
         where: {
-          shopId_email_role: { shopId: storeId, email: customer.email, role: userRole },
+          shopId_email_role: {
+            shopId: storeId,
+            email: customer.email,
+            role: userRole,
+          },
         },
         update: {
           firstName: customer.firstName || "",
@@ -933,7 +925,10 @@ export const syncSingleB2BCustomer = async (
     return { success: true, syncedCount };
   } catch (error) {
     console.error("Error in syncSingleB2BCustomer:", error);
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
 };
 

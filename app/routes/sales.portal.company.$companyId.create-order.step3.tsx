@@ -15,6 +15,7 @@ import {
   requireSalesSession,
   hasCompanyAccess,
 } from "app/utils/sales-session.server";
+import { toShopifyCompanyGid } from "app/utils/shopify-admin.server";
 import {
   SalesPortalHeader,
   SalesPortalLayout,
@@ -364,7 +365,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       taxExempt: true,
       purchasingEntity: {
         purchasingCompany: {
-          companyId: company.shopifyCompanyId,
+          companyId: toShopifyCompanyGid(company.shopifyCompanyId),
           companyLocationId,
           companyContactId,
         },
@@ -776,7 +777,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           },
           body: JSON.stringify({
             query: locationQuery,
-            variables: { companyId: company.shopifyCompanyId },
+      variables: { companyId: toShopifyCompanyGid(company.shopifyCompanyId) },
           }),
         },
       );

@@ -7,7 +7,10 @@ import {
   Form,
   useNavigation,
   useActionData,
+  useSearchParams,
 } from "react-router";
+import { useEffect, useState } from "react";
+import { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import {
   requireSalesSession,
@@ -16,6 +19,12 @@ import {
 } from "app/utils/sales-session.server";
 import { restoreCredit } from "app/services/creditService";
 import { getAdminForShop } from "app/shopify.server";
+import {
+  assignCompanyToCustomer,
+  checkCustomerExists,
+  createShopifyCompany,
+  createShopifyCustomer,
+} from "app/utils/b2b-customer.server";
 import {
   SalesPortalHeader,
   SalesPortalLayout,
@@ -27,6 +36,17 @@ import {
   isSalesPortalPaymentLinkEligible,
   logOrderActivity,
 } from "app/services/sales-order-management.server";
+import {
+  formatPhoneNumberForCountry,
+  getDialCodeForCountry,
+} from "app/utils/company-create-form";
+
+type CreateCompanyCountryOption = {
+  value: string;
+  label: string;
+  dialCode?: string;
+  provinces: Array<{ value: string; label: string }>;
+};
 
 // ⚠️ NOTE: isSalesPortalPaymentLinkEligible is only called inside loader/action
 // (server-only exports). It must NOT be called in the component body.
@@ -141,6 +161,238 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         "Set-Cookie": buildClearSessionCookie(),
       },
     });
+  }
+
+  if (intent === "createCompany") {
+    if (!user.shopId) {
+      return Response.json(
+        { error: "Your sales account is not linked to a store." },
+        { status: 400 },
+      );
+    }
+
+    const store = await prisma.store.findUnique({
+      where: { id: user.shopId },
+      select: {
+        id: true,
+        shopDomain: true,
+        defaultCompanyCreditLimit: true,
+      },
+    });
+
+    if (!store) {
+      return Response.json({ error: "Store not found." }, { status: 404 });
+    }
+
+    const companyName = String(formData.get("companyName") || "").trim();
+    const locationName =
+      String(formData.get("locationName") || "").trim() || companyName;
+    const customerEmail = String(formData.get("customerEmail") || "")
+      .trim()
+      .toLowerCase();
+    const firstName = String(formData.get("firstName") || "").trim();
+    const lastName = String(formData.get("lastName") || "").trim();
+    const phone = String(formData.get("phone") || "").trim();
+    const provinceCode = String(formData.get("provinceCode") || "").trim();
+    const countryCode = String(formData.get("countryCode") || "").trim();
+    const formattedPhone = formatPhoneNumberForCountry(phone, countryCode);
+    const address1 = String(formData.get("address1") || "").trim();
+    const address2 = String(formData.get("address2") || "").trim();
+    const city = String(formData.get("city") || "").trim();
+    const zip = String(formData.get("zip") || "").trim();
+
+    if (!companyName || !customerEmail || !firstName || !lastName) {
+      return Response.json(
+        {
+          error:
+            "Company name, customer email, first name and last name are required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const admin = (await getAdminForShop(store.shopDomain)) as any;
+
+    const existingCompany = await prisma.companyAccount.findFirst({
+      where: {
+        shopId: store.id,
+        name: { equals: companyName, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+
+    if (existingCompany) {
+      await prisma.salesUserCompany.upsert({
+        where: {
+          userId_companyId: {
+            userId: user.id,
+            companyId: existingCompany.id,
+          },
+        },
+        update: {},
+        create: { userId: user.id, companyId: existingCompany.id },
+      });
+
+      return redirect(
+        `/sales/portal/company/${existingCompany.id}/orders?companyLinked=1`,
+      );
+    }
+
+    const customerCheck = await checkCustomerExists(admin, customerEmail);
+    if (!customerCheck.success) {
+      return Response.json({ error: customerCheck.error }, { status: 400 });
+    }
+
+    let customerId =
+      customerCheck.exists && customerCheck.customer
+        ? customerCheck.customer.id
+        : "";
+
+    if (!customerId) {
+      const customerCreate = await createShopifyCustomer(admin, {
+        email: customerEmail,
+        firstName,
+        lastName,
+        phone: formattedPhone,
+      });
+
+      if (!customerCreate.success || !customerCreate.customer?.id) {
+        return Response.json(
+          { error: customerCreate.error || "Failed to create customer." },
+          { status: 400 },
+        );
+      }
+
+      customerId = customerCreate.customer.id;
+    }
+
+    const companyCreate = await createShopifyCompany(admin, {
+      name: companyName,
+      externalId: `sales-${user.id}-${Date.now()}`,
+    });
+
+    if (!companyCreate.success || !companyCreate.company?.id) {
+      return Response.json(
+        { error: companyCreate.error || "Failed to create company." },
+        { status: 400 },
+      );
+    }
+
+    const shopifyCompanyId = companyCreate.company.id;
+    const locationCreateRes = await admin.graphql(
+      `#graphql
+      mutation CreateCompanyLocation($companyId: ID!, $input: CompanyLocationInput!) {
+        companyLocationCreate(companyId: $companyId, input: $input) {
+          companyLocation { id name }
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          companyId: shopifyCompanyId,
+          input: { name: locationName },
+        },
+      },
+    );
+    const locationCreateJson = await locationCreateRes.json();
+    const locationErrors =
+      locationCreateJson.data?.companyLocationCreate?.userErrors || [];
+    const companyLocation =
+      locationCreateJson.data?.companyLocationCreate?.companyLocation;
+
+    if (
+      locationCreateJson.errors?.length ||
+      locationErrors.length ||
+      !companyLocation?.id
+    ) {
+      return Response.json(
+        {
+          error:
+            locationCreateJson.errors?.[0]?.message ||
+            locationErrors[0]?.message ||
+            "Failed to create company location.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (countryCode && address1) {
+      const addressRes = await admin.graphql(
+        `#graphql
+        mutation AssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
+          companyLocationAssignAddress(locationId: $locationId, address: $address, addressTypes: $addressTypes) {
+            userErrors { field message }
+          }
+        }`,
+        {
+          variables: {
+            locationId: companyLocation.id,
+            address: {
+              address1,
+              address2,
+              city,
+              zoneCode: provinceCode,
+              countryCode,
+              zip,
+              phone: formattedPhone,
+              firstName,
+              lastName,
+              recipient: `${firstName} ${lastName}`.trim(),
+            },
+            addressTypes: ["SHIPPING", "BILLING"],
+          },
+        },
+      );
+      const addressJson = await addressRes.json();
+      const addressErrors =
+        addressJson.data?.companyLocationAssignAddress?.userErrors || [];
+
+      if (addressJson.errors?.length || addressErrors.length) {
+        return Response.json(
+          {
+            error:
+              addressJson.errors?.[0]?.message ||
+              addressErrors[0]?.message ||
+              "Failed to assign location address.",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    const assignment = await assignCompanyToCustomer(
+      admin,
+      customerId,
+      shopifyCompanyId,
+    );
+
+    if (!assignment.success) {
+      return Response.json(
+        {
+          error: `${assignment.step || "assignCustomer"}: ${assignment.error}`,
+        },
+        { status: 400 },
+      );
+    }
+
+    const newCompany = await prisma.companyAccount.create({
+      data: {
+        shopId: store.id,
+        shopifyCompanyId,
+        name: companyName,
+        contactName: `${firstName} ${lastName}`.trim(),
+        contactEmail: customerEmail,
+        creditLimit: store.defaultCompanyCreditLimit ?? new Prisma.Decimal(0),
+        salesUsers: {
+          create: { userId: user.id },
+        },
+      },
+      select: { id: true },
+    });
+
+    return redirect(
+      `/sales/portal/company/${newCompany.id}/orders?companyCreated=1`,
+    );
   }
 
   if (intent === "delete_order") {
@@ -331,6 +583,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function OrderManageScreen() {
+  const [isCreateCompanyOpen, setIsCreateCompanyOpen] = useState(false);
+  const [countryOptions, setCountryOptions] = useState<
+    CreateCompanyCountryOption[]
+  >([]);
+  const [selectedCountryCode, setSelectedCountryCode] = useState("US");
+  const [selectedProvinceCode, setSelectedProvinceCode] = useState("");
   const { user, company, orders, quoteCount, allCompanies } = useLoaderData<{
     user: {
       id: string;
@@ -369,11 +627,20 @@ export default function OrderManageScreen() {
     allCompanies: Array<{ id: string; name: string }>;
   }>();
   const navigation = useNavigation();
+  const [searchParams] = useSearchParams();
   const actionData = useActionData<{
     success?: boolean;
     error?: string;
     message?: string;
   }>();
+  const successToastMessage = searchParams.get("companyCreated")
+    ? "Company created successfully."
+    : searchParams.get("companyLinked")
+      ? "Company already existed and was linked successfully."
+      : actionData?.success
+        ? actionData.message || "Action completed successfully."
+        : "";
+  const errorToastMessage = actionData?.error || "";
   const isDeleting =
     navigation.state === "submitting" &&
     navigation.formData?.get("intent") === "delete_order";
@@ -382,6 +649,53 @@ export default function OrderManageScreen() {
     navigation.formData?.get("intent") === "generate_payment_link"
       ? String(navigation.formData.get("orderId"))
       : null;
+  const isCreatingCompany =
+    navigation.state === "submitting" &&
+    navigation.formData?.get("intent") === "createCompany";
+
+  useEffect(() => {
+    let isActive = true;
+
+    fetch("/api/proxy/shipping-zones")
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Failed to load shipping zones");
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (!isActive) return;
+        const nextCountries: CreateCompanyCountryOption[] = Array.isArray(
+          data?.countries,
+        )
+          ? data.countries
+          : [];
+        setCountryOptions(nextCountries);
+        if (nextCountries.length > 0) {
+          const hasUs = nextCountries.some((country) => country.value === "US");
+          if (!hasUs) {
+            setSelectedCountryCode(nextCountries[0].value);
+          }
+        }
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setCountryOptions([]);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const selectedCountry = countryOptions.find(
+    (country) => country.value === selectedCountryCode,
+  );
+  const provinceOptions = selectedCountry?.provinces ?? [];
+  const selectedDialCode =
+    selectedCountry?.dialCode ||
+    getDialCodeForCountry(selectedCountryCode) ||
+    "+";
 
   const formatDate = (iso: string) =>
     new Intl.DateTimeFormat("en-IN", {
@@ -437,6 +751,13 @@ export default function OrderManageScreen() {
       quoteCount={quoteCount}
       themeColor={company.themeColor}
     >
+      {successToastMessage ? (
+        <div style={styles.successToast}>{successToastMessage}</div>
+      ) : null}
+      {errorToastMessage ? (
+        <div style={styles.errorToast}>{errorToastMessage}</div>
+      ) : null}
+
       <SalesPortalHeader
         title="Manage Orders"
         subtitle={`List, review, and manage B2B orders for ${company.name}`}
@@ -444,6 +765,13 @@ export default function OrderManageScreen() {
         companies={allCompanies}
         actions={
           <>
+            <button
+              type="button"
+              style={salesPortalButtonStyles.secondary}
+              onClick={() => setIsCreateCompanyOpen(true)}
+            >
+              + Create Company
+            </button>
             <Link
               to={`/sales/portal/company/${company.id}/create-order`}
               style={salesPortalButtonStyles.primary}
@@ -460,13 +788,184 @@ export default function OrderManageScreen() {
         }
       />
 
-      {actionData?.error && (
-        <div style={styles.errorBanner}>⚠️ {actionData.error}</div>
-      )}
+      {isCreateCompanyOpen && (
+        <div style={styles.modalBackdrop}>
+          <div style={styles.modal}>
+            <div style={styles.modalHeader}>
+              <div>
+                <h2 style={styles.modalTitle}>Create Company</h2>
+                <p style={styles.modalSubtitle}>
+                  Add a company, location, and main contact.
+                </p>
+              </div>
+              <button
+                type="button"
+                style={styles.closeBtn}
+                onClick={() => setIsCreateCompanyOpen(false)}
+                aria-label="Close create company modal"
+              >
+                ×
+              </button>
+            </div>
 
-      {actionData?.success && (
-        <div style={styles.successBanner}>
-          ✅ {actionData.message || "Action completed successfully."}
+            <Form method="post" style={styles.companyForm}>
+              <input type="hidden" name="intent" value="createCompany" />
+
+              <section style={styles.formSection}>
+                <h3 style={styles.sectionTitle}>Company</h3>
+                <label style={styles.fieldLabel}>
+                  Company name
+                  <input name="companyName" required style={styles.input} />
+                </label>
+              </section>
+
+              <section style={styles.formSection}>
+                <h3 style={styles.sectionTitle}>Location</h3>
+                <label style={styles.fieldLabel}>
+                  Location name
+                  <input name="locationName" style={styles.input} />
+                </label>
+                <label style={styles.fieldLabel}>
+                  Address line 1
+                  <input name="address1" style={styles.input} />
+                </label>
+                <label style={styles.fieldLabel}>
+                  Address line 2
+                  <input name="address2" style={styles.input} />
+                </label>
+                <div style={styles.formGrid}>
+                  <label style={styles.fieldLabel}>
+                    Country
+                    <select
+                      name="countryCode"
+                      value={selectedCountryCode}
+                      onChange={(event) => {
+                        setSelectedCountryCode(event.target.value);
+                        setSelectedProvinceCode("");
+                      }}
+                      style={{ ...styles.input, appearance: "none" as const }}
+                    >
+                      <option value="">Select country</option>
+                      {countryOptions.map((country) => (
+                        <option key={country.value} value={country.value}>
+                          {country.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={styles.fieldLabel}>
+                    State / Province
+                    {provinceOptions.length > 0 ? (
+                      <select
+                        name="provinceCode"
+                        value={selectedProvinceCode}
+                        onChange={(event) =>
+                          setSelectedProvinceCode(event.target.value)
+                        }
+                        style={{ ...styles.input, appearance: "none" as const }}
+                      >
+                        <option value="">Select state / province</option>
+                        {provinceOptions.map((province) => (
+                          <option key={province.value} value={province.value}>
+                            {province.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        name="provinceCode"
+                        placeholder="CA"
+                        value={selectedProvinceCode}
+                        onChange={(event) =>
+                          setSelectedProvinceCode(event.target.value)
+                        }
+                        style={styles.input}
+                      />
+                    )}
+                  </label>
+                </div>
+                <div style={styles.formGrid}>
+                  <label style={styles.fieldLabel}>
+                    City
+                    <input name="city" style={styles.input} />
+                  </label>
+                  <label style={styles.fieldLabel}>
+                    ZIP / Postal code
+                    <input name="zip" style={styles.input} />
+                  </label>
+                </div>
+              </section>
+              
+              <section style={styles.formSection}>
+                <h3 style={styles.sectionTitle}>Main contact</h3>
+                <div style={styles.formGrid}>
+                  <label style={styles.fieldLabel}>
+                    First name
+                    <input name="firstName" required style={styles.input} />
+                  </label>
+                  <label style={styles.fieldLabel}>
+                    Last name
+                    <input name="lastName" required style={styles.input} />
+                  </label>
+                </div>
+                <div style={styles.formGrid}>
+                  <label style={styles.fieldLabel}>
+                    Email
+                    <input
+                      name="customerEmail"
+                      type="email"
+                      required
+                      style={styles.input}
+                    />
+                  </label>
+                  <label style={styles.fieldLabel}>
+                    Phone (optional)
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <span
+                        style={{
+                          ...styles.input,
+                          width: "84px",
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#4b5563",
+                          backgroundColor: "#f9fafb",
+                        }}
+                      >
+                        {selectedDialCode}
+                      </span>
+                      <input
+                        name="phone"
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        placeholder="9876543210"
+                        style={{ ...styles.input, flex: 1 }}
+                      />
+                    </div>
+                  </label>
+                </div>
+              </section>
+
+              <div style={styles.modalActions}>
+                <button
+                  type="button"
+                  style={styles.cancelBtn}
+                  onClick={() => setIsCreateCompanyOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={styles.primaryBtn}
+                  disabled={isCreatingCompany}
+                >
+                  {isCreatingCompany ? "Creating..." : "Create Company"}
+                </button>
+              </div>
+            </Form>
+          </div>
         </div>
       )}
 
@@ -695,25 +1194,154 @@ const styles = {
     textDecoration: "none",
     cursor: "pointer",
   },
-  errorBanner: {
-    backgroundColor: "#fef2f2",
-    border: "1px solid #fee2e2",
-    borderRadius: "12px",
-    color: "#991b1b",
-    padding: "16px",
+  successToast: {
+    position: "fixed" as const,
+    top: "20px",
+    right: "20px",
+    zIndex: 1200,
+    maxWidth: "420px",
+    padding: "14px 16px",
+    backgroundColor: "#ecfdf5",
+    color: "#065f46",
+    border: "1px solid #a7f3d0",
+    borderRadius: "8px",
+    boxShadow: "0 12px 32px rgba(15, 23, 42, 0.16)",
     fontSize: "14px",
-    fontWeight: 500,
+    fontWeight: 700,
+  },
+  errorToast: {
+    position: "fixed" as const,
+    top: "20px",
+    right: "20px",
+    zIndex: 1200,
+    maxWidth: "420px",
+    padding: "14px 16px",
+    backgroundColor: "#fef2f2",
+    color: "#991b1b",
+    border: "1px solid #fecaca",
+    borderRadius: "8px",
+    boxShadow: "0 12px 32px rgba(15, 23, 42, 0.16)",
+    fontSize: "14px",
+    fontWeight: 700,
+  },
+  modalBackdrop: {
+    position: "fixed" as const,
+    inset: 0,
+    zIndex: 1000,
+    backgroundColor: "rgba(17, 24, 39, 0.48)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "20px",
+  },
+  modal: {
+    width: "100%",
+    maxWidth: "760px",
+    maxHeight: "90vh",
+    overflowY: "auto" as const,
+    backgroundColor: "white",
+    borderRadius: "12px",
+    boxShadow: "0 24px 60px rgba(15, 23, 42, 0.24)",
+    border: "1px solid #e5e7eb",
+    padding: "24px",
+  },
+  modalHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "20px",
     marginBottom: "20px",
   },
-  successBanner: {
-    backgroundColor: "#f0fdf4",
-    border: "1px solid #dcfce7",
-    borderRadius: "12px",
-    color: "#166534",
-    padding: "16px",
+  modalTitle: {
+    fontFamily: "'Poppins', sans-serif",
+    fontSize: "22px",
+    fontWeight: 700,
+    color: "#111827",
+    margin: 0,
+  },
+  modalSubtitle: {
+    color: "#6b7280",
     fontSize: "14px",
-    fontWeight: 500,
-    marginBottom: "20px",
+    margin: "6px 0 0",
+  },
+  closeBtn: {
+    width: "36px",
+    height: "36px",
+    borderRadius: "8px",
+    border: "1px solid #e5e7eb",
+    backgroundColor: "white",
+    color: "#374151",
+    fontSize: "24px",
+    lineHeight: 1,
+    cursor: "pointer",
+  },
+  companyForm: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "18px",
+  },
+  formSection: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "12px",
+    paddingTop: "16px",
+    borderTop: "1px solid #eef2f7",
+  },
+  sectionTitle: {
+    fontFamily: "'Poppins', sans-serif",
+    color: "#111827",
+    fontSize: "15px",
+    fontWeight: 700,
+    margin: 0,
+  },
+  formGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "12px",
+  },
+  fieldLabel: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "6px",
+    color: "#374151",
+    fontSize: "13px",
+    fontWeight: 600,
+  },
+  input: {
+    width: "100%",
+    boxSizing: "border-box" as const,
+    border: "1px solid #d1d5db",
+    borderRadius: "8px",
+    padding: "11px 12px",
+    fontSize: "14px",
+    color: "#111827",
+    outline: "none",
+  },
+  modalActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "10px",
+    paddingTop: "4px",
+  },
+  cancelBtn: {
+    padding: "11px 18px",
+    border: "1px solid #d1d5db",
+    borderRadius: "8px",
+    backgroundColor: "white",
+    color: "#374151",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  primaryBtn: {
+    padding: "11px 18px",
+    border: "none",
+    borderRadius: "8px",
+    backgroundColor: "#111827",
+    color: "white",
+    fontSize: "14px",
+    fontWeight: 700,
+    cursor: "pointer",
   },
   emptyState: {
     display: "flex",

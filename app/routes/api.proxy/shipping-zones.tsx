@@ -1,6 +1,12 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { unauthenticated } from "app/shopify.server";
+import prisma from "app/db.server";
 import { authenticateCustomerAccountSession } from "app/utils/customer-account-session.server";
+import { getDialCodeForCountry } from "app/utils/company-create-form";
+import {
+  validateSalesSession,
+  getSessionTokenFromCookie,
+} from "app/utils/sales-session.server";
 
 type ShippingZonesPayload = {
   errors?: unknown;
@@ -31,6 +37,22 @@ type ShippingZonesPayload = {
   };
 };
 
+type MarketsPayload = {
+  errors?: unknown;
+  data?: {
+    markets?: {
+      nodes?: Array<{
+        regions?: {
+          nodes?: Array<{
+            name?: string | null;
+            code?: string | null;
+          }>;
+        } | null;
+      }>;
+    } | null;
+  };
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") {
     return new Response(null, {
@@ -44,9 +66,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   try {
-    const { shop } = await authenticateCustomerAccountSession(request, {
-      requireCustomer: false,
-    });
+    let shop = "";
+
+    try {
+      const customerSession = await authenticateCustomerAccountSession(request, {
+        requireCustomer: false,
+      });
+      shop = customerSession.shop;
+    } catch (customerAuthError) {
+      const salesSession = await validateSalesSession(
+        getSessionTokenFromCookie(request),
+      );
+
+      if (!salesSession.valid || !salesSession.user.shopId) {
+        throw customerAuthError;
+      }
+
+      const store = await prisma.store.findUnique({
+        where: { id: salesSession.user.shopId },
+        select: { shopDomain: true },
+      });
+
+      if (!store?.shopDomain) {
+        throw new Response("Missing shop for sales session", {
+          status: 401,
+          statusText: "Unauthorized",
+        });
+      }
+
+      shop = store.shopDomain;
+    }
 
     const { admin } = await unauthenticated.admin(shop);
 
@@ -110,8 +159,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const countriesMap = new Map<string, {
       value: string;
       label: string;
+      dialCode: string;
       provinces: { value: string; label: string }[];
     }>();
+
+    const upsertCountry = (
+      countryCode: string,
+      label: string | null | undefined,
+      provinces: { value: string; label: string }[] = [],
+    ) => {
+      if (countriesMap.has(countryCode)) {
+        const existing = countriesMap.get(countryCode)!;
+        if (label && existing.label === countryCode) {
+          existing.label = label;
+        }
+
+        const existingCodes = new Set(
+          existing.provinces.map((province) => province.value)
+        );
+        for (const province of provinces) {
+          if (!existingCodes.has(province.value)) {
+            existing.provinces.push(province);
+          }
+        }
+        return;
+      }
+
+      countriesMap.set(countryCode, {
+        value: countryCode,
+        label: label ?? countryCode,
+        dialCode: getDialCodeForCountry(countryCode),
+        provinces,
+      });
+    };
 
     for (const profile of payload.data?.deliveryProfiles?.nodes || []) {
       for (const group of profile.profileLocationGroups || []) {
@@ -127,23 +207,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               })
             );
 
-            if (countriesMap.has(countryCode)) {
-              const existing = countriesMap.get(countryCode)!;
-              const existingCodes = new Set(
-                existing.provinces.map((province) => province.value)
-              );
-              for (const province of provinces) {
-                if (!existingCodes.has(province.value)) {
-                  existing.provinces.push(province);
-                }
-              }
-            } else {
-              countriesMap.set(countryCode, {
-                value: countryCode,
-                label: country.name ?? countryCode,
-                provinces,
-              });
-            }
+            upsertCountry(countryCode, country.name, provinces);
           }
         }
       }
@@ -151,16 +215,60 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     for (const code of validCountryCodes) {
       if (!countriesMap.has(code)) {
-        countriesMap.set(code, {
-          value: code,
-          label: code,
-          provinces: [],
-        });
+        upsertCountry(code, code);
       }
     }
 
+    let marketCountryCodes: Set<string> | null = null;
+    try {
+      const marketsResponse = await admin.graphql(
+        `#graphql
+        query GetMarketCountries {
+          markets(first: 250) {
+            nodes {
+              regions(first: 250) {
+                nodes {
+                  name
+                  ... on MarketRegionCountry {
+                    code
+                  }
+                }
+              }
+            }
+          }
+        }
+        `
+      );
+      const marketsPayload = (await marketsResponse.json()) as MarketsPayload;
+
+      if (marketsResponse.ok && !marketsPayload.errors) {
+        marketCountryCodes = new Set<string>();
+
+        for (const market of marketsPayload.data?.markets?.nodes || []) {
+          for (const region of market.regions?.nodes || []) {
+            if (!region.code) continue;
+
+            marketCountryCodes.add(region.code);
+            upsertCountry(region.code, region.name);
+          }
+        }
+      } else {
+        console.warn("Unable to load Shopify Markets countries:", {
+          status: marketsResponse.status,
+          errors: marketsPayload.errors,
+        });
+      }
+    } catch (marketsError) {
+      console.warn("Unable to load Shopify Markets countries:", marketsError);
+    }
+
     const countries = Array.from(countriesMap.values())
-      .filter((country) => validCountryCodes.has(country.value))
+      .filter(
+        (country) =>
+          marketCountryCodes?.size
+            ? marketCountryCodes.has(country.value)
+            : validCountryCodes.size === 0 || validCountryCodes.has(country.value),
+      )
       .sort((a, b) => a.label.localeCompare(b.label));
 
     return Response.json({ countries, total: countries.length });

@@ -15,6 +15,7 @@ import {
   requireSalesSession,
   hasCompanyAccess,
 } from "app/utils/sales-session.server";
+import { toShopifyCompanyGid } from "app/utils/shopify-admin.server";
 import {
   SalesPortalHeader,
   SalesPortalLayout,
@@ -243,7 +244,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       admin,
       operation: "LoadSalesPortalB2BContext",
       query: baseMetaQuery,
-      variables: { companyId: company.shopifyCompanyId },
+      variables: { companyId: toShopifyCompanyGid(company.shopifyCompanyId) },
     });
     const contacts = baseMetaData.company?.contacts?.edges || [];
     const matchCustGid = `gid://shopify/Customer/${customerId}`;
@@ -334,7 +335,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       taxExempt: true,
       purchasingEntity: {
         purchasingCompany: {
-          companyId: company.shopifyCompanyId,
+          companyId: toShopifyCompanyGid(company.shopifyCompanyId),
           companyLocationId,
           companyContactId
         }
@@ -697,7 +698,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           "Content-Type": "application/json",
           "X-Shopify-Access-Token": token,
         },
-        body: JSON.stringify({ query: baseMetaQuery, variables: { companyId: company.shopifyCompanyId } }),
+        body: JSON.stringify({ query: baseMetaQuery, variables: { companyId: toShopifyCompanyGid(company.shopifyCompanyId) } }),
       });
       const baseMetaData = await baseMetaRes.json();
       

@@ -1,5 +1,17 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
+/**
+ * Normalizes a raw company ID or malformed GID into a proper Shopify Company GID.
+ * Accepts: "4545216571", "gid://shopify/Company/4545216571", or partial formats.
+ */
+export function toShopifyCompanyGid(companyId: string | null | undefined): string | null {
+  if (!companyId) return null;
+  if (companyId.startsWith("gid://shopify/Company/")) return companyId;
+  const match = companyId.match(/(\d+)$/);
+  if (match) return `gid://shopify/Company/${match[1]}`;
+  return null;
+}
+
 // Type for GraphQL response
 type GraphQLResponse<T = unknown> = {
   data?: T;

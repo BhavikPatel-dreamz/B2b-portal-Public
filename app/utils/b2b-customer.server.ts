@@ -4,12 +4,94 @@ import { getStoreByDomain } from "../services/store.server";
 import { createUser } from "../services/user.server";
 import { calculateAvailableCredit } from "app/services/creditService";
 
-
 // Type for GraphQL response
 type GraphQLResponse<T = unknown> = {
   data?: T;
   errors?: Array<{ message: string }>;
 };
+
+type CustomerExistsGraphQLResponse = GraphQLResponse<{
+  customers?: {
+    edges?: Array<{
+      node: {
+        id: string;
+        email: string;
+        firstName?: string | null;
+        lastName?: string | null;
+        phone?: string | null;
+        metafields?: {
+          edges?: Array<{
+            node: { namespace: string; key: string; value: string };
+          }>;
+        } | null;
+      };
+    }>;
+  };
+}>;
+
+type CompanyExistsGraphQLResponse = GraphQLResponse<{
+  companies?: {
+    nodes?: Array<{
+      id: string;
+      name: string;
+      externalId?: string | null;
+    }>;
+  };
+}>;
+
+type CustomerCreateGraphQLResponse = GraphQLResponse<{
+  customerCreate?: {
+    customer?: {
+      id: string;
+      email?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      phone?: string | null;
+    } | null;
+    userErrors?: Array<{ field?: string[] | null; message: string }>;
+  };
+}>;
+
+type CompanyCreateGraphQLResponse = GraphQLResponse<{
+  companyCreate?: {
+    company?: {
+      id: string;
+      name: string;
+      externalId?: string | null;
+      updatedAt?: string | null;
+    } | null;
+    userErrors?: Array<{ field?: string[] | null; message: string }>;
+  };
+}>;
+
+type CompanyAssignLocationsGraphQLResponse = GraphQLResponse<{
+  companyAssignLocations?: {
+    company?: {
+      id: string;
+      name: string;
+      locations?: {
+        edges?: Array<{
+          node: { id: string; name: string };
+        }>;
+      } | null;
+    } | null;
+    userErrors?: Array<{ field?: string[] | null; message: string }>;
+  };
+}>;
+
+type CustomerUpdateGraphQLResponse = GraphQLResponse<{
+  customerUpdate?: {
+    customer?: {
+      id: string;
+      metafields?: {
+        edges?: Array<{
+          node: { namespace: string; key: string; value: string };
+        }>;
+      } | null;
+    } | null;
+    userErrors?: Array<{ field?: string[] | null; message: string }>;
+  };
+}>;
 
 /**
  * Check if a Shopify customer exists by email
@@ -49,7 +131,7 @@ export async function checkCustomerExists(
 
   try {
     const response = await admin.graphql(query, { variables });
-    const data = (await response.json()) as GraphQLResponse;
+    const data = (await response.json()) as CustomerExistsGraphQLResponse;
 
     if (data.errors) {
       console.error("Shopify GraphQL errors:", data.errors);
@@ -69,11 +151,11 @@ export async function checkCustomerExists(
           firstName: customer.firstName,
           lastName: customer.lastName,
           phone: customer.phone,
-          metafields: customer.metafields.edges.map(
+          metafields: customer.metafields?.edges?.map(
             (edge: {
               node: { namespace: string; key: string; value: string };
             }) => edge.node,
-          ),
+          ) || [],
         },
       };
     }
@@ -132,7 +214,7 @@ export async function checkCompanyExists(
       },
     });
 
-    const json = (await res.json()) as GraphQLResponse;
+    const json = (await res.json()) as CompanyExistsGraphQLResponse;
 
     if (json.errors?.length) {
       return { success: false, error: json.errors[0].message };
@@ -196,7 +278,7 @@ export async function createShopifyCustomer(
     );
 
     const response = await admin.graphql(mutation, { variables });
-    const data = (await response.json()) as GraphQLResponse;
+    const data = (await response.json()) as CustomerCreateGraphQLResponse;
 
     console.log("Create Customer Response:", JSON.stringify(data, null, 2));
 
@@ -210,10 +292,7 @@ export async function createShopifyCustomer(
       return {
         success: false,
         error: errors
-          .map(
-            (e: { field: string; message: string }) =>
-              `${e.field}: ${e.message}`,
-          )
+          .map((e) => `${(e.field || []).join(".")}: ${e.message}`)
           .join(", "),
       };
     }
@@ -283,14 +362,14 @@ export async function createShopifyCompany(
   };
 
   const res = await admin.graphql(mutation, { variables });
-  const json = await res.json();
+    const json = (await res.json()) as CompanyCreateGraphQLResponse;
 
   const errors = json.data?.companyCreate?.userErrors;
   if (errors?.length) {
     return { success: false, error: errors[0].message };
   }
 
-  return { success: true, company: json.data.companyCreate.company };
+  return { success: true, company: json.data?.companyCreate?.company };
 }
 
 export async function assignCompanyToCustomer(
@@ -299,7 +378,6 @@ export async function assignCompanyToCustomer(
   companyId: string,
 ) {
   try {
-    // Step 1: Get or create company location
     const locationQuery = `
       query getCompanyLocations($companyId: ID!) {
         company(id: $companyId) {
@@ -315,15 +393,71 @@ export async function assignCompanyToCustomer(
       }
     `;
 
-    const locationRes = await admin.graphql(locationQuery, {
-      variables: { companyId },
-    });
+    const companyQuery = `
+      query getCompany($companyId: ID!) {
+        company(id: $companyId) {
+          contactRoles(first: 10) {
+            edges {
+              node {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    `;
 
-    const locationJson = await locationRes.json();
+    const [locationRes, companyRes] = await Promise.all([
+      admin.graphql(locationQuery, { variables: { companyId } }),
+      admin.graphql(companyQuery, { variables: { companyId } }),
+    ]);
+
+    const [locationJson, companyJson] = (await Promise.all([
+      locationRes.json(),
+      companyRes.json(),
+    ])) as [
+      GraphQLResponse<{
+        company?: {
+          locations?: {
+            edges?: Array<{
+              node: { id: string; name: string };
+            }>;
+          } | null;
+        } | null;
+      }>,
+      GraphQLResponse<{
+        company?: {
+          contactRoles?: {
+            edges?: Array<{
+              node: { id: string; name: string };
+            }>;
+          } | null;
+        } | null;
+      }>,
+    ];
+
+    if (locationJson.errors?.length) {
+      return {
+        success: false,
+        error: "Failed to query company locations from Shopify.",
+        step: "getCompanyLocations",
+        details: locationJson.errors,
+      };
+    }
+
+    if (companyJson.errors?.length) {
+      return {
+        success: false,
+        error: "Failed to query company contact roles from Shopify.",
+        step: "getRoles",
+        details: companyJson.errors,
+      };
+    }
+
     let companyLocationId =
       locationJson.data?.company?.locations?.edges?.[0]?.node?.id;
 
-    // If no location exists, create one
     if (!companyLocationId) {
       const createLocationMutation = `
         mutation companyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
@@ -349,7 +483,22 @@ export async function assignCompanyToCustomer(
         },
       });
 
-      const createLocationJson = await createLocationRes.json();
+      const createLocationJson =
+        (await createLocationRes.json()) as GraphQLResponse<{
+          companyLocationCreate?: {
+            companyLocation?: { id: string; name: string } | null;
+            userErrors?: Array<{ field?: string[] | null; message: string }>;
+          };
+        }>;
+      if (createLocationJson.errors?.length) {
+        return {
+          success: false,
+          error: "Failed to create a company location in Shopify.",
+          step: "createLocation",
+          details: createLocationJson.errors,
+        };
+      }
+
       const createLocationPayload =
         createLocationJson.data?.companyLocationCreate;
 
@@ -361,40 +510,27 @@ export async function assignCompanyToCustomer(
         };
       }
 
+      if (!createLocationPayload?.companyLocation?.id) {
+        return {
+          success: false,
+          error: "Failed to create or fetch the company location from Shopify.",
+          step: "createLocation",
+          details: createLocationJson,
+        };
+      }
+
       companyLocationId = createLocationPayload.companyLocation.id;
     }
 
-    // Step 2: Get available roles
-    const companyQuery = `
-      query getCompany($companyId: ID!) {
-        company(id: $companyId) {
-          contactRoles(first: 10) {
-            edges {
-              node {
-                id
-                name
-              }
-            }
-          }
-        }
-      }
-    `;
-
-    const companyRes = await admin.graphql(companyQuery, {
-      variables: { companyId },
-    });
-
-    const companyJson = await companyRes.json();
     const roles = companyJson.data?.company?.contactRoles?.edges || [];
-
-    // Find "Member" role or use the first available role
+    const normalizedRoleName = (name: string) => name?.trim().toLowerCase();
     let companyContactRoleId = roles.find(
       (edge: { node: { name: string; id: string } }) =>
-        edge.node.name.toLowerCase() === "Company Admin",
+        normalizedRoleName(edge.node.name) === "company admin",
     )?.node?.id;
 
-    if (!companyContactRoleId && roles.length > 0) {
-      companyContactRoleId = roles[0].node.id;
+    if (!companyContactRoleId) {
+      companyContactRoleId = roles[0]?.node?.id;
     }
 
     if (!companyContactRoleId) {
@@ -405,7 +541,6 @@ export async function assignCompanyToCustomer(
       };
     }
 
-    // Step 3: Assign customer as a contact to the company
     const assignContactMutation = `
       mutation companyAssignCustomerAsContact(
         $companyId: ID!
@@ -430,20 +565,107 @@ export async function assignCompanyToCustomer(
       variables: { companyId, customerId },
     });
 
-    const contactJson = await contactRes.json();
-    const contactPayload = contactJson.data?.companyAssignCustomerAsContact;
-
-    if (contactPayload?.userErrors?.length) {
+    const contactJson = (await contactRes.json()) as GraphQLResponse<{
+      companyAssignCustomerAsContact?: {
+        companyContact?: { id: string } | null;
+        userErrors?: Array<{ field?: string[] | null; message: string }>;
+      };
+    }>;
+    if (contactJson.errors?.length) {
       return {
         success: false,
-        error: contactPayload.userErrors[0].message,
+        error: "Failed to assign customer to company as a contact.",
         step: "assignContact",
+        details: contactJson.errors,
       };
     }
 
-    const companyContactId = contactPayload.companyContact.id;
+    let companyContactId =
+      contactJson.data?.companyAssignCustomerAsContact?.companyContact?.id;
+    let wasAlreadyContact = false;
 
-    // Step 4: Assign role and location to the contact
+    if (
+      !companyContactId &&
+      contactJson.data?.companyAssignCustomerAsContact?.userErrors?.length
+    ) {
+      const errorMessage: string =
+        contactJson.data.companyAssignCustomerAsContact.userErrors[0].message;
+      const alreadyAssociated =
+        errorMessage.toLowerCase().includes("already associated") ||
+        errorMessage.toLowerCase().includes("already");
+
+      if (!alreadyAssociated) {
+        return {
+          success: false,
+          error: errorMessage,
+          step: "assignContact",
+        };
+      }
+
+      const existingContactRes = await admin.graphql(
+        `
+          query getCompanyContacts($companyId: ID!) {
+            company(id: $companyId) {
+              contacts(first: 50) {
+                edges {
+                  node {
+                    id
+                    customer {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `,
+        { variables: { companyId } },
+      );
+
+      const existingContactJson = (await existingContactRes.json()) as GraphQLResponse<{
+        company?: {
+          contacts?: {
+            edges?: Array<{
+              node: { id: string; customer: { id: string } };
+            }>;
+          } | null;
+        } | null;
+      }>;
+      const contacts:
+        Array<{ node: { id: string; customer: { id: string } } }> =
+        existingContactJson?.data?.company?.contacts?.edges || [];
+
+      const normalizeId = (id: string) => id?.split("/").pop()?.trim() || id;
+      const normalizedCustomerId = normalizeId(customerId);
+      const matchingContact = contacts.find(
+        (edge) => normalizeId(edge.node.customer?.id) === normalizedCustomerId,
+      );
+
+      if (matchingContact) {
+        companyContactId = matchingContact.node.id;
+        wasAlreadyContact = true;
+      } else if (contacts.length === 1) {
+        companyContactId = contacts[0].node.id;
+        wasAlreadyContact = true;
+      } else {
+        return {
+          success: false,
+          error: "Could not find existing company contact for this customer",
+          step: "getExistingContact",
+        };
+      }
+    }
+
+    if (!companyContactId) {
+      return {
+        success: false,
+        error:
+          "Shopify did not return a valid company contact after assignment.",
+        step: "assignContact",
+        details: contactJson,
+      };
+    }
+
     const assignRoleMutation = `
       mutation companyContactAssignRole(
         $companyContactId: ID!
@@ -482,18 +704,41 @@ export async function assignCompanyToCustomer(
       },
     });
 
-    const roleJson = await roleRes.json();
-    const rolePayload = roleJson.data?.companyContactAssignRole;
-
-    if (rolePayload?.userErrors?.length) {
+    const roleJson = (await roleRes.json()) as GraphQLResponse<{
+      companyContactAssignRole?: {
+        companyContactRoleAssignment?: {
+          id: string;
+          role: { id: string; name: string };
+          companyLocation: { id: string; name: string };
+        } | null;
+        userErrors?: Array<{ field?: string[] | null; message: string }>;
+      };
+    }>;
+    if (roleJson.errors?.length) {
       return {
         success: false,
-        error: rolePayload.userErrors[0].message,
+        error: "Failed to assign the role to the company contact.",
         step: "assignRole",
+        details: roleJson.errors,
       };
     }
 
-    // Step 5: Assign this contact as the main contact
+    const rolePayload = roleJson.data?.companyContactAssignRole;
+    if (rolePayload?.userErrors?.length) {
+      const roleErrorMessage: string = rolePayload.userErrors[0].message;
+      const alreadyAssigned =
+        roleErrorMessage.toLowerCase().includes("already been assigned") ||
+        roleErrorMessage.toLowerCase().includes("already assigned");
+
+      if (!alreadyAssigned) {
+        return {
+          success: false,
+          error: roleErrorMessage,
+          step: "assignRole",
+        };
+      }
+    }
+
     const assignMainContactMutation = `
       mutation companyAssignMainContact(
         $companyId: ID!
@@ -530,22 +775,59 @@ export async function assignCompanyToCustomer(
       variables: { companyId, companyContactId },
     });
 
-    const mainContactJson = await mainContactRes.json();
-    const mainContactPayload = mainContactJson.data?.companyAssignMainContact;
-
-    if (mainContactPayload?.userErrors?.length) {
+    const mainContactJson = (await mainContactRes.json()) as GraphQLResponse<{
+      companyAssignMainContact?: {
+        company?: {
+          id: string;
+          name: string;
+          externalId?: string | null;
+          mainContact?: {
+            id: string;
+            customer: {
+              id: string;
+              firstName: string | null;
+              lastName: string | null;
+              email: string;
+            };
+          } | null;
+          updatedAt?: string | null;
+        } | null;
+        userErrors?: Array<{ field?: string[] | null; message: string }>;
+      };
+    }>;
+    if (mainContactJson.errors?.length) {
       return {
         success: false,
-        error: mainContactPayload.userErrors[0].message,
+        error: "Failed to assign the main contact on Shopify.",
         step: "assignMainContact",
+        details: mainContactJson.errors,
       };
+    }
+
+    const mainContactPayload = mainContactJson.data?.companyAssignMainContact;
+    if (mainContactPayload?.userErrors?.length) {
+      const mainContactError: string = mainContactPayload.userErrors[0].message;
+      const alreadyMain =
+        mainContactError.toLowerCase().includes("already") ||
+        mainContactError.toLowerCase().includes("main contact");
+
+      if (!alreadyMain) {
+        return {
+          success: false,
+          error: mainContactError,
+          step: "assignMainContact",
+        };
+      }
     }
 
     return {
       success: true,
+      wasAlreadyContact,
       companyContactId,
-      roleAssignment: rolePayload.companyContactRoleAssignment,
-      company: mainContactPayload.company,
+      company: mainContactPayload?.company,
+      message: wasAlreadyContact
+        ? "Customer was already assigned to the company and is now set as the main contact."
+        : "Customer assigned as main contact successfully",
     };
   } catch (error) {
     console.error("Error in assignCompanyToCustomer:", error);
@@ -597,7 +879,7 @@ export async function assignLocationsToCompany(
       },
     });
 
-    const data = (await response.json()) as GraphQLResponse;
+    const data = (await response.json()) as CustomerUpdateGraphQLResponse;
 
     /* USER ERRORS */
     if (data.data?.companyAssignLocations?.userErrors?.length) {
@@ -963,7 +1245,34 @@ export async function checkCustomerIsB2BInShopifyByREST(
       };
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as GraphQLResponse<{
+      company?: {
+        contacts?: {
+          edges?: Array<{
+            node: {
+              id: string;
+              title: string;
+              customer: {
+                id: string;
+                firstName: string;
+                lastName: string;
+                email: string;
+                phone: string;
+                metafield: { value: string; type: string };
+                roleAssignments?: {
+                  edges?: Array<{
+                    node?: {
+                      role?: { id: string; name: string } | null;
+                      companyLocation?: { id: string; name: string } | null;
+                    } | null;
+                  }>;
+                } | null;
+              };
+            };
+          }>;
+        } | null;
+      } | null;
+    }>;
     const customer = data.customer;
 
     if (!customer) {
@@ -1358,13 +1667,13 @@ export async function getCustomerCompanyInfo(
 
     if (customerData.errors) {
       console.error("GraphQL Errors:", customerData.errors);
-      return { 
-        hasCompany: false, 
+      return {
+        hasCompany: false,
         error: customerData.errors,
         debugInfo: {
           query: customerQuery,
-          errors: customerData.errors
-        }
+          errors: customerData.errors,
+        },
       };
     }
 
@@ -1438,10 +1747,11 @@ export async function getCustomerCompanyInfo(
       `gid://shopify/Customer/${customerId}`;
 
     // Check if user is Ordering Only (restrictive role)
-    const isOrderingOnly = primaryRoles.includes("ordering only") &&
-                          !hasPrimaryCompanyAdminRole &&
-                          !isPrimaryMainContact &&
-                          !primaryRoles.includes("location admin");
+    const isOrderingOnly =
+      primaryRoles.includes("ordering only") &&
+      !hasPrimaryCompanyAdminRole &&
+      !isPrimaryMainContact &&
+      !primaryRoles.includes("location admin");
 
     const hasPrimaryUnrestrictedLocationAccess =
       (isPrimaryMainContact || hasPrimaryCompanyAdminRole) &&
@@ -1497,7 +1807,9 @@ export async function getCustomerCompanyInfo(
     const shopId = storeRecord?.id || "";
 
     // Fetch company accounts for ALL associated companies to get their internal IDs
-    const associatedCompanyGids = companyProfiles.map((p: any) => p.company?.id as string).filter(Boolean);
+    const associatedCompanyGids = companyProfiles
+      .map((p: any) => p.company?.id as string)
+      .filter(Boolean);
     const companyAccounts = await prisma.companyAccount.findMany({
       where: {
         shopId,
@@ -1507,7 +1819,7 @@ export async function getCustomerCompanyInfo(
     });
 
     const companyAccountMap = new Map(
-      companyAccounts.map(ca => [ca.shopifyCompanyId, ca])
+      companyAccounts.map((ca) => [ca.shopifyCompanyId, ca]),
     );
 
     const companyAccount = companyAccountMap.get(primaryCompanyGid);
@@ -1565,7 +1877,13 @@ export async function getCustomerCompanyInfo(
               where: {
                 companyId: companyAccount.id,
                 orderStatus: "draft",
-                ...(isOrderingOnly ? { createdByUser: { shopifyCustomerId: `gid://shopify/Customer/${customerId}` } } : {})
+                ...(isOrderingOnly
+                  ? {
+                      createdByUser: {
+                        shopifyCustomerId: `gid://shopify/Customer/${customerId}`,
+                      },
+                    }
+                  : {}),
               },
             })
           : Promise.resolve([]),
@@ -1794,6 +2112,12 @@ export async function getCompanyCustomers(
     query?: string; // Search query
   } = {},
 ) {
+  const normalizedCompanyId = companyId.startsWith("gid://")
+    ? companyId
+    : companyId.match(/(\d+)$/)
+      ? `gid://shopify/Company/${companyId.match(/(\d+)$/)![1]}`
+      : companyId;
+
   try {
     const {
       first = 10,
@@ -1819,7 +2143,7 @@ export async function getCompanyCustomers(
 
     const query = `
       query {
-        company(id: "${companyId}") {
+        company(id: "${normalizedCompanyId}") {
           id
           name
           contacts(${queryArgs.join(", ")}) {
@@ -1992,10 +2316,16 @@ async function assignRoleToCompanyContact(
   shopName: string,
   accessToken: string,
 ) {
+  const normalizedCompanyId = companyId.startsWith("gid://")
+    ? companyId
+    : companyId.match(/(\d+)$/)
+      ? `gid://shopify/Company/${companyId.match(/(\d+)$/)![1]}`
+      : companyId;
+
   // 1. Fetch Company Roles to find the ID for the given name
   const rolesQuery = `
     query {
-      company(id: "${companyId}") {
+      company(id: "${normalizedCompanyId}") {
         roles(first: 20) {
           edges {
             node {
@@ -2269,7 +2599,7 @@ async function checkCompanyContactExists(
   try {
     const query = `
       query {
-        company(id: "${companyId}") {
+        company(id: "${normalizedCompanyId}") {
           contacts(first: 250) {
             edges {
               node {
@@ -3088,10 +3418,16 @@ export async function getCompanyLocations(
   shopName: string,
   accessToken: string,
 ) {
+  const normalizedCompanyId = companyId.startsWith("gid://")
+    ? companyId
+    : companyId.match(/(\d+)$/)
+      ? `gid://shopify/Company/${companyId.match(/(\d+)$/)![1]}`
+      : companyId;
+
   try {
     const query = `
   query {
-    company(id: "${companyId}") {
+    company(id: "${normalizedCompanyId}") {
       id
       name
       contacts(first: 250) {
@@ -5676,7 +6012,10 @@ export async function updateCompanyLocation(
       }
 
       if (Object.keys(input).length > 0) {
-        console.log("📝 [updateCompanyLocation] Updating basic fields:", JSON.stringify({ locationId, input }, null, 2));
+        console.log(
+          "📝 [updateCompanyLocation] Updating basic fields:",
+          JSON.stringify({ locationId, input }, null, 2),
+        );
 
         const response = await fetch(
           `https://${shopName}/admin/api/2025-01/graphql.json`,
@@ -5694,8 +6033,14 @@ export async function updateCompanyLocation(
         );
 
         const result = await response.json();
-        if (result.errors || result.data?.companyLocationUpdate?.userErrors?.length > 0) {
-          console.error("❌ [updateCompanyLocation] Basic update error:", JSON.stringify(result, null, 2));
+        if (
+          result.errors ||
+          result.data?.companyLocationUpdate?.userErrors?.length > 0
+        ) {
+          console.error(
+            "❌ [updateCompanyLocation] Basic update error:",
+            JSON.stringify(result, null, 2),
+          );
         } else {
           console.log("✅ [updateCompanyLocation] Basic update success");
         }
@@ -5709,10 +6054,10 @@ export async function updateCompanyLocation(
           );
         }
       }
-      }
+    }
 
-      // Step 2: Update address if any address field is provided (including firstName and lastName)
-      const hasAddressUpdate =
+    // Step 2: Update address if any address field is provided (including firstName and lastName)
+    const hasAddressUpdate =
       locationData.address1 !== undefined ||
       locationData.address2 !== undefined ||
       locationData.city !== undefined ||
@@ -5722,8 +6067,11 @@ export async function updateCompanyLocation(
       locationData.firstName !== undefined ||
       locationData.lastName !== undefined;
 
-      if (hasAddressUpdate) {
-      console.log("🔍 [updateCompanyLocation] Fetching existing address for location:", locationId);
+    if (hasAddressUpdate) {
+      console.log(
+        "🔍 [updateCompanyLocation] Fetching existing address for location:",
+        locationId,
+      );
       // First, get existing address
       const queryMutation = `
         query getCompanyLocation($id: ID!) {
@@ -5761,7 +6109,10 @@ export async function updateCompanyLocation(
       const queryResult = await queryResponse.json();
       const existingLocation = queryResult.data?.companyLocation;
       if (!existingLocation) {
-        console.error("❌ [updateCompanyLocation] Location not found in Shopify:", locationId);
+        console.error(
+          "❌ [updateCompanyLocation] Location not found in Shopify:",
+          locationId,
+        );
         return { error: "Location not found in Shopify" };
       }
 
@@ -5780,7 +6131,8 @@ export async function updateCompanyLocation(
         lastName?: string;
       } = {
         address1:
-          locationData.address1 !== undefined && locationData.address1.trim() !== ""
+          locationData.address1 !== undefined &&
+          locationData.address1.trim() !== ""
             ? locationData.address1
             : existingShipping.address1 || "Pending",
         city:
@@ -5792,18 +6144,25 @@ export async function updateCompanyLocation(
             ? locationData.zip
             : existingShipping.zip || "00000",
         countryCode:
-          locationData.country !== undefined && locationData.country.trim() !== ""
+          locationData.country !== undefined &&
+          locationData.country.trim() !== ""
             ? locationData.country
             : existingShipping.country || "US",
       };
 
-      if (locationData.firstName !== undefined && locationData.firstName.trim() !== "") {
+      if (
+        locationData.firstName !== undefined &&
+        locationData.firstName.trim() !== ""
+      ) {
         addressInput.firstName = locationData.firstName;
       } else if (existingShipping.firstName) {
         addressInput.firstName = existingShipping.firstName;
       }
 
-      if (locationData.lastName !== undefined && locationData.lastName.trim() !== "") {
+      if (
+        locationData.lastName !== undefined &&
+        locationData.lastName.trim() !== ""
+      ) {
         addressInput.lastName = locationData.lastName;
       } else if (existingShipping.lastName) {
         addressInput.lastName = existingShipping.lastName;
@@ -5825,7 +6184,10 @@ export async function updateCompanyLocation(
         addressInput.zoneCode = provinceValue;
       }
 
-      console.log("📍 [updateCompanyLocation] Assigning address:", JSON.stringify(addressInput, null, 2));
+      console.log(
+        "📍 [updateCompanyLocation] Assigning address:",
+        JSON.stringify(addressInput, null, 2),
+      );
 
       const addressMutation = `
         mutation companyLocationAssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
@@ -5865,13 +6227,21 @@ export async function updateCompanyLocation(
       );
 
       const addressResult = await addressResponse.json();
-      if (addressResult.errors || addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0) {
-        console.error("❌ [updateCompanyLocation] Address assignment error:", JSON.stringify(addressResult, null, 2));
+      if (
+        addressResult.errors ||
+        addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0
+      ) {
+        console.error(
+          "❌ [updateCompanyLocation] Address assignment error:",
+          JSON.stringify(addressResult, null, 2),
+        );
       } else {
         console.log("✅ [updateCompanyLocation] Address assignment success");
       }
 
-      if (addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0) {
+      if (
+        addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0
+      ) {
         hasErrors = true;
         errors.push(
           ...addressResult.data.companyLocationAssignAddress.userErrors.map(
@@ -5879,23 +6249,23 @@ export async function updateCompanyLocation(
           ),
         );
       }
-      }
+    }
 
-      // Step 3: Update recipient and/or isDefault metafields if provided
-      const metafieldsToUpdate: {
+    // Step 3: Update recipient and/or isDefault metafields if provided
+    const metafieldsToUpdate: {
       ownerId: string;
       namespace: string;
       key: string;
       value: string;
       type: string;
-      }[] = [];
+    }[] = [];
 
-      // Only add recipient if it's not blank. Shopify single_line_text_field can't be blank.
-      if (
+    // Only add recipient if it's not blank. Shopify single_line_text_field can't be blank.
+    if (
       locationData.recipient !== undefined &&
       locationData.recipient !== null &&
       locationData.recipient.trim() !== ""
-      ) {
+    ) {
       metafieldsToUpdate.push({
         ownerId: locationId,
         namespace: "custom",
@@ -5903,9 +6273,9 @@ export async function updateCompanyLocation(
         value: locationData.recipient.trim(),
         type: "single_line_text_field",
       });
-      }
+    }
 
-      if (locationData.isDefault !== undefined) {
+    if (locationData.isDefault !== undefined) {
       metafieldsToUpdate.push({
         ownerId: locationId,
         namespace: "custom",
@@ -5913,10 +6283,13 @@ export async function updateCompanyLocation(
         value: locationData.isDefault ? "true" : "false",
         type: "single_line_text_field",
       });
-      }
+    }
 
-      if (metafieldsToUpdate.length > 0) {
-      console.log("🏷️ [updateCompanyLocation] Setting metafields:", JSON.stringify(metafieldsToUpdate, null, 2));
+    if (metafieldsToUpdate.length > 0) {
+      console.log(
+        "🏷️ [updateCompanyLocation] Setting metafields:",
+        JSON.stringify(metafieldsToUpdate, null, 2),
+      );
       const metafieldMutation = `
         mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
@@ -6211,10 +6584,39 @@ interface OrderNode {
   purchasingEntity: {
     id: string;
     email: string;
+    location?: {
+      id: string;
+      name: string;
+    } | null;
   };
   location: {
     id: string;
     name: string;
+  } | null;
+  locationId?: string;
+  shippingAddress?: {
+    company?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    province?: string | null;
+    country?: string | null;
+    zip?: string | null;
+    phone?: string | null;
+  } | null;
+  billingAddress?: {
+    company?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    province?: string | null;
+    country?: string | null;
+    zip?: string | null;
+    phone?: string | null;
   } | null;
   financialStatus: string;
   fulfillmentStatus: string;
@@ -6336,21 +6738,47 @@ export async function getAdvancedCompanyOrders(
         const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         dateQuery = `created_at:>=${sevenDaysAgo.toISOString()}`;
       } else if (preset === "last_30_days") {
-        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const thirtyDaysAgo = new Date(
+          now.getTime() - 30 * 24 * 60 * 60 * 1000,
+        );
         dateQuery = `created_at:>=${thirtyDaysAgo.toISOString()}`;
       } else if (preset === "this_month" || preset === "current_month") {
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
         dateQuery = `created_at:>=${firstDay.toISOString()}`;
       } else if (preset === "last_month") {
-        const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        const firstDayLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          1,
+        );
+        const lastDayLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          0,
+          23,
+          59,
+          59,
+          999,
+        );
         dateQuery = `created_at:>=${firstDayLastMonth.toISOString()} AND created_at:<=${lastDayLastMonth.toISOString()}`;
       } else if (preset === "last_3_months") {
-        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+        const threeMonthsAgo = new Date(
+          now.getFullYear(),
+          now.getMonth() - 3,
+          1,
+        );
         dateQuery = `created_at:>=${threeMonthsAgo.toISOString()}`;
       } else if (preset === "last_year") {
         const lastYear = new Date(now.getFullYear() - 1, 0, 1);
-        const endLastYear = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+        const endLastYear = new Date(
+          now.getFullYear() - 1,
+          11,
+          31,
+          23,
+          59,
+          59,
+          999,
+        );
         dateQuery = `created_at:>=${lastYear.toISOString()} AND created_at:<=${endLastYear.toISOString()}`;
       } else if (preset === "all_time" || preset === "all") {
         // No dateQuery filter needed for all_time
@@ -6559,7 +6987,7 @@ export async function getAdvancedCompanyOrders(
         }),
       },
     );
-console.log("Fetched orders data", { queryString });
+    console.log("Fetched orders data", { queryString });
     const data = await response.json();
 
     if (data.errors) {
@@ -6588,7 +7016,10 @@ console.log("Fetched orders data", { queryString });
             order.billingAddress?.company || order.shippingAddress?.company;
         }
 
-        const source = (order as any).customAttributes?.find((attr: any) => attr.key === "_source")?.value || null;
+        const source =
+          (order as any).customAttributes?.find(
+            (attr: any) => attr.key === "_source",
+          )?.value || null;
 
         return {
           ...order,

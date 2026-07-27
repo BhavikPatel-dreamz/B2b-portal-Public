@@ -413,6 +413,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         message: result.message,
         companiesWithCustomers: result.companiesWithCustomers,
         companiesWithLocations: result.companiesWithLocations,
+        companiesWithSyncedUsers: result.companiesWithSyncedUsers,
+        usersSynced: result.usersSynced,
       });
     } catch (error: any) {
       console.error("Error syncing companies:", error);

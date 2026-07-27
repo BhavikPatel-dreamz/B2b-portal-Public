@@ -58,6 +58,13 @@ type CompanyUserOption = {
   isGlobalAdmin: boolean;
 };
 
+type ShopifyCustomerOption = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+};
+
 type ShopifyCatalogNode = {
   id: string;
   title: string;
@@ -84,6 +91,14 @@ type CompanyCatalogsResponse = {
   errors?: unknown;
   data?: {
     company?: {
+      mainContact?: {
+        customer?: {
+          id: string;
+          firstName?: string | null;
+          lastName?: string | null;
+          email?: string | null;
+        } | null;
+      } | null;
       locations?: { nodes?: ShopifyCatalogLocation[] } | null;
     } | null;
   };
@@ -104,6 +119,45 @@ function formatLocationAddress(
   ]
     .map((line) => String(line || "").trim())
     .filter(Boolean);
+}
+
+function mapShopifyCustomer(c: ShopifyCompanyCustomer): CompanyUserOption {
+  const fallbackName = c.name?.trim() || "";
+  const [fallbackFirstName, ...fallbackLastParts] =
+    fallbackName.split(/\s+/).filter(Boolean);
+  const firstName = c.customer?.firstName?.trim() || fallbackFirstName || null;
+  const lastName =
+    c.customer?.lastName?.trim() || fallbackLastParts.join(" ") || null;
+  const locationRoleNames =
+    c.locationRoles?.map((role) => role.roleName || "").filter(Boolean) || [];
+  const roleNames = [
+    ...(c.roles || []),
+    ...locationRoleNames,
+    ...(c.customer?.roleAssignments?.edges
+      ?.map((edge) => edge.node?.role?.name || "")
+      .filter(Boolean) || []),
+  ];
+  const adminRole =
+    roleNames.find((role) => role.toLowerCase().includes("admin")) || null;
+  const companyRole = adminRole || roleNames[0] || "Ordering only";
+  const customerId =
+    (c.customerId || c.customer?.id || c.id || "").split("/").pop() || "";
+  const locationNames =
+    c.locationNames ||
+    c.locationRoles?.map((role) => role.locationName || "").filter(Boolean) ||
+    [];
+
+  return {
+    id: customerId,
+    email: c.customer?.email || c.email || "",
+    firstName,
+    lastName,
+    shopifyCustomerId: customerId,
+    companyRole,
+    locationIds: c.locationIds || [],
+    locationNames,
+    isGlobalAdmin: Boolean(c.isGlobalAdmin),
+  };
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -183,6 +237,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return Response.json({ error: "Unknown intent" }, { status: 400 });
 };
 
+function getShopifyCompanyGid(companyId: string | null | undefined) {
+  if (!companyId) return null;
+
+  // Already GID
+  if (companyId.startsWith("gid://shopify/Company/")) {
+    return companyId;
+  }
+
+  // Extract number if malformed GID
+  const match = companyId.match(/(\d+)$/);
+
+  if (match) {
+    return `gid://shopify/Company/${match[1]}`;
+  }
+
+  return null;
+}
+
+
+
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
@@ -213,19 +287,38 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
   });
 
+  
+
   if (!company || !company.shop) {
     return redirect("/sales/portal");
   }
 
+  const companyGid = getShopifyCompanyGid(
+  company.shopifyCompanyId,
+);
+
+if (!companyGid) {
+  throw new Error(
+    `Invalid Shopify Company ID: ${company.shopifyCompanyId}`,
+  );
+}
+
   // Fetch real-time users directly from Shopify (fixes the issue where Shopify users aren't synced locally)
   let activeUsers: CompanyUserOption[] = [];
+  let allCompanyCustomers: ShopifyCustomerOption[] = [];
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
     const { getCompanyCustomers } =
       await import("app/utils/b2b-customer.server");
-    const companyGid = company.shopifyCompanyId?.startsWith("gid://")
-      ? company.shopifyCompanyId
-      : `gid://shopify/Company/${company.shopifyCompanyId}`;
+    // const companyGid = company.shopifyCompanyId?.startsWith("gid://")
+    //   ? company.shopifyCompanyId
+    //   : `gid://shopify/Company/${company.shopifyCompanyId}`;
+
+    const companyGid = getShopifyCompanyGid(company.shopifyCompanyId);
+
+    if (!companyGid) {
+      throw new Error("Invalid Shopify Company ID");
+    }
 
     const customersData = await getCompanyCustomers(
       companyGid,
@@ -235,64 +328,27 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     );
 
     if (!customersData.error && customersData.customers) {
-      activeUsers = customersData.customers
-        .map((c: ShopifyCompanyCustomer) => {
-          const fallbackName = c.name?.trim() || "";
-          const [fallbackFirstName, ...fallbackLastParts] =
-            fallbackName.split(/\s+/).filter(Boolean);
-          const firstName =
-            c.customer?.firstName?.trim() || fallbackFirstName || null;
-          const lastName =
-            c.customer?.lastName?.trim() ||
-            fallbackLastParts.join(" ") ||
-            null;
-          const locationRoleNames =
-            c.locationRoles
-              ?.map((role) => role.roleName || "")
-              .filter(Boolean) || [];
-          const roleNames =
-            [
-              ...(c.roles || []),
-              ...locationRoleNames,
-              ...(c.customer?.roleAssignments?.edges
-                ?.map((edge) => edge.node?.role?.name || "")
-                .filter(Boolean) || []),
-            ];
-          const adminRole =
-            roleNames.find((role) =>
-              role.toLowerCase().includes("admin"),
-            ) || null;
-          const companyRole =
-            adminRole ||
-            roleNames[0] ||
-            "Ordering only";
-          const customerId =
-            (c.customerId || c.customer?.id || c.id || "")
-            .split("/")
-            .pop() || "";
-          const locationNames =
-            c.locationNames ||
-            c.locationRoles
-              ?.map((role) => role.locationName || "")
-              .filter(Boolean) ||
-            [];
+      const mapped = customersData.customers.map((c: ShopifyCompanyCustomer) =>
+        mapShopifyCustomer(c),
+      );
 
-          return {
-            id: customerId,
-            email: c.customer?.email || c.email || "",
-            firstName,
-            lastName,
-            shopifyCustomerId: customerId,
-            companyRole,
-            locationIds: c.locationIds || [],
-            locationNames,
-            isGlobalAdmin: Boolean(c.isGlobalAdmin),
-          };
-        })
-        .filter((u: CompanyUserOption) =>
+      const adminUsers = mapped.filter(
+        (u: CompanyUserOption) =>
           u.isGlobalAdmin ||
           String(u.companyRole || "").toLowerCase().includes("admin"),
-        );
+      );
+
+      activeUsers = adminUsers.length > 0 ? adminUsers : mapped;
+
+      // Full list of company customers, used as a fallback dropdown when no admin exists
+      allCompanyCustomers = mapped
+        .filter((u: CompanyUserOption) => u.shopifyCustomerId)
+        .map((u: CompanyUserOption) => ({
+          id: u.shopifyCustomerId as string,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          email: u.email,
+        }));
     }
   }
 
@@ -308,7 +364,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     ? 0
     : Math.max(0, creditSummary.availableCredit.toNumber());
 
-  // Fetch catalogs and price lists assigned to the company locations via Shopify GraphQL
+  // Fetch catalogs, price lists, and main contact for the company via Shopify GraphQL
   let catalogs: Array<{
     id: string;
     title: string;
@@ -321,11 +377,20 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     phone: string | null;
     addressLines: string[];
   }> = [];
+  let mainContactCustomerId: string | null = null;
 
   if (company.shopifyCompanyId && company.shop.accessToken) {
     const query = `
       query GetCompanyCatalogs($companyId: ID!) {
         company(id: $companyId) {
+          mainContact {
+            customer {
+              id
+              firstName
+              lastName
+              email
+            }
+          }
           locations(first: 50) {
             nodes {
               id
@@ -359,9 +424,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     `;
 
     try {
-      const companyGid = company.shopifyCompanyId?.startsWith("gid://")
-        ? company.shopifyCompanyId
-        : `gid://shopify/Company/${company.shopifyCompanyId}`;
+      // const companyGid = company.shopifyCompanyId?.startsWith("gid://")
+      //   ? company.shopifyCompanyId
+      //   : `gid://shopify/Company/${company.shopifyCompanyId}`;
+      const companyGid = getShopifyCompanyGid(company.shopifyCompanyId);
+
+      if (!companyGid) {
+        throw new Error("Invalid Shopify Company ID");
+      }
 
       const response = await fetch(
         `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
@@ -380,40 +450,66 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
       const data = (await response.json()) as CompanyCatalogsResponse;
 
-      if (!data.errors && data.data?.company?.locations?.nodes) {
-        locations = data.data.company.locations.nodes.map((loc) => ({
-          id: loc.id,
-          name: loc.name || "Company location",
-          phone: loc.shippingAddress?.phone || loc.phone || null,
-          addressLines: formatLocationAddress(loc.shippingAddress),
-        }));
+      if (!data.errors && data.data?.company) {
+        const mainContactCustomer = data.data.company.mainContact?.customer;
+        if (mainContactCustomer?.id) {
+          mainContactCustomerId =
+            mainContactCustomer.id.split("/").pop() || null;
 
-        const uniqueCatalogs = new Map<string, ShopifyCatalogNode>();
-        const uniquePriceLists = new Map<
-          string,
-          { name: string; currency: string }
-        >();
+          // Make sure the main contact is present in the dropdown options
+          // even if getCompanyCustomers didn't return them for some reason.
+          if (
+            mainContactCustomerId &&
+            !allCompanyCustomers.some((c) => c.id === mainContactCustomerId)
+          ) {
+            allCompanyCustomers = [
+              {
+                id: mainContactCustomerId,
+                firstName: mainContactCustomer.firstName || null,
+                lastName: mainContactCustomer.lastName || null,
+                email: mainContactCustomer.email || "",
+              },
+              ...allCompanyCustomers,
+            ];
+          }
+        }
 
-        data.data.company.locations.nodes.forEach((loc) => {
-          loc.catalogs?.nodes?.forEach((cat) => {
-            if (!uniqueCatalogs.has(cat.id)) {
-              uniqueCatalogs.set(cat.id, {
-                id: cat.id,
-                title: cat.title,
-                priceList: cat.priceList,
-              });
-            }
-            if (cat.priceList && !uniquePriceLists.has(cat.priceList.name)) {
-              uniquePriceLists.set(cat.priceList.name, {
-                name: cat.priceList.name,
-                currency: cat.priceList.currency,
-              });
-            }
+        const locationNodes = data.data.company.locations?.nodes;
+        if (locationNodes) {
+          locations = locationNodes.map((loc) => ({
+            id: loc.id,
+            name: loc.name || "Company location",
+            phone: loc.shippingAddress?.phone || loc.phone || null,
+            addressLines: formatLocationAddress(loc.shippingAddress),
+          }));
+
+          const uniqueCatalogs = new Map<string, ShopifyCatalogNode>();
+          const uniquePriceLists = new Map<
+            string,
+            { name: string; currency: string }
+          >();
+
+          locationNodes.forEach((loc) => {
+            loc.catalogs?.nodes?.forEach((cat) => {
+              if (!uniqueCatalogs.has(cat.id)) {
+                uniqueCatalogs.set(cat.id, {
+                  id: cat.id,
+                  title: cat.title,
+                  priceList: cat.priceList,
+                });
+              }
+              if (cat.priceList && !uniquePriceLists.has(cat.priceList.name)) {
+                uniquePriceLists.set(cat.priceList.name, {
+                  name: cat.priceList.name,
+                  currency: cat.priceList.currency,
+                });
+              }
+            });
           });
-        });
 
-        catalogs = Array.from(uniqueCatalogs.values());
-        priceLists = Array.from(uniquePriceLists.values());
+          catalogs = Array.from(uniqueCatalogs.values());
+          priceLists = Array.from(uniquePriceLists.values());
+        }
       }
     } catch (e) {
       console.error("Failed to fetch catalogs from Shopify:", e);
@@ -431,6 +527,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       availableCredit: availableCredit.toString(),
       currencyCode: company.shop.currencyCode || "USD",
       users: activeUsers,
+      shopifyCustomers: allCompanyCustomers,
+      mainContactCustomerId,
       locations,
       catalogs,
       priceLists,
@@ -456,6 +554,8 @@ export default function CreateOrderCustomerSelection() {
       availableCredit: string;
       currencyCode: string;
       users: CompanyUserOption[];
+      shopifyCustomers: ShopifyCustomerOption[];
+      mainContactCustomerId: string | null;
       locations: Array<{
         id: string;
         name: string;
@@ -478,10 +578,12 @@ export default function CreateOrderCustomerSelection() {
     };
     mode: "order" | "quote";
   }>();
-  const [shopifyCustomers, setShopifyCustomers] = useState<Array<{id:string;firstName?:string|null;lastName?:string|null;email?:string|null}>>([]);
-  const [loadingShopifyCustomers, setLoadingShopifyCustomers] = useState(false);
-  const [selectedShopifyCustomer, setSelectedShopifyCustomer] = useState<string>("");
-  
+
+  const [selectedShopifyCustomer, setSelectedShopifyCustomer] = useState<string>(
+    company.mainContactCustomerId || "",
+  );
+  const [assigning, setAssigning] = useState(false);
+
   // Use theme palette from loader
   const theme = company.theme;
   const [selectedLocationId, setSelectedLocationId] = useState(
@@ -513,7 +615,7 @@ export default function CreateOrderCustomerSelection() {
     (companyUser) => companyUser.locationIds.length === 0,
   );
   const selectedAdmin =
-    locationAdmins[0] || globalAdmins[0] || fallbackAdmins[0] || null;
+    locationAdmins[0] || globalAdmins[0] || fallbackAdmins[0] || company.users[0] || null;
   const buildStep2Url = (customerId: string) => {
     const params = new URLSearchParams({ customerId });
     if (selectedLocationId) {
@@ -531,6 +633,32 @@ export default function CreateOrderCustomerSelection() {
       style: "currency",
       currency: company.currencyCode,
     }).format(Number(val) || 0);
+
+  const handleAssignAdmin = async () => {
+    if (!selectedShopifyCustomer) return;
+    setAssigning(true);
+    const formData = new FormData();
+    formData.append("intent", "assign_admin");
+    formData.append("customerId", selectedShopifyCustomer);
+    try {
+      const res = await fetch(window.location.href, {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin",
+      });
+      const data = await res.json();
+      if (data?.success) {
+        window.location.reload();
+      } else {
+        alert("Failed to assign customer: " + (data?.error || "Unknown"));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to assign customer");
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   return (
     <SalesPortalLayout
@@ -713,73 +841,51 @@ export default function CreateOrderCustomerSelection() {
                       No admin users found for this company.
                     </p>
 
-                    <div style={{ marginTop: 12 }}>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          // load customers via proxy
-                          if (!company.shopifyCompanyId || !company.shopDomain) return;
-                          setLoadingShopifyCustomers(true);
-                          try {
-                            const res = await fetch(
-                              `/api/company-customers?companyId=${encodeURIComponent(company.shopifyCompanyId)}&shop=${encodeURIComponent(company.shopDomain)}`,
-                              { credentials: "same-origin" },
+                    {company.shopifyCustomers.length > 0 ? (
+                      <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+                        <select
+                          value={selectedShopifyCustomer}
+                          onChange={(e) => setSelectedShopifyCustomer(e.target.value)}
+                          style={{ flex: 1, padding: 8, borderRadius: 6, border: "1px solid #d1d5db" }}
+                        >
+                          <option value="">Select a customer...</option>
+                          {company.shopifyCustomers.map((c) => {
+                            const label =
+                              [c.firstName, c.lastName].filter(Boolean).join(" ") ||
+                              c.email ||
+                              c.id;
+                            const isMainContact = c.id === company.mainContactCustomerId;
+                            return (
+                              <option key={c.id} value={c.id}>
+                                {label}
+                                {c.email ? ` — ${c.email}` : ""}
+                                {isMainContact ? " (Main contact)" : ""}
+                              </option>
                             );
-                            const data = await res.json();
-                            if (!data.error && Array.isArray(data.customers)) {
-                              setShopifyCustomers(data.customers.map((c:any) => ({ id: c.id, firstName: c.firstName, lastName: c.lastName, email: c.email })));
-                            } else {
-                              console.error("Failed to load customers:", data.error);
-                              setShopifyCustomers([]);
-                            }
-                          } catch (err) {
-                            console.error("Failed to fetch company customers:", err);
-                            setShopifyCustomers([]);
-                          } finally {
-                            setLoadingShopifyCustomers(false);
-                          }
-                        }}
-                        style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", background: "white", cursor: "pointer" }}
-                      >
-                        {loadingShopifyCustomers ? "Loading..." : "Load Shopify Customers"}
-                      </button>
-
-                      {shopifyCustomers.length > 0 && (
-                        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <select value={selectedShopifyCustomer} onChange={(e) => setSelectedShopifyCustomer(e.target.value)} style={{ padding: 8 }}>
-                            <option value="">Select a customer...</option>
-                            {shopifyCustomers.map((c) => (
-                              <option key={c.id} value={c.id}>{(c.firstName || "") + " " + (c.lastName || "") + " — " + (c.email || "")}</option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            disabled={!selectedShopifyCustomer}
-                            onClick={async () => {
-                              if (!selectedShopifyCustomer) return;
-                              const formData = new FormData();
-                              formData.append('intent', 'assign_admin');
-                              formData.append('customerId', selectedShopifyCustomer);
-                              try {
-                                const res = await fetch(window.location.href, { method: 'POST', body: formData, credentials: 'same-origin' });
-                                const data = await res.json();
-                                if (data?.success) {
-                                  window.location.reload();
-                                } else {
-                                  alert('Failed to assign customer: ' + (data?.error || 'Unknown'));
-                                }
-                              } catch (err) {
-                                console.error(err);
-                                alert('Failed to assign customer');
-                              }
-                            }}
-                            style={{ padding: '8px 12px', borderRadius: 6, background: '#111827', color: 'white', border: 'none', cursor: 'pointer' }}
-                          >
-                            Assign as Admin
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                          })}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!selectedShopifyCustomer || assigning}
+                          onClick={handleAssignAdmin}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            background: "#111827",
+                            color: "white",
+                            border: "none",
+                            cursor: assigning ? "wait" : "pointer",
+                            opacity: !selectedShopifyCustomer || assigning ? 0.6 : 1,
+                          }}
+                        >
+                          {assigning ? "Assigning..." : "Sync customer and assign"}
+                        </button>
+                      </div>
+                    ) : (
+                      <p style={{ ...styles.locationWarning, marginTop: 8 }}>
+                        No Shopify customers found for this company either.
+                      </p>
+                    )}
                   </>
                 )}
               </div>
