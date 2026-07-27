@@ -670,22 +670,26 @@ export default function CreateOrderCustomerSelection() {
         title={`${flowLabel}: ${company.name}`}
         subtitle="Step 1: Select Customer"
         companyId={company.id}
-        actions={
-          <Link
-            to={`/sales/portal?companyId=${company.id}`}
-            style={salesPortalButtonStyles.secondary}
-          >
-            Back to Overview
-          </Link>
-        }
       />
       <div style={styles.container}>
         <main style={styles.mainContent}>
           <div style={styles.pageHeader}>
-            <h1 style={styles.pageTitle}>
-              {flowLabel}: {company.name}
-            </h1>
-            <p style={styles.pageSubtitle}>Step 1: Select Customer</p>
+            <Link
+              to={`/sales/portal?companyId=${company.id}`}
+              style={styles.backLink}
+              aria-label="Back to overview"
+            >
+              <span aria-hidden="true" style={styles.backIcon}>
+                ←
+              </span>
+              <span>Back</span>
+            </Link>
+            <div>
+              <h1 style={styles.pageTitle}>
+                {flowLabel}: {company.name}
+              </h1>
+              <p style={styles.pageSubtitle}>Step 1: Select Customer</p>
+            </div>
           </div>
 
           {/* Two Column Layout */}
@@ -1091,6 +1095,9 @@ const styles = {
     margin: "0 auto",
   },
   pageHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "16px",
     marginBottom: "32px",
   },
   pageTitle: {
@@ -1105,6 +1112,24 @@ const styles = {
     fontSize: "16px",
     color: "#6b7280",
     margin: 0,
+  },
+  backLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px 14px",
+    borderRadius: "999px",
+    border: "1px solid #e5e7eb",
+    backgroundColor: "#ffffff",
+    color: "#0f172a",
+    textDecoration: "none",
+    fontSize: "14px",
+    fontWeight: 600,
+    flexShrink: 0,
+  },
+  backIcon: {
+    fontSize: "16px",
+    lineHeight: 1,
   },
   twoColGrid: {
     display: "grid",

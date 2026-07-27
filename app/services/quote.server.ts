@@ -141,7 +141,9 @@ async function generateQuoteNumber(shopId: string) {
   const seq = String(count + 1).padStart(4, "0");
   const rand = crypto.randomBytes(2).toString("hex");
   const base = `Q-${datePart}-${seq}-${rand}`;
-  const exists = await prisma.quote.findUnique({ where: { quoteNumber: base } });
+  const exists = await prisma.quote.findUnique({
+    where: { quoteNumber: base },
+  });
   if (exists) {
     return `Q-${datePart}-${seq}-${crypto.randomBytes(3).toString("hex")}`;
   }
@@ -587,8 +589,8 @@ export async function convertQuoteToOrder({
   }
 
   const completeMutation = `
-    mutation CompleteDraftOrder($id: ID!, $paymentPending: Boolean) {
-      draftOrderComplete(id: $id, paymentPending: $paymentPending) {
+    mutation CompleteDraftOrder($id: ID!) {
+      draftOrderComplete(id: $id) {
         draftOrder {
           order {
             id
@@ -610,7 +612,7 @@ export async function convertQuoteToOrder({
       },
       body: JSON.stringify({
         query: completeMutation,
-        variables: { id: draftId, paymentPending: true },
+        variables: { id: draftId },
       }),
     },
   );

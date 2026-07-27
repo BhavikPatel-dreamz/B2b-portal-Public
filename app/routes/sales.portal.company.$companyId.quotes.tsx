@@ -468,6 +468,14 @@ export default function QuoteListingPage() {
                     >
                       View
                     </Link>
+                    {quote.status === "draft" && (
+                      <Link
+                        to={`/sales/portal/company/${company.id}/quotes/${quote.id}`}
+                        style={styles.actionLink}
+                      >
+                        ✏️ Edit
+                      </Link>
+                    )}
                     <QuoteAction
                       quoteId={quote.id}
                       intent="send_quote"
@@ -641,6 +649,11 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontWeight: 700,
     padding: 0,
+  },
+  actionLink: {
+    color: "#2563eb",
+    textDecoration: "none",
+    fontWeight: 700,
   },
   error: {
     background: "#fef2f2",

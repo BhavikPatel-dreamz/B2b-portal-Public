@@ -206,12 +206,16 @@ export function SalesPortalHeader({
   subtitle,
   companyId,
   companies = [],
+  companySwitchPath,
+  allCompaniesPath,
   actions,
 }: {
   title: string;
   subtitle: ReactNode;
   companyId: string;
   companies?: SalesPortalCompany[];
+  companySwitchPath?: string;
+  allCompaniesPath?: string;
   actions?: ReactNode;
 }) {
   return (
@@ -227,7 +231,14 @@ export function SalesPortalHeader({
             value={companyId}
             onChange={(event) => {
               if (event.target.value !== companyId) {
-                window.location.href = `/sales/portal?companyId=${event.target.value}`;
+                const target = event.target.value;
+                const redirectUrl =
+                  target === "all" && allCompaniesPath
+                    ? `${allCompaniesPath}${encodeURIComponent(target)}`
+                    : companySwitchPath
+                    ? `${companySwitchPath}${encodeURIComponent(target)}`
+                    : `/sales/portal?companyId=${encodeURIComponent(target)}`;
+                window.location.href = redirectUrl;
               }
             }}
             style={styles.companySelect}

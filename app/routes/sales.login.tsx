@@ -185,9 +185,14 @@ export default function SalesLogin() {
           </button>
         </Form>
 
-        <p style={styles.footerText}>
-          Don't have an account? Contact your store admin for an invitation.
-        </p>
+        <div style={styles.footerActions}>
+          <Link to="/sales/forgot-password" style={styles.linkText}>
+            Forgot password?
+          </Link>
+          <p style={styles.footerText}>
+            Don't have an account? Contact your store admin for an invitation.
+          </p>
+        </div>
       </div>
 
       <style>{`
@@ -301,7 +306,7 @@ const styles = {
   logoImage: {
     width: "100%",
     height: "100%",
-    objectFit: "contain",
+    objectFit: "contain" as const,
   },
   logoText: {
     fontFamily: "'Poppins', sans-serif",
@@ -390,11 +395,24 @@ const styles = {
     fontWeight: 500,
     border: "1px solid #fca5a5",
   },
+  footerActions: {
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    gap: "8px",
+    marginTop: "24px",
+  },
   footerText: {
     textAlign: "center" as const,
     fontSize: "13px",
     color: "#9ca3af",
-    marginTop: "24px",
+    margin: 0,
     lineHeight: 1.5,
+  },
+  linkText: {
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#E91E63",
+    textDecoration: "none",
   },
 };

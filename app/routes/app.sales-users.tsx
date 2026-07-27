@@ -923,7 +923,9 @@ export default function SalesUsers() {
             <Button onClick={handleSyncCompanies} loading={isSyncing} disabled={isSyncing} variant="secondary">
               {isSyncing ? "Syncing..." : "Sync All Companies"}
             </Button>
-            <Button variant="primary" onClick={toggleModal}>Create Sales User</Button>
+            <Button variant="primary" onClick={toggleModal} loading={isCreating} disabled={isCreating}>
+              {isCreating ? "Creating..." : "Create Sales User"}
+            </Button>
           </div>
         </div>
         <p style={pageHeroTextStyle}>

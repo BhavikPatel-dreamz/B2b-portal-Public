@@ -614,8 +614,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         admin,
         operation: "CompleteSalesPortalDraftOrder",
         query: `#graphql
-          mutation CompleteDraftOrder($id: ID!, $paymentPending: Boolean) {
-            draftOrderComplete(id: $id, paymentPending: $paymentPending) {
+          mutation CompleteDraftOrder($id: ID!) {
+            draftOrderComplete(id: $id) {
               draftOrder {
                 order {
                   id
@@ -627,7 +627,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             }
           }
         `,
-        variables: { id: draftOrderId, paymentPending: true },
+        variables: { id: draftOrderId },
       });
       assertNoShopifyUserErrors(
         "CompleteSalesPortalDraftOrder",
@@ -970,7 +970,7 @@ export default function DraftDetailsPage() {
 
                       </tr>
                     ))}
-                    {/* <tr>
+                    <tr>
                       <td style={styles.td}>
                         <div style={styles.productInputs}>
                           <input
@@ -991,7 +991,11 @@ export default function DraftDetailsPage() {
                         </div>
                       </td>
                       <td style={styles.td}>
-                        <input name="newSku" placeholder="SKU" style={styles.smallInput} />
+                        <input
+                          name="newSku"
+                          placeholder="SKU"
+                          style={styles.smallInput}
+                        />
                       </td>
                       <td style={styles.td}>
                         <input
@@ -1034,10 +1038,10 @@ export default function DraftDetailsPage() {
                           style={styles.numberInput}
                         />
                       </td>
-                      <td colSpan={2} style={styles.td}>
+                      <td style={styles.td}>
                         Add this product on Save Changes
                       </td>
-                    </tr> */}
+                    </tr>
                   </tbody>
                 </table>
               </div>

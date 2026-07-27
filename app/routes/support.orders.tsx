@@ -82,7 +82,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
   if (status) filters.push({ orderStatus: status });
   if (paymentStatus) filters.push({ paymentStatus });
-  if (companyId) filters.push({ companyId });
+  if (companyId && companyId !== "all") filters.push({ companyId });
   if (customer) filters.push({ customerEmail: customer });
   if (agentId && accessLevel !== "agent")
     filters.push({ createdByUserId: agentId });
@@ -187,15 +187,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  const companies = user.salesCompanies.map((item) => ({
+  const userCompanies = user.salesCompanies.map((item) => ({
     id: item.company.id,
     name: item.company.name,
   }));
-  if (!companies.length) return redirect("/sales/portal");
+  if (!userCompanies.length) return redirect("/sales/portal");
+
+  const companies =
+    userCompanies.length > 1
+      ? [{ id: "all", name: "All companies" }, ...userCompanies]
+      : userCompanies;
+
+  const selectedCompanyId =
+    companyId || (userCompanies.length > 1 ? "all" : userCompanies[0].id);
+
   const currentCompany =
-    companies.find((item) => item.id === companyId) || companies[0];
+    selectedCompanyId === "all"
+      ? { id: "all", name: "All companies" }
+      : userCompanies.find((item) => item.id === selectedCompanyId) ||
+        userCompanies[0];
+
   const companyDetails = await prisma.companyAccount.findUnique({
-    where: { id: currentCompany.id },
+    where: {
+      id:
+        currentCompany.id === "all"
+          ? userCompanies[0].id
+          : currentCompany.id,
+    },
     select: { shop: { select: { themeColor: true } } },
   });
   const currentCompanyWithTheme = {
@@ -232,11 +250,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     createdOrder,
     syncWarning,
     deletedOrder,
+    selectedCompanyId,
     filters: {
       search,
       status,
       paymentStatus,
-      companyId,
+      companyId: selectedCompanyId === "all" ? "all" : selectedCompanyId,
       customer,
       agentId,
       dateFrom,
@@ -441,6 +460,7 @@ export default function CentralOrderListPage() {
         subtitle="View, track, and manage orders across your assigned companies."
         companyId={data.currentCompany.id}
         companies={data.companies}
+        companySwitchPath="/sales/portal/orders?company="
         actions={
           <Link
             to={`/sales/portal/company/${data.currentCompany.id}/create-order`}
@@ -510,18 +530,17 @@ export default function CentralOrderListPage() {
             </option>
           ))}
         </select>
-        {/* <select
+        <select
           name="company"
           defaultValue={data.filters.companyId}
           style={styles.input}
         >
-          <option value="">All companies</option>
           {data.companies.map((company: any) => (
             <option key={company.id} value={company.id}>
               {company.name}
             </option>
           ))}
-        </select> */}
+        </select>
         <select
           name="customer"
           defaultValue={data.filters.customer}

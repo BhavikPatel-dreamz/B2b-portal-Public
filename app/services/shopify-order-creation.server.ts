@@ -113,6 +113,116 @@ export function assertNoShopifyUserErrors(
   }
 }
 
+function isAlreadyAssignedRoleError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("already been assigned") ||
+    normalized.includes("already assigned")
+  );
+}
+
+export async function ensureCompanyContactLocationRole({
+  admin,
+  companyId,
+  companyContactId,
+  companyLocationId,
+}: {
+  admin: AdminGraphQLClient;
+  companyId: string;
+  companyContactId: string;
+  companyLocationId: string;
+}) {
+  const rolesData = await shopifyOrderGraphql<{
+    company: null | {
+      contactRoles?: {
+        edges?: Array<{ node?: { id?: string; name?: string | null } | null }>;
+      } | null;
+    };
+  }>({
+    admin,
+    operation: "LoadSalesPortalCompanyContactRoles",
+    query: `#graphql
+      query LoadCompanyContactRoles($companyId: ID!) {
+        company(id: $companyId) {
+          contactRoles(first: 20) {
+            edges {
+              node {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    `,
+    variables: { companyId },
+  });
+
+  const roles =
+    rolesData.company?.contactRoles?.edges
+      ?.map((edge) => edge.node)
+      .filter((role): role is { id: string; name?: string | null } =>
+        Boolean(role?.id),
+      ) || [];
+  const roleId =
+    roles.find((role) => role.name?.toLowerCase() === "ordering only")?.id ||
+    roles.find((role) => role.name?.toLowerCase() === "location admin")?.id ||
+    roles.find((role) => role.name?.toLowerCase() === "company admin")?.id ||
+    roles[0]?.id;
+
+  if (!roleId) {
+    throw new ShopifyOrderCreationError(
+      "No Shopify company contact roles are available for this company.",
+      "LoadSalesPortalCompanyContactRoles",
+    );
+  }
+
+  const assignData = await shopifyOrderGraphql<{
+    companyContactAssignRole: {
+      companyContactRoleAssignment: null | { id: string };
+      userErrors: Array<{ field?: string[] | null; message: string }>;
+    };
+  }>({
+    admin,
+    operation: "AssignSalesPortalContactLocationRole",
+    query: `#graphql
+      mutation AssignContactLocationRole(
+        $companyContactId: ID!
+        $companyContactRoleId: ID!
+        $companyLocationId: ID!
+      ) {
+        companyContactAssignRole(
+          companyContactId: $companyContactId
+          companyContactRoleId: $companyContactRoleId
+          companyLocationId: $companyLocationId
+        ) {
+          companyContactRoleAssignment {
+            id
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `,
+    variables: {
+      companyContactId,
+      companyContactRoleId: roleId,
+      companyLocationId,
+    },
+  });
+
+  const userErrors = assignData.companyContactAssignRole.userErrors || [];
+  const blockingErrors = userErrors.filter(
+    (error) => !isAlreadyAssignedRoleError(error.message),
+  );
+  assertNoShopifyUserErrors(
+    "AssignSalesPortalContactLocationRole",
+    blockingErrors,
+  );
+}
+
 async function retry<T>(operation: string, callback: () => Promise<T | null>) {
   const delays = [0, 250, 750, 1500];
   let lastError: unknown;

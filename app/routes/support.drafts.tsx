@@ -53,7 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 
   const filters: Prisma.B2BOrderWhereInput[] = [draftWhere()];
-  if (companyId) filters.push({ companyId });
+  if (companyId && companyId !== "all") filters.push({ companyId });
   if (search) {
     filters.push({
       OR: [
@@ -107,10 +107,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ]);
 
   if (!companies.length) return redirect("/sales/portal");
+
+  const selectedCompanyId =
+    companyId || (companies.length > 1 ? "all" : companies[0].id);
   const currentCompany =
-    companies.find((company) => company.id === companyId) || companies[0];
+    selectedCompanyId === "all"
+      ? { id: "all", name: "All companies" }
+      : companies.find((company) => company.id === selectedCompanyId) ||
+        companies[0];
+
   const companyDetails = await prisma.companyAccount.findUnique({
-    where: { id: currentCompany.id },
+    where: {
+      id:
+        currentCompany.id === "all"
+          ? companies[0].id
+          : currentCompany.id,
+    },
     select: { shop: { select: { themeColor: true } } },
   });
   const currentCompanyWithTheme = {
@@ -127,7 +139,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     currentCompany: currentCompanyWithTheme,
     companies,
     counts: { drafts: draftCount, orders: orderCount, quotes: quoteCount },
-    filters: { search, companyId },
+    filters: { search, companyId: selectedCompanyId },
     drafts: drafts.map((draft) => ({
       id: draft.id,
       orderNumber: getOrderNumber(draft),
@@ -307,6 +319,7 @@ export default function DraftListPage() {
         subtitle="Review, open, or delete draft order records."
         companyId={data.currentCompany.id}
         companies={data.companies}
+        companySwitchPath="/sales/portal/drafts?company="
         actions={
           <Link
             to={`/sales/portal/company/${data.currentCompany.id}/create-order`}

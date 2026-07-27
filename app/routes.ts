@@ -107,6 +107,8 @@ export default [
 
   // Unified Sales Portal (single login for all companies/stores)
   route("sales/login", "routes/sales.login.tsx"),
+  route("sales/forgot-password", "routes/sales.forgot-password.tsx"),
+  route("sales/reset-password", "routes/sales.reset-password.tsx"),
   route("sales/portal", "routes/sales.portal.tsx"),
   route(
     "sales/portal/company/:companyId/create-order",
@@ -139,7 +141,10 @@ export default [
   route("sales/portal/orders", "routes/support.orders.tsx"),
   route("sales/portal/orders/:orderId", "routes/support.orders.$orderId.tsx"),
   route("sales/portal/drafts", "routes/support.drafts.tsx"),
-  route("sales/portal/drafts/:draftId", "routes/sales.portal.drafts.$draftId.tsx"),
+  route(
+    "sales/portal/drafts/:draftId",
+    "routes/sales.portal.drafts.$draftId.tsx",
+  ),
   route("support/drafts/:draftId", "routes/support.drafts.$draftId.tsx"),
   route(
     "sales/portal/company/:companyId/quotes",
@@ -148,6 +153,17 @@ export default [
   route(
     "sales/portal/company/:companyId/quotes/:quoteId",
     "routes/sales.portal.company.$companyId.quotes.$quoteId.tsx",
+    { id: "sales-portal-company-quote-detail" },
+  ),
+  route(
+    "sales/portal/quotes/:quoteId",
+    "routes/sales.portal.company.$companyId.quotes.$quoteId.tsx",
+    { id: "sales-portal-quote-detail-support" },
+  ),
+  route(
+    "support/quotes/:quoteId",
+    "routes/sales.portal.company.$companyId.quotes.$quoteId.tsx",
+    { id: "support-quote-detail" },
   ),
 
   // Public payment request

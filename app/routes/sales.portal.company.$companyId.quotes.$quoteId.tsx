@@ -32,6 +32,15 @@ import {
   type DeliveryDetails,
 } from "app/services/delivery-details.server";
 
+async function resolveQuoteCompanyId(quoteId: string) {
+  const quote = await prisma.quote.findUnique({
+    where: { id: quoteId },
+    select: { companyId: true },
+  });
+
+  return quote?.companyId || null;
+}
+
 type ActionResponse = {
   success?: boolean;
   message?: string;
@@ -43,12 +52,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
   const quoteId = params.quoteId;
-  if (!companyId || !quoteId || !hasCompanyAccess(user, companyId)) {
+  if (!quoteId) {
+    return redirect("/sales/portal");
+  }
+
+  const resolvedCompanyId = companyId || (await resolveQuoteCompanyId(quoteId));
+  if (!resolvedCompanyId || !hasCompanyAccess(user, resolvedCompanyId)) {
     return redirect("/sales/portal");
   }
 
   const quote = await prisma.quote.findFirst({
-    where: { id: quoteId, companyId },
+    where: { id: quoteId, companyId: resolvedCompanyId },
     include: {
       company: {
         include: {
@@ -66,7 +80,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
   });
   if (!quote) {
-    return redirect(`/sales/portal/company/${companyId}/quotes`);
+    return redirect(
+      resolvedCompanyId
+        ? `/sales/portal/company/${resolvedCompanyId}/quotes`
+        : "/sales/portal",
+    );
   }
 
   if (
@@ -107,10 +125,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       id: item.company.id,
       name: item.company.name,
     })),
-    quoteCount: await prisma.quote.count({ where: { companyId } }),
+    quoteCount: await prisma.quote.count({ where: { companyId: resolvedCompanyId } }),
     orderCount: await prisma.b2BOrder.count({
       where: {
-        companyId,
+        companyId: resolvedCompanyId,
         orderStatus: { notIn: ["converted", "archived"] },
       },
     }),
@@ -122,11 +140,51 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
+async function recalculateQuoteTotals(quoteId: string) {
+  const items = await prisma.quoteItem.findMany({ where: { quoteId } });
+  const subtotal = items.reduce((total, item) => {
+    const lineTotal = Number(item.unitPrice) * item.quantity;
+    const lineDiscount = Number(item.discount) || 0;
+    return total + Math.max(0, lineTotal - lineDiscount);
+  }, 0);
+
+  const quote = await prisma.quote.findUnique({ where: { id: quoteId } });
+  if (!quote) return;
+
+  const discountType = quote.discountType === "PERCENTAGE" ? "PERCENTAGE" : "FIXED_AMOUNT";
+  const discountAmount = Number(quote.discountAmount) || 0;
+  const discountTotal =
+    discountType === "PERCENTAGE"
+      ? Math.min(subtotal, subtotal * (discountAmount / 100))
+      : Math.min(subtotal, discountAmount);
+
+  const taxableAmount = Math.max(0, subtotal - discountTotal);
+  const taxRate = Number(quote.taxRate) || 0;
+  const taxAmount = taxableAmount * (taxRate / 100);
+  const shippingAmount = Number(quote.shippingAmount) || 0;
+  const totalAmount = taxableAmount + taxAmount + shippingAmount;
+
+  await prisma.quote.update({
+    where: { id: quoteId },
+    data: {
+      subtotal,
+      discountTotal,
+      taxAmount,
+      totalAmount,
+    },
+  });
+}
+
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const companyId = params.companyId;
   const quoteId = params.quoteId;
-  if (!companyId || !quoteId || !hasCompanyAccess(user, companyId)) {
+  if (!quoteId) {
+    return Response.json({ error: "Quote not found" }, { status: 404 });
+  }
+
+  const resolvedCompanyId = companyId || (await resolveQuoteCompanyId(quoteId));
+  if (!resolvedCompanyId || !hasCompanyAccess(user, resolvedCompanyId)) {
     return Response.json({ error: "Access denied" }, { status: 403 });
   }
 
@@ -138,7 +196,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
   }
   const quote = await prisma.quote.findFirst({
-    where: { id: quoteId, companyId },
+    where: { id: quoteId, companyId: resolvedCompanyId },
     include: { items: true },
   });
   if (!quote) {
@@ -153,41 +211,143 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           { status: 400 },
         );
       }
+
       const title = String(formData.get("title") || "").trim();
       const customerNotes = String(formData.get("customerNotes") || "");
       const internalNotes = String(formData.get("internalNotes") || "");
       const expires = String(formData.get("expiresAt") || "");
-      await prisma.quote.update({
-        where: { id: quote.id },
-        data: {
-          title: title || quote.title,
-          customerNotes,
-          internalNotes,
-          expiresAt: expires
-            ? new Date(`${expires}T23:59:59.999`)
-            : quote.expiresAt,
-        },
+
+      const itemUpdates = quote.items
+        .map((item) => {
+          const quantityValue = Number(formData.get(`quantity_${item.id}`));
+          const unitPriceValue = Number(formData.get(`unitPrice_${item.id}`));
+          const discountValue = Number(formData.get(`discount_${item.id}`));
+
+          if (!Number.isFinite(quantityValue) || quantityValue < 1) {
+            throw new Error(`Invalid quantity for ${item.productTitle}`);
+          }
+          if (!Number.isFinite(unitPriceValue) || unitPriceValue < 0) {
+            throw new Error(`Invalid unit price for ${item.productTitle}`);
+          }
+          if (!Number.isFinite(discountValue) || discountValue < 0) {
+            throw new Error(`Invalid discount for ${item.productTitle}`);
+          }
+
+          const totalPrice = Math.max(0, unitPriceValue * quantityValue - discountValue);
+          return {
+            id: item.id,
+            quantity: Math.round(quantityValue),
+            unitPrice: unitPriceValue,
+            discount: discountValue,
+            totalPrice,
+          };
+        })
+        .filter(Boolean);
+
+      const newRowKeys = formData.getAll("newProductRow").map(String).filter(Boolean);
+      const newItems = newRowKeys
+        .map((rowKey) => {
+          const productTitle = String(formData.get(`newProductTitle_${rowKey}`) || "").trim();
+          const variantTitle = String(formData.get(`newVariantTitle_${rowKey}`) || "").trim();
+          const sku = String(formData.get(`newSku_${rowKey}`) || "").trim();
+          const variantId = String(formData.get(`newVariantId_${rowKey}`) || "").trim();
+          const image = String(formData.get(`newImage_${rowKey}`) || "").trim();
+          const quantity = Number(formData.get(`newQuantity_${rowKey}`));
+          const unitPrice = Number(formData.get(`newUnitPrice_${rowKey}`));
+          const discount = Number(formData.get(`newDiscount_${rowKey}`));
+
+          const isAnyValueFilled = Boolean(productTitle || variantTitle || sku || image || quantity || unitPrice || discount);
+          if (!isAnyValueFilled) return null;
+
+          const validQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+          const validUnitPrice = Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0;
+          const validDiscount = Number.isFinite(discount) && discount >= 0 ? discount : 0;
+
+          return {
+            productTitle: productTitle || "Product",
+            variantTitle,
+            sku,
+            image: image || null,
+            variantId: variantId || "",
+            quantity: validQuantity,
+            unitPrice: validUnitPrice,
+            discount: validDiscount,
+            totalPrice: Math.max(0, validUnitPrice * validQuantity - validDiscount),
+          };
+        })
+        .filter(Boolean) as Array<{
+          productTitle: string;
+          variantTitle: string;
+          sku: string;
+          image: string | null;
+          variantId: string;
+          quantity: number;
+          unitPrice: number;
+          discount: number;
+          totalPrice: number;
+        }>;
+
+      if (!itemUpdates.length && !newItems.length) {
+        return Response.json({ error: "No quote changes were submitted." }, { status: 400 });
+      }
+
+      const quoteCurrency = quote.currencyCode || quote.items?.[0]?.currencyCode || "USD";
+
+      await prisma.$transaction(async (tx) => {
+        for (const item of itemUpdates) {
+          await tx.quoteItem.update({
+            where: { id: item.id },
+            data: {
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              discount: item.discount,
+              totalPrice: item.totalPrice,
+            },
+          });
+        }
+
+        for (const newItem of newItems) {
+          await tx.quoteItem.create({
+            data: {
+              quoteId: quote.id,
+              productTitle: newItem.productTitle,
+              variantTitle: newItem.variantTitle,
+              sku: newItem.sku,
+              image: newItem.image,
+              quantity: newItem.quantity,
+              unitPrice: newItem.unitPrice,
+              discount: newItem.discount,
+              totalPrice: newItem.totalPrice,
+              currencyCode: quoteCurrency,
+              variantId: newItem.variantId,
+            },
+          });
+        }
+
+        await tx.quote.update({
+          where: { id: quote.id },
+          data: {
+            title: title || quote.title,
+            customerNotes,
+            internalNotes,
+            expiresAt: expires
+              ? new Date(`${expires}T23:59:59.999`)
+              : quote.expiresAt,
+          },
+        });
       });
+
+      await recalculateQuoteTotals(quote.id);
+
       await logQuoteActivity({
         quoteId: quote.id,
         userId: user.id,
-        companyId,
+        companyId: resolvedCompanyId,
         customerEmail: quote.customerEmail,
         action: "Quote Updated",
+        message: "Quote items, notes, and expiry were updated.",
       });
       return Response.json({ success: true, message: "Quote updated." });
-    }
-
-    if (intent === "send_quote" || intent === "resend_quote") {
-      const result = await sendQuoteToCustomer({
-        quoteId: quote.id,
-        request,
-        userId: user.id,
-      });
-      return Response.json({
-        success: true,
-        message: `Quote sent. Link: ${result.quoteUrl}`,
-      });
     }
 
     if (intent === "cancel_quote") {
@@ -198,7 +358,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await logQuoteActivity({
         quoteId: quote.id,
         userId: user.id,
-        companyId,
+        companyId: resolvedCompanyId,
         customerEmail: quote.customerEmail,
         action: "Quote Cancelled",
       });
@@ -452,13 +612,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await logQuoteActivity({
         quoteId: duplicate.id,
         userId: user.id,
-        companyId,
+        companyId: resolvedCompanyId,
         customerEmail: duplicate.customerEmail,
         action: "Quote Created",
         message: `Duplicated from ${quote.quoteNumber}.`,
       });
       return redirect(
-        `/sales/portal/company/${companyId}/quotes/${duplicate.id}?duplicatedFrom=${encodeURIComponent(quote.quoteNumber)}`,
+        `/sales/portal/company/${resolvedCompanyId}/quotes/${duplicate.id}?duplicatedFrom=${encodeURIComponent(quote.quoteNumber)}`,
       );
     }
 
@@ -513,6 +673,7 @@ export default function QuoteDetailPage() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showAllActivities, setShowAllActivities] = useState(false);
   const [invoiceData, setInvoiceData] = useState<any>(null);
+  const [newProductRows, setNewProductRows] = useState<string[]>(["0"]);
 
   useEffect(() => {
     if (navigation.state === "idle") submissionLock.current = false;
@@ -861,7 +1022,7 @@ export default function QuoteDetailPage() {
               onSubmit={guardSubmission}
             >
               <input type="hidden" name="intent" value="update_quote" />
-              <h2 style={styles.cardTitle}>Edit Draft</h2>
+              <h2 style={styles.cardTitle}>Edit Quote</h2>
               <label style={styles.label}>
                 Title
                 <input
@@ -899,13 +1060,223 @@ export default function QuoteDetailPage() {
                   disabled={isSubmitting}
                 />
               </label>
+
+              <div style={{ margin: "12px 0 16px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 8 }}>
+                  Line Items
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {quote.items.map((item: any) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        padding: 10,
+                        background: "#fafafa",
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+                        {item.productTitle}
+                        {item.variantTitle ? ` — ${item.variantTitle}` : ""}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 10 }}>
+                        <label style={styles.label}>
+                          Product Name
+                          <input
+                            name={`productTitle_${item.id}`}
+                            defaultValue={item.productTitle}
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          SKU
+                          <input
+                            name={`sku_${item.id}`}
+                            defaultValue={item.sku || ""}
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Variant
+                          <input
+                            name={`variantTitle_${item.id}`}
+                            defaultValue={item.variantTitle || ""}
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Image URL
+                          <input
+                            name={`image_${item.id}`}
+                            defaultValue={item.image || ""}
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                        <label style={styles.label}>
+                          Qty
+                          <input
+                            type="number"
+                            min="1"
+                            name={`quantity_${item.id}`}
+                            defaultValue={item.quantity}
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Unit Price
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            name={`unitPrice_${item.id}`}
+                            defaultValue={Number(item.unitPrice) || 0}
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Discount
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            name={`discount_${item.id}`}
+                            defaultValue={Number(item.discount) || 0}
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ margin: "16px 0", padding: "14px", border: "1px solid #e5e7eb", borderRadius: 8, background: "#ffffff" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+                    Add Product
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setNewProductRows((rows) => [...rows, String(rows.length)])}
+                    style={{
+                      ...styles.secondaryBtn,
+                      padding: "8px 12px",
+                      fontSize: 13,
+                      alignSelf: "flex-start",
+                    }}
+                  >
+                    + Add product
+                  </button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {newProductRows.map((rowKey, index) => (
+                    <div key={rowKey} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, background: "#f9fafb" }}>
+                      <input type="hidden" name="newProductRow" value={rowKey} />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <label style={styles.label}>
+                          Product Name
+                          <input
+                            name={`newProductTitle_${rowKey}`}
+                            placeholder="Product name"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          SKU
+                          <input
+                            name={`newSku_${rowKey}`}
+                            placeholder="SKU"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Variant
+                          <input
+                            name={`newVariantTitle_${rowKey}`}
+                            placeholder="Variant title"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Variant ID
+                          <input
+                            name={`newVariantId_${rowKey}`}
+                            placeholder="Variant ID"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Quantity
+                          <input
+                            type="number"
+                            min="1"
+                            name={`newQuantity_${rowKey}`}
+                            defaultValue="1"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Unit Price
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            name={`newUnitPrice_${rowKey}`}
+                            defaultValue="0"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Discount
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            name={`newDiscount_${rowKey}`}
+                            defaultValue="0"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                        <label style={styles.label}>
+                          Image URL
+                          <input
+                            name={`newImage_${rowKey}`}
+                            placeholder="Image URL"
+                            style={styles.input}
+                            disabled={isSubmitting}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <button
                 disabled={isSubmitting}
                 aria-busy={pendingIntent === "update_quote"}
                 style={disabledButtonStyle(styles.primaryBtn, isSubmitting)}
               >
                 {pendingIntent === "update_quote" && <Spinner />}
-                {pendingIntent === "update_quote" ? "Saving Draft..." : "Save Draft"}
+                {pendingIntent === "update_quote" ? "Saving Quote..." : "Save Quote"}
               </button>
             </Form>
           )}

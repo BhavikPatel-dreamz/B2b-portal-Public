@@ -43,6 +43,7 @@ import { getAdminForShop } from "app/shopify.server";
 import { canCreateOrder } from "app/services/creditService";
 import {
   assertNoShopifyUserErrors,
+  ensureCompanyContactLocationRole,
   retryLocalOrderSync,
   shopifyOrderGraphql,
   ShopifyOrderCreationError,
@@ -79,6 +80,9 @@ type ActionResponse = {
   error?: string;
   requestId?: string;
 };
+
+const isPresentString = (value: string | null | undefined): value is string =>
+  Boolean(value);
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
@@ -138,6 +142,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     ) {
       return Response.json(
         { error: "Company or shop credentials not found" },
+        { status: 400 },
+      );
+    }
+    const shopifyCompanyGid = toShopifyCompanyGid(company.shopifyCompanyId);
+    if (!shopifyCompanyGid) {
+      return Response.json(
+        { error: "Company is not linked to a valid Shopify company." },
         { status: 400 },
       );
     }
@@ -224,7 +235,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       admin,
       operation: "LoadSalesPortalB2BContext",
       query: baseMetaQuery,
-      variables: { companyId: company.shopifyCompanyId },
+      variables: { companyId: shopifyCompanyGid },
     });
     const contacts = baseMetaData.company?.contacts?.edges || [];
     const matchCustGid = `gid://shopify/Customer/${customerId}`;
@@ -245,10 +256,22 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       );
     }
 
+    const assignedLocationIds =
+      matchedContact?.node.roleAssignments?.edges
+        ?.map((edge: any) => edge.node?.companyLocation?.id)
+        .filter(isPresentString) || [];
+    if (!matchedContact?.node?.id) {
+      return Response.json(
+        {
+          error:
+            "B2B context missing. The selected customer is not correctly assigned as a contact for this company in Shopify.",
+        },
+        { status: 400 },
+      );
+    }
     const companyLocationId =
       submittedCompanyLocationId ||
-      matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation
-        ?.id ||
+      assignedLocationIds[0] ||
       companyLocations[0]?.id ||
       "";
     const companyContactId = matchedContact?.node?.id || "";
@@ -260,10 +283,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return Response.json(
         {
           error:
-            "B2B context missing. The selected customer is not correctly assigned as a contact for this company in Shopify.",
+            "B2B context missing. The selected customer has no Shopify role assigned for any company location.",
         },
         { status: 400 },
       );
+    }
+    if (!assignedLocationIds.includes(companyLocationId)) {
+      await ensureCompanyContactLocationRole({
+        admin,
+        companyId: shopifyCompanyGid,
+        companyContactId,
+        companyLocationId,
+      });
     }
 
     // 2. Map line items with explicit B2B contextual price overrides.
@@ -365,7 +396,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       taxExempt: true,
       purchasingEntity: {
         purchasingCompany: {
-          companyId: toShopifyCompanyGid(company.shopifyCompanyId),
+          companyId: shopifyCompanyGid,
           companyLocationId,
           companyContactId,
         },
@@ -412,8 +443,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     // 4. Complete Draft Order (Convert to Final Shopify Order)
     const completeMutation = `
-    mutation CompleteDraftOrder($id: ID!, $paymentPending: Boolean) {
-      draftOrderComplete(id: $id, paymentPending: $paymentPending) {
+    mutation CompleteDraftOrder($id: ID!) {
+      draftOrderComplete(id: $id) {
         draftOrder {
           order {
             id
@@ -450,7 +481,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       admin,
       operation: "CompleteSalesPortalDraftOrder",
       query: completeMutation,
-      variables: { id: draftId, paymentPending: true },
+      variables: { id: draftId },
     });
     assertNoShopifyUserErrors(
       "CompleteSalesPortalDraftOrder",

@@ -52,6 +52,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   let companyId = url.searchParams.get("companyId");
 
+  if (companyId === "all") {
+    return redirect("/sales/portal/orders?company=all");
+  }
+
   if (!companyId && user.salesCompanies.length > 0) {
     companyId = user.salesCompanies[0].companyId;
   }
@@ -204,6 +208,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? 0
     : Math.max(0, creditSummary.availableCredit.toNumber());
 
+  const allCompanies = user.salesCompanies.map((sc) => ({
+    id: sc.company.id,
+    name: sc.company.name,
+  }));
+  const companies =
+    allCompanies.length > 1
+      ? [{ id: "all", name: "All companies" }, ...allCompanies]
+      : allCompanies;
+
   return Response.json({
     user: {
       id: user.id,
@@ -239,10 +252,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
     orderCount,
     quoteCount,
-    allCompanies: user.salesCompanies.map((sc) => ({
-      id: sc.company.id,
-      name: sc.company.name,
-    })),
+    allCompanies: companies,
   });
 };
 
@@ -846,6 +856,8 @@ export default function SalesPortal() {
           subtitle={`${company.contactEmail ? `Contact: ${company.contactEmail}` : "Sales Portal"} · ${company.users.length} customer(s) · ${company.storeName}`}
           companyId={company.id}
           companies={allCompanies}
+          companySwitchPath="/sales/portal?companyId="
+          allCompaniesPath="/sales/portal/orders?company="
           actions={
             <>
               <button

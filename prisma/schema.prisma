@@ -99,6 +99,8 @@ model User {
   firstName         String?
   lastName          String?
   password          String
+  passwordResetToken String?
+  passwordResetExpiresAt DateTime?
   role              UserRole        @default(STORE_USER)
   status            UserStatus      @default(PENDING)
   isActive          Boolean         @default(true)

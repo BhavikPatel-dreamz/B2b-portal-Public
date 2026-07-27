@@ -46,7 +46,6 @@ export async function sendEmail(
       greetingTimeout: 20000,
       socketTimeout: 45000,
     });
-    
 
     const response = await transporter.sendMail({
       from: `"${resolvedConfig.fromName}" <${resolvedConfig.fromEmail}>`,
@@ -175,7 +174,7 @@ export async function sendRegistrationEmailForAdmin(
       ctaLabel: "View B2B Page",
       ctaUrl: `https://admin.shopify.com/store/${
         (storeData?.shopDomain || "store.com").split(".")[0]
-      }/apps/b2b-portal-public-3/app/registrations`
+      }/apps/b2b-portal-public-3/app/registrations`,
     },
   );
 
@@ -736,7 +735,8 @@ export async function sendAppWelcomeEmail(
     },
   ];
 
-  const merchantName = storeData?.storeOwnerName || storeData?.shopName?.split(".")[0] || "there";
+  const merchantName =
+    storeData?.storeOwnerName || storeData?.shopName?.split(".")[0] || "there";
 
   const stepsHtml = steps
     .map(
@@ -871,7 +871,7 @@ export async function sendSalesUserInvitationEmail({
   const shopName = storeData?.shopName || storeData?.shopDomain || "Store Name";
 
   const subject = "You've been invited as a Sales User";
-  
+
   const content = `
     <p>Hello ${firstName},</p>
     <p>You have been invited to join <strong>${shopName}</strong> as a Sales User.</p>
@@ -887,7 +887,7 @@ export async function sendSalesUserInvitationEmail({
       ctaLabel: "Set Password & Login",
       ctaUrl: inviteLink,
       footerText: "This email was sent to invite you to the Sales Portal.",
-    }
+    },
   );
 
   const text = `Hello ${firstName},
@@ -898,6 +898,67 @@ Please copy and paste the following link into your browser to set your password 
 ${inviteLink}
 
 This link will expire in 7 days.
+
+Best regards,
+${shopName}`;
+
+  return sendEmail(
+    {
+      to: email,
+      subject,
+      html,
+      text,
+    },
+    smtpConfig,
+  );
+}
+
+export async function sendSalesUserPasswordResetEmail({
+  storeId,
+  email,
+  firstName,
+  resetLink,
+}: {
+  storeId: string;
+  email: string;
+  firstName: string;
+  resetLink: string;
+}): Promise<RegistrationEmailResult> {
+  const storeData = await prisma.store.findUnique({
+    where: { id: storeId },
+  });
+
+  const smtpConfig = resolveStoreSmtpConfig(storeData);
+  const shopName = storeData?.shopName || storeData?.shopDomain || "Store Name";
+
+  const subject = "Reset your Sales Portal password";
+
+  const content = `
+    <p>Hello ${firstName},</p>
+    <p>We received a request to reset the password for your <strong>${shopName}</strong> Sales Portal account.</p>
+    <p>Click the button below to choose a new password. This link will expire in 30 minutes.</p>
+  `;
+
+  const html = convertToHtmlEmail(
+    content,
+    storeData?.shopDomain || "store.com",
+    subject,
+    {
+      logoUrl: storeData?.logo,
+      ctaLabel: "Reset Password",
+      ctaUrl: resetLink,
+      footerText: "This password reset link will expire in 30 minutes.",
+    },
+  );
+
+  const text = `Hello ${firstName},
+
+We received a request to reset the password for your ${shopName} Sales Portal account.
+
+Please copy and paste the following link into your browser to choose a new password:
+${resetLink}
+
+This link will expire in 30 minutes.
 
 Best regards,
 ${shopName}`;
@@ -958,12 +1019,18 @@ export async function sendQuoteEmail({
     Please review the quote and choose approve or reject.
   `;
 
-  const html = convertToHtmlEmail(body, storeData?.shopDomain || "store.com", subject, {
-    logoUrl: storeData?.logo,
-    ctaLabel: "Review Quote",
-    ctaUrl: quoteUrl,
-    footerText: "This secure quote link is intended for the selected customer.",
-  });
+  const html = convertToHtmlEmail(
+    body,
+    storeData?.shopDomain || "store.com",
+    subject,
+    {
+      logoUrl: storeData?.logo,
+      ctaLabel: "Review Quote",
+      ctaUrl: quoteUrl,
+      footerText:
+        "This secure quote link is intended for the selected customer.",
+    },
+  );
 
   return sendEmail(
     {

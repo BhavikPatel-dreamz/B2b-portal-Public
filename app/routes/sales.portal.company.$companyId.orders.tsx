@@ -589,6 +589,9 @@ export default function OrderManageScreen() {
   >([]);
   const [selectedCountryCode, setSelectedCountryCode] = useState("US");
   const [selectedProvinceCode, setSelectedProvinceCode] = useState("");
+  // NEW: controls whether the toast is currently visible (manual dismiss)
+  const [toastDismissed, setToastDismissed] = useState(false);
+
   const { user, company, orders, quoteCount, allCompanies } = useLoaderData<{
     user: {
       id: string;
@@ -652,6 +655,26 @@ export default function OrderManageScreen() {
   const isCreatingCompany =
     navigation.state === "submitting" &&
     navigation.formData?.get("intent") === "createCompany";
+
+  // FIX #1: Close the "Create Company" modal once the create/link succeeds.
+  // The action does a redirect to the same route, so React Router keeps this
+  // component mounted and isCreateCompanyOpen would otherwise stay true forever.
+  useEffect(() => {
+    if (
+      searchParams.get("companyCreated") ||
+      searchParams.get("companyLinked")
+    ) {
+      setIsCreateCompanyOpen(false);
+    }
+  }, [searchParams]);
+
+  // FIX #2: Reset the dismiss flag whenever a *new* toast message appears,
+  // so previously-closed toasts don't stay hidden and new ones show + can be closed.
+  useEffect(() => {
+    if (successToastMessage || errorToastMessage) {
+      setToastDismissed(false);
+    }
+  }, [successToastMessage, errorToastMessage]);
 
   useEffect(() => {
     let isActive = true;
@@ -751,11 +774,31 @@ export default function OrderManageScreen() {
       quoteCount={quoteCount}
       themeColor={company.themeColor}
     >
-      {successToastMessage ? (
-        <div style={styles.successToast}>{successToastMessage}</div>
+      {successToastMessage && !toastDismissed ? (
+        <div style={styles.successToast}>
+          <span>{successToastMessage}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            style={styles.toastCloseBtn}
+            onClick={() => setToastDismissed(true)}
+          >
+            ×
+          </button>
+        </div>
       ) : null}
-      {errorToastMessage ? (
-        <div style={styles.errorToast}>{errorToastMessage}</div>
+      {errorToastMessage && !toastDismissed ? (
+        <div style={styles.errorToast}>
+          <span>{errorToastMessage}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            style={styles.toastCloseBtn}
+            onClick={() => setToastDismissed(true)}
+          >
+            ×
+          </button>
+        </div>
       ) : null}
 
       <SalesPortalHeader
@@ -895,7 +938,7 @@ export default function OrderManageScreen() {
                   </label>
                 </div>
               </section>
-              
+
               <section style={styles.formSection}>
                 <h3 style={styles.sectionTitle}>Main contact</h3>
                 <div style={styles.formGrid}>
@@ -1208,6 +1251,10 @@ const styles = {
     boxShadow: "0 12px 32px rgba(15, 23, 42, 0.16)",
     fontSize: "14px",
     fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
   },
   errorToast: {
     position: "fixed" as const,
@@ -1223,6 +1270,20 @@ const styles = {
     boxShadow: "0 12px 32px rgba(15, 23, 42, 0.16)",
     fontSize: "14px",
     fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+  },
+  toastCloseBtn: {
+    background: "none",
+    border: "none",
+    fontSize: "18px",
+    lineHeight: 1,
+    cursor: "pointer",
+    color: "inherit",
+    padding: "0 0 0 8px",
+    flexShrink: 0,
   },
   modalBackdrop: {
     position: "fixed" as const,

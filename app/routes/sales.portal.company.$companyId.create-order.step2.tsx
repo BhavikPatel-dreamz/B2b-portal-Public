@@ -39,6 +39,7 @@ import {
 import { getAdminForShop } from "app/shopify.server";
 import {
   assertNoShopifyUserErrors,
+  ensureCompanyContactLocationRole,
   retryLocalOrderSync,
   shopifyOrderGraphql,
   ShopifyOrderCreationError,
@@ -129,6 +130,9 @@ const cleanShopifySearchTerm = (value: string) =>
 const escapeShopifyQuotedValue = (value: string) =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
+const isPresentString = (value: string | null | undefined): value is string =>
+  Boolean(value);
+
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     const formData = await request.formData();
@@ -170,6 +174,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     if (!company || !company.shop || !company.shop.accessToken || !company.shopifyCompanyId) {
       return Response.json({ error: "Company or shop credentials not found" }, { status: 400 });
+    }
+    const shopifyCompanyGid = toShopifyCompanyGid(company.shopifyCompanyId);
+    if (!shopifyCompanyGid) {
+      return Response.json(
+        { error: "Company is not linked to a valid Shopify company." },
+        { status: 400 },
+      );
     }
     const admin = await getAdminForShop(company.shop.shopDomain);
 
@@ -244,7 +255,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       admin,
       operation: "LoadSalesPortalB2BContext",
       query: baseMetaQuery,
-      variables: { companyId: toShopifyCompanyGid(company.shopifyCompanyId) },
+      variables: { companyId: shopifyCompanyGid },
     });
     const contacts = baseMetaData.company?.contacts?.edges || [];
     const matchCustGid = `gid://shopify/Customer/${customerId}`;
@@ -263,15 +274,42 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       );
     }
 
+    const assignedLocationIds =
+      matchedContact?.node.roleAssignments?.edges
+        ?.map((edge) => edge.node?.companyLocation?.id)
+        .filter(isPresentString) || [];
+    if (!matchedContact?.node?.id) {
+      return Response.json(
+        {
+          error:
+            "B2B context missing. The selected customer is not correctly assigned as a contact for this company in Shopify.",
+        },
+        { status: 400 },
+      );
+    }
     const companyLocationId =
       submittedCompanyLocationId ||
-      matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation?.id ||
+      assignedLocationIds[0] ||
       companyLocations[0]?.id ||
       "";
     const companyContactId = matchedContact?.node?.id || "";
 
     if (!companyLocationId || !companyContactId) {
-      return Response.json({ error: "B2B context missing. The selected customer is not correctly assigned as a contact for this company in Shopify." }, { status: 400 });
+      return Response.json(
+        {
+          error:
+            "B2B context missing. The selected customer has no Shopify role assigned for any company location.",
+        },
+        { status: 400 },
+      );
+    }
+    if (!assignedLocationIds.includes(companyLocationId)) {
+      await ensureCompanyContactLocationRole({
+        admin,
+        companyId: shopifyCompanyGid,
+        companyContactId,
+        companyLocationId,
+      });
     }
 
     const currencyCode = getCartCurrency(cartData);
@@ -335,7 +373,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       taxExempt: true,
       purchasingEntity: {
         purchasingCompany: {
-          companyId: toShopifyCompanyGid(company.shopifyCompanyId),
+          companyId: shopifyCompanyGid,
           companyLocationId,
           companyContactId
         }
@@ -2036,7 +2074,7 @@ export default function CreateOrderProductCatalog() {
                                     }}
                                     disabled={!currentVariant?.inStock || isLoading}
                                   >
-                                    {currentVariant?.inStock ? "Added" : "Out of stock"}
+                                    {currentVariant?.inStock ? "Add" : "Out of stock"}
                                   </button>
                                 </div>
                               </div>
