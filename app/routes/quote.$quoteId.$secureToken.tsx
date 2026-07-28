@@ -85,15 +85,27 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     );
   }
 
+  const mergeCustomerNotes = (existingNotes: string | null | undefined, comment: string) => {
+    if (!comment.trim()) return existingNotes || null;
+    const prefix = existingNotes?.trim() ? `${existingNotes.trim()}
+
+Customer Response: ` : "Customer Response: ";
+    return `${prefix}${comment}`;
+  };
+
   if (intent === "approve_quote" || intent === "reject_quote") {
     const approved = intent === "approve_quote";
+    const nextCustomerComments = comments || quote.customerComments;
+    const nextCustomerNotes = mergeCustomerNotes(quote.customerNotes, comments);
+
     await prisma.quote.update({
       where: { id: quote.id },
       data: {
         status: approved ? "approved" : "rejected",
         approvedAt: approved ? new Date() : null,
         rejectedAt: approved ? null : new Date(),
-        customerComments: comments || quote.customerComments,
+        customerComments: nextCustomerComments,
+        customerNotes: nextCustomerNotes,
       },
     });
     await logQuoteActivity({
@@ -105,6 +117,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
     return Response.json({
       success: true,
+      quote: {
+        status: approved ? "approved" : "rejected",
+        customerComments: nextCustomerComments,
+        customerNotes: nextCustomerNotes,
+      },
       message: approved
         ? "Quote approved. Your sales agent will follow up."
         : "Quote rejected. Thank you for the feedback.",
@@ -112,9 +129,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   if (intent === "leave_comment") {
+    const nextCustomerNotes = mergeCustomerNotes(quote.customerNotes, comments);
     await prisma.quote.update({
       where: { id: quote.id },
-      data: { customerComments: comments },
+      data: {
+        customerComments: comments,
+        customerNotes: nextCustomerNotes,
+      },
     });
     await logQuoteActivity({
       quoteId: quote.id,
@@ -123,7 +144,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       action: "Quote Commented",
       message: comments,
     });
-    return Response.json({ success: true, message: "Comment saved." });
+    return Response.json({
+      success: true,
+      quote: {
+        customerComments: comments,
+        customerNotes: nextCustomerNotes,
+      },
+      message: "Comment saved.",
+    });
   }
 
   return Response.json({ error: "Unknown action" }, { status: 400 });
@@ -132,7 +160,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 export default function PublicQuotePage() {
   const { quote } = useLoaderData<any>();
   const actionData = useActionData<any>();
-  const canAct = ["sent", "viewed"].includes(quote.status);
+  const effectiveQuote = { ...quote, ...(actionData?.quote || {}) };
+  const quoteStatus = actionData?.quote?.status || quote.status;
+  const canAct = ["sent", "viewed"].includes(quoteStatus);
+  const customerNoteText =
+    effectiveQuote.customerNotes?.trim() || effectiveQuote.customerComments?.trim() || "";
+  const customerCommentValue =
+    actionData?.quote?.customerComments ?? quote.customerComments ?? "";
 
   const fmtMoney = (amount: string, currency = quote.currencyCode) =>
     new Intl.NumberFormat(undefined, {
@@ -190,10 +224,10 @@ export default function PublicQuotePage() {
             <Info label="Expiration Date" value={fmtDate(quote.expiresAt)} />
           </div>
 
-          {quote.customerNotes && (
+          {customerNoteText && (
             <div style={styles.note}>
               <strong>Notes</strong>
-              <p>{quote.customerNotes}</p>
+              <p>{customerNoteText}</p>
             </div>
           )}
 
@@ -257,10 +291,12 @@ export default function PublicQuotePage() {
           >
             <h2 style={styles.cardTitle}>Customer Response</h2>
             <textarea
+              key={customerCommentValue}
               name="comments"
-              defaultValue={quote.customerComments || ""}
+              defaultValue={customerCommentValue}
               placeholder="Leave comments for the sales agent"
               style={styles.textarea}
+              disabled={!canAct}
             />
             <div style={styles.actions}>
               <button
@@ -268,6 +304,7 @@ export default function PublicQuotePage() {
                 name="intent"
                 value="leave_comment"
                 style={styles.secondaryBtn}
+                disabled={!canAct}
               >
                 Save Comment
               </button>
@@ -279,26 +316,30 @@ export default function PublicQuotePage() {
                 Download PDF
               </button>
             </div>
-            <div style={styles.actions}>
-              <button
-                disabled={!canAct}
-                type="submit"
-                name="intent"
-                value="reject_quote"
-                style={styles.rejectBtn}
-              >
-                Reject Quote
-              </button>
-              <button
-                disabled={!canAct}
-                type="submit"
-                name="intent"
-                value="approve_quote"
-                style={styles.primaryBtn}
-              >
-                Approve Quote
-              </button>
-            </div>
+            {canAct ? (
+              <div style={styles.actions}>
+                <button
+                  type="submit"
+                  name="intent"
+                  value="reject_quote"
+                  style={styles.rejectBtn}
+                >
+                  Reject Quote
+                </button>
+                <button
+                  type="submit"
+                  name="intent"
+                  value="approve_quote"
+                  style={styles.primaryBtn}
+                >
+                  Approve Quote
+                </button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 12, color: "#4b5563" }}>
+                This quote has been {quoteStatus} and customer actions are no longer available.
+              </div>
+            )}
           </Form>
         </aside>
       </div>

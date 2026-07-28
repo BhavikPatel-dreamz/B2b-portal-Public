@@ -130,6 +130,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     themeColor: companyDetails?.shop.themeColor ?? null,
   };
 
+  const headerCompanies =
+    companies.length > 1 ? [{ id: "all", name: "All companies" }, ...companies] : companies;
+
   return Response.json({
     user: {
       firstName: user.firstName,
@@ -137,7 +140,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       email: user.email,
     },
     currentCompany: currentCompanyWithTheme,
-    companies,
+    companies: headerCompanies,
     counts: { drafts: draftCount, orders: orderCount, quotes: quoteCount },
     filters: { search, companyId: selectedCompanyId },
     drafts: drafts.map((draft) => ({
@@ -322,7 +325,7 @@ export default function DraftListPage() {
         companySwitchPath="/sales/portal/drafts?company="
         actions={
           <Link
-            to={`/sales/portal/company/${data.currentCompany.id}/create-order`}
+            to="/sales/portal/create-order"
             style={salesPortalButtonStyles.primary}
           >
             + Create Order
@@ -349,7 +352,7 @@ export default function DraftListPage() {
           defaultValue={data.filters.companyId}
           style={styles.input}
         >
-          <option value="">All companies</option>
+          <option value="all">All companies</option>
           {data.companies.map((company: any) => (
             <option key={company.id} value={company.id}>
               {company.name}

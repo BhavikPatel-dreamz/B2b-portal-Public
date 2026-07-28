@@ -97,9 +97,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     // ── UPDATE LINE ITEM ──────────────────────────────────────
     if (intent === "update_line_item") {
-      if (quote.status !== "draft") {
-        return Response.json({ error: "Only draft quotes can be edited." }, { status: 400 });
-      }
       const itemId = String(formData.get("itemId") || "");
       const unitPrice = parseFloat(String(formData.get("unitPrice") || "0"));
       const discount = parseFloat(String(formData.get("itemDiscount") || "0"));
@@ -133,9 +130,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     // ── APPLY ORDER DISCOUNT ──────────────────────────────────
     if (intent === "apply_order_discount") {
-      if (!["draft", "sent"].includes(quote.status)) {
-        return Response.json({ error: "Only draft or sent quotes can have discounts edited." }, { status: 400 });
-      }
       const discountAmount = parseFloat(String(formData.get("discountAmount") || "0"));
       const discountType = String(formData.get("discountType") || "FIXED_AMOUNT");
 
@@ -166,9 +160,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     // ── REMOVE ORDER DISCOUNT ─────────────────────────────────
     if (intent === "remove_order_discount") {
-      if (!["draft", "sent"].includes(quote.status)) {
-        return Response.json({ error: "Only draft or sent quotes can have discounts edited." }, { status: 400 });
-      }
       await prisma.quote.update({
         where: { id: quoteId },
         data: { discountAmount: 0, discountTotal: 0, discountType: "FIXED_AMOUNT" },
@@ -558,11 +549,171 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return Response.json({ success: true, message: `Order created: ${order.id}`, orderId: order.id });
     }
 
+    // ── UPDATE CUSTOMER DETAILS ────────────────────────────────
+    if (intent === "update_customer_details") {
+      const customerFirstName = String(formData.get("customerFirstName") || "").trim();
+      const customerLastName = String(formData.get("customerLastName") || "").trim();
+      const customerEmail = String(formData.get("customerEmail") || "").trim();
+      if (!customerEmail) {
+        return Response.json({ error: "Customer email is required." }, { status: 400 });
+      }
+
+      const existingInvoiceData =
+        quote.invoiceData && typeof quote.invoiceData === "object"
+          ? (quote.invoiceData as Record<string, any>)
+          : {};
+      const nextInvoiceData = {
+        ...existingInvoiceData,
+        quoteEditMeta: {
+          ...(existingInvoiceData.quoteEditMeta && typeof existingInvoiceData.quoteEditMeta === "object"
+            ? existingInvoiceData.quoteEditMeta
+            : {}),
+          customerDetails: {
+            firstName: customerFirstName || quote.customerFirstName || null,
+            lastName: customerLastName || quote.customerLastName || null,
+            email: customerEmail,
+          },
+        },
+      };
+
+      await prisma.quote.update({
+        where: { id: quoteId },
+        data: {
+          customerFirstName: customerFirstName || quote.customerFirstName || null,
+          customerLastName: customerLastName || quote.customerLastName || null,
+          customerEmail,
+          invoiceData: nextInvoiceData,
+        },
+      });
+
+      await logQuoteActivity({
+        quoteId,
+        companyId: quote.companyId,
+        customerEmail,
+        action: "Customer Details Updated",
+        message: `Updated customer: ${customerFirstName} ${customerLastName} (${customerEmail})`,
+      });
+
+      return Response.json({ success: true, message: "Customer details updated." });
+    }
+
+    // ── UPDATE DELIVERY DETAILS ────────────────────────────────
+    if (intent === "update_delivery_details") {
+      const deliveryLocationName = String(formData.get("deliveryLocationName") || "").trim();
+      const deliveryAddress = String(formData.get("deliveryAddress") || "").trim();
+      const deliveryPhone = String(formData.get("deliveryPhone") || "").trim();
+
+      const existingInvoiceData =
+        quote.invoiceData && typeof quote.invoiceData === "object"
+          ? (quote.invoiceData as Record<string, any>)
+          : {};
+      const nextInvoiceData = {
+        ...existingInvoiceData,
+        quoteEditMeta: {
+          ...(existingInvoiceData.quoteEditMeta && typeof existingInvoiceData.quoteEditMeta === "object"
+            ? existingInvoiceData.quoteEditMeta
+            : {}),
+          deliveryDetails: {
+            locationName: deliveryLocationName || null,
+            address: deliveryAddress || null,
+            phone: deliveryPhone || null,
+          },
+        },
+      };
+
+      await prisma.quote.update({
+        where: { id: quoteId },
+        data: { invoiceData: nextInvoiceData },
+      });
+
+      await logQuoteActivity({
+        quoteId,
+        companyId: quote.companyId,
+        customerEmail: quote.customerEmail,
+        action: "Delivery Details Updated",
+        message: `Location: ${deliveryLocationName || "N/A"}, Address: ${deliveryAddress || "N/A"}, Phone: ${deliveryPhone || "N/A"}`,
+      });
+
+      return Response.json({ success: true, message: "Delivery details updated." });
+    }
+
+    // ── ADD PRODUCT ────────────────────────────────────────────
+    if (intent === "add_product") {
+      const productTitle = String(formData.get("newProductTitle") || "").trim();
+      const variantTitle = String(formData.get("newVariantTitle") || "").trim();
+      const sku = String(formData.get("newSku") || "").trim();
+      const variantId = String(formData.get("newVariantId") || "").trim();
+      const image = String(formData.get("newImage") || "").trim();
+      const quantity = parseInt(String(formData.get("newQuantity") || "1"), 10);
+      const unitPrice = parseFloat(String(formData.get("newUnitPrice") || "0"));
+      const discount = parseFloat(String(formData.get("newDiscount") || "0"));
+
+      if (!productTitle) {
+        return Response.json({ error: "Product name is required." }, { status: 400 });
+      }
+      if (isNaN(quantity) || quantity < 1) {
+        return Response.json({ error: "Invalid quantity." }, { status: 400 });
+      }
+      if (isNaN(unitPrice) || unitPrice < 0) {
+        return Response.json({ error: "Invalid unit price." }, { status: 400 });
+      }
+
+      const totalPrice = Math.max(0, unitPrice * quantity - (discount || 0));
+      const quoteCurrency = quote.currencyCode || quote.items?.[0]?.currencyCode || "USD";
+
+      await prisma.quoteItem.create({
+        data: {
+          quoteId,
+          productTitle,
+          variantTitle: variantTitle || null,
+          sku: sku || null,
+          image: image || null,
+          variantId: variantId || "",
+          quantity,
+          unitPrice,
+          discount: discount || 0,
+          totalPrice,
+          currencyCode: quoteCurrency,
+        },
+      });
+
+      await recalculateQuoteTotals(quoteId);
+
+      await logQuoteActivity({
+        quoteId,
+        companyId: quote.companyId,
+        customerEmail: quote.customerEmail,
+        action: "Product Added",
+        message: `Added "${productTitle}" — qty: ${quantity}, price: ${unitPrice}`,
+      });
+
+      return Response.json({ success: true, message: "Product added to quote." });
+    }
+
+    // ── DELETE ITEM ────────────────────────────────────────────
+    if (intent === "delete_item") {
+      const itemId = String(formData.get("itemId") || "");
+      if (!itemId) return Response.json({ error: "Item ID missing." }, { status: 400 });
+
+      const item = await prisma.quoteItem.findFirst({ where: { id: itemId, quoteId } });
+      if (!item) return Response.json({ error: "Item not found." }, { status: 404 });
+
+      await prisma.quoteItem.delete({ where: { id: itemId } });
+      await recalculateQuoteTotals(quoteId);
+
+      await logQuoteActivity({
+        quoteId,
+        companyId: quote.companyId,
+        customerEmail: quote.customerEmail,
+        action: "Product Removed",
+        message: `Removed "${item.productTitle}" from quote.`,
+      });
+
+      return Response.json({ success: true, message: "Product removed from quote." });
+    }
+
     // ── UPDATE QUOTE METADATA ─────────────────────────────────
     if (intent === "update_quote") {
-      if (quote.status !== "draft") {
-        return Response.json({ error: "Only draft quotes can be edited." }, { status: 400 });
-      }
       const title = String(formData.get("title") || "").trim();
       const customerNotes = String(formData.get("customerNotes") || "");
       const internalNotes = String(formData.get("internalNotes") || "");

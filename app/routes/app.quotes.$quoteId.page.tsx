@@ -64,6 +64,9 @@ export default function AdminQuoteDetailPage() {
   const [discountType, setDiscountType] = useState(quote.discountType || "FIXED_AMOUNT");
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceData, setInvoiceData] = useState<any>(null);
+  const [editCustomer, setEditCustomer] = useState(false);
+  const [editDelivery, setEditDelivery] = useState(false);
+  const [showAddProduct, setShowAddProduct] = useState(false);
 
   const isSubmitting = navigation.state !== "idle";
   const submittingIntent = isSubmitting ? String(navigation.formData?.get("intent") || "") : "";
@@ -82,8 +85,8 @@ export default function AdminQuoteDetailPage() {
   }, [actionData]);
 
   const isDraft = quote.status === "draft";
-  const canEdit = isDraft;
-  const canEditDiscount = isDraft || quote.status === "sent";
+  const canEdit = true;
+  const canEditDiscount = true;
   const canConvert = ["approved", "sent", "viewed"].includes(quote.status);
 
   return (
@@ -210,49 +213,255 @@ export default function AdminQuoteDetailPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0, overflow: "hidden" }}>
             {/* Customer Info */}
             <div style={styles.card}>
-              <h3 style={styles.cardTitle}>Customer Information</h3>
-              <div style={styles.infoGrid}>
-                <div>
-                  <span style={styles.label}>Company</span>
-                  <Link to={`/app/companies/${quote.companyId}`} style={styles.link}>{quote.companyName}</Link>
-                </div>
-                <div>
-                  <span style={styles.label}>Customer</span>
-                  <span>{quote.customerFirstName || ""} {quote.customerLastName || ""}</span>
-                </div>
-                <div>
-                  <span style={styles.label}>Email</span>
-                  <span>{quote.customerEmail}</span>
-                </div>
-                <div>
-                  <span style={styles.label}>Sales Agent</span>
-                  <span>{quote.salesAgentName}</span>
-                </div>
-                <div>
-                  <span style={styles.label}>Created</span>
-                  <span>{fmtDate(quote.createdAt)}</span>
-                </div>
-                <div>
-                  <span style={styles.label}>Expires</span>
-                  <span>{fmtDate(quote.expiresAt)}</span>
-                </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <h3 style={{ ...styles.cardTitle, margin: 0 }}>Customer Information</h3>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => setEditCustomer(!editCustomer)}
+                    style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
+                  >
+                    {editCustomer ? "Cancel" : "Edit Customer"}
+                  </button>
+                )}
               </div>
+              {editCustomer && canEdit ? (
+                <Form method="post" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <input type="hidden" name="intent" value="update_customer_details" />
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+                    <div>
+                      <label style={styles.label}>First Name</label>
+                      <input
+                        name="customerFirstName"
+                        defaultValue={quote.customerFirstName || ""}
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Last Name</label>
+                      <input
+                        name="customerLastName"
+                        defaultValue={quote.customerLastName || ""}
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div style={{ gridColumn: "span 2" }}>
+                      <label style={styles.label}>Email</label>
+                      <input
+                        name="customerEmail"
+                        type="email"
+                        defaultValue={quote.customerEmail || ""}
+                        style={styles.inputFull}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      style={{ ...styles.btn, background: "#005bd3", color: "white" }}
+                    >
+                      {submittingIntent === "update_customer_details" ? "Saving..." : "Save Customer Details"}
+                    </button>
+                  </div>
+                </Form>
+              ) : (
+                <div style={styles.infoGrid}>
+                  <div>
+                    <span style={styles.label}>Company</span>
+                    <Link to={`/app/companies/${quote.companyId}`} style={styles.link}>{quote.companyName}</Link>
+                  </div>
+                  <div>
+                    <span style={styles.label}>Customer</span>
+                    <span>{quote.customerFirstName || ""} {quote.customerLastName || ""}</span>
+                  </div>
+                  <div>
+                    <span style={styles.label}>Email</span>
+                    <span>{quote.customerEmail}</span>
+                  </div>
+                  <div>
+                    <span style={styles.label}>Sales Agent</span>
+                    <span>{quote.salesAgentName}</span>
+                  </div>
+                  <div>
+                    <span style={styles.label}>Created</span>
+                    <span>{fmtDate(quote.createdAt)}</span>
+                  </div>
+                  <div>
+                    <span style={styles.label}>Expires</span>
+                    <span>{fmtDate(quote.expiresAt)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Delivery Details */}
+            <div style={styles.card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <h3 style={{ ...styles.cardTitle, margin: 0 }}>Delivery Details</h3>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => setEditDelivery(!editDelivery)}
+                    style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
+                  >
+                    {editDelivery ? "Cancel" : (quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName ? "Edit Location" : "Add Location")}
+                  </button>
+                )}
+              </div>
+              {editDelivery && canEdit ? (
+                <Form method="post" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <input type="hidden" name="intent" value="update_delivery_details" />
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+                    <div>
+                      <label style={styles.label}>Location Name</label>
+                      <input
+                        name="deliveryLocationName"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName || ""}
+                        placeholder="e.g. Main Warehouse"
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Delivery Phone</label>
+                      <input
+                        name="deliveryPhone"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.phone || ""}
+                        placeholder="+1 234 567 890"
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div style={{ gridColumn: "span 2" }}>
+                      <label style={styles.label}>Delivery Address</label>
+                      <textarea
+                        name="deliveryAddress"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address || ""}
+                        placeholder="Full delivery address"
+                        rows={3}
+                        style={styles.textarea}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      style={{ ...styles.btn, background: "#005bd3", color: "white" }}
+                    >
+                      {submittingIntent === "update_delivery_details" ? "Saving..." : "Save Delivery Details"}
+                    </button>
+                  </div>
+                </Form>
+              ) : (
+                <div>
+                  {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName ||
+                   quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address ||
+                   quote.invoiceData?.quoteEditMeta?.deliveryDetails?.phone ? (
+                    <div style={styles.infoGrid}>
+                      {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName && (
+                        <div>
+                          <span style={styles.label}>Location</span>
+                          <span>{quote.invoiceData.quoteEditMeta.deliveryDetails.locationName}</span>
+                        </div>
+                      )}
+                      {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address && (
+                        <div style={{ gridColumn: "span 2" }}>
+                          <span style={styles.label}>Address</span>
+                          <span style={{ whiteSpace: "pre-wrap" }}>{quote.invoiceData.quoteEditMeta.deliveryDetails.address}</span>
+                        </div>
+                      )}
+                      {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.phone && (
+                        <div>
+                          <span style={styles.label}>Phone</span>
+                          <span>{quote.invoiceData.quoteEditMeta.deliveryDetails.phone}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p style={{ margin: 0, color: "#5c5f62", fontSize: 13 }}>No delivery details added yet.</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Line Items */}
             <div style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
                 <h3 style={{ ...styles.cardTitle, margin: 0 }}>Line Items ({quote.items.length})</h3>
-                {canEditDiscount && (
-                  <button
-                    type="button"
-                    onClick={() => setShowDiscountForm(!showDiscountForm)}
-                    style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
-                  >
-                    {showDiscountForm ? "Hide Discount" : "Order Discount"}
-                  </button>
-                )}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddProduct(!showAddProduct)}
+                      style={{ ...styles.btn, background: showAddProduct ? "#f3f4f6" : "#005bd3", color: showAddProduct ? "#374151" : "white", border: showAddProduct ? "1px solid #c9ccd0" : "1px solid transparent", fontSize: 13 }}
+                    >
+                      {showAddProduct ? "Cancel" : "+ Add Product"}
+                    </button>
+                  )}
+                  {canEditDiscount && (
+                    <button
+                      type="button"
+                      onClick={() => setShowDiscountForm(!showDiscountForm)}
+                      style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
+                    >
+                      {showDiscountForm ? "Hide Discount" : "Order Discount"}
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Add Product Form */}
+              {showAddProduct && canEdit && (
+                <div style={{ padding: 14, background: "#f8fbff", border: "1px solid #dde3ea", borderRadius: 10, marginBottom: 14 }}>
+                  <Form method="post" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <input type="hidden" name="intent" value="add_product" />
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Add New Product</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+                      <div>
+                        <label style={styles.label}>Product Name *</label>
+                        <input name="newProductTitle" required placeholder="Product name" style={styles.inputFull} />
+                      </div>
+                      <div>
+                        <label style={styles.label}>SKU</label>
+                        <input name="newSku" placeholder="SKU" style={styles.inputFull} />
+                      </div>
+                      <div>
+                        <label style={styles.label}>Variant Title</label>
+                        <input name="newVariantTitle" placeholder="Variant" style={styles.inputFull} />
+                      </div>
+                      <div>
+                        <label style={styles.label}>Variant ID</label>
+                        <input name="newVariantId" placeholder="gid://shopify/ProductVariant/..." style={styles.inputFull} />
+                      </div>
+                      <div>
+                        <label style={styles.label}>Image URL</label>
+                        <input name="newImage" placeholder="https://..." style={styles.inputFull} />
+                      </div>
+                      <div>
+                        <label style={styles.label}>Quantity *</label>
+                        <input name="newQuantity" type="number" min="1" defaultValue="1" style={styles.inputFull} />
+                      </div>
+                      <div>
+                        <label style={styles.label}>Unit Price *</label>
+                        <input name="newUnitPrice" type="number" min="0" step="0.01" defaultValue="0" style={styles.inputFull} />
+                      </div>
+                      <div>
+                        <label style={styles.label}>Discount</label>
+                        <input name="newDiscount" type="number" min="0" step="0.01" defaultValue="0" style={styles.inputFull} />
+                      </div>
+                    </div>
+                    <div>
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        style={{ ...styles.btn, background: "#166534", color: "white" }}
+                      >
+                        {submittingIntent === "add_product" ? "Adding..." : "Add Product to Quote"}
+                      </button>
+                    </div>
+                  </Form>
+                </div>
+              )}
 
               {/* Order Discount Form */}
               {showDiscountForm && canEditDiscount && (
@@ -308,6 +517,7 @@ export default function AdminQuoteDetailPage() {
                     <th style={{ ...styles.th, textAlign: "center" }}>Qty</th>
                     <th style={{ ...styles.th, textAlign: "right" }}>Unit Price</th>
                     <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
+                    {canEdit && <th style={{ ...styles.th, textAlign: "center" }}>Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -334,6 +544,21 @@ export default function AdminQuoteDetailPage() {
                       <td style={{ ...styles.td, textAlign: "right", fontWeight: 600 }}>
                         {fmtMoney(item.totalPrice, item.currencyCode)}
                       </td>
+                      {canEdit && (
+                        <td style={{ ...styles.td, textAlign: "center" }}>
+                          <Form method="post" style={{ display: "inline" }} onSubmit={(e) => { if (!confirm(`Remove "${item.productTitle}" from this quote?`)) e.preventDefault(); }}>
+                            <input type="hidden" name="intent" value="delete_item" />
+                            <input type="hidden" name="itemId" value={item.id} />
+                            <button
+                              type="submit"
+                              disabled={isSubmitting}
+                              style={{ ...styles.btn, background: "#fff", border: "1px solid #fecaca", color: "#b91b1b", fontSize: 12, padding: "5px 10px" }}
+                            >
+                              Remove
+                            </button>
+                          </Form>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

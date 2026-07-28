@@ -34,6 +34,7 @@ import {
   getDeliveryDetailsForRecord,
   type DeliveryDetails,
 } from "app/services/delivery-details.server";
+import { getCompanyLocations } from "app/utils/b2b-customer.server";
 import { getAdminForShop } from "app/shopify.server";
 import {
   assertNoShopifyUserErrors,
@@ -44,6 +45,11 @@ import {
 type DraftNotes = {
   internalNotes: string;
   customerNotes: string;
+  deliveryDetails?: {
+    locationName: string;
+    address: string;
+    phone: string;
+  };
 };
 
 type ActionResponse = {
@@ -52,14 +58,35 @@ type ActionResponse = {
   error?: string;
 };
 
+type NewProductRow = {
+  rowKey: string;
+  productId?: string | null;
+  productTitle: string;
+  sku: string;
+  variantTitle: string;
+  variantId: string;
+  image: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+};
+
 function parseDraftNotes(notes?: string | null): DraftNotes {
-  if (!notes) return { internalNotes: "", customerNotes: "" };
+  if (!notes) return { internalNotes: "", customerNotes: "", deliveryDetails: undefined };
   try {
     const parsed = JSON.parse(notes);
     if (parsed && typeof parsed === "object") {
       return {
         internalNotes: String(parsed.internalNotes || ""),
         customerNotes: String(parsed.customerNotes || ""),
+        deliveryDetails:
+          parsed.deliveryDetails && typeof parsed.deliveryDetails === "object"
+            ? {
+                locationName: String(parsed.deliveryDetails.locationName || ""),
+                address: String(parsed.deliveryDetails.address || ""),
+                phone: String(parsed.deliveryDetails.phone || ""),
+              }
+            : undefined,
       };
     }
   } catch {
@@ -253,7 +280,35 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   ]);
 
   const notes = parseDraftNotes(draft.notes);
-  const deliveryDetails = await getDeliveryDetailsForRecord(draft);
+  let deliveryDetails = await getDeliveryDetailsForRecord(draft);
+  if (notes.deliveryDetails) {
+    deliveryDetails = {
+      ...deliveryDetails,
+      locationName:
+        notes.deliveryDetails.locationName || deliveryDetails.locationName,
+      addressLines:
+        notes.deliveryDetails.address?.split(/\r?\n/).filter(Boolean) ||
+        deliveryDetails.addressLines,
+      phone: notes.deliveryDetails.phone || deliveryDetails.phone,
+    };
+  }
+
+  let companyLocations: any[] = [];
+  if (
+    draft.company?.shopifyCompanyId &&
+    draft.company.shop?.shopDomain &&
+    draft.company.shop?.accessToken
+  ) {
+    const companyLocationsResult = await getCompanyLocations(
+      draft.company.shopifyCompanyId,
+      draft.company.shop.shopDomain,
+      draft.company.shop.accessToken,
+    );
+    if (!companyLocationsResult.error) {
+      companyLocations = companyLocationsResult.locations || [];
+    }
+  }
+
   return Response.json({
     user: {
       firstName: user.firstName,
@@ -272,6 +327,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         : null,
     companyUsers,
     deliveryDetails,
+    companyLocations,
     draft: {
       id: draft.id,
       orderNumber: getOrderNumber(draft),
@@ -354,33 +410,61 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           };
         });
 
-      const newProductTitle = String(formData.get("newProductTitle") || "").trim();
-      const newQuantity = Math.max(1, numberField(formData, "newQuantity", 1));
-      const newUnitPrice = Math.max(0, numberField(formData, "newUnitPrice"));
-      const newDiscount = Math.max(0, numberField(formData, "newDiscount"));
-      const newItem =
-        newProductTitle || newUnitPrice > 0
-          ? {
-              productId: String(formData.get("newProductId") || "") || null,
-              productTitle: newProductTitle || "Product",
-              variantId: String(formData.get("newVariantId") || "") || null,
-              variantTitle: String(formData.get("newVariantTitle") || "") || null,
-              sku: String(formData.get("newSku") || "") || null,
-              image: String(formData.get("newImage") || "") || null,
-              quantity: newQuantity,
-              unitPrice: newUnitPrice,
-              discount: newDiscount,
-              lineTotal: Math.max(0, newQuantity * newUnitPrice - newDiscount),
-            }
-          : null;
+      const newRowKeys = formData
+        .getAll("newProductRow")
+        .map(String)
+        .filter(Boolean);
+
+      const newRows = newRowKeys
+        .map((rowKey) => {
+          const productTitle = String(formData.get(`newProductTitle_${rowKey}`) || "").trim();
+          const variantTitle = String(formData.get(`newVariantTitle_${rowKey}`) || "").trim();
+          const sku = String(formData.get(`newSku_${rowKey}`) || "").trim();
+          const variantId = String(formData.get(`newVariantId_${rowKey}`) || "").trim();
+          const image = String(formData.get(`newImage_${rowKey}`) || "").trim();
+          const quantity = Math.max(1, numberField(formData, `newQuantity_${rowKey}`, 1));
+          const unitPrice = Math.max(0, numberField(formData, `newUnitPrice_${rowKey}`));
+          const discount = Math.max(0, numberField(formData, `newDiscount_${rowKey}`));
+
+          if (!productTitle && !variantTitle && !sku && !image && quantity === 1 && unitPrice === 0 && discount === 0) {
+            return null;
+          }
+
+          return {
+            productId: String(formData.get(`newProductId_${rowKey}`) || "") || null,
+            productTitle: productTitle || "Product",
+            variantId: variantId || null,
+            variantTitle: variantTitle || null,
+            sku: sku || null,
+            image: image || null,
+            quantity,
+            unitPrice,
+            discount,
+            lineTotal: Math.max(0, quantity * unitPrice - discount),
+          };
+        })
+        .filter(Boolean) as Array<{
+          productId: string | null;
+          productTitle: string;
+          variantId: string | null;
+          variantTitle: string | null;
+          sku: string | null;
+          image: string | null;
+          quantity: number;
+          unitPrice: number;
+          discount: number;
+          lineTotal: number;
+        }>;
+
+      const newItems = newRows;
 
       const subtotal = updates.reduce(
         (sum, item) => sum + item.quantity * item.unitPrice,
-        newItem ? newItem.quantity * newItem.unitPrice : 0,
+        newItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
       );
       const lineDiscountTotal = updates.reduce(
         (sum, item) => sum + item.discount,
-        newItem ? newItem.discount : 0,
+        newItems.reduce((sum, item) => sum + item.discount, 0),
       );
       const discountTotal = Math.max(
         0,
@@ -447,7 +531,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             },
           });
         }
-        if (newItem) {
+        for (const newItem of newItems) {
           await tx.b2BOrderItem.create({
             data: { ...newItem, orderId: draft.id },
           });
@@ -467,6 +551,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             notes: serializeDraftNotes({
               internalNotes: String(formData.get("internalNotes") || ""),
               customerNotes: String(formData.get("customerNotes") || ""),
+              deliveryDetails: {
+                locationName: String(formData.get("deliveryLocationName") || ""),
+                address: String(formData.get("deliveryAddress") || ""),
+                phone: String(formData.get("deliveryPhone") || ""),
+              },
             }),
           },
         });
@@ -690,10 +779,33 @@ export default function DraftDetailsPage() {
   const busy = navigation.state !== "idle";
   const pendingIntent = String(navigation.formData?.get("intent") || "");
   const submissionLock = useRef(false);
+  const notificationTimerRef = useRef<number | null>(null);
   const [notification, setNotification] = useState<{
     type: "success" | "error";
     message: string;
   } | null>(data.successMessage ? { type: "success", message: data.successMessage } : null);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [productQuery, setProductQuery] = useState("all");
+  const [productResults, setProductResults] = useState<any[]>([]);
+  const [isFetchingProducts, setIsFetchingProducts] = useState(false);
+  const [newProductRows, setNewProductRows] = useState<NewProductRow[]>([]);
+
+  const companyLocations = data.companyLocations || [];
+  const initialLocationMatch = companyLocations.find(
+    (loc: any) => loc.name === deliveryDetails.locationName,
+  );
+  const [selectedDeliveryLocationId, setSelectedDeliveryLocationId] = useState<string>(
+    initialLocationMatch?.id || "",
+  );
+  const [deliveryLocationNameValue, setDeliveryLocationNameValue] = useState<string>(
+    deliveryDetails.locationName || "",
+  );
+  const [deliveryPhoneValue, setDeliveryPhoneValue] = useState<string>(
+    deliveryDetails.phone || "",
+  );
+  const [deliveryAddressValue, setDeliveryAddressValue] = useState<string>(
+    (deliveryDetails.addressLines || []).join("\n") || "",
+  );
 
   useEffect(() => {
     if (navigation.state === "idle") submissionLock.current = false;
@@ -711,10 +823,95 @@ export default function DraftDetailsPage() {
   }, [actionData]);
 
   useEffect(() => {
+    if (!selectedDeliveryLocationId) return;
+    const location = companyLocations.find((loc: any) => loc.id === selectedDeliveryLocationId);
+    if (!location) return;
+
+    const addressLines = [] as string[];
+    const shipping = location.shippingAddress || {};
+    const recipient = [shipping.firstName, shipping.lastName]
+      .filter(Boolean)
+      .join(" ");
+    if (recipient) addressLines.push(recipient);
+    if (location.name) addressLines.push(location.name);
+    if (shipping.address1) addressLines.push(shipping.address1);
+    if (shipping.address2) addressLines.push(shipping.address2);
+    const cityLine = [shipping.city, shipping.province, shipping.zip]
+      .filter(Boolean)
+      .join(", ");
+    if (cityLine) addressLines.push(cityLine);
+    if (shipping.country) addressLines.push(shipping.country);
+
+    setDeliveryLocationNameValue(location.name || "");
+    setDeliveryPhoneValue(shipping.phone || location.phone || "");
+    setDeliveryAddressValue(addressLines.join("\n"));
+  }, [selectedDeliveryLocationId, companyLocations]);
+
+  useEffect(() => {
     if (data.successMessage) {
       setNotification({ type: "success", message: data.successMessage });
     }
   }, [data.successMessage]);
+
+  useEffect(() => {
+    if (notification?.type === "success") {
+      if (notificationTimerRef.current) {
+        window.clearTimeout(notificationTimerRef.current);
+      }
+      notificationTimerRef.current = window.setTimeout(() => {
+        setNotification(null);
+        notificationTimerRef.current = null;
+      }, 4000);
+    }
+    return () => {
+      if (notificationTimerRef.current) {
+        window.clearTimeout(notificationTimerRef.current);
+        notificationTimerRef.current = null;
+      }
+    };
+  }, [notification]);
+
+  const fetchProducts = async (query = "all") => {
+    setIsFetchingProducts(true);
+    try {
+      const normalizedQuery = String(query || "").trim() || "all";
+      const url = `/api/sales-product-search?q=${encodeURIComponent(normalizedQuery)}&companyId=${encodeURIComponent(draft.company.id)}`;
+      const res = await fetch(url);
+      if (!res.ok) return setProductResults([]);
+      const data = await res.json();
+      setProductResults(data.products || []);
+    } catch {
+      setProductResults([]);
+    } finally {
+      setIsFetchingProducts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showProductModal) return;
+    fetchProducts(productQuery || "all");
+  }, [showProductModal, productQuery, draft.company.id]);
+
+  const handleSelectProductVariant = (product: any, variant: any) => {
+    const selected = {
+      productId: product.id || null,
+      productTitle: product.title || "",
+      sku: variant?.sku || "",
+      variantTitle: variant?.title || "Default variant",
+      variantId: variant?.id || "",
+      image: product.image || "",
+      unitPrice: Number(variant?.price || 0),
+      discount: 0,
+      quantity: 1,
+      rowKey: String(Date.now()),
+    };
+    setNewProductRows((rows) => [...rows, selected]);
+    setShowProductModal(false);
+  };
+
+  const removePendingProduct = (rowKey: string) => {
+    setNewProductRows((rows) => rows.filter((row) => row.rowKey !== rowKey));
+  };
 
   const guardSubmission = (event: React.FormEvent<HTMLFormElement>) => {
     if (submissionLock.current || busy) {
@@ -866,11 +1063,90 @@ export default function DraftDetailsPage() {
               </div>
             </Card>
 
-            <DeliveryDetailsCard deliveryDetails={deliveryDetails} />
+            <section style={styles.card}>
+              <h2 style={styles.cardTitle}>Delivery Details</h2>
+              <div className="draft-delivery-grid" style={styles.deliveryGrid}>
+                <label style={styles.label}>
+                  Saved location
+                  <select
+                    name="deliveryLocationId"
+                    value={selectedDeliveryLocationId}
+                    onChange={(e) => setSelectedDeliveryLocationId(e.target.value)}
+                    style={styles.input}
+                  >
+                    <option value="">-- Use custom delivery details --</option>
+                    {companyLocations.map((location: any) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={styles.label}>
+                  Location name
+                  <input
+                    name="deliveryLocationName"
+                    value={deliveryLocationNameValue}
+                    onChange={(e) => {
+                      setDeliveryLocationNameValue(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="e.g. Warehouse / Store name"
+                    style={styles.input}
+                  />
+                </label>
+                <label style={styles.label}>
+                  Delivery Phone
+                  <input
+                    name="deliveryPhone"
+                    value={deliveryPhoneValue}
+                    onChange={(e) => {
+                      setDeliveryPhoneValue(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    style={styles.input}
+                  />
+                </label>
+                <label style={{ ...styles.label, gridColumn: "1 / -1" }}>
+                  Delivery Address
+                  <textarea
+                    name="deliveryAddress"
+                    value={deliveryAddressValue}
+                    onChange={(e) => {
+                      setDeliveryAddressValue(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="Full delivery address"
+                    rows={4}
+                    style={{ ...styles.textarea, minHeight: 72 }}
+                  />
+                </label>
+              </div>
+              {companyLocations.length > 0 ? (
+                <p style={{ ...styles.muted, marginTop: 10 }}>
+                  Select one of the saved company locations to auto-fill address and phone, or leave the location blank to add a new one.
+                </p>
+              ) : (
+                <p style={{ ...styles.muted, marginTop: 10 }}>
+                  No saved company locations are available. Enter a new delivery location below.
+                </p>
+              )}
+            </section>
 
             <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
               <div style={styles.cardHeader}>
                 <h2 style={styles.cardTitle}>Product Information</h2>
+                <button
+                  type="button"
+                  onClick={() => setShowProductModal(true)}
+                  style={{
+                    ...styles.secondaryButton,
+                    padding: "8px 12px",
+                    fontSize: 13,
+                  }}
+                >
+                  + Add Product
+                </button>
               </div>
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
@@ -970,78 +1246,60 @@ export default function DraftDetailsPage() {
 
                       </tr>
                     ))}
-                    <tr>
-                      <td style={styles.td}>
-                        <div style={styles.productInputs}>
-                          <input
-                            name="newProductTitle"
-                            placeholder="New product name"
-                            style={styles.input}
-                          />
-                          <input
-                            name="newImage"
-                            placeholder="Image URL"
-                            style={styles.smallInput}
-                          />
-                          <input
-                            name="newProductId"
-                            placeholder="Product ID"
-                            style={styles.smallInput}
-                          />
-                        </div>
-                      </td>
-                      <td style={styles.td}>
-                        <input
-                          name="newSku"
-                          placeholder="SKU"
-                          style={styles.smallInput}
-                        />
-                      </td>
-                      <td style={styles.td}>
-                        <input
-                          name="newVariantTitle"
-                          placeholder="Variant"
-                          style={styles.smallInput}
-                        />
-                        <input
-                          name="newVariantId"
-                          placeholder="Variant ID"
-                          style={styles.smallInput}
-                        />
-                      </td>
-                      <td style={styles.td}>
-                        <input
-                          type="number"
-                          min="1"
-                          name="newQuantity"
-                          defaultValue="1"
-                          style={styles.numberInput}
-                        />
-                      </td>
-                      <td style={styles.td}>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          name="newUnitPrice"
-                          defaultValue="0"
-                          style={styles.numberInput}
-                        />
-                      </td>
-                      <td style={styles.td}>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          name="newDiscount"
-                          defaultValue="0"
-                          style={styles.numberInput}
-                        />
-                      </td>
-                      <td style={styles.td}>
-                        Add this product on Save Changes
-                      </td>
-                    </tr>
+                    {newProductRows.map((row) => (
+                      <tr key={row.rowKey} style={{ background: "#f8f5ff" }}>
+                        <td style={styles.td}>
+                          <div style={styles.productCell}>
+                            <span style={{ display: "none" }}>
+                              <input type="hidden" name="newProductRow" value={row.rowKey} />
+                              <input type="hidden" name={`newProductId_${row.rowKey}`} value={row.productId || ""} />
+                              <input type="hidden" name={`newProductTitle_${row.rowKey}`} value={row.productTitle} />
+                              <input type="hidden" name={`newSku_${row.rowKey}`} value={row.sku} />
+                              <input type="hidden" name={`newVariantTitle_${row.rowKey}`} value={row.variantTitle} />
+                              <input type="hidden" name={`newVariantId_${row.rowKey}`} value={row.variantId} />
+                              <input type="hidden" name={`newImage_${row.rowKey}`} value={row.image} />
+                              <input type="hidden" name={`newUnitPrice_${row.rowKey}`} value={row.unitPrice} />
+                              <input type="hidden" name={`newDiscount_${row.rowKey}`} value={row.discount} />
+                              <input type="hidden" name={`newQuantity_${row.rowKey}`} value={row.quantity} />
+                            </span>
+                            {row.image ? (
+                              <img src={row.image} alt="" style={styles.productImage} />
+                            ) : (
+                              <span style={styles.imagePlaceholder} />
+                            )}
+                            <div style={styles.productInputs}>
+                              <div style={{ fontWeight: 700 }}>{row.productTitle}</div>
+                              <div style={{ color: "#6b7280", fontSize: 12 }}>Pending save</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={styles.td}>{row.sku || "N/A"}</td>
+                        <td style={styles.td}>{row.variantTitle || "Default variant"}</td>
+                        <td style={styles.td}>{row.quantity}</td>
+                        <td style={styles.td}>{money(row.unitPrice)}</td>
+                        <td style={styles.td}>{money(row.discount)}</td>
+                        <td style={styles.td}>
+                          <strong>{money(Math.max(0, row.quantity * row.unitPrice - row.discount))}</strong>
+                        </td>
+                        <td style={styles.td}>
+                          <button
+                            type="button"
+                            onClick={() => removePendingProduct(row.rowKey)}
+                            style={{
+                              border: "1px solid #d1d5db",
+                              borderRadius: 8,
+                              background: "#fff",
+                              color: "#374151",
+                              padding: "6px 10px",
+                              fontSize: 12,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -1137,6 +1395,101 @@ export default function DraftDetailsPage() {
           />
         </div>
       </Card>
+
+      {showProductModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.5)",
+          }}
+          onClick={() => setShowProductModal(false)}
+        >
+          <div
+            style={{
+              width: "90vw",
+              maxWidth: 900,
+              maxHeight: "90vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 8,
+              padding: 18,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <h3 style={{ margin: 0 }}>Add Product</h3>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  placeholder="Search products"
+                  value={productQuery}
+                  onChange={(e) => setProductQuery(e.target.value)}
+                  style={{ ...styles.input, width: 260 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fetchProducts(productQuery)}
+                  style={styles.secondaryButton}
+                >
+                  Search
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductQuery("all");
+                    fetchProducts("all");
+                  }}
+                  style={styles.secondaryButton}
+                >
+                  Show All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowProductModal(false)}
+                  style={styles.secondaryButton}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              {productResults.length === 0 ? (
+                <p style={styles.muted}>No products found. Try a different search or click Show All.</p>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {productResults.map((product: any) => (
+                    <div
+                      key={product.id}
+                      style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 700 }}>{product.title}</div>
+                        <div style={{ color: "#6b7280", fontSize: 13 }}>{product.vendor || ""}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {(product.variants || []).map((variant: any) => (
+                          <button
+                            key={variant.id}
+                            type="button"
+                            onClick={() => handleSelectProductVariant(product, variant)}
+                            style={styles.secondaryButton}
+                          >
+                            Add {variant.title || "Variant"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       <style>{responsiveCss}</style>
     </SalesPortalLayout>
   );
@@ -1358,10 +1711,17 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 20,
   },
   cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
     padding: "16px 18px",
     borderBottom: "1px solid #e1e3e5",
   },
   cardTitle: { margin: "0 0 14px", fontSize: 16, color: "#202223" },
+  muted: {
+    color: "#6d7175",
+    fontSize: 13,
+  },
   infoGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",

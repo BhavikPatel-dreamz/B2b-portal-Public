@@ -26,44 +26,63 @@ import {
   salesPortalButtonStyles,
 } from "app/components/SalesPortalLayout";
 
-const editableStatuses = ["draft"];
+const editableStatuses = ["draft", "sent", "viewed", "approved"];
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
-  const companyId = params.companyId;
-  if (!companyId || !hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/portal");
-  }
 
   const url = new URL(request.url);
+  const companyIdParam = url.searchParams.get("company") || "";
   const status = url.searchParams.get("status") || "";
   const customer = url.searchParams.get("customer") || "";
   const agent = url.searchParams.get("agent") || "";
   const dateFrom = url.searchParams.get("dateFrom") || "";
   const dateTo = url.searchParams.get("dateTo") || "";
 
+  const companies = user.salesCompanies.map((sc) => ({
+    id: sc.company.id,
+    name: sc.company.name,
+  }));
+  const headerCompanies =
+    companies.length > 1 ? [{ id: "all", name: "All companies" }, ...companies] : companies;
+
+  if (!companies.length) return redirect("/sales/portal");
+
+  const selectedCompanyId =
+    companyIdParam || (companies.length > 1 ? "all" : companies[0].id);
+
+  const currentCompany =
+    selectedCompanyId === "all"
+      ? { id: "all", name: "All companies" }
+      : companies.find((c) => c.id === selectedCompanyId) || companies[0];
+
+  const filterCompanyId =
+    selectedCompanyId === "all"
+      ? { in: user.salesCompanies.map((sc) => sc.companyId) }
+      : selectedCompanyId;
+
+  const companyIdsForQuery =
+    selectedCompanyId === "all"
+      ? user.salesCompanies.map((sc) => sc.companyId)
+      : [selectedCompanyId];
+
   await prisma.quote.updateMany({
     where: {
-      companyId,
+      companyId: { in: companyIdsForQuery },
       status: { in: ["draft", "sent", "viewed"] },
       expiresAt: { lt: new Date() },
     },
     data: { status: "expired" },
   });
 
-  const company = await prisma.companyAccount.findUnique({
-    where: { id: companyId },
-    include: {
-      shop: {
-        select: { shopName: true, shopDomain: true, themeColor: true },
-      },
-    },
+  const themeCompanyId =
+    selectedCompanyId === "all" ? companies[0].id : selectedCompanyId;
+  const companyDetails = await prisma.companyAccount.findUnique({
+    where: { id: themeCompanyId },
+    select: { shop: { select: { themeColor: true } } },
   });
-  if (!company) {
-    return redirect("/sales/portal");
-  }
 
-  const where: any = { companyId };
+  const where: any = { companyId: filterCompanyId };
   if (status) where.status = status;
   if (customer) {
     where.OR = [
@@ -83,6 +102,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
   }
 
+  const companyAccessFilter =
+    selectedCompanyId === "all"
+      ? { some: { companyId: { in: companyIdsForQuery } } }
+      : { some: { companyId: selectedCompanyId } };
+
   const [quotes, agents, quoteCount, orderCount] = await Promise.all([
     prisma.quote.findMany({
       where,
@@ -91,31 +115,32 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         salesAgent: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
+        company: { select: { id: true, name: true } },
       },
     }),
     prisma.user.findMany({
       where: {
         role: "SALES_USER",
-        salesCompanies: { some: { companyId } },
+        salesCompanies: companyAccessFilter,
       },
       select: { id: true, firstName: true, lastName: true, email: true },
       orderBy: { firstName: "asc" },
     }),
-    prisma.quote.count({ where: { companyId } }),
+    prisma.quote.count({
+      where: { companyId: filterCompanyId },
+    }),
     prisma.b2BOrder.count({
       where: {
-        companyId,
+        companyId: filterCompanyId,
         orderStatus: { notIn: ["converted", "archived"] },
       },
     }),
   ]);
 
   return Response.json({
-    company: {
-      id: company.id,
-      name: company.name,
-      themeColor: company.shop.themeColor ?? null,
-      storeName: company.shop.shopName || company.shop.shopDomain,
+    currentCompany: {
+      ...currentCompany,
+      themeColor: companyDetails?.shop.themeColor ?? null,
     },
     user: {
       id: user.id,
@@ -123,14 +148,18 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       lastName: user.lastName,
       email: user.email,
     },
-    allCompanies: user.salesCompanies.map((sc) => ({
-      id: sc.company.id,
-      name: sc.company.name,
-    })),
+    companies: headerCompanies,
     agents,
     quoteCount,
     orderCount,
-    filters: { status, customer, agent, dateFrom, dateTo },
+    filters: {
+      status,
+      customer,
+      agent,
+      dateFrom,
+      dateTo,
+      companyId: selectedCompanyId,
+    },
     quotes: quotes.map((quote) => ({
       ...quote,
       subtotal: quote.subtotal.toString(),
@@ -141,12 +170,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   const { user } = await requireSalesSession(request);
-  const companyId = params.companyId;
-  if (!companyId || !hasCompanyAccess(user, companyId)) {
-    return Response.json({ error: "Access denied" }, { status: 403 });
-  }
 
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "");
@@ -160,7 +185,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const quote = quoteId
     ? await prisma.quote.findFirst({
-        where: { id: quoteId, companyId },
+        where: { id: quoteId, companyId: { in: user.salesCompanies.map((sc) => sc.companyId) } },
         include: { items: true },
       })
     : null;
@@ -189,7 +214,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await logQuoteActivity({
         quoteId,
         userId: user.id,
-        companyId,
+        companyId: quote.companyId,
         customerEmail: quote.customerEmail,
         action: "Quote Cancelled",
       });
@@ -248,13 +273,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await logQuoteActivity({
         quoteId: duplicate.id,
         userId: user.id,
-        companyId,
+        companyId: quote.companyId,
         customerEmail: duplicate.customerEmail,
         action: "Quote Created",
         message: `Duplicated from ${quote.quoteNumber}.`,
       });
       return redirect(
-        `/sales/portal/company/${companyId}/quotes/${duplicate.id}`,
+        `/sales/portal/quotes/${duplicate.id}`,
       );
     }
 
@@ -280,15 +305,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export default function QuoteListingPage() {
   const {
-    company,
+    currentCompany,
     user,
-    allCompanies,
+    companies,
     agents,
     filters,
     quotes,
     quoteCount,
     orderCount,
   } = useLoaderData<any>();
+  const safeCompany =
+    currentCompany ?? { id: "all", name: "All companies", themeColor: null, storeName: "" };
   const actionData = useActionData<any>();
   const navigation = useNavigation();
 
@@ -322,23 +349,36 @@ export default function QuoteListingPage() {
     );
   };
 
+  const hasActiveFilters =
+    filters.customer ||
+    filters.status ||
+    filters.agent ||
+    filters.dateFrom ||
+    filters.dateTo ||
+    (filters.companyId && filters.companyId !== "all" && companies.length > 1);
+
   return (
     <SalesPortalLayout
-      company={company}
+      company={safeCompany}
       user={user}
       activePage="quotes"
       orderCount={orderCount}
       quoteCount={quoteCount}
-      themeColor={company.themeColor}
+      themeColor={safeCompany.themeColor}
     >
       <SalesPortalHeader
         title="Quotes"
-        subtitle={`Create, send, track, and convert customer quotes for ${company.name}.`}
-        companyId={company.id}
-        companies={allCompanies}
+        subtitle={
+          safeCompany.id === "all"
+            ? "Create, send, track, and convert customer quotes across all companies."
+            : `Create, send, track, and convert customer quotes for ${safeCompany.name}.`
+        }
+        companyId={safeCompany.id}
+        companies={companies}
+        companySwitchPath="/sales/portal/quotes?company="
         actions={
           <Link
-            to={`/sales/portal/company/${company.id}/create-quote`}
+            to="/sales/portal/create-quote"
             style={salesPortalButtonStyles.primary}
           >
             + Create Quote
@@ -352,6 +392,20 @@ export default function QuoteListingPage() {
       )}
 
       <Form method="get" className="sales-quote-filters" style={styles.filters}>
+        {companies.length > 1 && (
+          <select
+            name="company"
+            defaultValue={filters.companyId}
+            style={styles.input}
+          >
+            <option value="all">All companies</option>
+            {companies.map((company: any) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           name="customer"
           placeholder="Customer"
@@ -400,15 +454,8 @@ export default function QuoteListingPage() {
           style={styles.input}
         />
         <button style={styles.secondaryBtn}>Filter</button>
-        {(filters.customer ||
-          filters.status ||
-          filters.agent ||
-          filters.dateFrom ||
-          filters.dateTo) && (
-          <Link
-            to={`/sales/portal/company/${company.id}/quotes`}
-            style={styles.clearBtn}
-          >
+        {hasActiveFilters && (
+          <Link to="/sales/portal/quotes" style={styles.clearBtn}>
             Clear
           </Link>
         )}
@@ -437,7 +484,7 @@ export default function QuoteListingPage() {
               <tr key={quote.id} className="sales-quote-row">
                 <td style={styles.td}>
                   <Link
-                    to={`/sales/portal/company/${company.id}/quotes/${quote.id}`}
+                    to={`/sales/portal/quotes/${quote.id}`}
                     style={styles.link}
                   >
                     {quote.quoteNumber}
@@ -448,7 +495,7 @@ export default function QuoteListingPage() {
                   <br />
                   <small>{quote.customerEmail}</small>
                 </td>
-                <td style={styles.td}>{company.name}</td>
+                <td style={styles.td}>{quote.company?.name || safeCompany.name}</td>
                 <td style={styles.td}>
                   <strong>
                     {fmtMoney(quote.totalAmount, quote.currencyCode)}
@@ -463,26 +510,18 @@ export default function QuoteListingPage() {
                 <td style={{ ...styles.td, textAlign: "right" }}>
                   <div style={styles.actions}>
                     <Link
-                      to={`/sales/portal/company/${company.id}/quotes/${quote.id}`}
+                      to={`/sales/portal/quotes/${quote.id}`}
                       style={styles.smallLink}
                     >
                       View
                     </Link>
-                    {quote.status === "draft" && (
-                      <Link
-                        to={`/sales/portal/company/${company.id}/quotes/${quote.id}`}
-                        style={styles.actionLink}
-                      >
-                        ✏️ Edit
-                      </Link>
-                    )}
-                    <QuoteAction
+                    {/* <QuoteAction
                       quoteId={quote.id}
                       intent="send_quote"
                       label={quote.status === "draft" ? "Send" : "Resend"}
                       disabled={navigation.state !== "idle"}
-                    />
-                    <QuoteAction
+                    /> */}
+                    {/* <QuoteAction
                       quoteId={quote.id}
                       intent="duplicate_quote"
                       label="Duplicate"
@@ -500,7 +539,7 @@ export default function QuoteListingPage() {
                         intent="cancel_quote"
                         label="Cancel"
                       />
-                    )}
+                    )} */}
                     <QuoteAction
                       quoteId={quote.id}
                       intent="delete_quote"

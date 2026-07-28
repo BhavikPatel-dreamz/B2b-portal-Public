@@ -1026,6 +1026,7 @@ export default function CreateOrderProductCatalog() {
   } | null>(null);
   const [itemAddedMessage, setItemAddedMessage] = useState<string | null>(null);
   const itemAddedMessageTimeoutRef = useRef<number | null>(null);
+  const draftSaveStatusTimerRef = useRef<number | null>(null);
   const isSavingDraft = draftFetcher.state !== "idle";
   const draftSubmitLock = useRef(false);
   const selectedCustomerShopifyId = selectedCustomer.shopifyCustomerId || selectedCustomer.id || "";
@@ -1133,6 +1134,28 @@ export default function CreateOrderProductCatalog() {
       }
     };
   }, [itemAddedMessage]);
+
+  useEffect(() => {
+    if (!draftSaveStatus) return;
+
+    if (draftSaveStatusTimerRef.current) {
+      window.clearTimeout(draftSaveStatusTimerRef.current);
+    }
+
+    if (draftSaveStatus.success) {
+      draftSaveStatusTimerRef.current = window.setTimeout(() => {
+        setDraftSaveStatus(null);
+        draftSaveStatusTimerRef.current = null;
+      }, 4000);
+    }
+
+    return () => {
+      if (draftSaveStatusTimerRef.current) {
+        window.clearTimeout(draftSaveStatusTimerRef.current);
+        draftSaveStatusTimerRef.current = null;
+      }
+    };
+  }, [draftSaveStatus]);
 
   useEffect(() => {
     if (draftFetcher.state === "idle") {

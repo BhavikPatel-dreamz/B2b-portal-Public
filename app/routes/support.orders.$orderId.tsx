@@ -716,6 +716,7 @@ export default function OrderDetailsPage() {
   const [pendingActionIntent, setPendingActionIntent] = useState("");
   const activePendingIntent = navigationIntent || (busy ? pendingActionIntent : "");
   const submissionLock = useRef(false);
+  const notificationTimerRef = useRef<number | null>(null);
   const [notification, setNotification] = useState<{
     type: "success" | "error";
     message: string;
@@ -744,6 +745,24 @@ export default function OrderDetailsPage() {
       setNotification({ type: "success", message: data.successMessage });
     }
   }, [data.successMessage]);
+
+  useEffect(() => {
+    if (notification?.type === "success") {
+      if (notificationTimerRef.current) {
+        window.clearTimeout(notificationTimerRef.current);
+      }
+      notificationTimerRef.current = window.setTimeout(() => {
+        setNotification(null);
+        notificationTimerRef.current = null;
+      }, 4000);
+    }
+    return () => {
+      if (notificationTimerRef.current) {
+        window.clearTimeout(notificationTimerRef.current);
+        notificationTimerRef.current = null;
+      }
+    };
+  }, [notification]);
 
   const guardSubmission = (event: React.FormEvent<HTMLFormElement>) => {
     if (submissionLock.current || busy) {

@@ -209,6 +209,7 @@ export function SalesPortalHeader({
   companySwitchPath,
   allCompaniesPath,
   actions,
+  startAction,
 }: {
   title: string;
   subtitle: ReactNode;
@@ -217,10 +218,12 @@ export function SalesPortalHeader({
   companySwitchPath?: string;
   allCompaniesPath?: string;
   actions?: ReactNode;
+  startAction?: ReactNode;
 }) {
   return (
     <header className="sales-portal-header" style={styles.header}>
       <div style={styles.headingGroup}>
+        {startAction && <div style={styles.startActionWrap}>{startAction}</div>}
         <h1 style={styles.title}>{title}</h1>
         <p style={styles.subtitle}>{subtitle}</p>
       </div>
@@ -419,6 +422,11 @@ const styles: Record<string, CSSProperties> = {
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
   },
+  startActionWrap: {
+    marginRight: 12,
+    display: "inline-flex",
+    alignItems: "flex-start",
+  } as CSSProperties,
   companyCard: {
     margin: "0 16px 24px",
     padding: "14px 16px",

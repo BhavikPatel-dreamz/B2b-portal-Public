@@ -9,7 +9,7 @@ import {
   useActionData,
   useSearchParams,
 } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import {
@@ -53,40 +53,46 @@ type CreateCompanyCountryOption = {
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
-  const companyId = params.companyId;
 
-  if (!companyId) {
-    return redirect("/sales/portal");
+  const url = new URL(request.url);
+  const companyIdParam = url.searchParams.get("company") || "";
+
+  const companies = user.salesCompanies.map((sc) => ({
+    id: sc.company.id,
+    name: sc.company.name,
+  }));
+
+  if (!companies.length) return redirect("/sales/portal");
+
+  const selectedCompanyId =
+    companyIdParam || (companies.length > 1 ? "all" : companies[0].id);
+
+  const currentCompany =
+    selectedCompanyId === "all"
+      ? { id: "all", name: "All companies" }
+      : companies.find((c) => c.id === selectedCompanyId) || companies[0];
+
+  if (selectedCompanyId !== "all") {
+    if (!hasCompanyAccess(user, selectedCompanyId)) {
+      return redirect("/sales/portal");
+    }
   }
 
-  if (!hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/portal");
-  }
+  const filterCompanyIds =
+    selectedCompanyId === "all"
+      ? user.salesCompanies.map((sc) => sc.companyId)
+      : [selectedCompanyId];
 
-  const company = await prisma.companyAccount.findUnique({
-    where: { id: companyId },
-    include: {
-      shop: {
-        select: {
-          shopName: true,
-          shopDomain: true,
-          themeColor: true,
-          accessToken: true,
-        },
-      },
-    },
-  });
+  const companyIdsForQuery =
+    selectedCompanyId === "all"
+      ? user.salesCompanies.map((sc) => sc.companyId)
+      : [selectedCompanyId];
 
-  if (!company) {
-    return redirect("/sales/portal");
-  }
-
-  // Fetch only real Shopify Orders for this company.
   const orders = await prisma.b2BOrder.findMany({
     where: {
       AND: [
         {
-          companyId: company.id,
+          companyId: { in: companyIdsForQuery },
           orderStatus: { notIn: ["converted", "archived"] },
         },
         getShopifyOrderWhere(),
@@ -106,14 +112,23 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       source: true,
       paymentLink: true,
       paymentLinkToken: true,
+      company: {
+        select: { id: true, name: true },
+      },
       createdByUser: {
         select: { firstName: true, lastName: true, email: true },
       },
     },
   });
-  const quoteCount = await prisma.quote.count({
-    where: { companyId: company.id },
-  });
+
+  const quoteCount =
+    selectedCompanyId === "all"
+      ? await prisma.quote.count({
+          where: { companyId: { in: companyIdsForQuery } },
+        })
+      : await prisma.quote.count({
+          where: { companyId: selectedCompanyId },
+        });
 
   return Response.json({
     user: {
@@ -123,11 +138,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       email: user.email,
     },
     company: {
-      id: company.id,
-      name: company.name,
-      creditLimit: company.creditLimit.toString(),
-      themeColor: company.shop.themeColor ?? null,
-      storeName: company.shop.shopName || company.shop.shopDomain,
+      id: currentCompany.id,
+      name: currentCompany.name,
+      creditLimit: "0",
+      themeColor: null,
+      storeName: null,
     },
     orders: orders.map((o) => ({
       ...o,
@@ -135,12 +150,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       remainingBalance: o.remainingBalance?.toString() || "0",
       createdAt: o.createdAt.toISOString(),
       canGeneratePaymentLink: isSalesPortalPaymentLinkEligible(o),
+      companyName: o.company?.name || null,
     })),
     quoteCount,
-    allCompanies: user.salesCompanies.map((sc) => ({
-      id: sc.company.id,
-      name: sc.company.name,
-    })),
+    allCompanies: companies,
+    selectedCompanyId,
   });
 };
 
@@ -331,8 +345,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               address1,
               address2,
               city,
-              zoneCode: provinceCode,
-              countryCode,
+              province: provinceCode,
+              country: countryCode,
               zip,
               phone: formattedPhone,
               firstName,
@@ -350,10 +364,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       if (addressJson.errors?.length || addressErrors.length) {
         return Response.json(
           {
-            error:
-              addressJson.errors?.[0]?.message ||
-              addressErrors[0]?.message ||
-              "Failed to assign location address.",
+            error: addressErrors[0]?.message || "Failed to assign location address.",
           },
           { status: 400 },
         );
@@ -592,7 +603,7 @@ export default function OrderManageScreen() {
   // NEW: controls whether the toast is currently visible (manual dismiss)
   const [toastDismissed, setToastDismissed] = useState(false);
 
-  const { user, company, orders, quoteCount, allCompanies } = useLoaderData<{
+  const { user, company, orders, quoteCount, allCompanies, selectedCompanyId } = useLoaderData<{
     user: {
       id: string;
       firstName: string | null;
@@ -620,6 +631,7 @@ export default function OrderManageScreen() {
       paymentLink: string | null;
       paymentLinkToken: string | null;
       canGeneratePaymentLink: boolean;
+      companyName: string | null;
       createdByUser: {
         firstName: string | null;
         lastName: string | null;
@@ -628,6 +640,7 @@ export default function OrderManageScreen() {
     }>;
     quoteCount: number;
     allCompanies: Array<{ id: string; name: string }>;
+    selectedCompanyId: string;
   }>();
   const navigation = useNavigation();
   const [searchParams] = useSearchParams();
@@ -644,6 +657,7 @@ export default function OrderManageScreen() {
         ? actionData.message || "Action completed successfully."
         : "";
   const errorToastMessage = actionData?.error || "";
+  const toastTimerRef = useRef<number | null>(null);
   const isDeleting =
     navigation.state === "submitting" &&
     navigation.formData?.get("intent") === "delete_order";
@@ -675,6 +689,24 @@ export default function OrderManageScreen() {
       setToastDismissed(false);
     }
   }, [successToastMessage, errorToastMessage]);
+
+  useEffect(() => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    if (successToastMessage) {
+      toastTimerRef.current = window.setTimeout(() => {
+        setToastDismissed(true);
+      }, 4000);
+    }
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
+  }, [successToastMessage]);
 
   useEffect(() => {
     let isActive = true;
@@ -767,7 +799,11 @@ export default function OrderManageScreen() {
 
   return (
     <SalesPortalLayout
-      company={company}
+      company={
+        selectedCompanyId === "all"
+          ? { ...allCompanies[0], creditLimit: "0", themeColor: null, storeName: null }
+          : company
+      }
       user={user}
       activePage="orders"
       orderCount={orders.length}
@@ -803,9 +839,14 @@ export default function OrderManageScreen() {
 
       <SalesPortalHeader
         title="Manage Orders"
-        subtitle={`List, review, and manage B2B orders for ${company.name}`}
-        companyId={company.id}
+        subtitle={
+          selectedCompanyId === "all"
+            ? "List, review, and manage B2B orders across all companies."
+            : `List, review, and manage B2B orders for ${company.name}.`
+        }
+        companyId={selectedCompanyId}
         companies={allCompanies}
+        companySwitchPath="/sales/portal/orders?company="
         actions={
           <>
             <button
@@ -816,13 +857,13 @@ export default function OrderManageScreen() {
               + Create Company
             </button>
             <Link
-              to={`/sales/portal/company/${company.id}/create-order`}
+              to={`/sales/portal/company/${selectedCompanyId === "all" ? allCompanies[0]?.id : company.id}/create-order`}
               style={salesPortalButtonStyles.primary}
             >
               + Create Order
             </Link>
             <Link
-              to={`/sales/portal/company/${company.id}/create-quote`}
+              to={`/sales/portal/company/${selectedCompanyId === "all" ? allCompanies[0]?.id : company.id}/create-quote`}
               style={salesPortalButtonStyles.secondary}
             >
               + Create Quote
@@ -1014,7 +1055,31 @@ export default function OrderManageScreen() {
 
       {/* Orders Table Card */}
       <div style={styles.card}>
-        <h2 style={styles.cardTitle}>All B2B Orders</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={styles.cardTitle}>
+            {selectedCompanyId === "all" ? "All B2B Orders" : `B2B Orders — ${company.name}`}
+          </h2>
+          {allCompanies.length > 1 && (
+            <Form method="get" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <select
+                name="company"
+                defaultValue={selectedCompanyId}
+                style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13 }}
+              >
+                <option value="all">All companies</option>
+                {allCompanies.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                style={{ padding: "6px 14px", fontSize: 13, borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer" }}
+              >
+                Filter
+              </button>
+            </Form>
+          )}
+        </div>
         {orders.length > 0 ? (
           <div className="sales-quote-table-wrap" style={styles.tableContainer}>
             <table style={styles.table}>
@@ -1022,6 +1087,7 @@ export default function OrderManageScreen() {
                 <tr>
                   <th style={styles.th}>Order ID</th>
                   <th style={styles.th}>Shopify Name</th>
+                  {selectedCompanyId === "all" && <th style={styles.th}>Company</th>}
                   <th style={styles.th}>Created By</th>
                   <th style={styles.th}>Date</th>
                   <th style={styles.th}>Total</th>
@@ -1054,6 +1120,13 @@ export default function OrderManageScreen() {
                             : "N/A"}
                         </strong>
                       </td>
+                      {selectedCompanyId === "all" && (
+                        <td style={styles.td}>
+                          <span style={{ fontSize: 13, color: "#374151" }}>
+                            {order.companyName || "—"}
+                          </span>
+                        </td>
+                      )}
                       <td style={styles.td}>
                         {order.createdByUser
                           ? `${order.createdByUser.firstName} ${order.createdByUser.lastName}`
