@@ -35,6 +35,7 @@ import {
   type DeliveryDetails,
 } from "app/services/delivery-details.server";
 import { getCompanyLocations } from "app/utils/b2b-customer.server";
+import { action as locationManagementAction } from "./api.proxy/locationmanagement";
 import { getAdminForShop } from "app/shopify.server";
 import {
   assertNoShopifyUserErrors,
@@ -642,6 +643,50 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
       const currentNotes = parseDraftNotes(draft.notes);
 
+      const deliveryLocationId = String(formData.get("deliveryLocationId") || "").trim();
+      const payload: Record<string, any> = {
+        source: "sales-portal",
+        companyId: draft.companyId,
+        action: deliveryLocationId ? "edit" : "create",
+        locationId: deliveryLocationId || undefined,
+        name: deliveryData.locationName || deliveryData.address1 || "Custom Delivery Location",
+        country: deliveryData.country || undefined,
+        address1: deliveryData.address1 || undefined,
+        address2: deliveryData.address2 || undefined,
+        city: deliveryData.city || undefined,
+        province: deliveryData.province || undefined,
+        zip: deliveryData.zip || undefined,
+        phone: deliveryData.phone || undefined,
+        firstName: customerName || undefined,
+        lastName: undefined,
+        billingSameAsShipping: true,
+      };
+
+      const locationReq = new Request("http://internal/api/proxy/locationmanagement", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(request.headers.get("cookie")
+            ? { Cookie: request.headers.get("cookie")! }
+            : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const locationRes = await locationManagementAction({
+        request: locationReq,
+        params: params,
+        context: {} as any,
+        url: new URL(locationReq.url),
+        pattern: { path: "/api/proxy/locationmanagement" },
+      } as unknown as ActionFunctionArgs);
+      const locationResult = await locationRes.json().catch(() => ({}));
+      if (!locationRes.ok || !locationResult.success) {
+        throw new Error(
+          locationResult.error || "Failed to save delivery location details.",
+        );
+      }
+
       await prisma.b2BOrder.update({
         where: { id: draft.id },
         data: {
@@ -941,6 +986,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   return Response.json({ error: "Unknown action" }, { status: 400 });
 };
 
+
 export default function DraftDetailsPage() {
   const data = useLoaderData<any>();
   const actionData = useActionData<ActionResponse>();
@@ -980,6 +1026,12 @@ export default function DraftDetailsPage() {
   const [deliveryAddress2Value, setDeliveryAddress2Value] = useState<string>(
     deliveryDetails.addressLines?.[1] || "",
   );
+  const [showLocationForm, setShowLocationForm] = useState(false);
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [locationSubmitting, setLocationSubmitting] = useState(false);
+  const [locationFormError, setLocationFormError] = useState<string | null>(null);
+  const [locationFormSuccess, setLocationFormSuccess] = useState<string | null>(null);
+  const [locationFieldErrors, setLocationFieldErrors] = useState<Record<string, string>>({});
   type ShippingCountryOption = {
     value: string;
     label: string;
@@ -1001,6 +1053,17 @@ export default function DraftDetailsPage() {
   const [shippingCountryOptions, setShippingCountryOptions] = useState<ShippingCountryOption[]>(
     [],
   );
+
+  const getFlagForCountry = (raw: string | undefined) => {
+    if (!raw) return "";
+    const v = String(raw).toUpperCase().trim();
+    if (["IN", "INDIA"].includes(v)) return "🇮🇳";
+    if (["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"].includes(v)) return "🇺🇸";
+    if (["GB", "UK", "UNITED KINGDOM", "UNITED KINGDOM OF GREAT BRITAIN"].includes(v)) return "🇬🇧";
+    if (["AU", "AUSTRALIA"].includes(v)) return "🇦🇺";
+    if (["CA", "CANADA"].includes(v)) return "🇨🇦";
+    return "";
+  };
 
   const selectedDeliveryCountry = shippingCountryOptions.find((country) => {
     const rawValue = deliveryCountryValue.trim();
@@ -1073,6 +1136,10 @@ export default function DraftDetailsPage() {
     }
   }, [deliveryProvinceValue, selectedDeliveryCountry]);
 
+  const selectedLocation = companyLocations.find(
+    (loc: any) => loc.id === selectedDeliveryLocationId,
+  );
+
   useEffect(() => {
     if (!selectedDeliveryLocationId) return;
     const location = companyLocations.find((loc: any) => loc.id === selectedDeliveryLocationId);
@@ -1088,6 +1155,178 @@ export default function DraftDetailsPage() {
     setDeliveryCountryValue(shipping.country || "");
     setDeliveryPhoneValue(shipping.phone || location.phone || "");
   }, [selectedDeliveryLocationId, companyLocations]);
+
+  // Resets the shared delivery-details fields (the same fields used for the
+  // draft's delivery details) so they can double as the Add/Edit location
+  // form. Editing pre-fills from the selected saved location; adding clears
+  // everything for a fresh entry.
+  const resetLocationForm = (editing: boolean) => {
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+    setLocationFieldErrors({});
+
+    if (editing && selectedLocation) {
+      const shipping = selectedLocation.shippingAddress || {};
+      setDeliveryLocationNameValue(selectedLocation.name || "");
+      setDeliveryAddress1Value(shipping.address1 || "");
+      setDeliveryAddress2Value(shipping.address2 || "");
+      setDeliveryCityValue(shipping.city || "");
+      setDeliveryProvinceValue(shipping.province || "");
+      setDeliveryZipValue(shipping.zip || "");
+      setDeliveryCountryValue(shipping.country || "US");
+      setDeliveryPhoneValue(shipping.phone || selectedLocation.phone || "");
+    } else if (!editing) {
+      setSelectedDeliveryLocationId("");
+      setDeliveryLocationNameValue("");
+      setDeliveryAddress1Value("");
+      setDeliveryAddress2Value("");
+      setDeliveryCityValue("");
+      setDeliveryProvinceValue("");
+      setDeliveryZipValue("");
+      setDeliveryCountryValue("US");
+      setDeliveryPhoneValue("");
+    }
+  };
+
+  const handleOpenLocationForm = (editing: boolean) => {
+    setShowLocationForm(true);
+    setIsEditingLocation(editing);
+    resetLocationForm(editing);
+  };
+
+  const handleCancelLocationForm = () => {
+    setShowLocationForm(false);
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+    setLocationFieldErrors({});
+    // Revert unsaved edits back to the saved location's values (if any).
+    if (selectedLocation) {
+      const shipping = selectedLocation.shippingAddress || {};
+      setDeliveryLocationNameValue(selectedLocation.name || "");
+      setDeliveryAddress1Value(shipping.address1 || "");
+      setDeliveryAddress2Value(shipping.address2 || "");
+      setDeliveryCityValue(shipping.city || "");
+      setDeliveryProvinceValue(shipping.province || "");
+      setDeliveryZipValue(shipping.zip || "");
+      setDeliveryCountryValue(shipping.country || "");
+      setDeliveryPhoneValue(shipping.phone || selectedLocation.phone || "");
+    }
+  };
+
+  const locationFormTitle = isEditingLocation
+    ? "Edit company location"
+    : "Add a Shopify company location";
+
+  const handleSaveLocation = async () => {
+    setLocationSubmitting(true);
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+
+    const payload: Record<string, unknown> = {
+      source: "sales-portal",
+      action: isEditingLocation ? "edit" : "create",
+      name: deliveryLocationNameValue.trim(),
+      country: deliveryCountryValue.trim() || "US",
+      firstName: "",
+      lastName: "",
+      address1: deliveryAddress1Value.trim(),
+      address2: deliveryAddress2Value.trim(),
+      city: deliveryCityValue.trim(),
+      province: deliveryProvinceValue.trim(),
+      zip: deliveryZipValue.trim(),
+      phone: deliveryPhoneValue.trim(),
+      recipient: "",
+      billingSameAsShipping: true,
+      companyId: draft.company.id,
+    };
+
+    if (isEditingLocation) {
+      if (!selectedLocation?.id) {
+        setLocationFormError("No location selected to edit.");
+        setLocationSubmitting(false);
+        return;
+      }
+      payload.locationId = selectedLocation.id;
+    }
+
+    const fieldErrors: Record<string, string> = {};
+    if (!deliveryLocationNameValue.trim()) fieldErrors.name = "Location name is required.";
+    if (!deliveryAddress1Value.trim()) fieldErrors.address1 = "Street address is required.";
+    if (!deliveryCityValue.trim()) fieldErrors.city = "City is required.";
+    if (!deliveryCountryValue.trim()) fieldErrors.country = "Country is required.";
+    if (!deliveryZipValue.trim()) fieldErrors.zip = "Postal code is required.";
+
+    if (Object.keys(fieldErrors).length > 0) {
+      setLocationFieldErrors(fieldErrors);
+      setLocationFormError(
+        "Please complete the required location fields before saving.",
+      );
+      setLocationSubmitting(false);
+      return;
+    }
+
+    try {
+      function getLocationManagementUrl() {
+        const proxyBaseMatch = window.location.pathname.match(/^(\/apps\/[^/]+)/);
+        const proxyQuery = window.location.search || "";
+
+        if (proxyBaseMatch) {
+          return `${proxyBaseMatch[1]}/api/proxy/locationmanagement${proxyQuery}`;
+        }
+
+        return `/api/proxy/locationmanagement${proxyQuery}`;
+      }
+
+      const response = await fetch(getLocationManagementUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => null);
+      if (response.ok && result?.success) {
+        const locationId = result.locationId || selectedLocation?.id;
+        setLocationFormSuccess("Location saved successfully.");
+        if (locationId) {
+          window.location.href = `${window.location.pathname}?locationId=${encodeURIComponent(
+            locationId,
+          )}`;
+          return;
+        }
+        window.location.reload();
+      } else {
+        const serverFieldErrors: Record<string, string> = {};
+        if (Array.isArray(result?.userErrors)) {
+          for (const error of result.userErrors) {
+            const field = Array.isArray(error.field)
+              ? error.field[0]
+              : typeof error.field === "string"
+              ? error.field
+              : undefined;
+            if (field) {
+              serverFieldErrors[field] = error.message;
+            }
+          }
+        }
+        if (Object.keys(serverFieldErrors).length > 0) {
+          setLocationFieldErrors(serverFieldErrors);
+        }
+        setLocationFormError(
+          result?.error ||
+            (response.ok
+              ? "Unable to save location."
+              : `Unable to save location. (${response.status})`),
+        );
+      }
+    } catch (error: any) {
+      console.error(error);
+      setLocationFormError(
+        error?.message || "Unable to save location. Please try again.",
+      );
+    } finally {
+      setLocationSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     if (data.successMessage) {
@@ -1306,7 +1545,40 @@ export default function DraftDetailsPage() {
             </Card>
 
             <section style={styles.card}>
-              <h2 style={styles.cardTitle}>Delivery Details</h2>
+              <div style={styles.cardHeader}>
+                <h2 style={styles.cardTitle}>Delivery Details</h2>
+                {!showLocationForm && (
+                  <div style={styles.locationFormToolbar}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenLocationForm(false)}
+                      style={styles.secondaryButton}
+                    >
+                      Add location
+                    </button>
+                    {selectedLocation && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLocationForm(true)}
+                        style={styles.secondaryButton}
+                      >
+                        Edit location
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {showLocationForm && (
+                <div style={{ marginBottom: 12 }}>
+                  <span style={styles.infoLabel}>{locationFormTitle}</span>
+                  {locationFormError ? (
+                    <div style={styles.validationMessage}>{locationFormError}</div>
+                  ) : null}
+                  {locationFormSuccess ? (
+                    <div style={styles.successMessage}>{locationFormSuccess}</div>
+                  ) : null}
+                </div>
+              )}
               <div className="draft-delivery-grid" style={styles.deliveryGrid}>
                 <label style={styles.label}>
                   Saved location
@@ -1315,6 +1587,7 @@ export default function DraftDetailsPage() {
                     value={selectedDeliveryLocationId}
                     onChange={(e) => setSelectedDeliveryLocationId(e.target.value)}
                     style={styles.input}
+                    disabled={showLocationForm}
                   >
                     <option value="">-- Use custom delivery details --</option>
                     {companyLocations.map((location: any) => (
@@ -1334,8 +1607,15 @@ export default function DraftDetailsPage() {
                       if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
                     }}
                     placeholder="e.g. Warehouse / Store name"
-                    style={styles.input}
+                    style={
+                      locationFieldErrors.name
+                        ? { ...styles.input, ...styles.invalidInput }
+                        : styles.input
+                    }
                   />
+                  {locationFieldErrors.name ? (
+                    <div style={styles.fieldError}>{locationFieldErrors.name}</div>
+                  ) : null}
                 </label>
                 <label style={styles.label}>
                   Address line 1
@@ -1347,8 +1627,15 @@ export default function DraftDetailsPage() {
                       if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
                     }}
                     placeholder="Street address"
-                    style={styles.input}
+                    style={
+                      locationFieldErrors.address1
+                        ? { ...styles.input, ...styles.invalidInput }
+                        : styles.input
+                    }
                   />
+                  {locationFieldErrors.address1 ? (
+                    <div style={styles.fieldError}>{locationFieldErrors.address1}</div>
+                  ) : null}
                 </label>
                 <label style={styles.label}>
                   Address line 2
@@ -1373,15 +1660,22 @@ export default function DraftDetailsPage() {
                       if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
                       setDeliveryProvinceValue("");
                     }}
-                    style={{ ...styles.input, appearance: "none" as const }}
+                    style={
+                      locationFieldErrors.country
+                        ? { ...styles.input, ...styles.invalidInput, appearance: "none" as const }
+                        : { ...styles.input, appearance: "none" as const }
+                    }
                   >
                     <option value="">Select country</option>
                     {shippingCountryOptions.map((country) => (
                       <option key={country.value} value={country.value}>
-                        {country.label}
+                        {getFlagForCountry(country.value || country.label)} {country.label}
                       </option>
                     ))}
                   </select>
+                  {locationFieldErrors.country ? (
+                    <div style={styles.fieldError}>{locationFieldErrors.country}</div>
+                  ) : null}
                 </label>
                 <label style={styles.label}>
                   State / Province
@@ -1425,8 +1719,15 @@ export default function DraftDetailsPage() {
                       if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
                     }}
                     placeholder="City"
-                    style={styles.input}
+                    style={
+                      locationFieldErrors.city
+                        ? { ...styles.input, ...styles.invalidInput }
+                        : styles.input
+                    }
                   />
+                  {locationFieldErrors.city ? (
+                    <div style={styles.fieldError}>{locationFieldErrors.city}</div>
+                  ) : null}
                 </label>
                 <label style={styles.label}>
                   Postal code
@@ -1438,8 +1739,15 @@ export default function DraftDetailsPage() {
                       if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
                     }}
                     placeholder="Zip / postal code"
-                    style={styles.input}
+                    style={
+                      locationFieldErrors.zip
+                        ? { ...styles.input, ...styles.invalidInput }
+                        : styles.input
+                    }
                   />
+                  {locationFieldErrors.zip ? (
+                    <div style={styles.fieldError}>{locationFieldErrors.zip}</div>
+                  ) : null}
                 </label>
                 <label style={styles.label}>
                   Delivery Phone
@@ -1456,26 +1764,34 @@ export default function DraftDetailsPage() {
               </div>
               {companyLocations.length > 0 ? (
                 <p style={{ ...styles.muted, marginTop: 10 }}>
-                  Select one of the saved company locations to auto-fill address and phone, or leave the location blank to add a new one.
+                  Select one of the saved company locations to auto-fill address and phone, or use "Add location" / "Edit location" above to manage saved locations.
                 </p>
               ) : (
                 <p style={{ ...styles.muted, marginTop: 10 }}>
-                  No saved company locations are available. Enter a new delivery location below.
+                  No saved company locations are available. Use "Add location" above to create one.
                 </p>
               )}
-              <div style={{ marginTop: 16 }}>
-                <button
-                  type="submit"
-                  name="intent"
-                  value="save_details"
-                  disabled={busy}
-                  aria-busy={pendingIntent === "save_details"}
-                  style={{ ...disabledButtonStyle(styles.primaryButton, busy), width: "100%" }}
-                >
-                  {pendingIntent === "save_details" && <Spinner />}
-                  {pendingIntent === "save_details" ? "Saving Details..." : "Save Detail"}
-                </button>
-              </div>
+
+              {showLocationForm && (
+                <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={handleCancelLocationForm}
+                    disabled={locationSubmitting}
+                    style={styles.secondaryButton}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveLocation}
+                    disabled={locationSubmitting}
+                    style={styles.primaryButton}
+                  >
+                    {locationSubmitting ? "Saving..." : "Save location"}
+                  </button>
+                </div>
+              )}
             </section>
 
             <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
@@ -2214,6 +2530,79 @@ const styles: Record<string, React.CSSProperties> = {
   },
   buttonStack: { display: "flex", flexDirection: "column", gap: 10 },
   actionRow: { display: "flex", flexWrap: "wrap", gap: 10 },
+  locationFormToolbar: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap" as const,
+    marginTop: "18px",
+  },
+  locationFormSection: {
+    marginTop: "18px",
+    padding: "18px",
+    borderRadius: "12px",
+    border: "1px solid #e5e7eb",
+    backgroundColor: "#ffffff",
+  },
+  locationFormHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "16px",
+  },
+  linkButton: {
+    background: "transparent",
+    border: "none",
+    color: "#2563eb",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  validationMessage: {
+    marginBottom: "12px",
+    color: "#b45309",
+    fontSize: "13px",
+  },
+  successMessage: {
+    marginBottom: "12px",
+    color: "#166534",
+    fontSize: "13px",
+  },
+  locationFormGrid: {
+    display: "grid",
+    gap: "12px",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  },
+  locationLabel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    color: "#374151",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  formInput: {
+    width: "100%",
+    height: "40px",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    padding: "0 12px",
+    fontSize: "14px",
+    marginTop: "6px",
+  },
+  invalidInput: {
+    borderColor: "#dc2626",
+    backgroundColor: "#fef2f2",
+  },
+  fieldError: {
+    marginTop: "4px",
+    color: "#b91c1c",
+    fontSize: "12px",
+  },
+  formButtonRow: {
+    marginTop: "16px",
+    display: "flex",
+    justifyContent: "flex-end",
+  },
   primaryButton: {
     border: "1px solid #111827",
     borderRadius: 8,

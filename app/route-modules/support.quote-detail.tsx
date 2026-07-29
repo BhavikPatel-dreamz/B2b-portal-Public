@@ -46,7 +46,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   return quoteAction({
     request,
     params: { ...params, companyId: quote.companyId, quoteId },
-  } as ActionFunctionArgs);
+  } as any);
 };
 
 export default QuoteDetailPage;

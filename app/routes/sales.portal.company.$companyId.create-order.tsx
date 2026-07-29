@@ -726,6 +726,7 @@ export default function CreateOrderCustomerSelection() {
   const resetLocationForm = (editing: boolean) => {
     setLocationFormError(null);
     setLocationFormSuccess(null);
+    setLocationFieldErrors({});
     const defaultCountry =
       selectedLocation?.country || defaultLocationCountry || "US";
     const defaultProvince = selectedLocation?.province || "";
@@ -766,6 +767,25 @@ export default function CreateOrderCustomerSelection() {
     setIsEditingLocation(editing);
     resetLocationForm(editing);
   };
+
+  useEffect(() => {
+    if (showLocationForm && isEditingLocation && selectedLocation) {
+      setLocationForm({
+        name: selectedLocation.name || "",
+        country:
+          selectedLocation.country || defaultLocationCountry || "US",
+        firstName: "",
+        lastName: "",
+        address1: selectedLocation.address1 || "",
+        address2: selectedLocation.address2 || "",
+        city: selectedLocation.city || "",
+        province: selectedLocation.province || "",
+        zip: selectedLocation.zip || "",
+        phone: selectedLocation.phone || "",
+        recipient: "",
+      });
+    }
+  }, [showLocationForm, isEditingLocation, selectedLocation, defaultLocationCountry]);
 
   const handleLocationFormChange = (field: string, value: string) => {
     setLocationForm((current) => ({
