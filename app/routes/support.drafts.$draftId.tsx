@@ -81,10 +81,10 @@ function parseDraftNotes(notes?: string | null): DraftNotes {
   try {
     const parsed = JSON.parse(notes);
     if (parsed && typeof parsed === "object") {
-      const dd = parsed.deliveryDetails;
+      const dd = (parsed as any).deliveryDetails as Record<string, any> | undefined;
       return {
-        internalNotes: String(parsed.internalNotes || ""),
-        customerNotes: String(parsed.customerNotes || ""),
+        internalNotes: String((parsed as any).internalNotes || ""),
+        customerNotes: String((parsed as any).customerNotes || ""),
         deliveryDetails:
           dd && typeof dd === "object"
             ? {
@@ -293,13 +293,21 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const notes = parseDraftNotes(draft.notes);
   let deliveryDetails = await getDeliveryDetailsForRecord(draft);
   if (notes.deliveryDetails) {
+    const addressLines = [
+      notes.deliveryDetails.address1,
+      notes.deliveryDetails.address2,
+      notes.deliveryDetails.city,
+      notes.deliveryDetails.province,
+      notes.deliveryDetails.zip,
+      notes.deliveryDetails.country,
+    ].filter(Boolean);
+
     deliveryDetails = {
       ...deliveryDetails,
       locationName:
         notes.deliveryDetails.locationName || deliveryDetails.locationName,
       addressLines:
-        notes.deliveryDetails.address?.split(/\r?\n/).filter(Boolean) ||
-        deliveryDetails.addressLines,
+        addressLines.length > 0 ? addressLines : deliveryDetails.addressLines,
       phone: notes.deliveryDetails.phone || deliveryDetails.phone,
     };
   }
@@ -663,8 +671,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         ].filter(Boolean);
 
         const shopifyMutation = `#graphql
-          mutation UpdateDraftCustomAttributes($input: DraftOrderInput!) {
-            draftOrderUpdate(input: $input) {
+          mutation UpdateDraftCustomAttributes($id: ID!, $input: DraftOrderInput!) {
+            draftOrderUpdate(id: $id, input: $input) {
               draftOrder {
                 id
                 shippingAddress {
@@ -690,7 +698,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         `;
 
         const shopifyInput: any = {
-          id: draftOrderId,
           shippingAddress: {
             address1: deliveryData.address1 || undefined,
             address2: deliveryData.address2 || undefined,
@@ -719,7 +726,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           },
           body: JSON.stringify({
             query: shopifyMutation,
-            variables: { input: shopifyInput },
+            variables: { id: draftOrderId, input: shopifyInput },
           }),
         });
       }
@@ -973,6 +980,12 @@ export default function DraftDetailsPage() {
   const [deliveryAddress2Value, setDeliveryAddress2Value] = useState<string>(
     deliveryDetails.addressLines?.[1] || "",
   );
+  type ShippingCountryOption = {
+    value: string;
+    label: string;
+    provinces: Array<{ value: string; label: string }>;
+  };
+
   const [deliveryCityValue, setDeliveryCityValue] = useState<string>(
     deliveryDetails.addressLines?.[2] || "",
   );
@@ -985,6 +998,18 @@ export default function DraftDetailsPage() {
   const [deliveryCountryValue, setDeliveryCountryValue] = useState<string>(
     deliveryDetails.addressLines?.[5] || "",
   );
+  const [shippingCountryOptions, setShippingCountryOptions] = useState<ShippingCountryOption[]>(
+    [],
+  );
+
+  const selectedDeliveryCountry = shippingCountryOptions.find((country) => {
+    const rawValue = deliveryCountryValue.trim();
+    return (
+      country.value === rawValue ||
+      country.label.toLowerCase() === rawValue.toLowerCase()
+    );
+  });
+  const deliveryProvinceOptions = selectedDeliveryCountry?.provinces ?? [];
 
   useEffect(() => {
     if (navigation.state === "idle") submissionLock.current = false;
@@ -1000,6 +1025,53 @@ export default function DraftDetailsPage() {
       });
     }
   }, [actionData]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/proxy/shipping-zones")
+      .then(async (response) => {
+        if (!active) return;
+        if (!response.ok) return [];
+        const payload = await response.json();
+        return Array.isArray(payload?.countries) ? payload.countries : [];
+      })
+      .then((countries) => {
+        if (!active) return;
+        setShippingCountryOptions(countries);
+      })
+      .catch(() => {
+        if (!active) return;
+        setShippingCountryOptions([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!deliveryCountryValue || shippingCountryOptions.length === 0) return;
+    const match = shippingCountryOptions.find(
+      (country) =>
+        country.value === deliveryCountryValue ||
+        country.label.toLowerCase() === deliveryCountryValue.toLowerCase(),
+    );
+    if (match && match.value !== deliveryCountryValue) {
+      setDeliveryCountryValue(match.value);
+    }
+  }, [deliveryCountryValue, shippingCountryOptions]);
+
+  useEffect(() => {
+    if (!deliveryProvinceValue || !selectedDeliveryCountry) return;
+    const match = selectedDeliveryCountry.provinces.find(
+      (province) =>
+        province.value === deliveryProvinceValue ||
+        province.label.toLowerCase() === deliveryProvinceValue.toLowerCase(),
+    );
+    if (match && match.value !== deliveryProvinceValue) {
+      setDeliveryProvinceValue(match.value);
+    }
+  }, [deliveryProvinceValue, selectedDeliveryCountry]);
 
   useEffect(() => {
     if (!selectedDeliveryLocationId) return;
@@ -1293,29 +1365,55 @@ export default function DraftDetailsPage() {
                 </label>
                 <label style={styles.label}>
                   Country
-                  <input
+                  <select
                     name="deliveryCountry"
                     value={deliveryCountryValue}
                     onChange={(e) => {
                       setDeliveryCountryValue(e.target.value);
                       if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      setDeliveryProvinceValue("");
                     }}
-                    placeholder="Country"
-                    style={styles.input}
-                  />
+                    style={{ ...styles.input, appearance: "none" as const }}
+                  >
+                    <option value="">Select country</option>
+                    {shippingCountryOptions.map((country) => (
+                      <option key={country.value} value={country.value}>
+                        {country.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label style={styles.label}>
                   State / Province
-                  <input
-                    name="deliveryProvince"
-                    value={deliveryProvinceValue}
-                    onChange={(e) => {
-                      setDeliveryProvinceValue(e.target.value);
-                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
-                    }}
-                    placeholder="State or province"
-                    style={styles.input}
-                  />
+                  {deliveryProvinceOptions.length > 0 ? (
+                    <select
+                      name="deliveryProvince"
+                      value={deliveryProvinceValue}
+                      onChange={(e) => {
+                        setDeliveryProvinceValue(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      style={{ ...styles.input, appearance: "none" as const }}
+                    >
+                      <option value="">Select state / province</option>
+                      {deliveryProvinceOptions.map((province) => (
+                        <option key={province.value} value={province.value}>
+                          {province.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      name="deliveryProvince"
+                      value={deliveryProvinceValue}
+                      onChange={(e) => {
+                        setDeliveryProvinceValue(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      placeholder="State or province"
+                      style={styles.input}
+                    />
+                  )}
                 </label>
                 <label style={styles.label}>
                   City

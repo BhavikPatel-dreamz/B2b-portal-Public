@@ -5248,6 +5248,136 @@ function normalizePhone(phone: string): string {
   return normalized;
 }
 
+function normalizeCountryCode(countryValue?: string | null) {
+  const normalized = String(countryValue || "")
+    .trim()
+    .toUpperCase();
+  if (!normalized) return undefined;
+  if (normalized.length === 2) return normalized;
+
+  const COUNTRY_CODE_ALIASES: Record<string, string> = {
+    "UNITED STATES": "US",
+    "UNITED STATES OF AMERICA": "US",
+    USA: "US",
+    AMERICA: "US",
+    "UNITED KINGDOM": "GB",
+    "GREAT BRITAIN": "GB",
+    ENGLAND: "GB",
+    SCOTLAND: "GB",
+    WALES: "GB",
+    "NORTHERN IRELAND": "GB",
+    BRITAIN: "GB",
+    CANADA: "CA",
+    INDIA: "IN",
+    AUSTRALIA: "AU",
+    GERMANY: "DE",
+    FRANCE: "FR",
+    SPAIN: "ES",
+    ITALY: "IT",
+    NETHERLANDS: "NL",
+    "NEW ZEALAND": "NZ",
+    JAPAN: "JP",
+    SINGAPORE: "SG",
+    "UNITED ARAB EMIRATES": "AE",
+    MEXICO: "MX",
+    CHINA: "CN",
+  };
+
+  return COUNTRY_CODE_ALIASES[normalized] || undefined;
+}
+
+function normalizeProvinceCode(
+  provinceValue?: string | null,
+  countryCode?: string | null,
+) {
+  const rawValue = String(provinceValue || "").trim();
+  if (!rawValue) return undefined;
+
+  const candidate = rawValue.toUpperCase();
+
+  // If the user already provided a normalized code, keep it.
+  if (/^[A-Z0-9]{1,5}$/.test(candidate)) {
+    return candidate;
+  }
+
+  const normalizedCountry = normalizeCountryCode(countryCode);
+  const provinceLookup: Record<string, Record<string, string>> = {
+    CA: {
+      ONTARIO: "ON",
+      QUEBEC: "QC",
+      "BRITISH COLUMBIA": "BC",
+      ALBERTA: "AB",
+      MANITOBA: "MB",
+      SASKATCHEWAN: "SK",
+      "NOVA SCOTIA": "NS",
+      "NEW BRUNSWICK": "NB",
+      "PRINCE EDWARD ISLAND": "PE",
+      "NEWFOUNDLAND AND LABRADOR": "NL",
+      YUKON: "YT",
+      "NORTHWEST TERRITORIES": "NT",
+      NUNAVUT: "NU",
+    },
+    US: {
+      ALABAMA: "AL",
+      ALASKA: "AK",
+      ARIZONA: "AZ",
+      ARKANSAS: "AR",
+      CALIFORNIA: "CA",
+      COLORADO: "CO",
+      CONNECTICUT: "CT",
+      DELAWARE: "DE",
+      FLORIDA: "FL",
+      GEORGIA: "GA",
+      HAWAII: "HI",
+      IDAHO: "ID",
+      ILLINOIS: "IL",
+      INDIANA: "IN",
+      IOWA: "IA",
+      KANSAS: "KS",
+      KENTUCKY: "KY",
+      LOUISIANA: "LA",
+      MAINE: "ME",
+      MARYLAND: "MD",
+      MASSACHUSETTS: "MA",
+      MICHIGAN: "MI",
+      MINNESOTA: "MN",
+      MISSISSIPPI: "MS",
+      MISSOURI: "MO",
+      MONTANA: "MT",
+      NEBRASKA: "NE",
+      NEVADA: "NV",
+      "NEW HAMPSHIRE": "NH",
+      "NEW JERSEY": "NJ",
+      "NEW MEXICO": "NM",
+      "NEW YORK": "NY",
+      "NORTH CAROLINA": "NC",
+      "NORTH DAKOTA": "ND",
+      OHIO: "OH",
+      OKLAHOMA: "OK",
+      OREGON: "OR",
+      PENNSYLVANIA: "PA",
+      "RHODE ISLAND": "RI",
+      "SOUTH CAROLINA": "SC",
+      "SOUTH DAKOTA": "SD",
+      TENNESSEE: "TN",
+      TEXAS: "TX",
+      UTAH: "UT",
+      VERMONT: "VT",
+      VIRGINIA: "VA",
+      WASHINGTON: "WA",
+      "WEST VIRGINIA": "WV",
+      WISCONSIN: "WI",
+      WYOMING: "WY",
+      "DISTRICT OF COLUMBIA": "DC",
+    },
+  };
+
+  const countryLookup = provinceLookup[normalizedCountry];
+  if (!countryLookup) return undefined;
+
+  return countryLookup[candidate] || undefined;
+}
+
 export async function createCompanyLocation(
   companyId: string,
   shopName: string,
@@ -5373,6 +5503,12 @@ export async function createCompanyLocation(
     }
 
     if (locationData.address1 || locationData.city) {
+      const countryCode =
+        normalizeCountryCode(locationData.country) ||
+        String(locationData.country || "IN")
+          .trim()
+          .toUpperCase();
+
       const addressData: {
         address1: string;
         address2?: string;
@@ -5387,8 +5523,8 @@ export async function createCompanyLocation(
         address2: locationData.address2,
         city: locationData.city || "Pending",
         zip: locationData.zip || "00000",
-        zoneCode: locationData.province || undefined,
-        countryCode: locationData.country || "IN",
+        zoneCode: normalizeProvinceCode(locationData.province, countryCode),
+        countryCode,
       };
 
       if (locationData.firstName) {
@@ -6187,6 +6323,21 @@ export async function updateCompanyLocation(
 
       // Build address input object
       // Shopify requires address1, city, zip, and countryCode to be non-blank
+      const countryCode =
+        locationData.country !== undefined && locationData.country.trim() !== ""
+          ? normalizeCountryCode(locationData.country) ||
+            locationData.country.trim().toUpperCase()
+          : normalizeCountryCode(existingShipping.country) ||
+            String(existingShipping.country || "US")
+              .trim()
+              .toUpperCase();
+
+      const provinceCode =
+        locationData.province !== undefined &&
+        locationData.province.trim() !== ""
+          ? normalizeProvinceCode(locationData.province, countryCode)
+          : normalizeProvinceCode(existingShipping.province, countryCode);
+
       const addressInput: {
         address1: string;
         address2?: string;
@@ -6210,11 +6361,8 @@ export async function updateCompanyLocation(
           locationData.zip !== undefined && locationData.zip.trim() !== ""
             ? locationData.zip
             : existingShipping.zip || "00000",
-        countryCode:
-          locationData.country !== undefined &&
-          locationData.country.trim() !== ""
-            ? locationData.country
-            : existingShipping.country || "US",
+        countryCode,
+        zoneCode: provinceCode,
       };
 
       if (
