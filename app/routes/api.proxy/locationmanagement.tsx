@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticateApiProxyWithPermissions } from "../../utils/proxy.server";
 import { requirePermission } from "../../utils/permissions.server";
+import { requireSalesSession, hasCompanyAccess } from "../../utils/sales-session.server";
 import {
   getCompanyLocations,
   updateCompanyLocation,
@@ -10,6 +11,7 @@ import {
   checkLocationHasOrders,
   checkLocationHasUsers,
 } from "../../utils/b2b-customer.server";
+import prisma from "../../db.server";
 
 
 // ============================================================
@@ -239,6 +241,163 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 // ============================================================
+// ✏️  AUTH HELPERS
+// ============================================================
+
+// async function authenticateLocationManagementRequest(request: Request, body: any) {
+//   try {
+//     return await authenticateApiProxyWithPermissions(request);
+//   } catch (error) {
+//     console.warn(
+//       "⚠️ [locationmanagement] App proxy auth failed, falling back to sales session auth:",
+//       error,
+//     );
+
+//     const { user } = await requireSalesSession(request);
+//     const companyId = typeof body?.companyId === "string" ? body.companyId : "";
+
+//     if (!companyId) {
+//       throw Response.json(
+//         { error: "companyId is required for sales session authentication" },
+//         { status: 400 },
+//       );
+//     }
+
+//     if (!hasCompanyAccess(user, companyId)) {
+//       throw Response.json(
+//         { error: "Unauthorized" },
+//         { status: 403 },
+//       );
+//     }
+
+//     const company = await prisma.companyAccount.findUnique({
+//       where: { id: companyId },
+//       include: { shop: true },
+//     });
+
+//     if (!company || !company.shop?.accessToken || !company.shop.shopDomain) {
+//       throw Response.json(
+//         { error: "Company or store not found" },
+//         { status: 404 },
+//       );
+//     }
+
+//     const store = {
+//       ...company.shop,
+//       accessToken: company.shop.accessToken,
+//     } as { accessToken: string; shopDomain: string };
+
+//     const userContext = {
+//       customerId: user.id,
+//       customerName: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+//       customerEmail: user.email,
+//       companyId,
+//       companyName: company.name,
+//       roles: [user.role],
+//       roleAssignments: [],
+//       permissions: {
+//         canManageUsers: true,
+//         canManageLocations: true,
+//         canManageOrders: true,
+//         canViewReports: true,
+//         canManageCredit: true,
+//         canManageSettings: true,
+//         canAccessAllLocations: true,
+//         assignedLocationIds: [],
+//       },
+//       isMainContact: false,
+//     };
+
+//     return {
+//       companyId,
+//       shop: company.shop.shopDomain,
+//       store: store as any,
+//       userContext: userContext as any,
+//     };
+//   }
+// }
+
+async function authenticateLocationManagementRequest(request: Request, body: any) {
+  // If the client explicitly tells us this came from the Sales Portal,
+  // don't waste a round trip on app-proxy auth — it can never succeed here.
+  const isFromSalesPortal = body?.source === "sales-portal";
+
+  if (!isFromSalesPortal) {
+    try {
+      // clone() so a failed attempt here never consumes the real body stream
+      return await authenticateApiProxyWithPermissions(request.clone());
+    } catch (error) {
+      console.warn(
+        "⚠️ [locationmanagement] App proxy auth failed, falling back to sales session auth:",
+        error,
+      );
+    }
+  }
+
+  const { user } = await requireSalesSession(request);
+  const companyId = typeof body?.companyId === "string" ? body.companyId : "";
+
+  if (!companyId) {
+    throw Response.json(
+      { error: "companyId is required for sales session authentication" },
+      { status: 400 },
+    );
+  }
+
+  if (!hasCompanyAccess(user, companyId)) {
+    throw Response.json({ error: "Unauthorized" }, { status: 403 });
+  }
+
+  const company = await prisma.companyAccount.findUnique({
+    where: { id: companyId },
+    include: { shop: true },
+  });
+
+  if (!company || !company.shop?.accessToken || !company.shop.shopDomain) {
+    throw Response.json({ error: "Company or store not found" }, { status: 404 });
+  }
+
+  const shopDomain = company.shop.shopDomain?.trim();
+  if (!shopDomain) {
+    throw Response.json({ error: "Company shop domain is invalid" }, { status: 404 });
+  }
+
+  const store = {
+    ...company.shop,
+    accessToken: company.shop.accessToken,
+    shopDomain,
+  } as { accessToken: string; shopDomain: string };
+
+  const userContext = {
+    customerId: user.id,
+    customerName: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+    customerEmail: user.email,
+    companyId,
+    companyName: company.name,
+    roles: [user.role],
+    roleAssignments: [],
+    permissions: {
+      canManageUsers: true,
+      canManageLocations: true,
+      canManageOrders: true,
+      canViewReports: true,
+      canManageCredit: true,
+      canManageSettings: true,
+      canAccessAllLocations: true,
+      assignedLocationIds: [],
+    },
+    isMainContact: false,
+  };
+
+  return {
+    companyId,
+    shop: shopDomain,
+    store: store as any,
+    userContext: userContext as any,
+  };
+}
+
+// ============================================================
 // ✏️  ACTION — POST requests (create / edit / delete)
 // ============================================================
 
@@ -247,9 +406,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
+  const body = await request.json().catch(() => ({}));
+
   try {
     const { companyId, store, shop, userContext } =
-      await authenticateApiProxyWithPermissions(request);
+      await authenticateLocationManagementRequest(request, body);
 
     requirePermission(
       userContext,
@@ -264,7 +425,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
     }
 
-    const body = await request.json();
     console.log("🚀 ~ action ~ body:", body);
     const { action: actionType } = body;
 
@@ -279,11 +439,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const validations = [
           { field: "name",       value: name,       message: "Location name is required" },
-          { field: "firstName",  value: firstName,  message: "First name is required" },
-          { field: "lastName",   value: lastName,   message: "Last name is required" },
           { field: "address1",   value: address1,   message: "Street address is required" },
-          { field: "address2",   value: address2,   message: "Apartment, suite, etc is required" },
-          { field: "recipient",  value: recipient,  message: "Company/Attention is required" },
           { field: "city",       value: city,       message: "City is required" },
           { field: "country",    value: country,    message: "Country is required" },
           { field: "zip",        value: zip,        message: "Zip/Postal code is required" },
@@ -326,6 +482,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             billingSameAsShipping,
           },
         );
+        console.log("🚀 ~ action ~ createLocationAndAssignToContact result:111", result);
 
         if (result.error) {
           return Response.json(
@@ -348,6 +505,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     recipient, billingSameAsShipping, isDefault, // ✅ Added
   } = body;
 
+  console.log("🚀 ~ action ~ edit body:");
   if (!locationId) {
     return Response.json(
       { error: "Location ID is required for editing" },
@@ -370,17 +528,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (isDefaultValue === true) {
     try {
       const locationsRes = await getCompanyLocations(companyId, shop, store.accessToken);
-      const otherDefaultLocations = (locationsRes.locations || []).filter(
-        (loc: any) => loc.isDefault && loc.id !== locationId
-      );
+      const allLocations = (locationsRes.locations || []) as Array<{
+        id: string | null;
+        isDefault?: boolean;
+      }>;
 
-      if (otherDefaultLocations.length > 0) {
-        console.log(`🔄 Unsetting default for ${otherDefaultLocations.length} other locations`);
-        await Promise.all(
-          otherDefaultLocations.map((loc: any) =>
-            updateCompanyLocation(loc.id, shop, store.accessToken, { isDefault: false })
-          )
-        );
+      const otherDefaultLocationIds: string[] = [];
+      for (const loc of allLocations) {
+        if (
+          loc.isDefault === true &&
+          typeof loc.id === "string" &&
+          loc.id !== locationId
+        ) {
+          otherDefaultLocationIds.push(loc.id);
+        }
+      }
+
+      if (otherDefaultLocationIds.length > 0) {
+        console.log(`🔄 Unsetting default for ${otherDefaultLocationIds.length} other locations`);
+        const unsetPromises: Promise<unknown>[] = [];
+        for (const locationIdToUnset of otherDefaultLocationIds) {
+          if (typeof locationIdToUnset === "string") {
+            unsetPromises.push(
+              updateCompanyLocation(locationIdToUnset, shop, store.accessToken, {
+                isDefault: false,
+              }),
+            );
+          }
+        }
+        await Promise.all(unsetPromises);
       }
     } catch (err) {
       console.warn("⚠️ Failed to unset other default locations:", err);
@@ -507,6 +683,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   } catch (error) {
     console.error("Proxy error (POST):", error);
+    if (error instanceof Response) {
+      throw error;
+    }
     return Response.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },

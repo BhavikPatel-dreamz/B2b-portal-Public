@@ -46,6 +46,16 @@ type DraftOrderInput = {
       companyContactId: string;
     };
   };
+  shippingAddress?: {
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    province?: string | null;
+    zip?: string | null;
+    country?: string | null;
+    countryCode?: string | null;
+    phone?: string | null;
+  };
   appliedDiscount?: {
     value: number;
     valueType: "PERCENTAGE" | "FIXED_AMOUNT";
@@ -54,6 +64,42 @@ type DraftOrderInput = {
   shippingLine?: SalesDraftShippingLineInput;
   taxExempt?: boolean;
 };
+
+function normalizeCountryCode(countryValue?: string | null) {
+  const normalized = String(countryValue || "")
+    .trim()
+    .toUpperCase();
+  if (!normalized) return undefined;
+  if (normalized.length === 2) return normalized;
+
+  const COUNTRY_CODE_ALIASES: Record<string, string> = {
+    "UNITED STATES": "US",
+    "UNITED STATES OF AMERICA": "US",
+    USA: "US",
+    AMERICA: "US",
+    "UNITED KINGDOM": "GB",
+    "GREAT BRITAIN": "GB",
+    ENGLAND: "GB",
+    SCOTLAND: "GB",
+    WALES: "GB",
+    "NORTHERN IRELAND": "GB",
+    BRITAIN: "GB",
+    CANADA: "CA",
+    INDIA: "IN",
+    AUSTRALIA: "AU",
+    GERMANY: "DE",
+    FRANCE: "FR",
+    SPAIN: "ES",
+    ITALY: "IT",
+    NETHERLANDS: "NL",
+    "NEW ZEALAND": "NZ",
+    JAPAN: "JP",
+    SINGAPORE: "SG",
+    "UNITED ARAB EMIRATES": "AE",
+  };
+
+  return COUNTRY_CODE_ALIASES[normalized] || undefined;
+}
 
 export function getQuoteUrl(
   request: Request,
@@ -398,7 +444,202 @@ export async function sendQuoteToCustomer({
   return { quoteUrl, emailResult };
 }
 
-async function resolveShopifyB2BContext(quote: any) {
+export async function updateShopifyDraftOrderFromQuote(
+  quote: any,
+  selectedCompanyLocationId?: string,
+  shippingAddress?: {
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    province?: string | null;
+    zip?: string | null;
+    country?: string | null;
+    countryCode?: string | null;
+    phone?: string | null;
+  },
+  salesAgent?: {
+    name?: string | null;
+    email?: string | null;
+  },
+) {
+  if (!quote.shopifyDraftOrderId) return;
+  if (!quote.company?.shopifyCompanyId || !quote.company?.shop?.accessToken) {
+    throw new Error("Shopify sales context not available for quote.");
+  }
+  if (!quote.customerShopifyId) {
+    throw new Error("Quote is not linked to a Shopify customer.");
+  }
+
+  const { companyLocationId, companyContactId } =
+    await resolveShopifyB2BContext(quote, selectedCompanyLocationId);
+
+  const cartData = quote.items.map((item: any) => ({
+    variantId: item.variantId,
+    quantity: item.quantity,
+    price: item.unitPrice.toString(),
+    currencyCode: item.currencyCode,
+    discount: (item.discount ?? 0).toString(),
+  }));
+  const lineItems = buildSalesDraftLineItems(cartData, quote.currencyCode);
+  const appliedDiscount =
+    Number(quote.discountTotal) > 0
+      ? {
+          value: Number(quote.discountTotal),
+          valueType: "FIXED_AMOUNT" as const,
+          title:
+            quote.discountType === "PERCENTAGE"
+              ? `Quote Discount (${quote.discountAmount}%)`
+              : "Quote Discount",
+        }
+      : undefined;
+  const customAttributes: Array<{ key: string; value: string }> = [
+    { key: "_source", value: "Sales Portal Quote" },
+    { key: "Quote Number", value: quote.quoteNumber },
+  ];
+  if (quote.internalNotes) {
+    customAttributes.push({
+      key: "Internal Notes",
+      value: quote.internalNotes,
+    });
+  }
+  if (salesAgent?.name) {
+    customAttributes.push({ key: "Sales Agent Name", value: salesAgent.name });
+  }
+  if (salesAgent?.email) {
+    customAttributes.push({ key: "Sales Agent Email", value: salesAgent.email });
+  }
+
+  if (shippingAddress) {
+    const addressLines = [
+      shippingAddress.address1,
+      shippingAddress.address2,
+      shippingAddress.city,
+      shippingAddress.province,
+      shippingAddress.zip,
+      shippingAddress.country,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    if (shippingAddress.address1) {
+      customAttributes.push({
+        key: "Delivery Address 1",
+        value: shippingAddress.address1,
+      });
+    }
+    if (shippingAddress.address2) {
+      customAttributes.push({
+        key: "Delivery Address 2",
+        value: shippingAddress.address2,
+      });
+    }
+    if (shippingAddress.city) {
+      customAttributes.push({
+        key: "Delivery City",
+        value: shippingAddress.city,
+      });
+    }
+    if (shippingAddress.province) {
+      customAttributes.push({
+        key: "Delivery State/Province",
+        value: shippingAddress.province,
+      });
+    }
+    if (shippingAddress.zip) {
+      customAttributes.push({
+        key: "Delivery Postal Code",
+        value: shippingAddress.zip,
+      });
+    }
+    if (shippingAddress.country) {
+      customAttributes.push({
+        key: "Delivery Country",
+        value: shippingAddress.country,
+      });
+    }
+    if (shippingAddress.phone) {
+      customAttributes.push({
+        key: "Delivery Phone",
+        value: shippingAddress.phone,
+      });
+    }
+    if (addressLines) {
+      customAttributes.push({ key: "Delivery Address", value: addressLines });
+    }
+  }
+
+  const draftInput: DraftOrderInput = {
+    lineItems,
+    note: quote.customerNotes || quote.quoteNumber,
+    customAttributes,
+    presentmentCurrencyCode: quote.currencyCode,
+    taxExempt: true,
+    purchasingEntity: {
+      purchasingCompany: {
+        companyId: quote.company.shopifyCompanyId,
+        companyLocationId,
+        companyContactId,
+      },
+    },
+  };
+  if (appliedDiscount) draftInput.appliedDiscount = appliedDiscount;
+
+  if (shippingAddress) {
+    const normalizedShippingAddress = {
+      ...shippingAddress,
+      countryCode:
+        shippingAddress.countryCode ||
+        normalizeCountryCode(shippingAddress.country),
+    };
+
+    if (
+      normalizedShippingAddress.address1 ||
+      normalizedShippingAddress.address2 ||
+      normalizedShippingAddress.city ||
+      normalizedShippingAddress.province ||
+      normalizedShippingAddress.zip ||
+      normalizedShippingAddress.country ||
+      normalizedShippingAddress.countryCode ||
+      normalizedShippingAddress.phone
+    ) {
+      draftInput.shippingAddress = normalizedShippingAddress;
+    }
+  }
+
+  const shopApiBase = `https://${quote.company.shop.shopDomain}/admin/api/2025-01/graphql.json`;
+  const shopApiHeaders = {
+    "Content-Type": "application/json",
+    "X-Shopify-Access-Token": quote.company.shop.accessToken,
+  };
+
+  const updateRes = await fetch(shopApiBase, {
+    method: "POST",
+    headers: shopApiHeaders,
+    body: JSON.stringify({
+      query: `mutation DraftOrderUpdate($id: ID!, $input: DraftOrderInput!) {
+        draftOrderUpdate(id: $id, input: $input) {
+          draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } }
+          userErrors { field message }
+        }
+      }`,
+      variables: { id: quote.shopifyDraftOrderId, input: draftInput },
+    }),
+  });
+  const updateData = await updateRes.json();
+  const errors = updateData.data?.draftOrderUpdate?.userErrors || [];
+  if (updateData.errors?.length || errors.length) {
+    throw new Error(
+      updateData.errors?.[0]?.message ||
+        errors[0]?.message ||
+        "Shopify draft order update failed.",
+    );
+  }
+}
+
+async function resolveShopifyB2BContext(
+  quote: any,
+  selectedCompanyLocationId?: string,
+) {
   const company = quote.company;
   if (!company.shopifyCompanyId || !company.shop?.accessToken) {
     throw new Error("Company or shop credentials not found.");
@@ -451,7 +692,13 @@ async function resolveShopifyB2BContext(quote: any) {
   const matchedContact = contacts.find(
     (edge) => edge.node.customer?.id === matchCustGid,
   );
+  const selectedLocationMatch = selectedCompanyLocationId
+    ? baseMetaData.data?.company?.locations?.nodes?.find(
+        (loc: any) => loc.id === selectedCompanyLocationId,
+      )
+    : null;
   const companyLocationId =
+    selectedLocationMatch?.id ||
     matchedContact?.node.roleAssignments?.edges?.[0]?.node?.companyLocation
       ?.id ||
     baseMetaData.data?.company?.locations?.nodes?.[0]?.id ||

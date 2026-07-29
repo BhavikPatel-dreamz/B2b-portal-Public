@@ -200,6 +200,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
+  const salesAgent = await prisma.user.findUnique({
+    where: { id: salesAgentId },
+    select: { firstName: true, lastName: true, email: true },
+  });
+
   const now = new Date();
   const datePart = now.toISOString().slice(0, 10).replace(/-/g, "");
   const count = await prisma.quote.count({
@@ -350,6 +355,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           customAttributes: [
             { key: "_source", value: "B2B Portal Quote" },
             { key: "Quote Number", value: quoteNumber },
+            { key: "_sales_agent_user_id", value: String(salesAgentId) },
+            {
+              key: "Sales Agent Name",
+              value: [salesAgent?.firstName, salesAgent?.lastName]
+                .filter(Boolean)
+                .join(" "),
+            },
+            { key: "Sales Agent Email", value: salesAgent?.email || "" },
           ],
           presentmentCurrencyCode: currencyCode,
           taxExempt: true,

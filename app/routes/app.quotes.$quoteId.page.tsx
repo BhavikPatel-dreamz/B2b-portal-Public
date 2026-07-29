@@ -331,14 +331,58 @@ export default function AdminQuoteDetailPage() {
                         style={styles.inputFull}
                       />
                     </div>
-                    <div style={{ gridColumn: "span 2" }}>
-                      <label style={styles.label}>Delivery Address</label>
-                      <textarea
-                        name="deliveryAddress"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address || ""}
-                        placeholder="Full delivery address"
-                        rows={3}
-                        style={styles.textarea}
+                    <div>
+                      <label style={styles.label}>Address line 1</label>
+                      <input
+                        name="deliveryAddress1"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address1 || quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address?.split("\n")[0] || ""}
+                        placeholder="Street address"
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Address line 2</label>
+                      <input
+                        name="deliveryAddress2"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address2 || ""}
+                        placeholder="Apartment, suite, unit, etc."
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Country</label>
+                      <input
+                        name="deliveryCountry"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.country || ""}
+                        placeholder="Country"
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>State / Province</label>
+                      <input
+                        name="deliveryProvince"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.province || ""}
+                        placeholder="State or province"
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>City</label>
+                      <input
+                        name="deliveryCity"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.city || ""}
+                        placeholder="City"
+                        style={styles.inputFull}
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Postal code</label>
+                      <input
+                        name="deliveryZip"
+                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.zip || ""}
+                        placeholder="Zip / postal code"
+                        style={styles.inputFull}
                       />
                     </div>
                   </div>
@@ -354,32 +398,45 @@ export default function AdminQuoteDetailPage() {
                 </Form>
               ) : (
                 <div>
-                  {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName ||
-                   quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address ||
-                   quote.invoiceData?.quoteEditMeta?.deliveryDetails?.phone ? (
-                    <div style={styles.infoGrid}>
-                      {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName && (
-                        <div>
-                          <span style={styles.label}>Location</span>
-                          <span>{quote.invoiceData.quoteEditMeta.deliveryDetails.locationName}</span>
-                        </div>
-                      )}
-                      {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address && (
-                        <div style={{ gridColumn: "span 2" }}>
-                          <span style={styles.label}>Address</span>
-                          <span style={{ whiteSpace: "pre-wrap" }}>{quote.invoiceData.quoteEditMeta.deliveryDetails.address}</span>
-                        </div>
-                      )}
-                      {quote.invoiceData?.quoteEditMeta?.deliveryDetails?.phone && (
-                        <div>
-                          <span style={styles.label}>Phone</span>
-                          <span>{quote.invoiceData.quoteEditMeta.deliveryDetails.phone}</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p style={{ margin: 0, color: "#5c5f62", fontSize: 13 }}>No delivery details added yet.</p>
-                  )}
+                  {(() => {
+                    const dd = quote.invoiceData?.quoteEditMeta?.deliveryDetails || {};
+                    const locName = dd.locationName || "";
+                    const addr1 = dd.address1 || "";
+                    const addr2 = dd.address2 || "";
+                    const city = dd.city || "";
+                    const province = dd.province || "";
+                    const zip = dd.zip || "";
+                    const country = dd.country || "";
+                    const phone = dd.phone || "";
+                    const hasAny = locName || addr1 || city || country || phone;
+                    const addressParts = [addr1, addr2, [city, province, zip].filter(Boolean).join(", "), country].filter(Boolean);
+                    return hasAny ? (
+                      <div style={styles.infoGrid}>
+                        {locName && (
+                          <div>
+                            <span style={styles.label}>Location</span>
+                            <span>{locName}</span>
+                          </div>
+                        )}
+                        {addressParts.length > 0 && (
+                          <div style={{ gridColumn: "span 2" }}>
+                            <span style={styles.label}>Address</span>
+                            <address style={{ whiteSpace: "pre-wrap", fontStyle: "normal" }}>
+                              {addressParts.map((line, i) => <span key={i}>{line}<br /></span>)}
+                            </address>
+                          </div>
+                        )}
+                        {phone && (
+                          <div>
+                            <span style={styles.label}>Phone</span>
+                            <span>{phone}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p style={{ margin: 0, color: "#5c5f62", fontSize: 13 }}>No delivery details added yet.</p>
+                    );
+                  })()}
                 </div>
               )}
             </div>

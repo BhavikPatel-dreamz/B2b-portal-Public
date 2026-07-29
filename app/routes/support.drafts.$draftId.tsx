@@ -47,7 +47,12 @@ type DraftNotes = {
   customerNotes: string;
   deliveryDetails?: {
     locationName: string;
-    address: string;
+    address1: string;
+    address2: string;
+    city: string;
+    province: string;
+    zip: string;
+    country: string;
     phone: string;
   };
 };
@@ -76,15 +81,21 @@ function parseDraftNotes(notes?: string | null): DraftNotes {
   try {
     const parsed = JSON.parse(notes);
     if (parsed && typeof parsed === "object") {
+      const dd = parsed.deliveryDetails;
       return {
         internalNotes: String(parsed.internalNotes || ""),
         customerNotes: String(parsed.customerNotes || ""),
         deliveryDetails:
-          parsed.deliveryDetails && typeof parsed.deliveryDetails === "object"
+          dd && typeof dd === "object"
             ? {
-                locationName: String(parsed.deliveryDetails.locationName || ""),
-                address: String(parsed.deliveryDetails.address || ""),
-                phone: String(parsed.deliveryDetails.phone || ""),
+                locationName: String(dd.locationName || ""),
+                address1: String(dd.address1 || dd.address?.split("\n")[0] || ""),
+                address2: String(dd.address2 || dd.address?.split("\n")[1] || ""),
+                city: String(dd.city || dd.address?.split("\n")[2] || ""),
+                province: String(dd.province || dd.address?.split("\n")[3] || ""),
+                zip: String(dd.zip || dd.address?.split("\n")[4] || ""),
+                country: String(dd.country || dd.address?.split("\n")[5] || ""),
+                phone: String(dd.phone || ""),
               }
             : undefined,
       };
@@ -371,7 +382,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const formData = await request.formData();
-  const intent = String(formData.get("intent") || "");
+  const intentValues = formData.getAll("intent").map(String).filter(Boolean);
+  const intent = intentValues.length > 0 ? intentValues[intentValues.length - 1] : "";
 
   if (intent === "logout") {
     return redirect("/sales/login", {
@@ -553,7 +565,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               customerNotes: String(formData.get("customerNotes") || ""),
               deliveryDetails: {
                 locationName: String(formData.get("deliveryLocationName") || ""),
-                address: String(formData.get("deliveryAddress") || ""),
+                address1: String(formData.get("deliveryAddress1") || ""),
+                address2: String(formData.get("deliveryAddress2") || ""),
+                city: String(formData.get("deliveryCity") || ""),
+                province: String(formData.get("deliveryProvince") || ""),
+                zip: String(formData.get("deliveryZip") || ""),
+                country: String(formData.get("deliveryCountry") || ""),
                 phone: String(formData.get("deliveryPhone") || ""),
               },
             }),
@@ -565,6 +582,153 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         userId: user.id,
         action: "Draft Updated",
         message: "Draft details were updated.",
+      });
+      return redirect(`/support/drafts/${draft.id}?saved=1`);
+    }
+
+    if (intent === "save_details") {
+      const selectedCustomerId = String(formData.get("customerId") || "");
+      const selectedCustomer = selectedCustomerId
+        ? await prisma.user.findFirst({
+            where: {
+              OR: [
+                { id: selectedCustomerId },
+                { shopifyCustomerId: selectedCustomerId },
+              ],
+            },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              shopifyCustomerId: true,
+            },
+          })
+        : null;
+      const customerName =
+        selectedCustomer
+          ? [selectedCustomer.firstName, selectedCustomer.lastName]
+              .filter(Boolean)
+              .join(" ")
+          : String(formData.get("customerName") || "").trim();
+      const customerEmail =
+        selectedCustomer?.email ||
+        String(formData.get("customerEmail") || "").trim() ||
+        null;
+      const customerId =
+        selectedCustomer?.shopifyCustomerId ||
+        selectedCustomer?.id ||
+        String(formData.get("customerNumber") || "").trim() ||
+        null;
+
+      const deliveryData = {
+        locationName: String(formData.get("deliveryLocationName") || ""),
+        address1: String(formData.get("deliveryAddress1") || ""),
+        address2: String(formData.get("deliveryAddress2") || ""),
+        city: String(formData.get("deliveryCity") || ""),
+        province: String(formData.get("deliveryProvince") || ""),
+        zip: String(formData.get("deliveryZip") || ""),
+        country: String(formData.get("deliveryCountry") || ""),
+        phone: String(formData.get("deliveryPhone") || ""),
+      };
+
+      const currentNotes = parseDraftNotes(draft.notes);
+
+      await prisma.b2BOrder.update({
+        where: { id: draft.id },
+        data: {
+          customerName,
+          customerEmail,
+          customerId,
+          notes: serializeDraftNotes({
+            internalNotes: currentNotes.internalNotes,
+            customerNotes: currentNotes.customerNotes,
+            deliveryDetails: deliveryData,
+          }),
+        },
+      });
+
+      if (draft.shopifyOrderId && draft.company.shop.accessToken) {
+        const shopDomain = draft.company.shop.shopDomain;
+        const accessToken = draft.company.shop.accessToken;
+        const draftOrderId = draft.shopifyOrderId.startsWith("gid://")
+          ? draft.shopifyOrderId
+          : `gid://shopify/DraftOrder/${draft.shopifyOrderId}`;
+
+        const deliveryLines = [
+          deliveryData.address1,
+          deliveryData.address2,
+          [deliveryData.city, deliveryData.province, deliveryData.zip].filter(Boolean).join(", "),
+          deliveryData.country,
+        ].filter(Boolean);
+
+        const shopifyMutation = `#graphql
+          mutation UpdateDraftCustomAttributes($input: DraftOrderInput!) {
+            draftOrderUpdate(input: $input) {
+              draftOrder {
+                id
+                shippingAddress {
+                  address1
+                  address2
+                  city
+                  province
+                  zip
+                  country
+                  phone
+                }
+                customAttributes {
+                  key
+                  value
+                }
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `;
+
+        const shopifyInput: any = {
+          id: draftOrderId,
+          shippingAddress: {
+            address1: deliveryData.address1 || undefined,
+            address2: deliveryData.address2 || undefined,
+            city: deliveryData.city || undefined,
+            province: deliveryData.province || undefined,
+            zip: deliveryData.zip || undefined,
+            country: deliveryData.country || undefined,
+            phone: deliveryData.phone || undefined,
+          },
+          customAttributes: [
+            { key: "Delivery Location", value: deliveryData.locationName },
+            { key: "Delivery Address", value: deliveryLines.join(", ") },
+            { key: "Delivery Phone", value: deliveryData.phone },
+            { key: "Customer Name", value: customerName },
+            { key: "Customer Email", value: customerEmail || "" },
+            { key: "Sales Agent Name", value: [user.firstName, user.lastName].filter(Boolean).join(" ") },
+            { key: "Sales Agent Email", value: user.email },
+          ],
+        };
+
+        await fetch(`https://${shopDomain}/admin/api/2025-01/graphql.json`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query: shopifyMutation,
+            variables: { input: shopifyInput },
+          }),
+        });
+      }
+
+      await logOrderActivity({
+        orderId: draft.id,
+        userId: user.id,
+        action: "Delivery Details Updated",
+        message: "Delivery and customer details were saved.",
       });
       return redirect(`/support/drafts/${draft.id}?saved=1`);
     }
@@ -803,8 +967,23 @@ export default function DraftDetailsPage() {
   const [deliveryPhoneValue, setDeliveryPhoneValue] = useState<string>(
     deliveryDetails.phone || "",
   );
-  const [deliveryAddressValue, setDeliveryAddressValue] = useState<string>(
-    (deliveryDetails.addressLines || []).join("\n") || "",
+  const [deliveryAddress1Value, setDeliveryAddress1Value] = useState<string>(
+    deliveryDetails.addressLines?.[0] || "",
+  );
+  const [deliveryAddress2Value, setDeliveryAddress2Value] = useState<string>(
+    deliveryDetails.addressLines?.[1] || "",
+  );
+  const [deliveryCityValue, setDeliveryCityValue] = useState<string>(
+    deliveryDetails.addressLines?.[2] || "",
+  );
+  const [deliveryProvinceValue, setDeliveryProvinceValue] = useState<string>(
+    deliveryDetails.addressLines?.[3] || "",
+  );
+  const [deliveryZipValue, setDeliveryZipValue] = useState<string>(
+    deliveryDetails.addressLines?.[4] || "",
+  );
+  const [deliveryCountryValue, setDeliveryCountryValue] = useState<string>(
+    deliveryDetails.addressLines?.[5] || "",
   );
 
   useEffect(() => {
@@ -827,24 +1006,15 @@ export default function DraftDetailsPage() {
     const location = companyLocations.find((loc: any) => loc.id === selectedDeliveryLocationId);
     if (!location) return;
 
-    const addressLines = [] as string[];
     const shipping = location.shippingAddress || {};
-    const recipient = [shipping.firstName, shipping.lastName]
-      .filter(Boolean)
-      .join(" ");
-    if (recipient) addressLines.push(recipient);
-    if (location.name) addressLines.push(location.name);
-    if (shipping.address1) addressLines.push(shipping.address1);
-    if (shipping.address2) addressLines.push(shipping.address2);
-    const cityLine = [shipping.city, shipping.province, shipping.zip]
-      .filter(Boolean)
-      .join(", ");
-    if (cityLine) addressLines.push(cityLine);
-    if (shipping.country) addressLines.push(shipping.country);
-
     setDeliveryLocationNameValue(location.name || "");
+    setDeliveryAddress1Value(shipping.address1 || "");
+    setDeliveryAddress2Value(shipping.address2 || "");
+    setDeliveryCityValue(shipping.city || "");
+    setDeliveryProvinceValue(shipping.province || "");
+    setDeliveryZipValue(shipping.zip || "");
+    setDeliveryCountryValue(shipping.country || "");
     setDeliveryPhoneValue(shipping.phone || location.phone || "");
-    setDeliveryAddressValue(addressLines.join("\n"));
   }, [selectedDeliveryLocationId, companyLocations]);
 
   useEffect(() => {
@@ -1096,6 +1266,84 @@ export default function DraftDetailsPage() {
                   />
                 </label>
                 <label style={styles.label}>
+                  Address line 1
+                  <input
+                    name="deliveryAddress1"
+                    value={deliveryAddress1Value}
+                    onChange={(e) => {
+                      setDeliveryAddress1Value(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="Street address"
+                    style={styles.input}
+                  />
+                </label>
+                <label style={styles.label}>
+                  Address line 2
+                  <input
+                    name="deliveryAddress2"
+                    value={deliveryAddress2Value}
+                    onChange={(e) => {
+                      setDeliveryAddress2Value(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="Apartment, suite, unit, etc."
+                    style={styles.input}
+                  />
+                </label>
+                <label style={styles.label}>
+                  Country
+                  <input
+                    name="deliveryCountry"
+                    value={deliveryCountryValue}
+                    onChange={(e) => {
+                      setDeliveryCountryValue(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="Country"
+                    style={styles.input}
+                  />
+                </label>
+                <label style={styles.label}>
+                  State / Province
+                  <input
+                    name="deliveryProvince"
+                    value={deliveryProvinceValue}
+                    onChange={(e) => {
+                      setDeliveryProvinceValue(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="State or province"
+                    style={styles.input}
+                  />
+                </label>
+                <label style={styles.label}>
+                  City
+                  <input
+                    name="deliveryCity"
+                    value={deliveryCityValue}
+                    onChange={(e) => {
+                      setDeliveryCityValue(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="City"
+                    style={styles.input}
+                  />
+                </label>
+                <label style={styles.label}>
+                  Postal code
+                  <input
+                    name="deliveryZip"
+                    value={deliveryZipValue}
+                    onChange={(e) => {
+                      setDeliveryZipValue(e.target.value);
+                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                    }}
+                    placeholder="Zip / postal code"
+                    style={styles.input}
+                  />
+                </label>
+                <label style={styles.label}>
                   Delivery Phone
                   <input
                     name="deliveryPhone"
@@ -1105,20 +1353,6 @@ export default function DraftDetailsPage() {
                       if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
                     }}
                     style={styles.input}
-                  />
-                </label>
-                <label style={{ ...styles.label, gridColumn: "1 / -1" }}>
-                  Delivery Address
-                  <textarea
-                    name="deliveryAddress"
-                    value={deliveryAddressValue}
-                    onChange={(e) => {
-                      setDeliveryAddressValue(e.target.value);
-                      if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
-                    }}
-                    placeholder="Full delivery address"
-                    rows={4}
-                    style={{ ...styles.textarea, minHeight: 72 }}
                   />
                 </label>
               </div>
@@ -1131,6 +1365,19 @@ export default function DraftDetailsPage() {
                   No saved company locations are available. Enter a new delivery location below.
                 </p>
               )}
+              <div style={{ marginTop: 16 }}>
+                <button
+                  type="submit"
+                  name="intent"
+                  value="save_details"
+                  disabled={busy}
+                  aria-busy={pendingIntent === "save_details"}
+                  style={{ ...disabledButtonStyle(styles.primaryButton, busy), width: "100%" }}
+                >
+                  {pendingIntent === "save_details" && <Spinner />}
+                  {pendingIntent === "save_details" ? "Saving Details..." : "Save Detail"}
+                </button>
+              </div>
             </section>
 
             <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>

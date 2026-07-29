@@ -502,6 +502,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function SalesPortal() {
   const [isCreateCompanyOpen, setIsCreateCompanyOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
   const [countryOptions, setCountryOptions] = useState<
     CreateCompanyCountryOption[]
   >([]);
@@ -555,6 +559,32 @@ export default function SalesPortal() {
       ? "Company already existed and was linked successfully."
       : "";
   const errorToastMessage = actionData?.error || "";
+  const hasSuccessRedirect = Boolean(
+    searchParams.get("companyCreated") || searchParams.get("companyLinked"),
+  );
+
+  useEffect(() => {
+    if (hasSuccessRedirect || company?.id) {
+      setIsCreateCompanyOpen(false);
+    }
+  }, [company?.id, hasSuccessRedirect]);
+
+  useEffect(() => {
+    if (successToastMessage || errorToastMessage) {
+      setToastMessage({
+        type: successToastMessage ? "success" : "error",
+        message: successToastMessage || errorToastMessage,
+      });
+
+      const timeout = window.setTimeout(() => {
+        setToastMessage(null);
+      }, 4000);
+
+      return () => window.clearTimeout(timeout);
+    }
+
+    setToastMessage(null);
+  }, [successToastMessage, errorToastMessage]);
 
   useEffect(() => {
     let isActive = true;
@@ -607,11 +637,11 @@ export default function SalesPortal() {
   if (!company) {
     return (
       <div style={styles.container}>
-        {successToastMessage ? (
-          <div style={styles.successToast}>{successToastMessage}</div>
+        {toastMessage?.type === "success" ? (
+          <div style={styles.successToast}>{toastMessage.message}</div>
         ) : null}
-        {errorToastMessage ? (
-          <div style={styles.errorToast}>{errorToastMessage}</div>
+        {toastMessage?.type === "error" ? (
+          <div style={styles.errorToast}>{toastMessage.message}</div>
         ) : null}
         <div style={styles.onboardingCard}>
           <div style={styles.onboardingHeader}>
@@ -845,11 +875,11 @@ export default function SalesPortal() {
       themeColor={company.themeColor}
     >
       <div id="overview">
-        {successToastMessage ? (
-          <div style={styles.successToast}>{successToastMessage}</div>
+        {toastMessage?.type === "success" ? (
+          <div style={styles.successToast}>{toastMessage.message}</div>
         ) : null}
-        {errorToastMessage ? (
-          <div style={styles.errorToast}>{errorToastMessage}</div>
+        {toastMessage?.type === "error" ? (
+          <div style={styles.errorToast}>{toastMessage.message}</div>
         ) : null}
         <SalesPortalHeader
           title={company.name}

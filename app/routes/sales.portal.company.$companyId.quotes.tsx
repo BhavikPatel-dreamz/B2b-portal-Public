@@ -160,6 +160,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       dateTo,
       companyId: selectedCompanyId,
     },
+    themeCompanyId,
     quotes: quotes.map((quote) => ({
       ...quote,
       subtotal: quote.subtotal.toString(),
@@ -313,6 +314,7 @@ export default function QuoteListingPage() {
     quotes,
     quoteCount,
     orderCount,
+    themeCompanyId,
   } = useLoaderData<any>();
   const safeCompany =
     currentCompany ?? { id: "all", name: "All companies", themeColor: null, storeName: "" };
@@ -378,7 +380,7 @@ export default function QuoteListingPage() {
         companySwitchPath="/sales/portal/quotes?company="
         actions={
           <Link
-            to="/sales/portal/create-quote"
+            to={`/sales/portal/company/${themeCompanyId ?? safeCompany.id}/create-quote`}
             style={salesPortalButtonStyles.primary}
           >
             + Create Quote

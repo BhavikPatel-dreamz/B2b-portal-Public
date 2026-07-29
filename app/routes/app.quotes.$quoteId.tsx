@@ -600,7 +600,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     // ── UPDATE DELIVERY DETAILS ────────────────────────────────
     if (intent === "update_delivery_details") {
       const deliveryLocationName = String(formData.get("deliveryLocationName") || "").trim();
-      const deliveryAddress = String(formData.get("deliveryAddress") || "").trim();
+      const deliveryAddress1 = String(formData.get("deliveryAddress1") || "").trim();
+      const deliveryAddress2 = String(formData.get("deliveryAddress2") || "").trim();
+      const deliveryCity = String(formData.get("deliveryCity") || "").trim();
+      const deliveryProvince = String(formData.get("deliveryProvince") || "").trim();
+      const deliveryZip = String(formData.get("deliveryZip") || "").trim();
+      const deliveryCountry = String(formData.get("deliveryCountry") || "").trim();
       const deliveryPhone = String(formData.get("deliveryPhone") || "").trim();
 
       const existingInvoiceData =
@@ -615,7 +620,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             : {}),
           deliveryDetails: {
             locationName: deliveryLocationName || null,
-            address: deliveryAddress || null,
+            address1: deliveryAddress1 || null,
+            address2: deliveryAddress2 || null,
+            city: deliveryCity || null,
+            province: deliveryProvince || null,
+            zip: deliveryZip || null,
+            country: deliveryCountry || null,
             phone: deliveryPhone || null,
           },
         },
@@ -631,10 +641,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         companyId: quote.companyId,
         customerEmail: quote.customerEmail,
         action: "Delivery Details Updated",
-        message: `Location: ${deliveryLocationName || "N/A"}, Address: ${deliveryAddress || "N/A"}, Phone: ${deliveryPhone || "N/A"}`,
+        message: `Location: ${deliveryLocationName || "N/A"}, Address: ${deliveryAddress1 || "N/A"}, Phone: ${deliveryPhone || "N/A"}`,
       });
 
-      return Response.json({ success: true, message: "Delivery details updated." });
+      return redirect(request.url);
     }
 
     // ── ADD PRODUCT ────────────────────────────────────────────

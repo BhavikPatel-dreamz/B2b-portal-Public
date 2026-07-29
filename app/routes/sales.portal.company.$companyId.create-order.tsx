@@ -4,8 +4,9 @@ import {
   Link,
   redirect,
   useLoaderData,
+  useSearchParams,
 } from "react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import prisma from "app/db.server";
 import {
   requireSalesSession,
@@ -71,6 +72,13 @@ type ShopifyCatalogNode = {
   priceList: { name: string; currency: string } | null;
 };
 
+type CountryOption = {
+  value: string;
+  label: string;
+  dialCode?: string;
+  provinces: Array<{ value: string; label: string }>;
+};
+
 type ShopifyCatalogLocation = {
   id: string;
   name: string;
@@ -111,20 +119,16 @@ function formatLocationAddress(
   const cityLine = [address.city, address.province, address.zip]
     .filter(Boolean)
     .join(", ");
-  return [
-    address.address1,
-    address.address2,
-    cityLine,
-    address.country,
-  ]
+  return [address.address1, address.address2, cityLine, address.country]
     .map((line) => String(line || "").trim())
     .filter(Boolean);
 }
 
 function mapShopifyCustomer(c: ShopifyCompanyCustomer): CompanyUserOption {
   const fallbackName = c.name?.trim() || "";
-  const [fallbackFirstName, ...fallbackLastParts] =
-    fallbackName.split(/\s+/).filter(Boolean);
+  const [fallbackFirstName, ...fallbackLastParts] = fallbackName
+    .split(/\s+/)
+    .filter(Boolean);
   const firstName = c.customer?.firstName?.trim() || fallbackFirstName || null;
   const lastName =
     c.customer?.lastName?.trim() || fallbackLastParts.join(" ") || null;
@@ -176,7 +180,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "assign_admin") {
     const companyId = new URL(request.url).pathname.split("/")[4];
     if (!companyId || !hasCompanyAccess(user, companyId)) {
-      return Response.json({ success: false, error: "Unauthorized" }, { status: 403 });
+      return Response.json(
+        { success: false, error: "Unauthorized" },
+        { status: 403 },
+      );
     }
 
     const company = await prisma.companyAccount.findUnique({
@@ -185,12 +192,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!company || !company.shop) {
-      return Response.json({ success: false, error: "Company or store not found" }, { status: 404 });
+      return Response.json(
+        { success: false, error: "Company or store not found" },
+        { status: 404 },
+      );
     }
 
     const rawCustomerId = String(formData.get("customerId") || "");
     if (!rawCustomerId) {
-      return Response.json({ success: false, error: "Customer ID required" }, { status: 400 });
+      return Response.json(
+        { success: false, error: "Customer ID required" },
+        { status: 400 },
+      );
     }
 
     const customerGid = rawCustomerId.startsWith("gid://")
@@ -204,33 +217,56 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       : null;
 
     if (!companyGid) {
-      return Response.json({ success: false, error: "Company not linked to Shopify" }, { status: 400 });
+      return Response.json(
+        { success: false, error: "Company not linked to Shopify" },
+        { status: 400 },
+      );
     }
 
     // Build a minimal admin object that matches what assignCompanyToCustomer expects
     const admin = {
       graphql: (query: string, opts?: { variables?: any }) =>
-        fetch(`https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": company.shop.accessToken || "",
+        fetch(
+          `https://${company.shop.shopDomain}/admin/api/2025-01/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": company.shop.accessToken || "",
+            },
+            body: JSON.stringify({ query, variables: opts?.variables }),
           },
-          body: JSON.stringify({ query, variables: opts?.variables }),
-        }),
+        ),
     } as any;
 
     try {
-      const { assignCompanyToCustomer } = await import("app/utils/b2b-customer.server");
-      const result = await assignCompanyToCustomer(admin, customerGid, companyGid);
+      const { assignCompanyToCustomer } =
+        await import("app/utils/b2b-customer.server");
+      const result = await assignCompanyToCustomer(
+        admin,
+        customerGid,
+        companyGid,
+      );
       if (!result.success) {
-        return Response.json({ success: false, error: result.error || "Failed to assign customer" }, { status: 500 });
+        return Response.json(
+          {
+            success: false,
+            error: result.error || "Failed to assign customer",
+          },
+          { status: 500 },
+        );
       }
 
-      return Response.json({ success: true, message: "Customer assigned to company successfully" });
+      return Response.json({
+        success: true,
+        message: "Customer assigned to company successfully",
+      });
     } catch (err: any) {
       console.error("assign_admin error:", err);
-      return Response.json({ success: false, error: err?.message || "Unexpected error" }, { status: 500 });
+      return Response.json(
+        { success: false, error: err?.message || "Unexpected error" },
+        { status: 500 },
+      );
     }
   }
 
@@ -287,21 +323,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
   });
 
-  
-
   if (!company || !company.shop) {
     return redirect("/sales/portal");
   }
 
-  const companyGid = getShopifyCompanyGid(
-  company.shopifyCompanyId,
-);
+  const companyGid = getShopifyCompanyGid(company.shopifyCompanyId);
 
-if (!companyGid) {
-  throw new Error(
-    `Invalid Shopify Company ID: ${company.shopifyCompanyId}`,
-  );
-}
+  if (!companyGid) {
+    throw new Error(`Invalid Shopify Company ID: ${company.shopifyCompanyId}`);
+  }
 
   // Fetch real-time users directly from Shopify (fixes the issue where Shopify users aren't synced locally)
   let activeUsers: CompanyUserOption[] = [];
@@ -335,7 +365,9 @@ if (!companyGid) {
       const adminUsers = mapped.filter(
         (u: CompanyUserOption) =>
           u.isGlobalAdmin ||
-          String(u.companyRole || "").toLowerCase().includes("admin"),
+          String(u.companyRole || "")
+            .toLowerCase()
+            .includes("admin"),
       );
 
       activeUsers = adminUsers.length > 0 ? adminUsers : mapped;
@@ -376,6 +408,12 @@ if (!companyGid) {
     name: string;
     phone: string | null;
     addressLines: string[];
+    country: string;
+    province: string;
+    city: string;
+    zip: string;
+    address1: string;
+    address2: string;
   }> = [];
   let mainContactCustomerId: string | null = null;
 
@@ -481,6 +519,12 @@ if (!companyGid) {
             name: loc.name || "Company location",
             phone: loc.shippingAddress?.phone || loc.phone || null,
             addressLines: formatLocationAddress(loc.shippingAddress),
+            country: loc.shippingAddress?.country || "US",
+            province: loc.shippingAddress?.province || "",
+            city: loc.shippingAddress?.city || "",
+            zip: loc.shippingAddress?.zip || "",
+            address1: loc.shippingAddress?.address1 || "",
+            address2: loc.shippingAddress?.address2 || "",
           }));
 
           const uniqueCatalogs = new Map<string, ShopifyCatalogNode>();
@@ -544,6 +588,7 @@ if (!companyGid) {
   });
 };
 
+
 export default function CreateOrderCustomerSelection() {
   const { company, user, mode } = useLoaderData<{
     company: {
@@ -561,6 +606,12 @@ export default function CreateOrderCustomerSelection() {
         name: string;
         phone: string | null;
         addressLines: string[];
+        country: string;
+        province: string;
+        city: string;
+        zip: string;
+        address1: string;
+        address2: string;
       }>;
       catalogs: Array<{
         id: string;
@@ -579,16 +630,37 @@ export default function CreateOrderCustomerSelection() {
     mode: "order" | "quote";
   }>();
 
-  const [selectedShopifyCustomer, setSelectedShopifyCustomer] = useState<string>(
-    company.mainContactCustomerId || "",
-  );
+  const [selectedShopifyCustomer, setSelectedShopifyCustomer] =
+    useState<string>(company.mainContactCustomerId || "");
   const [assigning, setAssigning] = useState(false);
 
   // Use theme palette from loader
   const theme = company.theme;
-  const [selectedLocationId, setSelectedLocationId] = useState(
-    company.locations[0]?.id || "",
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedLocationId = searchParams.get("locationId") || "";
+  const initialLocationId =
+    requestedLocationId &&
+    company.locations.some((location) => location.id === requestedLocationId)
+      ? requestedLocationId
+      : company.locations[0]?.id || "";
+  const [selectedLocationId, setSelectedLocationId] =
+    useState(initialLocationId);
+  const [showLocationForm, setShowLocationForm] = useState(
+    company.locations.length === 0,
   );
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [locationSubmitting, setLocationSubmitting] = useState(false);
+  const [locationFormError, setLocationFormError] = useState<string | null>(
+    null,
+  );
+  const [locationFormSuccess, setLocationFormSuccess] = useState<string | null>(
+    null,
+  );
+  const [locationFieldErrors, setLocationFieldErrors] = useState<
+    Record<string, string>
+  >({});
+  const [countryOptions, setCountryOptions] = useState<CountryOption[]>([]);
+  const [defaultLocationCountry, setDefaultLocationCountry] = useState("US");
   const flowBase =
     mode === "quote"
       ? `/sales/portal/company/${company.id}/create-quote`
@@ -597,16 +669,270 @@ export default function CreateOrderCustomerSelection() {
   const selectedLocation = company.locations.find(
     (location) => location.id === selectedLocationId,
   );
-  const locationAdmins = company.users.filter((companyUser) =>
-    companyUser.locationIds.includes(selectedLocationId) ||
-    Boolean(
-      selectedLocation?.name &&
+  const [locationForm, setLocationForm] = useState({
+    name: selectedLocation?.name || "",
+    country: selectedLocation?.country || "US",
+    firstName: "",
+    lastName: "",
+    address1: selectedLocation?.address1 || "",
+    address2: selectedLocation?.address2 || "",
+    city: selectedLocation?.city || "",
+    province: selectedLocation?.province || "",
+    zip: selectedLocation?.zip || "",
+    phone: selectedLocation?.phone || "",
+    recipient: "",
+  });
+
+  useEffect(() => {
+    if (!selectedLocationId) return;
+
+    const params = new URLSearchParams(searchParams);
+    if (params.get("locationId") !== selectedLocationId) {
+      params.set("locationId", selectedLocationId);
+      setSearchParams(params, { replace: true });
+    }
+  }, [selectedLocationId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/proxy/shipping-zones")
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Failed to load shipping zone countries");
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (!active) return;
+        const nextCountries: CountryOption[] = Array.isArray(data?.countries)
+          ? data.countries
+          : [];
+        setCountryOptions(nextCountries);
+        if (nextCountries.length > 0) {
+          const hasUs = nextCountries.some((country) => country.value === "US");
+          setDefaultLocationCountry(hasUs ? "US" : nextCountries[0].value);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setCountryOptions([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const resetLocationForm = (editing: boolean) => {
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+    const defaultCountry =
+      selectedLocation?.country || defaultLocationCountry || "US";
+    const defaultProvince = selectedLocation?.province || "";
+
+    if (editing && selectedLocation) {
+      setLocationForm({
+        name: selectedLocation.name || "",
+        country: defaultCountry,
+        firstName: "",
+        lastName: "",
+        address1: selectedLocation.address1 || "",
+        address2: selectedLocation.address2 || "",
+        city: selectedLocation.city || "",
+        province: defaultProvince,
+        zip: selectedLocation.zip || "",
+        phone: selectedLocation.phone || "",
+        recipient: "",
+      });
+    } else {
+      setLocationForm({
+        name: "",
+        country: defaultCountry,
+        firstName: "",
+        lastName: "",
+        address1: "",
+        address2: "",
+        city: "",
+        province: "",
+        zip: "",
+        phone: "",
+        recipient: "",
+      });
+    }
+  };
+
+  const handleOpenLocationForm = (editing: boolean) => {
+    setShowLocationForm(true);
+    setIsEditingLocation(editing);
+    resetLocationForm(editing);
+  };
+
+  const handleLocationFormChange = (field: string, value: string) => {
+    setLocationForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "country" ? { province: "" } : {}),
+    }));
+    setLocationFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const handleSaveLocation = async () => {
+    setLocationSubmitting(true);
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+
+    // const payload: Record<string, unknown> = {
+    //   action: isEditingLocation ? "edit" : "create",
+    //   name: locationForm.name.trim(),
+    //   country: locationForm.country.trim() || "US",
+    //   firstName: locationForm.firstName.trim(),
+    //   lastName: locationForm.lastName.trim(),
+    //   address1: locationForm.address1.trim(),
+    //   address2: locationForm.address2.trim(),
+    //   city: locationForm.city.trim(),
+    //   province: locationForm.province.trim(),
+    //   zip: locationForm.zip.trim(),
+    //   phone: locationForm.phone.trim(),
+    //   recipient: locationForm.recipient.trim(),
+    //   billingSameAsShipping: true,
+    // };
+    const payload: Record<string, unknown> = {
+  action: isEditingLocation ? "edit" : "create",
+  source: "sales-portal", // ✅ tells the API to skip app-proxy auth
+  name: locationForm.name.trim(),
+  country: locationForm.country.trim() || "US",
+  firstName: locationForm.firstName.trim(),
+  lastName: locationForm.lastName.trim(),
+  address1: locationForm.address1.trim(),
+  address2: locationForm.address2.trim(),
+  city: locationForm.city.trim(),
+  province: locationForm.province.trim(),
+  zip: locationForm.zip.trim(),
+  phone: locationForm.phone.trim(),
+  recipient: locationForm.recipient.trim(),
+  billingSameAsShipping: true,
+};
+
+    if (isEditingLocation) {
+      if (!selectedLocation?.id) {
+        setLocationFormError("No location selected to edit.");
+        setLocationSubmitting(false);
+        return;
+      }
+      payload.locationId = selectedLocation.id;
+    }
+
+    const fieldErrors: Record<string, string> = {};
+
+    if (!locationForm.name.trim()) {
+      fieldErrors.name = "Location name is required.";
+    }
+    if (!locationForm.address1.trim()) {
+      fieldErrors.address1 = "Street address is required.";
+    }
+    if (!locationForm.city.trim()) {
+      fieldErrors.city = "City is required.";
+    }
+    if (!locationForm.country.trim()) {
+      fieldErrors.country = "Country is required.";
+    }
+    if (!locationForm.zip.trim()) {
+      fieldErrors.zip = "Postal code is required.";
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      setLocationFieldErrors(fieldErrors);
+      setLocationFormError(
+        "Please complete the required location fields before saving.",
+      );
+      setLocationSubmitting(false);
+      return;
+    }
+
+    try {
+      function getLocationManagementUrl() {
+        const proxyBaseMatch = window.location.pathname.match(/^(\/apps\/[^/]+)/);
+        const proxyQuery = window.location.search || "";
+
+        if (proxyBaseMatch) {
+          return `${proxyBaseMatch[1]}/api/proxy/locationmanagement${proxyQuery}`;
+        }
+
+        return `/api/proxy/locationmanagement${proxyQuery}`;
+      }
+
+      const response = await fetch(getLocationManagementUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ ...payload, companyId: company.id }),
+      });
+      console.log("Location management response:111", response);
+      const result = await response.json().catch(() => null);
+      if (response.ok && result?.success) {
+        const locationId = result.locationId || selectedLocation?.id;
+        setLocationFormSuccess("Location saved successfully.");
+        if (locationId) {
+          window.location.href = `${window.location.pathname}?locationId=${encodeURIComponent(
+            locationId,
+          )}`;
+        } else {
+          window.location.reload();
+        }
+      } else {
+        const serverFieldErrors: Record<string, string> = {};
+        if (Array.isArray(result?.userErrors)) {
+          for (const error of result.userErrors) {
+            const field = Array.isArray(error.field)
+              ? error.field[0]
+              : typeof error.field === "string"
+                ? error.field
+                : undefined;
+            if (field) {
+              serverFieldErrors[field] = error.message;
+            }
+          }
+        }
+        if (Object.keys(serverFieldErrors).length > 0) {
+          setLocationFieldErrors(serverFieldErrors);
+        }
+        setLocationFormError(
+          result?.error ||
+            (response.ok
+              ? "Unable to save location."
+              : `Unable to save location. (${response.status})`),
+        );
+      }
+    } catch (error: any) {
+      console.error(error);
+      setLocationFormError(
+        error?.message || "Unable to save location. Please try again.",
+      );
+    } finally {
+      setLocationSubmitting(false);
+    }
+  };
+
+  const locationFormTitle = isEditingLocation
+    ? "Edit company location"
+    : "Add a Shopify company location";
+
+  const locationAdmins = company.users.filter(
+    (companyUser) =>
+      companyUser.locationIds.includes(selectedLocationId) ||
+      Boolean(
+        selectedLocation?.name &&
         companyUser.locationNames.some(
           (name) =>
             name.trim().toLowerCase() ===
             selectedLocation.name.trim().toLowerCase(),
         ),
-    ),
+      ),
   );
   const globalAdmins = company.users.filter(
     (companyUser) => companyUser.isGlobalAdmin,
@@ -615,7 +941,11 @@ export default function CreateOrderCustomerSelection() {
     (companyUser) => companyUser.locationIds.length === 0,
   );
   const selectedAdmin =
-    locationAdmins[0] || globalAdmins[0] || fallbackAdmins[0] || company.users[0] || null;
+    locationAdmins[0] ||
+    globalAdmins[0] ||
+    fallbackAdmins[0] ||
+    company.users[0] ||
+    null;
   const buildStep2Url = (customerId: string) => {
     const params = new URLSearchParams({ customerId });
     if (selectedLocationId) {
@@ -765,6 +1095,275 @@ export default function CreateOrderCustomerSelection() {
                 </div>
               )}
 
+              <div style={styles.locationFormToolbar}>
+                <button
+                  type="button"
+                  onClick={() => handleOpenLocationForm(false)}
+                  style={styles.secondaryButton}
+                >
+                  Add location
+                </button>
+                {selectedLocation && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenLocationForm(true)}
+                    style={styles.secondaryButton}
+                  >
+                    Edit location
+                  </button>
+                )}
+              </div>
+
+              {showLocationForm && (
+                <div style={styles.locationFormSection}>
+                  <div style={styles.locationFormHeader}>
+                    <span style={styles.infoLabel}>{locationFormTitle}</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowLocationForm(false)}
+                      style={styles.linkButton}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  {locationFormError ? (
+                    <div style={styles.validationMessage}>
+                      {locationFormError}
+                    </div>
+                  ) : null}
+                  {locationFormSuccess ? (
+                    <div style={styles.successMessage}>
+                      {locationFormSuccess}
+                    </div>
+                  ) : null}
+
+                  <div style={styles.locationFormGrid}>
+                    <label style={styles.locationLabel}>
+                      Location name
+                      <input
+                        type="text"
+                        value={locationForm.name}
+                        onChange={(event) =>
+                          handleLocationFormChange(
+                            "name",
+                            event.currentTarget.value,
+                          )
+                        }
+                        style={
+                          locationFieldErrors.name
+                            ? { ...styles.formInput, ...styles.invalidInput }
+                            : styles.formInput
+                        }
+                        placeholder="Warehouse, Office, etc."
+                      />
+                      {locationFieldErrors.name ? (
+                        <div style={styles.fieldError}>
+                          {locationFieldErrors.name}
+                        </div>
+                      ) : null}
+                    </label>
+                    <label style={styles.locationLabel}>
+                      Address line 1
+                      <input
+                        type="text"
+                        value={locationForm.address1}
+                        onChange={(event) =>
+                          handleLocationFormChange(
+                            "address1",
+                            event.currentTarget.value,
+                          )
+                        }
+                        style={
+                          locationFieldErrors.address1
+                            ? { ...styles.formInput, ...styles.invalidInput }
+                            : styles.formInput
+                        }
+                        placeholder="Street address"
+                      />
+                      {locationFieldErrors.address1 ? (
+                        <div style={styles.fieldError}>
+                          {locationFieldErrors.address1}
+                        </div>
+                      ) : null}
+                    </label>
+                    <label style={styles.locationLabel}>
+                      Address line 2
+                      <input
+                        type="text"
+                        value={locationForm.address2}
+                        onChange={(event) =>
+                          handleLocationFormChange(
+                            "address2",
+                            event.currentTarget.value,
+                          )
+                        }
+                        style={styles.formInput}
+                        placeholder="Apartment, suite, unit, etc."
+                      />
+                    </label>
+
+                    <label style={styles.locationLabel}>
+                      Country
+                      <select
+                        value={locationForm.country}
+                        onChange={(event) =>
+                          handleLocationFormChange(
+                            "country",
+                            event.currentTarget.value,
+                          )
+                        }
+                        style={
+                          locationFieldErrors.country
+                            ? { ...styles.formInput, ...styles.invalidInput }
+                            : styles.formInput
+                        }
+                      >
+                        {countryOptions.length > 0 ? (
+                          countryOptions.map((country) => (
+                            <option key={country.value} value={country.value}>
+                              {country.label}
+                            </option>
+                          ))
+                        ) : (
+                          <option value={locationForm.country || "US"}>
+                            {locationForm.country || "US"}
+                          </option>
+                        )}
+                      </select>
+                      {locationFieldErrors.country ? (
+                        <div style={styles.fieldError}>
+                          {locationFieldErrors.country}
+                        </div>
+                      ) : null}
+                    </label>
+                    <label style={styles.locationLabel}>
+                      State / Province
+                      {countryOptions.length > 0 &&
+                      countryOptions.some(
+                        (country) => country.value === locationForm.country,
+                      ) &&
+                      countryOptions.find(
+                        (country) => country.value === locationForm.country,
+                      )?.provinces?.length ? (
+                        <select
+                          value={locationForm.province}
+                          onChange={(event) =>
+                            handleLocationFormChange(
+                              "province",
+                              event.currentTarget.value,
+                            )
+                          }
+                          style={styles.formInput}
+                        >
+                          <option value="">Select state / province</option>
+                          {countryOptions
+                            .find(
+                              (country) =>
+                                country.value === locationForm.country,
+                            )
+                            ?.provinces.map((province) => (
+                              <option
+                                key={province.value}
+                                value={province.value}
+                              >
+                                {province.label}
+                              </option>
+                            ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={locationForm.province}
+                          onChange={(event) =>
+                            handleLocationFormChange(
+                              "province",
+                              event.currentTarget.value,
+                            )
+                          }
+                          style={styles.formInput}
+                          placeholder="State or province"
+                        />
+                      )}
+                    </label>
+                    <label style={styles.locationLabel}>
+                      City
+                      <input
+                        type="text"
+                        value={locationForm.city}
+                        onChange={(event) =>
+                          handleLocationFormChange(
+                            "city",
+                            event.currentTarget.value,
+                          )
+                        }
+                        style={
+                          locationFieldErrors.city
+                            ? { ...styles.formInput, ...styles.invalidInput }
+                            : styles.formInput
+                        }
+                        placeholder="City"
+                      />
+                      {locationFieldErrors.city ? (
+                        <div style={styles.fieldError}>
+                          {locationFieldErrors.city}
+                        </div>
+                      ) : null}
+                    </label>
+                    <label style={styles.locationLabel}>
+                      Postal code
+                      <input
+                        type="text"
+                        value={locationForm.zip}
+                        onChange={(event) =>
+                          handleLocationFormChange(
+                            "zip",
+                            event.currentTarget.value,
+                          )
+                        }
+                        style={
+                          locationFieldErrors.zip
+                            ? { ...styles.formInput, ...styles.invalidInput }
+                            : styles.formInput
+                        }
+                        placeholder="Zip / postal code"
+                      />
+                      {locationFieldErrors.zip ? (
+                        <div style={styles.fieldError}>
+                          {locationFieldErrors.zip}
+                        </div>
+                      ) : null}
+                    </label>
+                    <label style={styles.locationLabel}>
+                      Phone
+                      <input
+                        type="text"
+                        value={locationForm.phone}
+                        onChange={(event) =>
+                          handleLocationFormChange(
+                            "phone",
+                            event.currentTarget.value,
+                          )
+                        }
+                        style={styles.formInput}
+                        placeholder="Phone number"
+                      />
+                    </label>
+                  </div>
+
+                  <div style={styles.formButtonRow}>
+                    <button
+                      type="button"
+                      onClick={handleSaveLocation}
+                      disabled={locationSubmitting}
+                      style={styles.primaryButton}
+                    >
+                      {locationSubmitting ? "Saving..." : "Save location"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div style={styles.locationSelectorSection}>
                 <span style={styles.locationLabel}>Auto-selected admin</span>
                 {selectedAdmin ? (
@@ -774,9 +1373,7 @@ export default function CreateOrderCustomerSelection() {
                         selectedAdmin.email.charAt(0).toUpperCase()}
                     </div>
                     <div style={styles.userCardInfo}>
-                      <div style={styles.userCardName}>
-                        {selectedAdminName}
-                      </div>
+                      <div style={styles.userCardName}>{selectedAdminName}</div>
                       <div style={styles.userCardEmail}>
                         {selectedAdmin.email}
                       </div>
@@ -846,19 +1443,36 @@ export default function CreateOrderCustomerSelection() {
                     </p>
 
                     {company.shopifyCustomers.length > 0 ? (
-                      <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+                      <div
+                        style={{
+                          marginTop: 12,
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
                         <select
                           value={selectedShopifyCustomer}
-                          onChange={(e) => setSelectedShopifyCustomer(e.target.value)}
-                          style={{ flex: 1, padding: 8, borderRadius: 6, border: "1px solid #d1d5db" }}
+                          onChange={(e) =>
+                            setSelectedShopifyCustomer(e.target.value)
+                          }
+                          style={{
+                            flex: 1,
+                            padding: 8,
+                            borderRadius: 6,
+                            border: "1px solid #d1d5db",
+                          }}
                         >
                           <option value="">Select a customer...</option>
                           {company.shopifyCustomers.map((c) => {
                             const label =
-                              [c.firstName, c.lastName].filter(Boolean).join(" ") ||
+                              [c.firstName, c.lastName]
+                                .filter(Boolean)
+                                .join(" ") ||
                               c.email ||
                               c.id;
-                            const isMainContact = c.id === company.mainContactCustomerId;
+                            const isMainContact =
+                              c.id === company.mainContactCustomerId;
                             return (
                               <option key={c.id} value={c.id}>
                                 {label}
@@ -879,10 +1493,13 @@ export default function CreateOrderCustomerSelection() {
                             color: "white",
                             border: "none",
                             cursor: assigning ? "wait" : "pointer",
-                            opacity: !selectedShopifyCustomer || assigning ? 0.6 : 1,
+                            opacity:
+                              !selectedShopifyCustomer || assigning ? 0.6 : 1,
                           }}
                         >
-                          {assigning ? "Assigning..." : "Sync customer and assign"}
+                          {assigning
+                            ? "Assigning..."
+                            : "Sync customer and assign"}
                         </button>
                       </div>
                     ) : (
@@ -899,12 +1516,19 @@ export default function CreateOrderCustomerSelection() {
                   to={buildStep2Url(
                     selectedAdmin.shopifyCustomerId || selectedAdmin.id,
                   )}
-                  style={{ ...styles.continueButton, backgroundColor: theme.accent }}
+                  style={{
+                    ...styles.continueButton,
+                    backgroundColor: theme.accent,
+                  }}
                 >
                   Continue with {selectedAdminName} →
                 </Link>
               ) : (
-                <button type="button" disabled style={styles.disabledContinueButton}>
+                <button
+                  type="button"
+                  disabled
+                  style={styles.disabledContinueButton}
+                >
                   Assign an admin to continue
                 </button>
               )}
@@ -953,7 +1577,15 @@ export default function CreateOrderCustomerSelection() {
                     {company.locations.length > 0 ? (
                       <div style={styles.tagList}>
                         {company.locations.map((location) => (
-                          <span key={location.id} style={{ ...styles.tag, backgroundColor: theme.accentLighter, color: theme.accent, borderColor: theme.accentTint }}>
+                          <span
+                            key={location.id}
+                            style={{
+                              ...styles.tag,
+                              backgroundColor: theme.accentLighter,
+                              color: theme.accent,
+                              borderColor: theme.accentTint,
+                            }}
+                          >
                             {location.name}
                           </span>
                         ))}
@@ -974,7 +1606,15 @@ export default function CreateOrderCustomerSelection() {
                     {company.catalogs.length > 0 ? (
                       <div style={styles.tagList}>
                         {company.catalogs.map((cat) => (
-                          <span key={cat.id} style={{ ...styles.tag, backgroundColor: theme.accentLighter, color: theme.accent, borderColor: theme.accentTint }}>
+                          <span
+                            key={cat.id}
+                            style={{
+                              ...styles.tag,
+                              backgroundColor: theme.accentLighter,
+                              color: theme.accent,
+                              borderColor: theme.accentTint,
+                            }}
+                          >
                             {cat.title}
                           </span>
                         ))}
@@ -993,7 +1633,15 @@ export default function CreateOrderCustomerSelection() {
                     {company.priceLists.length > 0 ? (
                       <div style={styles.tagList}>
                         {company.priceLists.map((pl) => (
-                          <span key={pl.name} style={{ ...styles.tag, backgroundColor: theme.accentLighter, color: theme.accent, borderColor: theme.accentTint }}>
+                          <span
+                            key={pl.name}
+                            style={{
+                              ...styles.tag,
+                              backgroundColor: theme.accentLighter,
+                              color: theme.accent,
+                              borderColor: theme.accentTint,
+                            }}
+                          >
                             {pl.name} ({pl.currency})
                           </span>
                         ))}
@@ -1266,6 +1914,91 @@ const styles = {
     fontSize: "14px",
     fontWeight: 700,
     cursor: "not-allowed",
+  },
+  locationFormToolbar: {
+    display: "flex",
+    gap: "10px",
+    flexWrap: "wrap" as const,
+    marginTop: "18px",
+  },
+  secondaryButton: {
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    backgroundColor: "#ffffff",
+    color: "#111827",
+    fontSize: "14px",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  locationFormSection: {
+    marginTop: "18px",
+    padding: "18px",
+    borderRadius: "12px",
+    border: "1px solid #e5e7eb",
+    backgroundColor: "#ffffff",
+  },
+  locationFormHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "16px",
+  },
+  linkButton: {
+    background: "transparent",
+    border: "none",
+    color: "#2563eb",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  validationMessage: {
+    marginBottom: "12px",
+    color: "#b45309",
+    fontSize: "13px",
+  },
+  successMessage: {
+    marginBottom: "12px",
+    color: "#166534",
+    fontSize: "13px",
+  },
+  locationFormGrid: {
+    display: "grid",
+    gap: "12px",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  },
+  formInput: {
+    width: "100%",
+    height: "40px",
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    padding: "0 12px",
+    fontSize: "14px",
+    marginTop: "6px",
+  },
+  invalidInput: {
+    borderColor: "#dc2626",
+    backgroundColor: "#fef2f2",
+  },
+  fieldError: {
+    marginTop: "4px",
+    color: "#b91c1c",
+    fontSize: "12px",
+  },
+  formButtonRow: {
+    marginTop: "16px",
+    display: "flex",
+    justifyContent: "flex-end",
+  },
+  primaryButton: {
+    padding: "10px 16px",
+    borderRadius: "8px",
+    border: "none",
+    backgroundColor: "#111827",
+    color: "#ffffff",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: 700,
   },
   userForm: {
     margin: 0,

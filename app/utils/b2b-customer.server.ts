@@ -151,11 +151,12 @@ export async function checkCustomerExists(
           firstName: customer.firstName,
           lastName: customer.lastName,
           phone: customer.phone,
-          metafields: customer.metafields?.edges?.map(
-            (edge: {
-              node: { namespace: string; key: string; value: string };
-            }) => edge.node,
-          ) || [],
+          metafields:
+            customer.metafields?.edges?.map(
+              (edge: {
+                node: { namespace: string; key: string; value: string };
+              }) => edge.node,
+            ) || [],
         },
       };
     }
@@ -362,7 +363,7 @@ export async function createShopifyCompany(
   };
 
   const res = await admin.graphql(mutation, { variables });
-    const json = (await res.json()) as CompanyCreateGraphQLResponse;
+  const json = (await res.json()) as CompanyCreateGraphQLResponse;
 
   const errors = json.data?.companyCreate?.userErrors;
   if (errors?.length) {
@@ -622,18 +623,19 @@ export async function assignCompanyToCustomer(
         { variables: { companyId } },
       );
 
-      const existingContactJson = (await existingContactRes.json()) as GraphQLResponse<{
-        company?: {
-          contacts?: {
-            edges?: Array<{
-              node: { id: string; customer: { id: string } };
-            }>;
+      const existingContactJson =
+        (await existingContactRes.json()) as GraphQLResponse<{
+          company?: {
+            contacts?: {
+              edges?: Array<{
+                node: { id: string; customer: { id: string } };
+              }>;
+            } | null;
           } | null;
-        } | null;
-      }>;
-      const contacts:
-        Array<{ node: { id: string; customer: { id: string } } }> =
-        existingContactJson?.data?.company?.contacts?.edges || [];
+        }>;
+      const contacts: Array<{
+        node: { id: string; customer: { id: string } };
+      }> = existingContactJson?.data?.company?.contacts?.edges || [];
 
       const normalizeId = (id: string) => id?.split("/").pop()?.trim() || id;
       const normalizedCustomerId = normalizeId(customerId);
@@ -4492,24 +4494,79 @@ async function smartRoleUpdate(
   }
 }
 
+async function fetchShopifyGraphQL(
+  shopName: string,
+  accessToken: string,
+  query: string,
+  variables: Record<string, unknown>,
+) {
+  const normalizedShopName = (shopName || "").trim();
+  if (!normalizedShopName) {
+    throw new Error("Invalid Shopify shop domain");
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(
+      `https://${normalizedShopName}/admin/api/2025-01/graphql.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal,
+      },
+    );
+
+    const text = await response.text();
+    let result: any;
+    try {
+      result = JSON.parse(text);
+    } catch {
+      throw new Error(`Shopify GraphQL returned invalid JSON: ${text}`);
+    }
+
+    if (!response.ok) {
+      const errorMessage =
+        result?.errors?.[0]?.message ||
+        result?.message ||
+        `${response.status} ${response.statusText}`;
+      throw new Error(`Shopify GraphQL request failed: ${errorMessage}`);
+    }
+
+    return result;
+  } catch (error) {
+    console.error(`[fetchShopifyGraphQL] ${normalizedShopName} failed:`, error);
+    if (error instanceof Error) {
+      const isTimeout =
+        error.name === "AbortError" ||
+        (error as any).cause?.code === "UND_ERR_CONNECT_TIMEOUT";
+      if (isTimeout) {
+        throw new Error(
+          "Shopify API connection timed out. Please check your network and make sure the store is reachable.",
+        );
+      }
+      throw new Error(
+        `Shopify API request failed for ${normalizedShopName}: ${error.message}`,
+      );
+    }
+    throw new Error("Shopify API request failed");
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function makeGraphQLRequest(
   query: string,
   variables: Record<string, unknown>,
   shopName: string,
   accessToken: string,
 ) {
-  const response = await fetch(
-    `https://${shopName}/admin/api/2025-01/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
-    },
-  );
-  return await response.json();
+  return await fetchShopifyGraphQL(shopName, accessToken, query, variables);
 }
 
 async function fetchCompanyRoless(
@@ -5212,6 +5269,35 @@ export async function createCompanyLocation(
   },
 ) {
   try {
+    let normalizedCompanyId = companyId.startsWith("gid://shopify/Company/")
+      ? companyId
+      : null;
+
+    if (!normalizedCompanyId) {
+      const digitsMatch = companyId.match(/^(\d+)$/);
+      if (digitsMatch) {
+        normalizedCompanyId = `gid://shopify/Company/${digitsMatch[1]}`;
+      }
+    }
+
+    if (!normalizedCompanyId) {
+      const company = await prisma.companyAccount.findUnique({
+        where: { id: companyId },
+        select: { shopifyCompanyId: true },
+      });
+
+      if (company?.shopifyCompanyId) {
+        normalizedCompanyId = company.shopifyCompanyId;
+      }
+    }
+
+    if (!normalizedCompanyId) {
+      return {
+        error:
+          "Invalid company ID provided. Please provide a Shopify company ID or a valid internal company account ID.",
+      };
+    }
+
     const createMutation = `
       mutation companyLocationCreate($companyId: ID!, $input: CompanyLocationInput!) {
         companyLocationCreate(companyId: $companyId, input: $input) {
@@ -5326,7 +5412,7 @@ export async function createCompanyLocation(
         },
         body: JSON.stringify({
           query: createMutation,
-          variables: { companyId, input },
+          variables: { companyId: normalizedCompanyId, input },
         }),
       },
     );
@@ -6017,22 +6103,13 @@ export async function updateCompanyLocation(
           JSON.stringify({ locationId, input }, null, 2),
         );
 
-        const response = await fetch(
-          `https://${shopName}/admin/api/2025-01/graphql.json`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Shopify-Access-Token": accessToken,
-            },
-            body: JSON.stringify({
-              query: updateMutation,
-              variables: { companyLocationId: locationId, input },
-            }),
-          },
+        const result = await fetchShopifyGraphQL(
+          shopName,
+          accessToken,
+          updateMutation,
+          { companyLocationId: locationId, input },
         );
 
-        const result = await response.json();
         if (
           result.errors ||
           result.data?.companyLocationUpdate?.userErrors?.length > 0
@@ -6091,22 +6168,12 @@ export async function updateCompanyLocation(
         }
       `;
 
-      const queryResponse = await fetch(
-        `https://${shopName}/admin/api/2025-01/graphql.json`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
-          },
-          body: JSON.stringify({
-            query: queryMutation,
-            variables: { id: locationId },
-          }),
-        },
+      const queryResult = await fetchShopifyGraphQL(
+        shopName,
+        accessToken,
+        queryMutation,
+        { id: locationId },
       );
-
-      const queryResult = await queryResponse.json();
       const existingLocation = queryResult.data?.companyLocation;
       if (!existingLocation) {
         console.error(
@@ -6207,26 +6274,16 @@ export async function updateCompanyLocation(
         }
       `;
 
-      const addressResponse = await fetch(
-        `https://${shopName}/admin/api/2025-01/graphql.json`,
+      const addressResult = await fetchShopifyGraphQL(
+        shopName,
+        accessToken,
+        addressMutation,
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
-          },
-          body: JSON.stringify({
-            query: addressMutation,
-            variables: {
-              locationId: locationId,
-              address: addressInput,
-              addressTypes: ["BILLING", "SHIPPING"],
-            },
-          }),
+          locationId: locationId,
+          address: addressInput,
+          addressTypes: ["BILLING", "SHIPPING"],
         },
       );
-
-      const addressResult = await addressResponse.json();
       if (
         addressResult.errors ||
         addressResult.data?.companyLocationAssignAddress?.userErrors?.length > 0
@@ -6305,22 +6362,12 @@ export async function updateCompanyLocation(
         }
       `;
 
-      const metafieldResponse = await fetch(
-        `https://${shopName}/admin/api/2025-01/graphql.json`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
-          },
-          body: JSON.stringify({
-            query: metafieldMutation,
-            variables: { metafields: metafieldsToUpdate },
-          }),
-        },
+      const metafieldResult = await fetchShopifyGraphQL(
+        shopName,
+        accessToken,
+        metafieldMutation,
+        { metafields: metafieldsToUpdate },
       );
-
-      const metafieldResult = await metafieldResponse.json();
       if (
         metafieldResult.errors ||
         metafieldResult.data?.metafieldsSet?.userErrors?.length > 0

@@ -325,7 +325,11 @@ export default function DraftListPage() {
         companySwitchPath="/sales/portal/drafts?company="
         actions={
           <Link
-            to="/sales/portal/create-order"
+            to={`/sales/portal/company/${
+              data.currentCompany.id === "all"
+                ? data.companies[0]?.id ?? ""
+                : data.currentCompany.id
+            }/create-order`}
             style={salesPortalButtonStyles.primary}
           >
             + Create Order

@@ -330,6 +330,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const customAttributes = [
       { key: "_source", value: "Sales Portal" },
       { key: "_sales_agent_user_id", value: user.id },
+      {
+        key: "Sales Agent Name",
+        value: [user.firstName, user.lastName].filter(Boolean).join(" "),
+      },
+      { key: "Sales Agent Email", value: user.email || "" },
     ];
     if (internalNotes) {
       customAttributes.push({ key: "Internal Notes", value: internalNotes });

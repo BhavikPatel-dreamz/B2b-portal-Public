@@ -2204,6 +2204,7 @@ import {
   logQuoteActivity,
   sendQuoteToCustomer,
   serializeQuote,
+  updateShopifyDraftOrderFromQuote,
 } from "app/services/quote.server";
 import {
   SalesPortalHeader,
@@ -2214,6 +2215,7 @@ import {
   type DeliveryDetails,
 } from "app/services/delivery-details.server";
 import { getCompanyLocations } from "app/utils/b2b-customer.server";
+import { action as locationManagementAction } from "./api.proxy/locationmanagement";
 
 async function resolveQuoteCompanyId(quoteId: string) {
   const quote = await prisma.quote.findUnique({
@@ -2457,8 +2459,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const customerFirstName = String(formData.get("customerFirstName") || "").trim();
       const customerLastName = String(formData.get("customerLastName") || "").trim();
       const customerEmail = String(formData.get("customerEmail") || "").trim();
+      const deliveryLocationId = String(formData.get("deliveryLocationId") || "").trim();
       const deliveryLocationName = String(formData.get("deliveryLocationName") || "").trim();
-      const deliveryAddress = String(formData.get("deliveryAddress") || "").trim();
+      const deliveryAddress1 = String(formData.get("deliveryAddress1") || "").trim();
+      const deliveryAddress2 = String(formData.get("deliveryAddress2") || "").trim();
+      const deliveryCity = String(formData.get("deliveryCity") || "").trim();
+      const deliveryProvince = String(formData.get("deliveryProvince") || "").trim();
+      const deliveryZip = String(formData.get("deliveryZip") || "").trim();
+      const deliveryCountry = String(formData.get("deliveryCountry") || "").trim();
       const deliveryPhone = String(formData.get("deliveryPhone") || "").trim();
       const customerNotes = String(formData.get("customerNotes") || "");
       const internalNotes = String(formData.get("internalNotes") || "");
@@ -2591,7 +2599,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           },
           deliveryDetails: {
             locationName: deliveryLocationName || null,
-            address: deliveryAddress || null,
+            address: [deliveryAddress1, deliveryAddress2, deliveryCity, deliveryProvince, deliveryZip, deliveryCountry].filter(Boolean).join("\n") || null,
             phone: deliveryPhone || null,
           },
         },
@@ -2689,7 +2697,156 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         action: "Quote Updated",
         message: "Quote customer details, delivery details, items, notes, and expiry were updated.",
       });
+
+      if (quote.shopifyDraftOrderId) {
+        const quoteWithShop = await prisma.quote.findUnique({
+          where: { id: quote.id },
+          include: { items: true, company: { include: { shop: true } } },
+        });
+        if (quoteWithShop) {
+          await updateShopifyDraftOrderFromQuote(quoteWithShop, deliveryLocationId, {
+            address1: deliveryAddress1 || null,
+            address2: deliveryAddress2 || null,
+            city: deliveryCity || null,
+            province: deliveryProvince || null,
+            zip: deliveryZip || null,
+            country: deliveryCountry || null,
+            phone: deliveryPhone || null,
+          }, {
+            name: [user.firstName, user.lastName].filter(Boolean).join(" "),
+            email: user.email,
+          });
+        }
+      }
+
       return Response.json({ success: true, message: "Quote updated." });
+    }
+
+    if (intent === "save_details") {
+      if (!editableStatuses.includes(quote.status)) {
+        return Response.json(
+          { error: "This quote status cannot be edited." },
+          { status: 400 },
+        );
+      }
+
+      const customerFirstName = String(formData.get("customerFirstName") || "").trim();
+      const customerLastName = String(formData.get("customerLastName") || "").trim();
+      const customerEmail = String(formData.get("customerEmail") || "").trim();
+      const deliveryLocationId = String(formData.get("deliveryLocationId") || "").trim();
+      const deliveryLocationName = String(formData.get("deliveryLocationName") || "").trim();
+      const deliveryAddress1 = String(formData.get("deliveryAddress1") || "").trim();
+      const deliveryAddress2 = String(formData.get("deliveryAddress2") || "").trim();
+      const deliveryCity = String(formData.get("deliveryCity") || "").trim();
+      const deliveryProvince = String(formData.get("deliveryProvince") || "").trim();
+      const deliveryZip = String(formData.get("deliveryZip") || "").trim();
+      const deliveryCountry = String(formData.get("deliveryCountry") || "").trim();
+      const deliveryPhone = String(formData.get("deliveryPhone") || "").trim();
+
+      const addressFields = [deliveryAddress1, deliveryAddress2, deliveryCity, deliveryProvince, deliveryZip, deliveryCountry].filter(Boolean);
+
+      const existingInvoiceData =
+        quote.invoiceData && typeof quote.invoiceData === "object"
+          ? (quote.invoiceData as Record<string, any>)
+          : {};
+      const nextInvoiceData = {
+        ...existingInvoiceData,
+        quoteEditMeta: {
+          ...(existingInvoiceData.quoteEditMeta && typeof existingInvoiceData.quoteEditMeta === "object"
+            ? existingInvoiceData.quoteEditMeta
+            : {}),
+          customerDetails: {
+            firstName: customerFirstName || quote.customerFirstName || null,
+            lastName: customerLastName || quote.customerLastName || null,
+            email: customerEmail || quote.customerEmail,
+          },
+          deliveryDetails: {
+            locationName: deliveryLocationName || null,
+            address: addressFields.join("\n") || null,
+            phone: deliveryPhone || null,
+          },
+        },
+      };
+
+      await prisma.quote.update({
+        where: { id: quote.id },
+        data: {
+          customerFirstName: customerFirstName || quote.customerFirstName || null,
+          customerLastName: customerLastName || quote.customerLastName || null,
+          customerEmail: customerEmail || quote.customerEmail,
+          invoiceData: nextInvoiceData,
+        },
+      });
+
+      const locationPayload: Record<string, any> = {
+        source: "sales-portal",
+        companyId: resolvedCompanyId,
+        action: deliveryLocationId ? "edit" : "create",
+        locationId: deliveryLocationId || undefined,
+        name: deliveryLocationName || deliveryAddress1 || "Custom Delivery Location",
+        country: deliveryCountry || undefined,
+        address1: deliveryAddress1 || undefined,
+        address2: deliveryAddress2 || undefined,
+        city: deliveryCity || undefined,
+        province: deliveryProvince || undefined,
+        zip: deliveryZip || undefined,
+        phone: deliveryPhone || undefined,
+        firstName: customerFirstName || undefined,
+        lastName: customerLastName || undefined,
+        billingSameAsShipping: true,
+      };
+
+      const locationReq = new Request("http://internal/api/proxy/locationmanagement", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(request.headers.get("cookie")
+            ? { Cookie: request.headers.get("cookie")! }
+            : {}),
+        },
+        body: JSON.stringify(locationPayload),
+      });
+
+      const locationRes = await locationManagementAction({ request: locationReq });
+      const locationResult = await locationRes.json().catch(() => ({}));
+      if (!locationRes.ok || !locationResult.success) {
+        throw new Error(
+          locationResult.error || "Failed to save delivery location details.",
+        );
+      }
+
+      if (quote.shopifyDraftOrderId) {
+        const quoteWithShop = await prisma.quote.findUnique({
+          where: { id: quote.id },
+          include: { items: true, company: { include: { shop: true } } },
+        });
+        if (quoteWithShop) {
+          await updateShopifyDraftOrderFromQuote(quoteWithShop, deliveryLocationId, {
+            address1: deliveryAddress1 || null,
+            address2: deliveryAddress2 || null,
+            city: deliveryCity || null,
+            province: deliveryProvince || null,
+            zip: deliveryZip || null,
+            country: deliveryCountry || null,
+            phone: deliveryPhone || null,
+          }, {
+            name: [user.firstName, user.lastName].filter(Boolean).join(" "),
+            email: user.email,
+          });
+        }
+      }
+
+      await logQuoteActivity({
+        quoteId: quote.id,
+        userId: user.id,
+        companyId: resolvedCompanyId,
+        customerEmail: customerEmail || quote.customerEmail,
+        action: "Delivery Details Updated",
+        message: "Delivery and customer details were saved.",
+      });
+      return redirect(
+        `/sales/portal/company/${resolvedCompanyId}/quotes/${quote.id}?saved=1`,
+      );
     }
 
     if (intent === "send_quote" || intent === "resend_quote") {
@@ -3550,8 +3707,23 @@ export default function QuoteDetailPage() {
   const [deliveryPhoneValue, setDeliveryPhoneValue] = useState<string>(
     savedDeliveryDetails.phone || deliveryDetails.phone || "",
   );
-  const [deliveryAddressValue, setDeliveryAddressValue] = useState<string>(
-    savedDeliveryDetails.address || (deliveryDetails.addressLines || []).join("\n") || "",
+  const [deliveryAddress1Value, setDeliveryAddress1Value] = useState<string>(
+    savedDeliveryDetails.address?.split("\n")[0] || deliveryDetails.addressLines?.[0] || "",
+  );
+  const [deliveryAddress2Value, setDeliveryAddress2Value] = useState<string>(
+    savedDeliveryDetails.address?.split("\n")[1] || deliveryDetails.addressLines?.[1] || "",
+  );
+  const [deliveryCityValue, setDeliveryCityValue] = useState<string>(
+    savedDeliveryDetails.address?.split("\n")[2] || deliveryDetails.addressLines?.[2] || "",
+  );
+  const [deliveryProvinceValue, setDeliveryProvinceValue] = useState<string>(
+    savedDeliveryDetails.address?.split("\n")[3] || deliveryDetails.addressLines?.[3] || "",
+  );
+  const [deliveryZipValue, setDeliveryZipValue] = useState<string>(
+    savedDeliveryDetails.address?.split("\n")[4] || deliveryDetails.addressLines?.[4] || "",
+  );
+  const [deliveryCountryValue, setDeliveryCountryValue] = useState<string>(
+    savedDeliveryDetails.address?.split("\n")[5] || deliveryDetails.addressLines?.[5] || "",
   );
 
   useEffect(() => {
@@ -3562,24 +3734,15 @@ export default function QuoteDetailPage() {
     );
     if (!location) return;
 
-    const addressLines = [] as string[];
     const shipping = location.shippingAddress || {};
-    const recipient = [shipping.firstName, shipping.lastName]
-      .filter(Boolean)
-      .join(" ");
-    if (recipient) addressLines.push(recipient);
-    if (location.name) addressLines.push(location.name);
-    if (shipping.address1) addressLines.push(shipping.address1);
-    if (shipping.address2) addressLines.push(shipping.address2);
-    const cityLine = [shipping.city, shipping.province, shipping.zip]
-      .filter(Boolean)
-      .join(", ");
-    if (cityLine) addressLines.push(cityLine);
-    if (shipping.country) addressLines.push(shipping.country);
-
     setDeliveryLocationNameValue(location.name || "");
+    setDeliveryAddress1Value(shipping.address1 || "");
+    setDeliveryAddress2Value(shipping.address2 || "");
+    setDeliveryCityValue(shipping.city || "");
+    setDeliveryProvinceValue(shipping.province || "");
+    setDeliveryZipValue(shipping.zip || "");
+    setDeliveryCountryValue(shipping.country || "");
     setDeliveryPhoneValue(shipping.phone || location.phone || "");
-    setDeliveryAddressValue(addressLines.join("\n"));
   }, [selectedDeliveryLocationId, companyLocations]);
 
 return (
@@ -3800,6 +3963,90 @@ return (
                     />
                   </label>
                   <label style={styles.label}>
+                    Address line 1
+                    <input
+                      name="deliveryAddress1"
+                      value={deliveryAddress1Value}
+                      onChange={(e) => {
+                        setDeliveryAddress1Value(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      placeholder="Street address"
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label style={styles.label}>
+                    Address line 2
+                    <input
+                      name="deliveryAddress2"
+                      value={deliveryAddress2Value}
+                      onChange={(e) => {
+                        setDeliveryAddress2Value(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      placeholder="Apartment, suite, unit, etc."
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label style={styles.label}>
+                    Country
+                    <input
+                      name="deliveryCountry"
+                      value={deliveryCountryValue}
+                      onChange={(e) => {
+                        setDeliveryCountryValue(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      placeholder="Country"
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label style={styles.label}>
+                    State / Province
+                    <input
+                      name="deliveryProvince"
+                      value={deliveryProvinceValue}
+                      onChange={(e) => {
+                        setDeliveryProvinceValue(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      placeholder="State or province"
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label style={styles.label}>
+                    City
+                    <input
+                      name="deliveryCity"
+                      value={deliveryCityValue}
+                      onChange={(e) => {
+                        setDeliveryCityValue(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      placeholder="City"
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label style={styles.label}>
+                    Postal code
+                    <input
+                      name="deliveryZip"
+                      value={deliveryZipValue}
+                      onChange={(e) => {
+                        setDeliveryZipValue(e.target.value);
+                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
+                      }}
+                      placeholder="Zip / postal code"
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                  <label style={styles.label}>
                     Delivery Phone
                     <input
                       name="deliveryPhone"
@@ -3809,21 +4056,6 @@ return (
                         if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
                       }}
                       style={styles.input}
-                      disabled={isSubmitting}
-                    />
-                  </label>
-                  <label style={{ ...styles.label, gridColumn: "1 / -1" }}>
-                    Delivery Address
-                    <textarea
-                      name="deliveryAddress"
-                      value={deliveryAddressValue}
-                      onChange={(e) => {
-                        setDeliveryAddressValue(e.target.value);
-                        if (selectedDeliveryLocationId) setSelectedDeliveryLocationId("");
-                      }}
-                      placeholder="Full delivery address"
-                      rows={4}
-                      style={{ ...styles.textarea, minHeight: 72 }}
                       disabled={isSubmitting}
                     />
                   </label>
@@ -3837,6 +4069,19 @@ return (
                     No saved company locations are available. Enter a new delivery location below.
                   </p>
                 )}
+                <div style={{ marginTop: 16 }}>
+                  <button
+                    type="submit"
+                    name="intent"
+                    value="save_details"
+                    disabled={isSubmitting}
+                    aria-busy={pendingIntent === "save_details"}
+                    style={{ ...disabledButtonStyle(styles.primaryBtn, isSubmitting), width: "100%" }}
+                  >
+                    {pendingIntent === "save_details" && <Spinner />}
+                    {pendingIntent === "save_details" ? "Saving Details..." : "Save Detail"}
+                  </button>
+                </div>
               </div>
 
               {/* Notes */}
