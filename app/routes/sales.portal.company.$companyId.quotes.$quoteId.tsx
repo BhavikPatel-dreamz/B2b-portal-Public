@@ -1,6 +1,6 @@
 import nodeCrypto from "node:crypto";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   Form,
@@ -983,7 +983,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   return Response.json({ error: "Unknown action" }, { status: 400 });
 };
-
 export function AddProductModal({
   form,
   setForm,
@@ -995,46 +994,72 @@ export function AddProductModal({
   fetchProducts,
   isFetchingProducts,
   onSelectVariant,
-}: {
-  form: any;
-  setForm: (updater: (f: any) => any) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-  productQuery: string;
-  setProductQuery: (value: string) => void;
-  productResults: any[];
-  fetchProducts: (query?: string) => Promise<void>;
-  isFetchingProducts: boolean;
-  onSelectVariant: (product: any, variant: any, quantity?: number) => void;
-}) {
-  const [variantQty, setVariantQty] = useState<Record<string, number>>({});
-  const update = (field: string, value: any) =>
-    setForm((f: any) => ({ ...f, [field]: value }));
+  defaultCurrencyCode = "USD",
+}: AddProductModalProps) {
+  const manualEntryEnabled = Boolean(form && setForm && onConfirm);
+  const handleManualFieldChange = (field: string, value: string | number) => {
+    if (!setForm) return;
+    setForm((f: any) => ({ ...(f || {}), [field]: value }));
+  };
+  const [mode, setMode] = useState<"search" | "manual">("search");
+  const [searchInput, setSearchInput] = useState(productQuery || "");
+  const [selection, setSelection] = useState<Record<string, { variantId: string; qty: number }>>({});
+
+  useEffect(() => {
+    setSearchInput(productQuery || "");
+  }, [productQuery]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setProductQuery(searchInput.trim() || "all");
+  };
+
+  const getSelection = useCallback(
+    (product: Product) => {
+      const existing = selection[product.id];
+      const variantId = existing?.variantId || product.variants?.[0]?.id || "";
+      const qty = existing?.qty || 1;
+      return { variantId, qty };
+    },
+    [selection],
+  );
+
+  const setVariantId = (productId: string, variantId: string) => {
+    setSelection((prev) => ({ ...prev, [productId]: { variantId, qty: prev[productId]?.qty || 1 } }));
+  };
+
+  const setQty = (productId: string, qty: number) => {
+    if (qty < 1) return;
+    setSelection((prev) => ({ ...prev, [productId]: { variantId: prev[productId]?.variantId || "", qty } }));
+  };
 
   return (
     <div
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 10500,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.5)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(0,0,0,0.5)",
+        padding: 16,
       }}
       onClick={onCancel}
     >
       <div
         style={{
-          width: "min(900px, calc(100vw - 32px))",
+          width: "min(760px, 100%)",
           maxHeight: "88vh",
-          overflowY: "auto",
           background: "#fff",
-          borderRadius: 12,
-          padding: 0,
+          borderRadius: 14,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div
           style={{
             display: "flex",
@@ -1044,133 +1069,376 @@ export function AddProductModal({
             borderBottom: "1px solid #e3e7ec",
           }}
         >
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Add Product</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>Add Product</h3>
           <button
             type="button"
             onClick={onCancel}
+            aria-label="Close"
             style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#5c5f62", lineHeight: 1 }}
           >
             &times;
           </button>
         </div>
 
-        <div style={{ padding: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>All Products</h3>
-              <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 13 }}>
-                Search Shopify products for this store and add a variant directly.
-              </p>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {/* Mode toggle */}
+        {manualEntryEnabled && (
+          <div style={{ display: "flex", gap: 8, padding: "14px 20px 0" }}>
+            <button
+              type="button"
+              onClick={() => setMode("search")}
+              style={{
+                background: mode === "search" ? "#111827" : "#f9fafb",
+                color: mode === "search" ? "#fff" : "#374151",
+                border: "1px solid " + (mode === "search" ? "#111827" : "#d1d5db"),
+                borderRadius: 999,
+                padding: "7px 14px",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              Search Catalog
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("manual")}
+              style={{
+                background: mode === "manual" ? "#111827" : "#f9fafb",
+                color: mode === "manual" ? "#fff" : "#374151",
+                border: "1px solid " + (mode === "manual" ? "#111827" : "#d1d5db"),
+                borderRadius: 999,
+                padding: "7px 14px",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              Manual Entry
+            </button>
+          </div>
+        )}
+
+        {!manualEntryEnabled || mode === "search" ? (
+          <>
+            {/* Search bar */}
+            <form onSubmit={handleSearchSubmit} style={{ display: "flex", gap: 10, padding: "14px 20px 0" }}>
               <input
-                placeholder="Search products"
-                value={productQuery}
-                onChange={(e) => setProductQuery(e.target.value)}
-                style={{ ...styles.input, width: 220 }}
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search products by title or SKU..."
+                style={{
+                  flex: 1,
+                  height: 40,
+                  border: "1px solid #c9cccf",
+                  borderRadius: 8,
+                  padding: "0 12px",
+                  fontSize: 13,
+                }}
               />
               <button
-                type="button"
-                onClick={() => fetchProducts(productQuery)}
-                style={styles.secondaryBtn}
+                type="submit"
                 disabled={isFetchingProducts}
-              >
-                {isFetchingProducts ? "Loading..." : "Search"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setProductQuery("all");
-                  fetchProducts("all");
+                style={{
+                  height: 40,
+                  padding: "0 18px",
+                  background: "#111827",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: isFetchingProducts ? "not-allowed" : "pointer",
+                  opacity: isFetchingProducts ? 0.7 : 1,
                 }}
-                style={styles.secondaryBtn}
-                disabled={isFetchingProducts}
               >
-                Show All
+                {isFetchingProducts ? "Searching..." : "Search"}
               </button>
-            </div>
-          </div>
+            </form>
 
-          <div style={{ marginBottom: 16 }}>
-            {productResults.length === 0 ? (
-              <p style={styles.muted}>
-                {isFetchingProducts ? "Searching products..." : "No products found. Try a different search or click Show All."}
-              </p>
-            ) : (
-              <div style={{ display: "grid", gap: 10 }}>
-                {productResults.map((product: any) => (
-                  <div
-                    key={product.id}
-                    style={{
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 8,
-                      padding: 12,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
-                    <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-                      <div style={{ width: 64, height: 64, borderRadius: 12, overflow: "hidden", background: "#f3f4f6", flexShrink: 0 }}>
+            {/* Results */}
+            <div style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+              {isFetchingProducts ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+                  Loading products...
+                </div>
+              ) : productResults.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+                  No products found. Try a different search term.
+                </div>
+              ) : (
+                productResults.map((product) => {
+                  const { variantId, qty } = getSelection(product);
+                  const variant =
+                    product.variants.find((v) => v.id === variantId) || product.variants[0];
+                  const inStock = isVariantInStock(variant);
+
+                  return (
+                    <div
+                      key={product.id}
+                      style={{
+                        display: "flex",
+                        gap: 14,
+                        border: "1px solid #eceef1",
+                        borderRadius: 12,
+                        padding: 16,
+                        alignItems: "center",
+                        background: "#fff",
+                      }}
+                    >
+                      {/* Image */}
+                      <div
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 10,
+                          overflow: "hidden",
+                          border: "1px solid #eceef1",
+                          background: "#f9fafb",
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
                         {product.image ? (
                           <img
                             src={product.image}
-                            alt={product.title}
+                            alt=""
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
                         ) : (
-                          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 11 }}>
-                            No image
-                          </div>
+                          <span style={{ fontSize: 22 }}>📦</span>
                         )}
                       </div>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {product.title}
+
+                      {/* Middle info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14.5, color: "#111827" }}>{product.title}</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                          {product.vendor && (
+                            <span style={pillStyle}>{product.vendor}</span>
+                          )}
+                          {product.productType && <span style={pillStyle}>{product.productType}</span>}
+                          {(product.tags || []).slice(0, 2).map((tag) => (
+                            <span key={tag} style={pillStyle}>
+                              {tag}
+                            </span>
+                          ))}
                         </div>
-                        <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>
-                          {product.variants.length} variant{product.variants.length === 1 ? "" : "s"}
+
+                        <div style={{ marginTop: 10 }}>
+                          <div style={labelStyle}>Variant</div>
+                          {product.variants.length > 1 ? (
+                            <select
+                              value={variantId}
+                              onChange={(e) => setVariantId(product.id, e.target.value)}
+                              style={{
+                                width: "100%",
+                                maxWidth: 320,
+                                height: 36,
+                                border: "1px solid #d1d5db",
+                                borderRadius: 7,
+                                padding: "0 8px",
+                                fontSize: 13,
+                              }}
+                            >
+                              {product.variants.map((v) => (
+                                <option key={v.id} value={v.id}>
+                                  {v.title || "Default variant"} · SKU {v.sku || "N/A"} ·{" "}
+                                  {fmtPrice(v.price, v.currencyCode || defaultCurrencyCode)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <div
+                              style={{
+                                height: 36,
+                                display: "flex",
+                                alignItems: "center",
+                                color: "#374151",
+                                background: "#f9fafb",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: 7,
+                                padding: "0 8px",
+                                fontSize: 13,
+                                maxWidth: 320,
+                              }}
+                            >
+                              {variant?.title && variant.title !== "Default Title"
+                                ? variant.title
+                                : "Default variant"}
+                            </div>
+                          )}
+                          <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+                            SKU: {variant?.sku || "N/A"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right column: price + stepper + action */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-end",
+                          gap: 10,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 12, color: "#a21caf", fontWeight: 700 }}>Customer price</div>
+                          <div style={{ fontSize: 17, fontWeight: 800, color: "#a21caf" }}>
+                            {fmtPrice(variant?.price, variant?.currencyCode || defaultCurrencyCode)}
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              border: "1px solid #d1d5db",
+                              borderRadius: 7,
+                              overflow: "hidden",
+                              height: 30,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setQty(product.id, qty - 1)}
+                              style={stepBtnStyle}
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              value={qty}
+                              onChange={(e) => setQty(product.id, parseInt(e.target.value) || 1)}
+                              style={{
+                                width: 34,
+                                height: "100%",
+                                border: "none",
+                                textAlign: "center",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                outline: "none",
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setQty(product.id, qty + 1)}
+                              style={stepBtnStyle}
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={!inStock}
+                            onClick={() => variant && onSelectVariant(product, variant, qty)}
+                            style={{
+                              background: inStock
+                                ? "linear-gradient(135deg, #c026d3, #9333ea)"
+                                : "#d8b4fe",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: 999,
+                              padding: "9px 18px",
+                              fontWeight: 700,
+                              fontSize: 13,
+                              cursor: inStock ? "pointer" : "not-allowed",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {inStock ? "Add" : "Out of stock"}
+                          </button>
                         </div>
                       </div>
                     </div>
-
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
-                      {product.variants.slice(0, 3).map((variant: any) => (
-                        <div key={variant.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          {variant.inStock && (
-                            <input
-                              type="number"
-                              min="1"
-                              value={variantQty[variant.id] || 1}
-                              onChange={(e) => setVariantQty(q => ({ ...q, [variant.id]: Math.max(1, Number(e.target.value) || 1) }))}
-                              style={{ ...styles.input, width: 48, textAlign: "center" }}
-                            />
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => onSelectVariant(product, variant, variantQty[variant.id] || 1)}
-                            style={styles.secondaryBtn}
-                            disabled={!variant.inStock}
-                          >
-                            {variant.inStock ? "Add" : "Out of stock"}
-                            {variant.title ? `: ${variant.title}` : ""}
-                          </button>
-                        </div>
-                      ))}
-                      {product.variants.length > 3 && (
-                        <span style={{ color: "#6b7280", fontSize: 12, alignSelf: "center" }}>
-                          +{product.variants.length - 3} more
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  );
+                })
+              )}
+            </div>
+          </>
+        ) : (
+          /* Manual entry form */
+          <div style={{ padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              className="sales-add-product-grid"
+              style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}
+            >
+              <label style={fieldLabelStyle}>
+                Product title
+                <input
+                  value={form?.productTitle ?? ""}
+                  onChange={(e) => handleManualFieldChange("productTitle", e.target.value)}
+                  style={fieldInputStyle}
+                />
+              </label>
+              <label style={fieldLabelStyle}>
+                SKU
+                <input
+                  value={form?.sku ?? ""}
+                  onChange={(e) => handleManualFieldChange("sku", e.target.value)}
+                  style={fieldInputStyle}
+                />
+              </label>
+              <label style={fieldLabelStyle}>
+                Variant title
+                <input
+                  value={form?.variantTitle ?? ""}
+                  onChange={(e) => handleManualFieldChange("variantTitle", e.target.value)}
+                  style={fieldInputStyle}
+                />
+              </label>
+              <label style={fieldLabelStyle}>
+                Image URL
+                <input
+                  value={form?.image ?? ""}
+                  onChange={(e) => handleManualFieldChange("image", e.target.value)}
+                  style={fieldInputStyle}
+                />
+              </label>
+              <label style={fieldLabelStyle}>
+                Unit price
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form?.unitPrice ?? ""}
+                  onChange={(e) => handleManualFieldChange("unitPrice", e.target.value)}
+                  style={fieldInputStyle}
+                />
+              </label>
+              <label style={fieldLabelStyle}>
+                Discount
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form?.discount ?? ""}
+                  onChange={(e) => handleManualFieldChange("discount", e.target.value)}
+                  style={fieldInputStyle}
+                />
+              </label>
+              <label style={fieldLabelStyle}>
+                Quantity
+                <input
+                  type="number"
+                  min="1"
+                  value={form?.quantity ?? 1}
+                  onChange={(e) => handleManualFieldChange("quantity", parseInt(e.target.value, 10) || 1)}
+                  style={fieldInputStyle}
+                />
+              </label>
+            </div>
           </div>
-        </div>
+        )}
 
+        {/* Footer */}
         <div
           style={{
             display: "flex",
@@ -1180,21 +1448,40 @@ export function AddProductModal({
             borderTop: "1px solid #e3e7ec",
           }}
         >
-          <button type="button" onClick={onCancel} style={styles.secondaryBtn}>
-            Cancel
-          </button>
           <button
             type="button"
-            onClick={onConfirm}
-            disabled={!form.productTitle.trim()}
+            onClick={onCancel}
             style={{
-              ...styles.addToQuoteBtn,
-              opacity: !form.productTitle.trim() ? 0.5 : 1,
-              cursor: !form.productTitle.trim() ? "not-allowed" : "pointer",
+              background: "#fff",
+              color: "#374151",
+              border: "1px solid #c9cccf",
+              borderRadius: 8,
+              padding: "10px 16px",
+              fontWeight: 600,
+              cursor: "pointer",
             }}
           >
-            Add to Quote
+            Cancel
           </button>
+          {manualEntryEnabled && mode === "manual" && (
+            <button
+              type="button"
+              onClick={() => onConfirm?.()}
+              disabled={!form?.productTitle?.trim()}
+              style={{
+                background: "#111827",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 16px",
+                fontWeight: 600,
+                cursor: form.productTitle.trim() ? "pointer" : "not-allowed",
+                opacity: form?.productTitle?.trim() ? 1 : 0.6,
+              }}
+            >
+              Add to Quote
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1239,6 +1526,7 @@ export default function QuoteDetailPage() {
   const [productQuery, setProductQuery] = useState("all");
   const [productResults, setProductResults] = useState<any[]>([]);
   const [isFetchingProducts, setIsFetchingProducts] = useState(false);
+  const productsFetchControllerRef = useRef<AbortController | null>(null);
   const [addProductForm, setAddProductForm] = useState({
     productId: "",
     productTitle: "",
@@ -1356,27 +1644,45 @@ export default function QuoteDetailPage() {
 
   const fetchProducts = async (query = "all") => {
     setIsFetchingProducts(true);
-    const normalizedQuery = String(query || "").trim() || "all";
     try {
+      if (productsFetchControllerRef.current) {
+        productsFetchControllerRef.current.abort();
+        productsFetchControllerRef.current = null;
+      }
+      const controller = new AbortController();
+      productsFetchControllerRef.current = controller;
+
+      const normalizedQuery = String(query || "").trim() || "all";
       const url = `/api/sales-product-search?q=${encodeURIComponent(normalizedQuery)}&companyId=${encodeURIComponent(quote.companyId)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) {
         setProductResults([]);
         return;
       }
       const data = await res.json();
       setProductResults(data.products || []);
-    } catch (error) {
-      console.error("Failed to load product search results", error);
-      setProductResults([]);
+    } catch (error: any) {
+      if (error && error.name === "AbortError") {
+        // aborted - ignore
+      } else {
+        console.error("Failed to load product search results", error);
+        setProductResults([]);
+      }
     } finally {
       setIsFetchingProducts(false);
+      productsFetchControllerRef.current = null;
     }
   };
 
   useEffect(() => {
     if (!showAddProductModal) return;
     fetchProducts(productQuery || "all");
+    return () => {
+      if (productsFetchControllerRef.current) {
+        productsFetchControllerRef.current.abort();
+        productsFetchControllerRef.current = null;
+      }
+    };
   }, [showAddProductModal, productQuery, quote.companyId]);
 
   const fmtMoney = (amount: string, currency = quote.currencyCode) =>
@@ -3353,4 +3659,111 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
+};
+
+type Variant = {
+  id: string;
+  title?: string;
+  sku?: string;
+  price?: string | number;
+  currencyCode?: string;
+  inventoryQuantity?: number;
+  inventoryPolicy?: "CONTINUE" | "DENY" | string;
+  tracked?: boolean;
+  availableForSale?: boolean;
+};
+
+type Product = {
+  id: string;
+  title: string;
+  vendor?: string;
+  productType?: string;
+  tags?: string[];
+  image?: string;
+  variants: Variant[];
+};
+
+interface AddProductModalProps {
+  form?: any;
+  setForm?: (updater: any) => void;
+  onCancel: () => void;
+  onConfirm?: () => void;
+  productQuery: string;
+  setProductQuery: (q: string) => void;
+  productResults: Product[];
+  fetchProducts: (q: string) => void;
+  isFetchingProducts: boolean;
+  onSelectVariant: (product: Product, variant: Variant, quantity: number) => void;
+  defaultCurrencyCode?: string;
+}
+
+function isVariantInStock(variant?: Variant): boolean {
+  if (!variant) return false;
+  if (variant.availableForSale === false) return false;
+  if (variant.tracked === false) return true;
+  if (variant.inventoryQuantity === undefined || variant.inventoryQuantity === null) return true;
+  if (variant.inventoryPolicy === "CONTINUE") return true;
+  return variant.inventoryQuantity > 0;
+}
+
+function fmtPrice(amount: string | number | undefined, currencyCode = "USD") {
+  const num = Number(amount) || 0;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currencyCode,
+      minimumFractionDigits: 2,
+    }).format(num);
+  } catch {
+    return `${currencyCode} ${num.toFixed(2)}`;
+  }
+}
+
+
+
+const pillStyle: React.CSSProperties = {
+  display: "inline-block",
+  background: "#f1f2f4",
+  color: "#4b5563",
+  borderRadius: 999,
+  padding: "3px 10px",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const labelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#6b7280",
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+  marginBottom: 4,
+};
+
+const stepBtnStyle: React.CSSProperties = {
+  width: 24,
+  height: "100%",
+  border: "none",
+  background: "#f9fafb",
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 700,
+};
+
+const fieldLabelStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  fontSize: 13,
+  color: "#374151",
+  fontWeight: 700,
+};
+
+const fieldInputStyle: React.CSSProperties = {
+  height: 38,
+  border: "1px solid #c9cccf",
+  borderRadius: 8,
+  padding: "0 10px",
+  font: "inherit",
+  fontSize: 13,
 };

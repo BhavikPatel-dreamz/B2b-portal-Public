@@ -694,16 +694,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
-  const companyId = params.companyId;
+  const requestedCompanyId = params.companyId?.trim();
   const isQuoteMode = new URL(request.url).pathname.includes("create-quote");
 
-  if (!companyId) {
+  const resolvedCompanyId =
+    requestedCompanyId && requestedCompanyId !== "all" && hasCompanyAccess(user, requestedCompanyId)
+      ? requestedCompanyId
+      : user.salesCompanies[0]?.company?.id || null;
+
+  if (!resolvedCompanyId) {
     return redirect("/sales/portal");
   }
 
-  if (!hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/portal");
+  if (requestedCompanyId && requestedCompanyId !== resolvedCompanyId) {
+    return redirect(
+      `/sales/portal/company/${resolvedCompanyId}/${isQuoteMode ? "create-quote" : "create-order"}/step3`,
+    );
   }
+
+  const companyId = resolvedCompanyId;
 
   const url = new URL(request.url);
   const customerId = url.searchParams.get("customerId");
@@ -1044,18 +1053,15 @@ export default function ReviewOrder() {
             : "Verify details and complete the purchasing flow for the company location."
         }
         companyId={company.id}
-        actions={
+        startAction={
           <Link
             to={`${flowBase}/step2?customerId=${selectedCustomer.shopifyCustomerId}${selectedLocationQuery}`}
             aria-disabled={isSubmitting}
-            style={{
-              ...salesPortalButtonStyles.secondary,
-              opacity: isSubmitting ? 0.55 : 1,
-              pointerEvents: isSubmitting ? "none" : "auto",
-            }}
+           style={salesPortalButtonStyles.secondary}
           >
-            Back to Products
+            Back to product
           </Link>
+        
         }
       />
       <div style={styles.container}>

@@ -306,6 +306,10 @@ export default function DraftListPage() {
   const agentName = (agent: any) =>
     [agent.firstName, agent.lastName].filter(Boolean).join(" ") ||
     agent.email;
+  const createOrderCompanyId =
+    data.currentCompany.id === "all"
+      ? data.companies[0]?.id || ""
+      : data.currentCompany.id || data.companies[0]?.id || "";
 
   return (
     <SalesPortalLayout
@@ -325,11 +329,7 @@ export default function DraftListPage() {
         companySwitchPath="/sales/portal/drafts?company="
         actions={
           <Link
-            to={`/sales/portal/company/${
-              data.currentCompany.id === "all"
-                ? data.companies[0]?.id ?? ""
-                : data.currentCompany.id
-            }/create-order`}
+            to={createOrderCompanyId ? `/sales/portal/company/${createOrderCompanyId}/create-order` : "/sales/portal"}
             style={salesPortalButtonStyles.primary}
           >
             + Create Order

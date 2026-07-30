@@ -295,16 +295,25 @@ function getShopifyCompanyGid(companyId: string | null | undefined) {
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
-  const companyId = params.companyId;
+  const requestedCompanyId = params.companyId?.trim();
   const isQuoteMode = new URL(request.url).pathname.includes("create-quote");
 
-  if (!companyId) {
+  const resolvedCompanyId =
+    requestedCompanyId && requestedCompanyId !== "all" && hasCompanyAccess(user, requestedCompanyId)
+      ? requestedCompanyId
+      : user.salesCompanies[0]?.company?.id || null;
+
+  if (!resolvedCompanyId) {
     return redirect("/sales/portal");
   }
 
-  if (!hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/portal");
+  if (requestedCompanyId && requestedCompanyId !== resolvedCompanyId) {
+    return redirect(
+      `/sales/portal/company/${resolvedCompanyId}/${isQuoteMode ? "create-quote" : "create-order"}`,
+    );
   }
+
+  const companyId = resolvedCompanyId;
 
   // Get full company data including active users and shop to fetch GraphQL
   const company = await prisma.companyAccount.findUnique({
@@ -1016,11 +1025,7 @@ export default function CreateOrderCustomerSelection() {
       user={user}
       activePage={mode === "quote" ? "quotes" : "orders"}
     >
-      <SalesPortalHeader
-        title={`${flowLabel}: ${company.name}`}
-        subtitle="Step 1: Select Customer"
-        companyId={company.id}
-      />
+
       <div style={styles.container}>
         <main style={styles.mainContent}>
           <div style={styles.pageHeader}>

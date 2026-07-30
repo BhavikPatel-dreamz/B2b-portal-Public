@@ -445,6 +445,9 @@ export default function CentralOrderListPage() {
       month: "short",
       year: "numeric",
     }).format(new Date(value));
+  const createOrderCompanyId = data.currentCompany.id === "all"
+    ? data.companies[0]?.id || ""
+    : data.currentCompany.id || data.companies[0]?.id || "";
 
   return (
     <SalesPortalLayout
@@ -463,7 +466,7 @@ export default function CentralOrderListPage() {
         companySwitchPath="/sales/portal/orders?company="
         actions={
           <Link
-            to={`/sales/portal/company/${data.currentCompany.id}/create-order`}
+            to={createOrderCompanyId ? `/sales/portal/company/${createOrderCompanyId}/create-order` : "/sales/portal"}
             style={salesPortalButtonStyles.primary}
           >
             + Create Order

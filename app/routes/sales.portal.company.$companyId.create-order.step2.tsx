@@ -555,16 +555,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
-  const companyId = params.companyId;
+  const requestedCompanyId = params.companyId?.trim();
   const isQuoteMode = new URL(request.url).pathname.includes("create-quote");
 
-  if (!companyId) {
+  const resolvedCompanyId =
+    requestedCompanyId && requestedCompanyId !== "all" && hasCompanyAccess(user, requestedCompanyId)
+      ? requestedCompanyId
+      : user.salesCompanies[0]?.company?.id || null;
+
+  if (!resolvedCompanyId) {
     return redirect("/sales/portal");
   }
 
-  if (!hasCompanyAccess(user, companyId)) {
-    return redirect("/sales/portal");
+  if (requestedCompanyId && requestedCompanyId !== resolvedCompanyId) {
+    return redirect(
+      `/sales/portal/company/${resolvedCompanyId}/${isQuoteMode ? "create-quote" : "create-order"}/step2`,
+    );
   }
+
+  const companyId = resolvedCompanyId;
 
   const url = new URL(request.url);
   const customerId = url.searchParams.get("customerId");
@@ -1349,6 +1358,7 @@ export default function CreateOrderProductCatalog() {
     }
 
     saveCart(newCart);
+    setIsMobileCartOpen(true);
     setItemAddedMessage(`${product.title} added successfully`);
   };
 
@@ -1413,7 +1423,7 @@ export default function CreateOrderProductCatalog() {
 
   const renderCartContents = () => {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1, minHeight: 0 }}>
         {/* Undo Banner */}
         {showUndoBanner && lastRemovedItem && (
           <div style={{
@@ -1764,7 +1774,7 @@ export default function CreateOrderProductCatalog() {
           </>
         }
         companyId={company.id}
-        actions={
+        startAction={
           <Link to={flowBase} style={salesPortalButtonStyles.secondary}>
             Back to Customer
           </Link>
@@ -2249,7 +2259,7 @@ export default function CreateOrderProductCatalog() {
                 aria-label="Cart summary"
                 style={{
                   width: "100%",
-                  maxWidth: "400px",
+                  maxWidth: "460px",
                   height: "100%",
                   backgroundColor: "white",
                   display: "flex",
@@ -2280,7 +2290,7 @@ export default function CreateOrderProductCatalog() {
 
           {/* Column 3: Desktop Cart Sidebar */}
           <aside className="desktop-cart-sidebar" style={styles.cartSidebar}>
-            <div style={{ ...styles.card, position: "sticky", top: "20px", maxHeight: "calc(100vh - 40px)", overflowY: "auto" }}>
+            <div style={{ ...styles.card, position: "sticky", top: "20px", maxHeight: "calc(100vh - 40px)", overflowY: "auto", overflowX: "hidden", width: "100%", minWidth: 0 }}>
               <h3 style={styles.sidebarTitle}>Cart Summary</h3>
               {renderCartContents()}
             </div>
@@ -2325,7 +2335,7 @@ export default function CreateOrderProductCatalog() {
             display: none !important;
           }
           .mobile-cart-drawer {
-            display: none !important;
+            display: flex !important;
           }
         }
         @media (max-width: 768px) {
@@ -2489,7 +2499,7 @@ const createStyles = (theme: any) => ({
   },
   layoutGrid: {
     display: "grid",
-    gridTemplateColumns: "250px 1fr 340px",
+    gridTemplateColumns: "250px minmax(0, 1fr) 400px",
     gap: "24px",
     alignItems: "start",
   },
@@ -2505,6 +2515,8 @@ const createStyles = (theme: any) => ({
   cartSidebar: {
     display: "flex",
     flexDirection: "column" as const,
+    minWidth: 0,
+    width: "100%",
   },
   card: {
     backgroundColor: "white",
@@ -2512,6 +2524,9 @@ const createStyles = (theme: any) => ({
     boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)",
     border: "1px solid #f3f4f6",
     padding: "20px",
+    display: "flex",
+    flexDirection: "column" as const,
+    overflow: "hidden",
   },
   sidebarTitle: {
     fontFamily: "'Poppins', sans-serif",
@@ -2521,6 +2536,7 @@ const createStyles = (theme: any) => ({
     margin: "0 0 16px 0",
     borderBottom: "1px solid #f3f4f6",
     paddingBottom: "10px",
+    flexShrink: 0,
   },
   filterGroup: {
     marginBottom: "16px",
@@ -2966,9 +2982,12 @@ const createStyles = (theme: any) => ({
     display: "flex",
     flexDirection: "column" as const,
     gap: "14px",
-    maxHeight: "350px",
+    maxHeight: "min(42vh, 320px)",
     overflowY: "auto" as const,
-    paddingRight: "4px",
+    overflowX: "hidden" as const,
+    paddingRight: "6px",
+    scrollbarWidth: "thin" as const,
+    scrollBehavior: "smooth" as const,
   },
   cartItem: {
     display: "flex",

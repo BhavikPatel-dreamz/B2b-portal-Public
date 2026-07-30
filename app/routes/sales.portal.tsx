@@ -864,6 +864,7 @@ export default function SalesPortal() {
           (Number(company.usedCredit) / Number(company.creditLimit)) * 100,
         )
       : 0;
+  const createOrderCompanyId = company.id || allCompanies[0]?.id || "";
 
   return (
     <SalesPortalLayout
@@ -898,7 +899,7 @@ export default function SalesPortal() {
                 <span>+</span> Create Company
               </button>
               <Link
-                to={`/sales/portal/company/${company.id}/create-order`}
+                to={createOrderCompanyId ? `/sales/portal/company/${createOrderCompanyId}/create-order` : "/sales/portal"}
                 style={salesPortalButtonStyles.primary}
               >
                 <span>+</span> Create Order

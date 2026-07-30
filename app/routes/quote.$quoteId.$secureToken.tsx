@@ -1,4 +1,4 @@
-import type React from "react";
+import React, { useEffect, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Form, useActionData, useLoaderData } from "react-router";
 import prisma from "app/db.server";
@@ -165,8 +165,17 @@ export default function PublicQuotePage() {
   const canAct = ["sent", "viewed"].includes(quoteStatus);
   const customerNoteText =
     effectiveQuote.customerNotes?.trim() || effectiveQuote.customerComments?.trim() || "";
-  const customerCommentValue =
-    actionData?.quote?.customerComments ?? quote.customerComments ?? "";
+  const [customerCommentValue, setCustomerCommentValue] = useState(
+    actionData?.quote?.customerComments ?? quote.customerComments ?? "",
+  );
+
+  useEffect(() => {
+    if (actionData?.quote?.customerComments !== undefined) {
+      setCustomerCommentValue(actionData.quote.customerComments);
+    } else {
+      setCustomerCommentValue(quote.customerComments ?? "");
+    }
+  }, [actionData?.quote?.customerComments, quote.customerComments]);
 
   const fmtMoney = (amount: string, currency = quote.currencyCode) =>
     new Intl.NumberFormat(undefined, {
@@ -291,50 +300,51 @@ export default function PublicQuotePage() {
           >
             <h2 style={styles.cardTitle}>Customer Response</h2>
             <textarea
-              key={customerCommentValue}
               name="comments"
-              defaultValue={customerCommentValue}
+              value={customerCommentValue}
+              onChange={(event) => setCustomerCommentValue(event.target.value)}
               placeholder="Leave comments for the sales agent"
               style={styles.textarea}
               disabled={!canAct}
             />
-            <div style={styles.actions}>
-              <button
-                type="submit"
-                name="intent"
-                value="leave_comment"
-                style={styles.secondaryBtn}
-                disabled={!canAct}
-              >
-                Save Comment
-              </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                style={styles.secondaryBtn}
-              >
-                Download PDF
-              </button>
-            </div>
             {canAct ? (
-              <div style={styles.actions}>
-                <button
-                  type="submit"
-                  name="intent"
-                  value="reject_quote"
-                  style={styles.rejectBtn}
-                >
-                  Reject Quote
-                </button>
-                <button
-                  type="submit"
-                  name="intent"
-                  value="approve_quote"
-                  style={styles.primaryBtn}
-                >
-                  Approve Quote
-                </button>
-              </div>
+              <>
+                <div style={styles.actions}>
+                  <button
+                    type="submit"
+                    name="intent"
+                    value="leave_comment"
+                    style={styles.secondaryBtn}
+                  >
+                    Save Comment
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    style={styles.secondaryBtn}
+                  >
+                    Download PDF
+                  </button>
+                </div>
+                <div style={styles.actions}>
+                  <button
+                    type="submit"
+                    name="intent"
+                    value="reject_quote"
+                    style={styles.rejectBtn}
+                  >
+                    Reject Quote
+                  </button>
+                  <button
+                    type="submit"
+                    name="intent"
+                    value="approve_quote"
+                    style={styles.primaryBtn}
+                  >
+                    Approve Quote
+                  </button>
+                </div>
+              </>
             ) : (
               <div style={{ marginTop: 12, color: "#4b5563" }}>
                 This quote has been {quoteStatus} and customer actions are no longer available.

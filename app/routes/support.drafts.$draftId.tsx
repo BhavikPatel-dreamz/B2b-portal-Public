@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   Form,
@@ -42,6 +42,7 @@ import {
   shopifyOrderGraphql,
   verifyShopifyOrder,
 } from "app/services/shopify-order-creation.server";
+import { AddProductModal } from "./sales.portal.company.$companyId.quotes.$quoteId";
 
 type DraftNotes = {
   internalNotes: string;
@@ -986,6 +987,506 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   return Response.json({ error: "Unknown action" }, { status: 400 });
 };
 
+// export function AddProductModal({
+//   onCancel,
+//   productQuery,
+//   setProductQuery,
+//   productResults,
+//   fetchProducts,
+//   isFetchingProducts,
+//   onSelectVariant,
+//   defaultCurrencyCode = "USD",
+//   form,
+//   setForm,
+//   onConfirm,
+// }: AddProductModalProps) {
+//   const manualEntryEnabled = Boolean(form && setForm && onConfirm);
+//   const [mode, setMode] = useState<"search" | "manual">("search");
+//   const [searchInput, setSearchInput] = useState(productQuery || "");
+//   const [selection, setSelection] = useState<Record<string, { variantId: string; qty: number }>>({});
+
+//   useEffect(() => {
+//     setSearchInput(productQuery || "");
+//   }, [productQuery]);
+
+//   const handleSearchSubmit = (e: React.FormEvent) => {
+//     e.preventDefault();
+//     setProductQuery(searchInput.trim() || "all");
+//   };
+
+//   const getSelection = useCallback(
+//     (product: Product) => {
+//       const existing = selection[product.id];
+//       const variantId = existing?.variantId || product.variants?.[0]?.id || "";
+//       const qty = existing?.qty || 1;
+//       return { variantId, qty };
+//     },
+//     [selection],
+//   );
+
+//   const setVariantId = (productId: string, variantId: string) => {
+//     setSelection((prev) => ({ ...prev, [productId]: { variantId, qty: prev[productId]?.qty || 1 } }));
+//   };
+
+//   const setQty = (productId: string, qty: number) => {
+//     if (qty < 1) return;
+//     setSelection((prev) => ({ ...prev, [productId]: { variantId: prev[productId]?.variantId || "", qty } }));
+//   };
+
+//   return (
+//     <div
+//       style={{
+//         position: "fixed",
+//         inset: 0,
+//         zIndex: 9999,
+//         background: "rgba(0,0,0,0.5)",
+//         display: "flex",
+//         alignItems: "center",
+//         justifyContent: "center",
+//         padding: 16,
+//       }}
+//       onClick={onCancel}
+//     >
+//       <div
+//         style={{
+//           width: "min(760px, 100%)",
+//           maxHeight: "88vh",
+//           background: "#fff",
+//           borderRadius: 14,
+//           overflow: "hidden",
+//           display: "flex",
+//           flexDirection: "column",
+//         }}
+//         onClick={(e) => e.stopPropagation()}
+//       >
+//         {/* Header */}
+//         <div
+//           style={{
+//             display: "flex",
+//             justifyContent: "space-between",
+//             alignItems: "center",
+//             padding: "16px 20px",
+//             borderBottom: "1px solid #e3e7ec",
+//           }}
+//         >
+//           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>Add Product</h3>
+//           <button
+//             type="button"
+//             onClick={onCancel}
+//             aria-label="Close"
+//             style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#5c5f62", lineHeight: 1 }}
+//           >
+//             &times;
+//           </button>
+//         </div>
+
+//         {/* Mode toggle — only shown when the caller wired up manual entry */}
+//         {manualEntryEnabled && (
+//           <div style={{ display: "flex", gap: 8, padding: "14px 20px 0" }}>
+//             <button
+//               type="button"
+//               onClick={() => setMode("search")}
+//               style={{
+//                 background: mode === "search" ? "#111827" : "#f9fafb",
+//                 color: mode === "search" ? "#fff" : "#374151",
+//                 border: "1px solid " + (mode === "search" ? "#111827" : "#d1d5db"),
+//                 borderRadius: 999,
+//                 padding: "7px 14px",
+//                 fontWeight: 700,
+//                 fontSize: 13,
+//                 cursor: "pointer",
+//               }}
+//             >
+//               Search Catalog
+//             </button>
+//             <button
+//               type="button"
+//               onClick={() => setMode("manual")}
+//               style={{
+//                 background: mode === "manual" ? "#111827" : "#f9fafb",
+//                 color: mode === "manual" ? "#fff" : "#374151",
+//                 border: "1px solid " + (mode === "manual" ? "#111827" : "#d1d5db"),
+//                 borderRadius: 999,
+//                 padding: "7px 14px",
+//                 fontWeight: 700,
+//                 fontSize: 13,
+//                 cursor: "pointer",
+//               }}
+//             >
+//               Manual Entry
+//             </button>
+//           </div>
+//         )}
+
+//         {!manualEntryEnabled || mode === "search" ? (
+//           <>
+//             {/* Search bar */}
+//             <form onSubmit={handleSearchSubmit} style={{ display: "flex", gap: 10, padding: "14px 20px 0" }}>
+//               <input
+//                 type="text"
+//                 value={searchInput}
+//                 onChange={(e) => setSearchInput(e.target.value)}
+//                 placeholder="Search products by title or SKU..."
+//                 style={{
+//                   flex: 1,
+//                   height: 40,
+//                   border: "1px solid #c9cccf",
+//                   borderRadius: 8,
+//                   padding: "0 12px",
+//                   fontSize: 13,
+//                 }}
+//               />
+//               <button
+//                 type="submit"
+//                 disabled={isFetchingProducts}
+//                 style={{
+//                   height: 40,
+//                   padding: "0 18px",
+//                   background: "#111827",
+//                   color: "#fff",
+//                   border: "none",
+//                   borderRadius: 8,
+//                   fontWeight: 600,
+//                   fontSize: 13,
+//                   cursor: isFetchingProducts ? "not-allowed" : "pointer",
+//                   opacity: isFetchingProducts ? 0.7 : 1,
+//                 }}
+//               >
+//                 {isFetchingProducts ? "Searching..." : "Search"}
+//               </button>
+//             </form>
+
+//             {/* Results */}
+//             <div style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+//               {isFetchingProducts ? (
+//                 <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+//                   Loading products...
+//                 </div>
+//               ) : productResults.length === 0 ? (
+//                 <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+//                   No products found. Try a different search term.
+//                 </div>
+//               ) : (
+//                 productResults.map((product) => {
+//                   const { variantId, qty } = getSelection(product);
+//                   const variant =
+//                     product.variants.find((v) => v.id === variantId) || product.variants[0];
+//                   const inStock = isVariantInStock(variant);
+
+//                   return (
+//                     <div
+//                       key={product.id}
+//                       style={{
+//                         display: "flex",
+//                         gap: 14,
+//                         border: "1px solid #eceef1",
+//                         borderRadius: 12,
+//                         padding: 16,
+//                         alignItems: "center",
+//                         background: "#fff",
+//                       }}
+//                     >
+//                       {/* Image */}
+//                       <div
+//                         style={{
+//                           width: 64,
+//                           height: 64,
+//                           borderRadius: 10,
+//                           overflow: "hidden",
+//                           border: "1px solid #eceef1",
+//                           background: "#f9fafb",
+//                           flexShrink: 0,
+//                           display: "flex",
+//                           alignItems: "center",
+//                           justifyContent: "center",
+//                         }}
+//                       >
+//                         {product.image ? (
+//                           <img
+//                             src={product.image}
+//                             alt=""
+//                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
+//                           />
+//                         ) : (
+//                           <span style={{ fontSize: 22 }}>📦</span>
+//                         )}
+//                       </div>
+
+//                       {/* Middle info */}
+//                       <div style={{ flex: 1, minWidth: 0 }}>
+//                         <div style={{ fontWeight: 700, fontSize: 14.5, color: "#111827" }}>{product.title}</div>
+//                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+//                           {product.vendor && (
+//                             <span style={pillStyle}>{product.vendor}</span>
+//                           )}
+//                           {product.productType && <span style={pillStyle}>{product.productType}</span>}
+//                           {(product.tags || []).slice(0, 2).map((tag) => (
+//                             <span key={tag} style={pillStyle}>
+//                               {tag}
+//                             </span>
+//                           ))}
+//                         </div>
+
+//                         <div style={{ marginTop: 10 }}>
+//                           <div style={labelStyle}>Variant</div>
+//                           {product.variants.length > 1 ? (
+//                             <select
+//                               value={variantId}
+//                               onChange={(e) => setVariantId(product.id, e.target.value)}
+//                               style={{
+//                                 width: "100%",
+//                                 maxWidth: 320,
+//                                 height: 36,
+//                                 border: "1px solid #d1d5db",
+//                                 borderRadius: 7,
+//                                 padding: "0 8px",
+//                                 fontSize: 13,
+//                               }}
+//                             >
+//                               {product.variants.map((v) => (
+//                                 <option key={v.id} value={v.id}>
+//                                   {v.title || "Default variant"} · SKU {v.sku || "N/A"} ·{" "}
+//                                   {fmtPrice(v.price, v.currencyCode || defaultCurrencyCode)}
+//                                 </option>
+//                               ))}
+//                             </select>
+//                           ) : (
+//                             <div
+//                               style={{
+//                                 height: 36,
+//                                 display: "flex",
+//                                 alignItems: "center",
+//                                 color: "#374151",
+//                                 background: "#f9fafb",
+//                                 border: "1px solid #e5e7eb",
+//                                 borderRadius: 7,
+//                                 padding: "0 8px",
+//                                 fontSize: 13,
+//                                 maxWidth: 320,
+//                               }}
+//                             >
+//                               {variant?.title && variant.title !== "Default Title"
+//                                 ? variant.title
+//                                 : "Default variant"}
+//                             </div>
+//                           )}
+//                           <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+//                             SKU: {variant?.sku || "N/A"}
+//                           </div>
+//                         </div>
+//                       </div>
+
+//                       {/* Right column: price + stepper + action */}
+//                       <div
+//                         style={{
+//                           display: "flex",
+//                           flexDirection: "column",
+//                           alignItems: "flex-end",
+//                           gap: 10,
+//                           flexShrink: 0,
+//                         }}
+//                       >
+//                         <div style={{ textAlign: "right" }}>
+//                           <div style={{ fontSize: 12, color: "#a21caf", fontWeight: 700 }}>Customer price</div>
+//                           <div style={{ fontSize: 17, fontWeight: 800, color: "#a21caf" }}>
+//                             {fmtPrice(variant?.price, variant?.currencyCode || defaultCurrencyCode)}
+//                           </div>
+//                         </div>
+
+//                         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+//                           <div
+//                             style={{
+//                               display: "flex",
+//                               alignItems: "center",
+//                               border: "1px solid #d1d5db",
+//                               borderRadius: 7,
+//                               overflow: "hidden",
+//                               height: 30,
+//                             }}
+//                           >
+//                             <button
+//                               type="button"
+//                               onClick={() => setQty(product.id, qty - 1)}
+//                               style={stepBtnStyle}
+//                             >
+//                               -
+//                             </button>
+//                             <input
+//                               type="number"
+//                               min={1}
+//                               value={qty}
+//                               onChange={(e) => setQty(product.id, parseInt(e.target.value) || 1)}
+//                               style={{
+//                                 width: 34,
+//                                 height: "100%",
+//                                 border: "none",
+//                                 textAlign: "center",
+//                                 fontSize: 12,
+//                                 fontWeight: 600,
+//                                 outline: "none",
+//                               }}
+//                             />
+//                             <button
+//                               type="button"
+//                               onClick={() => setQty(product.id, qty + 1)}
+//                               style={stepBtnStyle}
+//                             >
+//                               +
+//                             </button>
+//                           </div>
+
+//                           <button
+//                             type="button"
+//                             disabled={!inStock}
+//                             onClick={() => variant && onSelectVariant(product, variant, qty)}
+//                             style={{
+//                               background: inStock
+//                                 ? "linear-gradient(135deg, #c026d3, #9333ea)"
+//                                 : "#d8b4fe",
+//                               color: "#fff",
+//                               border: "none",
+//                               borderRadius: 999,
+//                               padding: "9px 18px",
+//                               fontWeight: 700,
+//                               fontSize: 13,
+//                               cursor: inStock ? "pointer" : "not-allowed",
+//                               whiteSpace: "nowrap",
+//                             }}
+//                           >
+//                             {inStock ? "Add" : "Out of stock"}
+//                           </button>
+//                         </div>
+//                       </div>
+//                     </div>
+//                   );
+//                 })
+//               )}
+//             </div>
+//           </>
+//         ) : (
+//           /* Manual entry form */
+//           <div style={{ padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+//             <div
+//               className="sales-add-product-grid"
+//               style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}
+//             >
+//               <label style={fieldLabelStyle}>
+//                 Product title
+//                 <input
+//                   value={form.productTitle}
+//                   onChange={(e) => setForm((f: any) => ({ ...f, productTitle: e.target.value }))}
+//                   style={fieldInputStyle}
+//                 />
+//               </label>
+//               <label style={fieldLabelStyle}>
+//                 SKU
+//                 <input
+//                   value={form.sku}
+//                   onChange={(e) => setForm((f: any) => ({ ...f, sku: e.target.value }))}
+//                   style={fieldInputStyle}
+//                 />
+//               </label>
+//               <label style={fieldLabelStyle}>
+//                 Variant title
+//                 <input
+//                   value={form.variantTitle}
+//                   onChange={(e) => setForm((f: any) => ({ ...f, variantTitle: e.target.value }))}
+//                   style={fieldInputStyle}
+//                 />
+//               </label>
+//               <label style={fieldLabelStyle}>
+//                 Image URL
+//                 <input
+//                   value={form.image}
+//                   onChange={(e) => setForm((f: any) => ({ ...f, image: e.target.value }))}
+//                   style={fieldInputStyle}
+//                 />
+//               </label>
+//               <label style={fieldLabelStyle}>
+//                 Unit price
+//                 <input
+//                   type="number"
+//                   min="0"
+//                   step="0.01"
+//                   value={form.unitPrice}
+//                   onChange={(e) => setForm((f: any) => ({ ...f, unitPrice: e.target.value }))}
+//                   style={fieldInputStyle}
+//                 />
+//               </label>
+//               <label style={fieldLabelStyle}>
+//                 Discount
+//                 <input
+//                   type="number"
+//                   min="0"
+//                   step="0.01"
+//                   value={form.discount}
+//                   onChange={(e) => setForm((f: any) => ({ ...f, discount: e.target.value }))}
+//                   style={fieldInputStyle}
+//                 />
+//               </label>
+//               <label style={fieldLabelStyle}>
+//                 Quantity
+//                 <input
+//                   type="number"
+//                   min="1"
+//                   value={form.quantity}
+//                   onChange={(e) => setForm((f: any) => ({ ...f, quantity: parseInt(e.target.value) || 1 }))}
+//                   style={fieldInputStyle}
+//                 />
+//               </label>
+//             </div>
+//           </div>
+//         )}
+
+//         {/* Footer */}
+//         <div
+//           style={{
+//             display: "flex",
+//             justifyContent: "flex-end",
+//             gap: 10,
+//             padding: "14px 20px",
+//             borderTop: "1px solid #e3e7ec",
+//           }}
+//         >
+//           <button
+//             type="button"
+//             onClick={onCancel}
+//             style={{
+//               background: "#fff",
+//               color: "#374151",
+//               border: "1px solid #c9cccf",
+//               borderRadius: 8,
+//               padding: "10px 16px",
+//               fontWeight: 600,
+//               cursor: "pointer",
+//             }}
+//           >
+//             Cancel
+//           </button>
+//           {manualEntryEnabled && mode === "manual" && (
+//             <button
+//               type="button"
+//               onClick={onConfirm}
+//               disabled={!form.productTitle.trim()}
+//               style={{
+//                 background: "#111827",
+//                 color: "#fff",
+//                 border: "none",
+//                 borderRadius: 8,
+//                 padding: "10px 16px",
+//                 fontWeight: 600,
+//                 cursor: form.productTitle.trim() ? "pointer" : "not-allowed",
+//                 opacity: form.productTitle.trim() ? 1 : 0.6,
+//               }}
+//             >
+//               Add to Quote
+//             </button>
+//           )}
+//         </div>
+//       </div>
+//     </div>
+//   );
+// }
 
 export default function DraftDetailsPage() {
   const data = useLoaderData<any>();
@@ -1005,6 +1506,7 @@ export default function DraftDetailsPage() {
   const [productQuery, setProductQuery] = useState("all");
   const [productResults, setProductResults] = useState<any[]>([]);
   const [isFetchingProducts, setIsFetchingProducts] = useState(false);
+  const productsFetchControllerRef = useRef<AbortController | null>(null);
   const [newProductRows, setNewProductRows] = useState<NewProductRow[]>([]);
 
   const companyLocations = data.companyLocations || [];
@@ -1354,26 +1856,50 @@ export default function DraftDetailsPage() {
 
   const fetchProducts = async (query = "all") => {
     setIsFetchingProducts(true);
+    // abort any in-flight product search
     try {
+      if (productsFetchControllerRef.current) {
+        productsFetchControllerRef.current.abort();
+        productsFetchControllerRef.current = null;
+      }
+      const controller = new AbortController();
+      productsFetchControllerRef.current = controller;
+
       const normalizedQuery = String(query || "").trim() || "all";
       const url = `/api/sales-product-search?q=${encodeURIComponent(normalizedQuery)}&companyId=${encodeURIComponent(draft.company.id)}`;
-      const res = await fetch(url);
-      if (!res.ok) return setProductResults([]);
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        setProductResults([]);
+        return;
+      }
       const data = await res.json();
       setProductResults(data.products || []);
-    } catch {
-      setProductResults([]);
+    } catch (err: any) {
+      if (err && err.name === "AbortError") {
+        // request was aborted - ignore
+      } else {
+        setProductResults([]);
+      }
     } finally {
       setIsFetchingProducts(false);
+      productsFetchControllerRef.current = null;
     }
   };
 
   useEffect(() => {
     if (!showProductModal) return;
     fetchProducts(productQuery || "all");
+    return () => {
+      if (productsFetchControllerRef.current) {
+        productsFetchControllerRef.current.abort();
+        productsFetchControllerRef.current = null;
+      }
+    };
   }, [showProductModal, productQuery, draft.company.id]);
 
-  const handleSelectProductVariant = (product: any, variant: any) => {
+  // Now accepts quantity (default 1) so it matches the shared modal's
+  // qty-stepper + onSelectVariant(product, variant, qty) signature.
+  const handleSelectProductVariant = (product: any, variant: any, quantity: number = 1) => {
     const selected = {
       productId: product.id || null,
       productTitle: product.title || "",
@@ -1383,7 +1909,7 @@ export default function DraftDetailsPage() {
       image: product.image || "",
       unitPrice: Number(variant?.price || 0),
       discount: 0,
-      quantity: 1,
+      quantity,
       rowKey: String(Date.now()),
     };
     setNewProductRows((rows) => [...rows, selected]);
@@ -1793,176 +2319,166 @@ export default function DraftDetailsPage() {
                 </div>
               )}
             </section>
-
             <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
-              <div style={styles.cardHeader}>
-                <h2 style={styles.cardTitle}>Product Information</h2>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 20px 0" }}>
+                <h2 style={{ ...styles.cardTitle, margin: 0 }}>Product Information</h2>
                 <button
                   type="button"
                   onClick={() => setShowProductModal(true)}
-                  style={{
-                    ...styles.secondaryButton,
-                    padding: "8px 12px",
-                    fontSize: 13,
-                  }}
+                  style={{ ...styles.secondaryButton, padding: "8px 12px", fontSize: 13 }}
                 >
                   + Add Product
                 </button>
               </div>
-              <div style={styles.tableWrap}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      {[
-                        "Product",
-                        "SKU",
-                        "Variant",
-                        "Quantity",
-                        "Unit Price",
-                        "Discount",
-                        "Line Total",
-                      ].map((heading) => (
-                        <th key={heading} style={styles.th}>
-                          {heading}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.items.map((item: any) => (
-                      <tr key={item.id}>
-                        <td style={styles.td}>
-                          <input type="hidden" name="itemId" value={item.id} />
-                          <div style={styles.productCell}>
-                            {item.image ? (
-                              <img
-                                src={item.image}
-                                alt=""
-                                style={styles.productImage}
-                              />
-                            ) : (
-                              <span style={styles.imagePlaceholder} />
-                            )}
-                            <div style={styles.productInputs}>
-                              <input
-                                name={`productTitle_${item.id}`}
-                                defaultValue={item.productTitle}
-                                style={styles.input}
-                              />
-                              <input
-                                name={`image_${item.id}`}
-                                defaultValue={item.image || ""}
-                                placeholder="Image URL"
-                                style={styles.smallInput}
-                              />
-                            </div>
-                          </div>
-                        </td>
-                        <td style={styles.td}>
-                          <input
-                            name={`sku_${item.id}`}
-                            defaultValue={item.sku || ""}
-                            style={styles.smallInput}
-                          />
-                        </td>
-                        <td style={styles.td}>
-                          <input
-                            name={`variantTitle_${item.id}`}
-                            defaultValue={item.variantTitle || ""}
-                            style={styles.smallInput}
-                          />
-                        </td>
-                        <td style={styles.td}>
-                          <input
-                            type="number"
-                            min="1"
-                            name={`quantity_${item.id}`}
-                            defaultValue={item.quantity}
-                            style={styles.numberInput}
-                          />
-                        </td>
-                        <td style={styles.td}>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            name={`unitPrice_${item.id}`}
-                            defaultValue={item.unitPrice}
-                            style={styles.numberInput}
-                          />
-                        </td>
-                        <td style={styles.td}>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            name={`discount_${item.id}`}
-                            defaultValue={item.discount}
-                            style={styles.numberInput}
-                          />
-                        </td>
-                        <td style={styles.td}>
-                          <strong>{money(item.lineTotal)}</strong>
-                        </td>
 
-                      </tr>
-                    ))}
-                    {newProductRows.map((row) => (
-                      <tr key={row.rowKey} style={{ background: "#f8f5ff" }}>
-                        <td style={styles.td}>
-                          <div style={styles.productCell}>
-                            <span style={{ display: "none" }}>
-                              <input type="hidden" name="newProductRow" value={row.rowKey} />
-                              <input type="hidden" name={`newProductId_${row.rowKey}`} value={row.productId || ""} />
-                              <input type="hidden" name={`newProductTitle_${row.rowKey}`} value={row.productTitle} />
-                              <input type="hidden" name={`newSku_${row.rowKey}`} value={row.sku} />
-                              <input type="hidden" name={`newVariantTitle_${row.rowKey}`} value={row.variantTitle} />
-                              <input type="hidden" name={`newVariantId_${row.rowKey}`} value={row.variantId} />
-                              <input type="hidden" name={`newImage_${row.rowKey}`} value={row.image} />
-                              <input type="hidden" name={`newUnitPrice_${row.rowKey}`} value={row.unitPrice} />
-                              <input type="hidden" name={`newDiscount_${row.rowKey}`} value={row.discount} />
-                              <input type="hidden" name={`newQuantity_${row.rowKey}`} value={row.quantity} />
-                            </span>
-                            {row.image ? (
-                              <img src={row.image} alt="" style={styles.productImage} />
-                            ) : (
-                              <span style={styles.imagePlaceholder} />
-                            )}
-                            <div style={styles.productInputs}>
-                              <div style={{ fontWeight: 700 }}>{row.productTitle}</div>
-                              <div style={{ color: "#6b7280", fontSize: 12 }}>Pending save</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td style={styles.td}>{row.sku || "N/A"}</td>
-                        <td style={styles.td}>{row.variantTitle || "Default variant"}</td>
-                        <td style={styles.td}>{row.quantity}</td>
-                        <td style={styles.td}>{money(row.unitPrice)}</td>
-                        <td style={styles.td}>{money(row.discount)}</td>
-                        <td style={styles.td}>
-                          <strong>{money(Math.max(0, row.quantity * row.unitPrice - row.discount))}</strong>
-                        </td>
-                        <td style={styles.td}>
-                          <button
-                            type="button"
-                            onClick={() => removePendingProduct(row.rowKey)}
-                            style={{
-                              border: "1px solid #d1d5db",
-                              borderRadius: 8,
-                              background: "#fff",
-                              color: "#374151",
-                              padding: "6px 10px",
-                              fontSize: 12,
-                              cursor: "pointer",
+              <div style={{ padding: "16px 20px 20px", overflowX: "auto" }}>
+                <div style={styles.productsTable}>
+                  {/* Header row */}
+                  <div style={styles.productHeaderRow}>
+                    <span>Product</span>
+                    <span>SKU</span>
+                    <span>Variant</span>
+                    <span>Quantity</span>
+                    <span>Unit Price</span>
+                    <span>Discount</span>
+                    <span style={{ textAlign: "right" }}>Line Total</span>
+                    <span />
+                  </div>
+
+                  {/* Existing items */}
+                  {draft.items.map((item: any) => (
+                    <div key={item.id} style={styles.productRow}>
+                      <input type="hidden" name="itemId" value={item.id} />
+                      <div style={styles.productCellMain}>
+                        {item.image ? (
+                          <img
+                            src={item.image}
+                            alt=""
+                            style={styles.productThumbSm}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
                             }}
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          />
+                        ) : (
+                          <span style={styles.imagePlaceholder} />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                          <input
+                            name={`productTitle_${item.id}`}
+                            defaultValue={item.productTitle}
+                            style={{ ...styles.productRowInput, fontWeight: 700 }}
+                          />
+                          <input
+                            name={`image_${item.id}`}
+                            defaultValue={item.image || ""}
+                            placeholder="Image URL"
+                            style={{ ...styles.productRowInput, fontSize: 11, color: "#6b7280" }}
+                          />
+                        </div>
+                      </div>
+
+                      <input
+                        name={`sku_${item.id}`}
+                        defaultValue={item.sku || ""}
+                        placeholder="SKU"
+                        style={styles.productRowInput}
+                      />
+
+                      <input
+                        name={`variantTitle_${item.id}`}
+                        defaultValue={item.variantTitle || ""}
+                        style={styles.productRowInput}
+                      />
+
+                      <input
+                        type="number"
+                        min="1"
+                        name={`quantity_${item.id}`}
+                        defaultValue={item.quantity}
+                        style={styles.productRowInput}
+                      />
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        name={`unitPrice_${item.id}`}
+                        defaultValue={item.unitPrice}
+                        style={styles.productRowInput}
+                      />
+
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        name={`discount_${item.id}`}
+                        defaultValue={item.discount}
+                        style={styles.productRowInput}
+                      />
+
+                      <div style={{ textAlign: "right", fontWeight: 700, fontSize: 14 }}>
+                        {money(item.lineTotal)}
+                      </div>
+
+                      <div />
+                    </div>
+                  ))}
+
+                  {/* Newly added (pending save) rows */}
+                  {newProductRows.map((row) => (
+                    <div key={row.rowKey} style={{ ...styles.productRow, background: "#faf5ff" }}>
+                      <input type="hidden" name="newProductRow" value={row.rowKey} />
+                      <input type="hidden" name={`newProductId_${row.rowKey}`} value={row.productId || ""} />
+                      <input type="hidden" name={`newProductTitle_${row.rowKey}`} value={row.productTitle} />
+                      <input type="hidden" name={`newSku_${row.rowKey}`} value={row.sku} />
+                      <input type="hidden" name={`newVariantTitle_${row.rowKey}`} value={row.variantTitle} />
+                      <input type="hidden" name={`newVariantId_${row.rowKey}`} value={row.variantId} />
+                      <input type="hidden" name={`newImage_${row.rowKey}`} value={row.image} />
+                      <input type="hidden" name={`newUnitPrice_${row.rowKey}`} value={row.unitPrice} />
+                      <input type="hidden" name={`newDiscount_${row.rowKey}`} value={row.discount} />
+                      <input type="hidden" name={`newQuantity_${row.rowKey}`} value={row.quantity} />
+
+                      <div style={styles.productCellMain}>
+                        <div
+                          style={{
+                            ...styles.productThumbSm,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            overflow: "hidden",
+                          }}
+                        >
+                          {row.image ? (
+                            <img src={row.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : (
+                            <span style={{ color: "#9ca3af", fontSize: 9 }}>No image</span>
+                          )}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13.5 }}>{row.productTitle}</div>
+                          <span style={styles.pillPending}>Pending Save</span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13 }}>{row.sku || "N/A"}</div>
+                      <div style={{ fontSize: 13 }}>{row.variantTitle || "Default variant"}</div>
+                      <div style={{ fontSize: 13 }}>{row.quantity}</div>
+                      <div style={{ fontSize: 13 }}>{money(row.unitPrice)}</div>
+                      <div style={{ fontSize: 13 }}>{money(row.discount)}</div>
+                      <div style={{ textAlign: "right", fontWeight: 700, fontSize: 14 }}>
+                        {money(Math.max(0, row.quantity * row.unitPrice - row.discount))}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          onClick={() => removePendingProduct(row.rowKey)}
+                          style={styles.removeIconBtn}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -2057,100 +2573,24 @@ export default function DraftDetailsPage() {
         </div>
       </Card>
 
+      {/* Add Product Modal — now uses the same shared, rich UI as the Quote
+          Detail page (image thumbnail, vendor/type pills, variant dropdown,
+          customer price, qty stepper, gradient Add button). Manual entry is
+          intentionally left out here since form/setForm/onConfirm aren't
+          passed, so AddProductModal hides the mode toggle automatically. */}
       {showProductModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(0,0,0,0.5)",
-          }}
-          onClick={() => setShowProductModal(false)}
-        >
-          <div
-            style={{
-              width: "90vw",
-              maxWidth: 900,
-              maxHeight: "90vh",
-              overflow: "auto",
-              background: "#fff",
-              borderRadius: 8,
-              padding: 18,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <h3 style={{ margin: 0 }}>Add Product</h3>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  placeholder="Search products"
-                  value={productQuery}
-                  onChange={(e) => setProductQuery(e.target.value)}
-                  style={{ ...styles.input, width: 260 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => fetchProducts(productQuery)}
-                  style={styles.secondaryButton}
-                >
-                  Search
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProductQuery("all");
-                    fetchProducts("all");
-                  }}
-                  style={styles.secondaryButton}
-                >
-                  Show All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowProductModal(false)}
-                  style={styles.secondaryButton}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div style={{ marginTop: 12 }}>
-              {productResults.length === 0 ? (
-                <p style={styles.muted}>No products found. Try a different search or click Show All.</p>
-              ) : (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {productResults.map((product: any) => (
-                    <div
-                      key={product.id}
-                      style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 700 }}>{product.title}</div>
-                        <div style={{ color: "#6b7280", fontSize: 13 }}>{product.vendor || ""}</div>
-                      </div>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        {(product.variants || []).map((variant: any) => (
-                          <button
-                            key={variant.id}
-                            type="button"
-                            onClick={() => handleSelectProductVariant(product, variant)}
-                            style={styles.secondaryButton}
-                          >
-                            Add {variant.title || "Variant"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <AddProductModal
+          onCancel={() => setShowProductModal(false)}
+          productQuery={productQuery}
+          setProductQuery={setProductQuery}
+          productResults={productResults}
+          fetchProducts={fetchProducts}
+          isFetchingProducts={isFetchingProducts}
+          onSelectVariant={handleSelectProductVariant}
+          defaultCurrencyCode={draft.currencyCode}
+        />
       )}
+
       <style>{responsiveCss}</style>
     </SalesPortalLayout>
   );
@@ -2673,4 +3113,190 @@ const styles: Record<string, React.CSSProperties> = {
     animation: "draft-action-spin 0.8s linear infinite",
     flexShrink: 0,
   },
+  productsTable: {
+  display: "flex",
+  flexDirection: "column",
+  minWidth: 780,
+},
+productHeaderRow: {
+  display: "grid",
+  gridTemplateColumns: "2.2fr 1fr 1fr 0.8fr 1fr 1fr 1fr 70px",
+  gap: 12,
+  padding: "0 0 10px",
+  borderBottom: "1px solid #e5e7eb",
+  color: "#6b7280",
+  fontSize: 12,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+},
+productRow: {
+  display: "grid",
+  gridTemplateColumns: "2.2fr 1fr 1fr 0.8fr 1fr 1fr 1fr 70px",
+  gap: 12,
+  alignItems: "center",
+  padding: "14px 0",
+  borderBottom: "1px solid #f0f1f2",
+},
+productCellMain: {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  minWidth: 0,
+},
+productThumbSm: {
+  width: 44,
+  height: 44,
+  borderRadius: 8,
+  objectFit: "cover",
+  border: "1px solid #e5e7eb",
+  background: "#f9fafb",
+  flexShrink: 0,
+},
+productRowInput: {
+  width: "100%",
+  boxSizing: "border-box",
+  height: 38,
+  border: "1px solid #d1d5db",
+  borderRadius: 7,
+  padding: "0 9px",
+  font: "inherit",
+  fontSize: 13,
+},
+removeIconBtn: {
+  background: "none",
+  border: "none",
+  color: "#9ca3af",
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 600,
+  padding: "6px 4px",
+},
+pillPending: {
+  display: "inline-block",
+  background: "#f3e8ff",
+  color: "#7e22ce",
+  borderRadius: 999,
+  padding: "3px 10px",
+  fontSize: 11,
+  fontWeight: 700,
+},
+};
+
+
+
+type Variant = {
+  id: string;
+  title?: string;
+  sku?: string;
+  price?: string | number;
+  currencyCode?: string;
+  inventoryQuantity?: number;
+  inventoryPolicy?: "CONTINUE" | "DENY" | string;
+  tracked?: boolean;
+  availableForSale?: boolean;
+};
+
+type Product = {
+  id: string;
+  title: string;
+  vendor?: string;
+  productType?: string;
+  tags?: string[];
+  image?: string;
+  variants: Variant[];
+};
+
+interface AddProductModalProps {
+  onCancel: () => void;
+  productQuery: string;
+  setProductQuery: (q: string) => void;
+  productResults: Product[];
+  fetchProducts: (q: string) => void;
+  isFetchingProducts: boolean;
+  onSelectVariant: (product: Product, variant: Variant, quantity: number) => void;
+  // Fallback currency used when a variant/product doesn't carry its own
+  // currencyCode (e.g. DraftDetailsPage passes draft.currencyCode).
+  defaultCurrencyCode?: string;
+  // Manual entry is OPTIONAL. Pass all three (form, setForm, onConfirm) to
+  // enable the "Manual Entry" tab (used on QuoteDetailPage). Omit them
+  // (as on DraftDetailsPage) and the modal shows Search Catalog only.
+  form?: any;
+  setForm?: (updater: any) => void;
+  onConfirm?: () => void;
+}
+
+// A variant is treated as "out of stock" ONLY when inventory is explicitly
+// tracked, quantity is 0 (or less), and the inventory policy does not allow
+// overselling. Untracked items (gift cards, digital products, etc.) and any
+// variant missing inventory data are always treated as available.
+function isVariantInStock(variant?: Variant): boolean {
+  if (!variant) return false;
+  if (variant.availableForSale === false) return false;
+  if (variant.tracked === false) return true;
+  if (variant.inventoryQuantity === undefined || variant.inventoryQuantity === null) return true;
+  if (variant.inventoryPolicy === "CONTINUE") return true;
+  return variant.inventoryQuantity > 0;
+}
+
+function fmtPrice(amount: string | number | undefined, currencyCode = "USD") {
+  const num = Number(amount) || 0;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currencyCode,
+      minimumFractionDigits: 2,
+    }).format(num);
+  } catch {
+    return `${currencyCode} ${num.toFixed(2)}`;
+  }
+}
+
+
+
+const pillStyle: React.CSSProperties = {
+  display: "inline-block",
+  background: "#f1f2f4",
+  color: "#4b5563",
+  borderRadius: 999,
+  padding: "3px 10px",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const labelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#6b7280",
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+  marginBottom: 4,
+};
+
+const stepBtnStyle: React.CSSProperties = {
+  width: 24,
+  height: "100%",
+  border: "none",
+  background: "#f9fafb",
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 700,
+};
+
+const fieldLabelStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  fontSize: 13,
+  color: "#374151",
+  fontWeight: 700,
+};
+
+const fieldInputStyle: React.CSSProperties = {
+  height: 38,
+  border: "1px solid #c9cccf",
+  borderRadius: 8,
+  padding: "0 10px",
+  font: "inherit",
+  fontSize: 13,
 };

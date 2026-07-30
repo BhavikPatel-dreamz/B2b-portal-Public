@@ -424,6 +424,7 @@ const styles: Record<string, CSSProperties> = {
   },
   startActionWrap: {
     marginRight: 12,
+    marginBottom: 12,
     display: "inline-flex",
     alignItems: "flex-start",
   } as CSSProperties,

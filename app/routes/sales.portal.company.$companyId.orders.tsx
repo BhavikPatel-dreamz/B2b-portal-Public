@@ -857,7 +857,7 @@ export default function OrderManageScreen() {
               + Create Company
             </button>
             <Link
-              to={`/sales/portal/company/${selectedCompanyId === "all" ? allCompanies[0]?.id : company.id}/create-order`}
+              to={createOrderCompanyId ? `/sales/portal/company/${createOrderCompanyId}/create-order` : "/sales/portal"}
               style={salesPortalButtonStyles.primary}
             >
               + Create Order
