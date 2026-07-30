@@ -585,7 +585,7 @@ function QuoteAction({
       <input type="hidden" name="quoteId" value={quoteId} />
       <button
         disabled={disabled}
-        style={{ ...styles.actionBtn, color: danger ? "#b91c1c" : "#2563eb" }}
+        style={{ ...styles.actionBtn, color: danger ? "#b91c1c" : "var(--sales-portal-accent)" }}
       >
         {label}
       </button>
@@ -597,8 +597,8 @@ const styles: Record<string, React.CSSProperties> = {
   primaryBtn: {
     display: "inline-flex",
     alignItems: "center",
-    background: "#111827",
-    color: "#fff",
+    background: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
     padding: "10px 18px",
     borderRadius: 8,
     textDecoration: "none",
@@ -608,11 +608,11 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   secondaryBtn: {
-    background: "#fff",
-    color: "#374151",
+    background: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent-dark)",
     padding: "9px 12px",
     borderRadius: 8,
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--sales-portal-accent-tint)",
     fontWeight: 700,
     cursor: "pointer",
   },
@@ -620,7 +620,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "#6d7175",
+    color: "var(--sales-portal-accent-dark)",
     textDecoration: "none",
     fontSize: 13,
     fontWeight: 600,
@@ -668,8 +668,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     verticalAlign: "middle",
   },
-  link: { color: "#2c6ecb", fontWeight: 700, textDecoration: "none" },
-  smallLink: { color: "#2c6ecb", textDecoration: "none", fontWeight: 600 },
+  link: { color: "var(--sales-portal-accent)", fontWeight: 700, textDecoration: "none" },
+  smallLink: { color: "var(--sales-portal-accent)", textDecoration: "none", fontWeight: 600 },
   badge: {
     background: "#f4f6f8",
     borderRadius: 8,
@@ -692,7 +692,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 0,
   },
   actionLink: {
-    color: "#2563eb",
+    color: "var(--sales-portal-accent)",
     textDecoration: "none",
     fontWeight: 700,
   },

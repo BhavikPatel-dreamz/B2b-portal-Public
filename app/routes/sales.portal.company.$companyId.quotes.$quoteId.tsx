@@ -146,7 +146,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       ...quote.company,
       shop: {
         ...quote.company.shop,
-        shopDomain: shopCredentials?.shopDomain || quote.company.shop.shopDomain,
+        shopDomain:
+          shopCredentials?.shopDomain || quote.company.shop.shopDomain,
         accessToken: shopCredentials?.accessToken || null,
       },
     },
@@ -179,7 +180,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       id: item.company.id,
       name: item.company.name,
     })),
-    quoteCount: await prisma.quote.count({ where: { companyId: resolvedCompanyId } }),
+    quoteCount: await prisma.quote.count({
+      where: { companyId: resolvedCompanyId },
+    }),
     orderCount: await prisma.b2BOrder.count({
       where: {
         companyId: resolvedCompanyId,
@@ -206,7 +209,8 @@ async function recalculateQuoteTotals(quoteId: string) {
   const quote = await prisma.quote.findUnique({ where: { id: quoteId } });
   if (!quote) return;
 
-  const discountType = quote.discountType === "PERCENTAGE" ? "PERCENTAGE" : "FIXED_AMOUNT";
+  const discountType =
+    quote.discountType === "PERCENTAGE" ? "PERCENTAGE" : "FIXED_AMOUNT";
   const discountAmount = Number(quote.discountAmount) || 0;
   const discountTotal =
     discountType === "PERCENTAGE"
@@ -245,7 +249,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const intentValues = formData.getAll("intent").map(String).filter(Boolean);
-  const intent = intentValues.length ? intentValues[intentValues.length - 1] : "";
+  const intent = intentValues.length
+    ? intentValues[intentValues.length - 1]
+    : "";
   if (intent === "logout") {
     return redirect("/sales/login", {
       headers: { "Set-Cookie": buildClearSessionCookie() },
@@ -262,12 +268,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   // handle server-backed delete of a persisted quote item
   if (intent === "delete_item") {
     const itemId = String(formData.get("itemId") || "");
-    if (!itemId) return Response.json({ error: "Item id missing" }, { status: 400 });
-    const item = await prisma.quoteItem.findUnique({ where: { id: itemId }, select: { id: true, quoteId: true, productTitle: true } });
-    if (!item || item.quoteId !== quote.id) return Response.json({ error: "Item not found" }, { status: 404 });
+    if (!itemId)
+      return Response.json({ error: "Item id missing" }, { status: 400 });
+    const item = await prisma.quoteItem.findUnique({
+      where: { id: itemId },
+      select: { id: true, quoteId: true, productTitle: true },
+    });
+    if (!item || item.quoteId !== quote.id)
+      return Response.json({ error: "Item not found" }, { status: 404 });
     await prisma.quoteItem.delete({ where: { id: itemId } });
     await recalculateQuoteTotals(quote.id);
-    await logQuoteActivity({ quoteId: quote.id, userId: user.id, companyId: resolvedCompanyId, customerEmail: quote.customerEmail, action: "Quote Item Removed", message: `Removed item ${item.productTitle || item.id}` });
+    await logQuoteActivity({
+      quoteId: quote.id,
+      userId: user.id,
+      companyId: resolvedCompanyId,
+      customerEmail: quote.customerEmail,
+      action: "Quote Item Removed",
+      message: `Removed item ${item.productTitle || item.id}`,
+    });
     return Response.json({ success: true, message: "Item removed." });
   }
 
@@ -281,29 +299,53 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
 
       const title = String(formData.get("title") || "").trim();
-      const customerFirstName = String(formData.get("customerFirstName") || "").trim();
-      const customerLastName = String(formData.get("customerLastName") || "").trim();
+      const customerFirstName = String(
+        formData.get("customerFirstName") || "",
+      ).trim();
+      const customerLastName = String(
+        formData.get("customerLastName") || "",
+      ).trim();
       const customerEmail = String(formData.get("customerEmail") || "").trim();
-      const deliveryLocationId = String(formData.get("deliveryLocationId") || "").trim();
-      const deliveryLocationName = String(formData.get("deliveryLocationName") || "").trim();
-      const deliveryAddress1 = String(formData.get("deliveryAddress1") || "").trim();
-      const deliveryAddress2 = String(formData.get("deliveryAddress2") || "").trim();
+      const deliveryLocationId = String(
+        formData.get("deliveryLocationId") || "",
+      ).trim();
+      const deliveryLocationName = String(
+        formData.get("deliveryLocationName") || "",
+      ).trim();
+      const deliveryAddress1 = String(
+        formData.get("deliveryAddress1") || "",
+      ).trim();
+      const deliveryAddress2 = String(
+        formData.get("deliveryAddress2") || "",
+      ).trim();
       const deliveryCity = String(formData.get("deliveryCity") || "").trim();
-      const deliveryProvince = String(formData.get("deliveryProvince") || "").trim();
+      const deliveryProvince = String(
+        formData.get("deliveryProvince") || "",
+      ).trim();
       const deliveryZip = String(formData.get("deliveryZip") || "").trim();
-      const deliveryCountry = String(formData.get("deliveryCountry") || "").trim();
+      const deliveryCountry = String(
+        formData.get("deliveryCountry") || "",
+      ).trim();
       const deliveryPhone = String(formData.get("deliveryPhone") || "").trim();
       const customerNotes = String(formData.get("customerNotes") || "");
       const internalNotes = String(formData.get("internalNotes") || "");
       const expires = String(formData.get("expiresAt") || "");
-      const requestedStatus = String(formData.get("status") || quote.status).trim();
+      const requestedStatus = String(
+        formData.get("status") || quote.status,
+      ).trim();
       const normalizedStatus = quoteStatuses.includes(requestedStatus)
         ? requestedStatus
         : quote.status;
-      const discountType = String(formData.get("discountType") || quote.discountType || "FIXED_AMOUNT");
-      const discountAmount = Number(formData.get("discountAmount") ?? quote.discountAmount ?? 0);
+      const discountType = String(
+        formData.get("discountType") || quote.discountType || "FIXED_AMOUNT",
+      );
+      const discountAmount = Number(
+        formData.get("discountAmount") ?? quote.discountAmount ?? 0,
+      );
       const taxRate = Number(formData.get("taxRate") ?? quote.taxRate ?? 0);
-      const shippingAmount = Number(formData.get("shippingAmount") ?? quote.shippingAmount ?? 0);
+      const shippingAmount = Number(
+        formData.get("shippingAmount") ?? quote.shippingAmount ?? 0,
+      );
       const normalizedCustomerEmail = customerEmail || quote.customerEmail;
       if (!normalizedCustomerEmail) {
         throw new Error("Customer email is required.");
@@ -326,10 +368,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           const quantityValue = Number(formData.get(`quantity_${item.id}`));
           const unitPriceValue = Number(formData.get(`unitPrice_${item.id}`));
           const discountValue = Number(formData.get(`discount_${item.id}`));
-          const productTitleValue = String(formData.get(`productTitle_${item.id}`) ?? item.productTitle).trim();
-          const skuValue = String(formData.get(`sku_${item.id}`) ?? item.sku ?? "").trim();
-          const variantTitleValue = String(formData.get(`variantTitle_${item.id}`) ?? item.variantTitle ?? "").trim();
-          const imageValue = String(formData.get(`image_${item.id}`) ?? item.image ?? "").trim();
+          const productTitleValue = String(
+            formData.get(`productTitle_${item.id}`) ?? item.productTitle,
+          ).trim();
+          const skuValue = String(
+            formData.get(`sku_${item.id}`) ?? item.sku ?? "",
+          ).trim();
+          const variantTitleValue = String(
+            formData.get(`variantTitle_${item.id}`) ?? item.variantTitle ?? "",
+          ).trim();
+          const imageValue = String(
+            formData.get(`image_${item.id}`) ?? item.image ?? "",
+          ).trim();
 
           if (!Number.isFinite(quantityValue) || quantityValue < 1) {
             throw new Error(`Invalid quantity for ${item.productTitle}`);
@@ -341,7 +391,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             throw new Error(`Invalid discount for ${item.productTitle}`);
           }
 
-          const totalPrice = Math.max(0, unitPriceValue * quantityValue - discountValue);
+          const totalPrice = Math.max(
+            0,
+            unitPriceValue * quantityValue - discountValue,
+          );
           return {
             id: item.id,
             quantity: Math.round(quantityValue),
@@ -356,25 +409,49 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         })
         .filter(Boolean);
 
-      const newRowKeys = formData.getAll("newProductRow").map(String).filter(Boolean);
+      const newRowKeys = formData
+        .getAll("newProductRow")
+        .map(String)
+        .filter(Boolean);
       const newItems = newRowKeys
         .map((rowKey) => {
-          const productId = String(formData.get(`newProductId_${rowKey}`) || "").trim();
-          const productTitle = String(formData.get(`newProductTitle_${rowKey}`) || "").trim();
-          const variantTitle = String(formData.get(`newVariantTitle_${rowKey}`) || "").trim();
+          const productId = String(
+            formData.get(`newProductId_${rowKey}`) || "",
+          ).trim();
+          const productTitle = String(
+            formData.get(`newProductTitle_${rowKey}`) || "",
+          ).trim();
+          const variantTitle = String(
+            formData.get(`newVariantTitle_${rowKey}`) || "",
+          ).trim();
           const sku = String(formData.get(`newSku_${rowKey}`) || "").trim();
-          const variantId = String(formData.get(`newVariantId_${rowKey}`) || "").trim();
+          const variantId = String(
+            formData.get(`newVariantId_${rowKey}`) || "",
+          ).trim();
           const image = String(formData.get(`newImage_${rowKey}`) || "").trim();
           const quantity = Number(formData.get(`newQuantity_${rowKey}`));
           const unitPrice = Number(formData.get(`newUnitPrice_${rowKey}`));
           const discount = Number(formData.get(`newDiscount_${rowKey}`));
 
-          const isAnyValueFilled = Boolean(productTitle || variantTitle || sku || image || quantity || unitPrice || discount);
+          const isAnyValueFilled = Boolean(
+            productTitle ||
+            variantTitle ||
+            sku ||
+            image ||
+            quantity ||
+            unitPrice ||
+            discount,
+          );
           if (!isAnyValueFilled) return null;
 
-          const validQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
-          const validUnitPrice = Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0;
-          const validDiscount = Number.isFinite(discount) && discount >= 0 ? discount : 0;
+          const validQuantity =
+            Number.isFinite(quantity) && quantity > 0
+              ? Math.round(quantity)
+              : 1;
+          const validUnitPrice =
+            Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0;
+          const validDiscount =
+            Number.isFinite(discount) && discount >= 0 ? discount : 0;
 
           return {
             productId: productId || null,
@@ -386,27 +463,34 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             quantity: validQuantity,
             unitPrice: validUnitPrice,
             discount: validDiscount,
-            totalPrice: Math.max(0, validUnitPrice * validQuantity - validDiscount),
+            totalPrice: Math.max(
+              0,
+              validUnitPrice * validQuantity - validDiscount,
+            ),
           };
         })
         .filter(Boolean) as Array<{
-          productId: string | null;
-          productTitle: string;
-          variantTitle: string;
-          sku: string;
-          image: string | null;
-          variantId: string;
-          quantity: number;
-          unitPrice: number;
-          discount: number;
-          totalPrice: number;
-        }>;
+        productId: string | null;
+        productTitle: string;
+        variantTitle: string;
+        sku: string;
+        image: string | null;
+        variantId: string;
+        quantity: number;
+        unitPrice: number;
+        discount: number;
+        totalPrice: number;
+      }>;
 
       if (!itemUpdates.length && !newItems.length) {
-        return Response.json({ error: "No quote changes were submitted." }, { status: 400 });
+        return Response.json(
+          { error: "No quote changes were submitted." },
+          { status: 400 },
+        );
       }
 
-      const quoteCurrency = quote.currencyCode || quote.items?.[0]?.currencyCode || "USD";
+      const quoteCurrency =
+        quote.currencyCode || quote.items?.[0]?.currencyCode || "USD";
       const existingInvoiceData =
         quote.invoiceData && typeof quote.invoiceData === "object"
           ? (quote.invoiceData as Record<string, any>)
@@ -414,7 +498,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const nextInvoiceData = {
         ...existingInvoiceData,
         quoteEditMeta: {
-          ...(existingInvoiceData.quoteEditMeta && typeof existingInvoiceData.quoteEditMeta === "object"
+          ...(existingInvoiceData.quoteEditMeta &&
+          typeof existingInvoiceData.quoteEditMeta === "object"
             ? existingInvoiceData.quoteEditMeta
             : {}),
           customerDetails: {
@@ -424,7 +509,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           },
           deliveryDetails: {
             locationName: deliveryLocationName || null,
-            address: [deliveryAddress1, deliveryAddress2, deliveryCity, deliveryProvince, deliveryZip, deliveryCountry].filter(Boolean).join("\n") || null,
+            address:
+              [
+                deliveryAddress1,
+                deliveryAddress2,
+                deliveryCity,
+                deliveryProvince,
+                deliveryZip,
+                deliveryCountry,
+              ]
+                .filter(Boolean)
+                .join("\n") || null,
             phone: deliveryPhone || null,
           },
         },
@@ -490,8 +585,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           where: { id: quote.id },
           data: {
             title: title || quote.title,
-            customerFirstName: customerFirstName || quote.customerFirstName || null,
-            customerLastName: customerLastName || quote.customerLastName || null,
+            customerFirstName:
+              customerFirstName || quote.customerFirstName || null,
+            customerLastName:
+              customerLastName || quote.customerLastName || null,
             customerEmail: normalizedCustomerEmail,
             customerNotes,
             internalNotes,
@@ -509,7 +606,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       });
 
       if (normalizedStatus === "sent" && quote.status !== "sent") {
-        await sendQuoteToCustomer({ quoteId: quote.id, request, userId: user.id });
+        await sendQuoteToCustomer({
+          quoteId: quote.id,
+          request,
+          userId: user.id,
+        });
       }
 
       await recalculateQuoteTotals(quote.id);
@@ -520,7 +621,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         companyId: resolvedCompanyId,
         customerEmail: normalizedCustomerEmail,
         action: "Quote Updated",
-        message: "Quote customer details, delivery details, items, notes, and expiry were updated.",
+        message:
+          "Quote customer details, delivery details, items, notes, and expiry were updated.",
       });
 
       if (quote.shopifyDraftOrderId) {
@@ -529,18 +631,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           include: { items: true, company: { include: { shop: true } } },
         });
         if (quoteWithShop) {
-          await updateShopifyDraftOrderFromQuote(quoteWithShop, deliveryLocationId, {
-            address1: deliveryAddress1 || null,
-            address2: deliveryAddress2 || null,
-            city: deliveryCity || null,
-            province: deliveryProvince || null,
-            zip: deliveryZip || null,
-            country: deliveryCountry || null,
-            phone: deliveryPhone || null,
-          }, {
-            name: [user.firstName, user.lastName].filter(Boolean).join(" "),
-            email: user.email,
-          });
+          await updateShopifyDraftOrderFromQuote(
+            quoteWithShop,
+            deliveryLocationId,
+            {
+              address1: deliveryAddress1 || null,
+              address2: deliveryAddress2 || null,
+              city: deliveryCity || null,
+              province: deliveryProvince || null,
+              zip: deliveryZip || null,
+              country: deliveryCountry || null,
+              phone: deliveryPhone || null,
+            },
+            {
+              name: [user.firstName, user.lastName].filter(Boolean).join(" "),
+              email: user.email,
+            },
+          );
         }
       }
 
@@ -555,20 +662,43 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         );
       }
 
-      const customerFirstName = String(formData.get("customerFirstName") || "").trim();
-      const customerLastName = String(formData.get("customerLastName") || "").trim();
+      const customerFirstName = String(
+        formData.get("customerFirstName") || "",
+      ).trim();
+      const customerLastName = String(
+        formData.get("customerLastName") || "",
+      ).trim();
       const customerEmail = String(formData.get("customerEmail") || "").trim();
-      const deliveryLocationId = String(formData.get("deliveryLocationId") || "").trim();
-      const deliveryLocationName = String(formData.get("deliveryLocationName") || "").trim();
-      const deliveryAddress1 = String(formData.get("deliveryAddress1") || "").trim();
-      const deliveryAddress2 = String(formData.get("deliveryAddress2") || "").trim();
+      const deliveryLocationId = String(
+        formData.get("deliveryLocationId") || "",
+      ).trim();
+      const deliveryLocationName = String(
+        formData.get("deliveryLocationName") || "",
+      ).trim();
+      const deliveryAddress1 = String(
+        formData.get("deliveryAddress1") || "",
+      ).trim();
+      const deliveryAddress2 = String(
+        formData.get("deliveryAddress2") || "",
+      ).trim();
       const deliveryCity = String(formData.get("deliveryCity") || "").trim();
-      const deliveryProvince = String(formData.get("deliveryProvince") || "").trim();
+      const deliveryProvince = String(
+        formData.get("deliveryProvince") || "",
+      ).trim();
       const deliveryZip = String(formData.get("deliveryZip") || "").trim();
-      const deliveryCountry = String(formData.get("deliveryCountry") || "").trim();
+      const deliveryCountry = String(
+        formData.get("deliveryCountry") || "",
+      ).trim();
       const deliveryPhone = String(formData.get("deliveryPhone") || "").trim();
 
-      const addressFields = [deliveryAddress1, deliveryAddress2, deliveryCity, deliveryProvince, deliveryZip, deliveryCountry].filter(Boolean);
+      const addressFields = [
+        deliveryAddress1,
+        deliveryAddress2,
+        deliveryCity,
+        deliveryProvince,
+        deliveryZip,
+        deliveryCountry,
+      ].filter(Boolean);
 
       const existingInvoiceData =
         quote.invoiceData && typeof quote.invoiceData === "object"
@@ -577,7 +707,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const nextInvoiceData = {
         ...existingInvoiceData,
         quoteEditMeta: {
-          ...(existingInvoiceData.quoteEditMeta && typeof existingInvoiceData.quoteEditMeta === "object"
+          ...(existingInvoiceData.quoteEditMeta &&
+          typeof existingInvoiceData.quoteEditMeta === "object"
             ? existingInvoiceData.quoteEditMeta
             : {}),
           customerDetails: {
@@ -596,7 +727,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await prisma.quote.update({
         where: { id: quote.id },
         data: {
-          customerFirstName: customerFirstName || quote.customerFirstName || null,
+          customerFirstName:
+            customerFirstName || quote.customerFirstName || null,
           customerLastName: customerLastName || quote.customerLastName || null,
           customerEmail: customerEmail || quote.customerEmail,
           invoiceData: nextInvoiceData,
@@ -608,7 +740,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         companyId: resolvedCompanyId,
         action: deliveryLocationId ? "edit" : "create",
         locationId: deliveryLocationId || undefined,
-        name: deliveryLocationName || deliveryAddress1 || "Custom Delivery Location",
+        name:
+          deliveryLocationName ||
+          deliveryAddress1 ||
+          "Custom Delivery Location",
         country: deliveryCountry || undefined,
         address1: deliveryAddress1 || undefined,
         address2: deliveryAddress2 || undefined,
@@ -621,16 +756,19 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         billingSameAsShipping: true,
       };
 
-      const locationReq = new Request("http://internal/api/proxy/locationmanagement", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(request.headers.get("cookie")
-            ? { Cookie: request.headers.get("cookie")! }
-            : {}),
+      const locationReq = new Request(
+        "http://internal/api/proxy/locationmanagement",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(request.headers.get("cookie")
+              ? { Cookie: request.headers.get("cookie")! }
+              : {}),
+          },
+          body: JSON.stringify(locationPayload),
         },
-        body: JSON.stringify(locationPayload),
-      });
+      );
 
       const locationRes = await locationManagementAction({
         request: locationReq,
@@ -652,18 +790,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           include: { items: true, company: { include: { shop: true } } },
         });
         if (quoteWithShop) {
-          await updateShopifyDraftOrderFromQuote(quoteWithShop, deliveryLocationId, {
-            address1: deliveryAddress1 || null,
-            address2: deliveryAddress2 || null,
-            city: deliveryCity || null,
-            province: deliveryProvince || null,
-            zip: deliveryZip || null,
-            country: deliveryCountry || null,
-            phone: deliveryPhone || null,
-          }, {
-            name: [user.firstName, user.lastName].filter(Boolean).join(" "),
-            email: user.email,
-          });
+          await updateShopifyDraftOrderFromQuote(
+            quoteWithShop,
+            deliveryLocationId,
+            {
+              address1: deliveryAddress1 || null,
+              address2: deliveryAddress2 || null,
+              city: deliveryCity || null,
+              province: deliveryProvince || null,
+              zip: deliveryZip || null,
+              country: deliveryCountry || null,
+              phone: deliveryPhone || null,
+            },
+            {
+              name: [user.firstName, user.lastName].filter(Boolean).join(" "),
+              email: user.email,
+            },
+          );
         }
       }
 
@@ -710,7 +853,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (intent === "preview_invoice") {
       if (!quote.shopifyDraftOrderId) {
         return Response.json(
-          { error: `No draft order linked to this quote (${quote.shopifyDraftOrderName || quote.quoteNumber}). Send the invoice first.` },
+          {
+            error: `No draft order linked to this quote (${quote.shopifyDraftOrderName || quote.quoteNumber}). Send the invoice first.`,
+          },
           { status: 400 },
         );
       }
@@ -768,7 +913,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         });
         const data = await res.json();
         draft = data.data?.draftOrder;
-      } catch { /* continue */ }
+      } catch {
+        /* continue */
+      }
 
       if (!draft) {
         try {
@@ -801,7 +948,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           });
           const data = await res.json();
           draft = data.data?.order;
-        } catch { /* continue */ }
+        } catch {
+          /* continue */
+        }
       }
 
       if (!draft && label && label.startsWith("#")) {
@@ -833,7 +982,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           });
           const data = await res.json();
           draft = data.data?.orders?.nodes?.[0] || null;
-        } catch { /* continue */ }
+        } catch {
+          /* continue */
+        }
       }
 
       // Fallback: search by quote number in order note
@@ -866,12 +1017,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           });
           const data = await res.json();
           draft = data.data?.orders?.nodes?.[0] || null;
-        } catch { /* continue */ }
+        } catch {
+          /* continue */
+        }
       }
 
       if (!draft) {
         return Response.json(
-          { error: `Could not load invoice for "${label}". Please check the order on Shopify admin.` },
+          {
+            error: `Could not load invoice for "${label}". Please check the order on Shopify admin.`,
+          },
           { status: 400 },
         );
       }
@@ -895,7 +1050,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             quantity: item.quantity,
             originalUnitPrice: Number(item.unitPrice).toFixed(2),
             discount: Number(item.discount || 0).toFixed(2),
-            discountedTotal: (Number(item.unitPrice) * item.quantity - Number(item.discount || 0)).toFixed(2),
+            discountedTotal: (
+              Number(item.unitPrice) * item.quantity -
+              Number(item.discount || 0)
+            ).toFixed(2),
           })),
           subtotal: quote.subtotal.toString(),
           totalDiscounts: quote.discountTotal.toString(),
@@ -1003,7 +1161,9 @@ export function AddProductModal({
   };
   const [mode, setMode] = useState<"search" | "manual">("search");
   const [searchInput, setSearchInput] = useState(productQuery || "");
-  const [selection, setSelection] = useState<Record<string, { variantId: string; qty: number }>>({});
+  const [selection, setSelection] = useState<
+    Record<string, { variantId: string; qty: number }>
+  >({});
 
   useEffect(() => {
     setSearchInput(productQuery || "");
@@ -1025,12 +1185,18 @@ export function AddProductModal({
   );
 
   const setVariantId = (productId: string, variantId: string) => {
-    setSelection((prev) => ({ ...prev, [productId]: { variantId, qty: prev[productId]?.qty || 1 } }));
+    setSelection((prev) => ({
+      ...prev,
+      [productId]: { variantId, qty: prev[productId]?.qty || 1 },
+    }));
   };
 
   const setQty = (productId: string, qty: number) => {
     if (qty < 1) return;
-    setSelection((prev) => ({ ...prev, [productId]: { variantId: prev[productId]?.variantId || "", qty } }));
+    setSelection((prev) => ({
+      ...prev,
+      [productId]: { variantId: prev[productId]?.variantId || "", qty },
+    }));
   };
 
   return (
@@ -1069,12 +1235,28 @@ export function AddProductModal({
             borderBottom: "1px solid #e3e7ec",
           }}
         >
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>Add Product</h3>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: 16,
+              fontWeight: 700,
+              color: "#111827",
+            }}
+          >
+            Add Product
+          </h3>
           <button
             type="button"
             onClick={onCancel}
             aria-label="Close"
-            style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#5c5f62", lineHeight: 1 }}
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: 22,
+              cursor: "pointer",
+              color: "#5c5f62",
+              lineHeight: 1,
+            }}
           >
             &times;
           </button>
@@ -1089,7 +1271,8 @@ export function AddProductModal({
               style={{
                 background: mode === "search" ? "#111827" : "#f9fafb",
                 color: mode === "search" ? "#fff" : "#374151",
-                border: "1px solid " + (mode === "search" ? "#111827" : "#d1d5db"),
+                border:
+                  "1px solid " + (mode === "search" ? "#111827" : "#d1d5db"),
                 borderRadius: 999,
                 padding: "7px 14px",
                 fontWeight: 700,
@@ -1105,7 +1288,8 @@ export function AddProductModal({
               style={{
                 background: mode === "manual" ? "#111827" : "#f9fafb",
                 color: mode === "manual" ? "#fff" : "#374151",
-                border: "1px solid " + (mode === "manual" ? "#111827" : "#d1d5db"),
+                border:
+                  "1px solid " + (mode === "manual" ? "#111827" : "#d1d5db"),
                 borderRadius: 999,
                 padding: "7px 14px",
                 fontWeight: 700,
@@ -1121,7 +1305,10 @@ export function AddProductModal({
         {!manualEntryEnabled || mode === "search" ? (
           <>
             {/* Search bar */}
-            <form onSubmit={handleSearchSubmit} style={{ display: "flex", gap: 10, padding: "14px 20px 0" }}>
+            <form
+              onSubmit={handleSearchSubmit}
+              style={{ display: "flex", gap: 10, padding: "14px 20px 0" }}
+            >
               <input
                 type="text"
                 value={searchInput}
@@ -1157,20 +1344,43 @@ export function AddProductModal({
             </form>
 
             {/* Results */}
-            <div style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                overflowY: "auto",
+                padding: 20,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+              }}
+            >
               {isFetchingProducts ? (
-                <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "40px 0",
+                    color: "#6b7280",
+                    fontSize: 13,
+                  }}
+                >
                   Loading products...
                 </div>
               ) : productResults.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "40px 0",
+                    color: "#6b7280",
+                    fontSize: 13,
+                  }}
+                >
                   No products found. Try a different search term.
                 </div>
               ) : (
                 productResults.map((product) => {
                   const { variantId, qty } = getSelection(product);
                   const variant =
-                    product.variants.find((v) => v.id === variantId) || product.variants[0];
+                    product.variants.find((v) => v.id === variantId) ||
+                    product.variants[0];
                   const inStock = isVariantInStock(variant);
 
                   return (
@@ -1205,7 +1415,11 @@ export function AddProductModal({
                           <img
                             src={product.image}
                             alt=""
-                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                            }}
                           />
                         ) : (
                           <span style={{ fontSize: 22 }}>📦</span>
@@ -1214,12 +1428,29 @@ export function AddProductModal({
 
                       {/* Middle info */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14.5, color: "#111827" }}>{product.title}</div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 14.5,
+                            color: "#111827",
+                          }}
+                        >
+                          {product.title}
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 6,
+                            marginTop: 6,
+                          }}
+                        >
                           {product.vendor && (
                             <span style={pillStyle}>{product.vendor}</span>
                           )}
-                          {product.productType && <span style={pillStyle}>{product.productType}</span>}
+                          {product.productType && (
+                            <span style={pillStyle}>{product.productType}</span>
+                          )}
                           {(product.tags || []).slice(0, 2).map((tag) => (
                             <span key={tag} style={pillStyle}>
                               {tag}
@@ -1232,7 +1463,9 @@ export function AddProductModal({
                           {product.variants.length > 1 ? (
                             <select
                               value={variantId}
-                              onChange={(e) => setVariantId(product.id, e.target.value)}
+                              onChange={(e) =>
+                                setVariantId(product.id, e.target.value)
+                              }
                               style={{
                                 width: "100%",
                                 maxWidth: 320,
@@ -1245,8 +1478,12 @@ export function AddProductModal({
                             >
                               {product.variants.map((v) => (
                                 <option key={v.id} value={v.id}>
-                                  {v.title || "Default variant"} · SKU {v.sku || "N/A"} ·{" "}
-                                  {fmtPrice(v.price, v.currencyCode || defaultCurrencyCode)}
+                                  {v.title || "Default variant"} · SKU{" "}
+                                  {v.sku || "N/A"} ·{" "}
+                                  {fmtPrice(
+                                    v.price,
+                                    v.currencyCode || defaultCurrencyCode,
+                                  )}
                                 </option>
                               ))}
                             </select>
@@ -1265,12 +1502,19 @@ export function AddProductModal({
                                 maxWidth: 320,
                               }}
                             >
-                              {variant?.title && variant.title !== "Default Title"
+                              {variant?.title &&
+                              variant.title !== "Default Title"
                                 ? variant.title
                                 : "Default variant"}
                             </div>
                           )}
-                          <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize: 12,
+                              color: "#6b7280",
+                            }}
+                          >
                             SKU: {variant?.sku || "N/A"}
                           </div>
                         </div>
@@ -1287,13 +1531,36 @@ export function AddProductModal({
                         }}
                       >
                         <div style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: 12, color: "#a21caf", fontWeight: 700 }}>Customer price</div>
-                          <div style={{ fontSize: 17, fontWeight: 800, color: "#a21caf" }}>
-                            {fmtPrice(variant?.price, variant?.currencyCode || defaultCurrencyCode)}
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "var(--sales-portal-accent)",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Customer price
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 17,
+                              fontWeight: 800,
+                              color: "var(--sales-portal-accent)",
+                            }}
+                          >
+                            {fmtPrice(
+                              variant?.price,
+                              variant?.currencyCode || defaultCurrencyCode,
+                            )}
                           </div>
                         </div>
 
-                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 10,
+                            alignItems: "center",
+                          }}
+                        >
                           <div
                             style={{
                               display: "flex",
@@ -1315,7 +1582,12 @@ export function AddProductModal({
                               type="number"
                               min={1}
                               value={qty}
-                              onChange={(e) => setQty(product.id, parseInt(e.target.value) || 1)}
+                              onChange={(e) =>
+                                setQty(
+                                  product.id,
+                                  parseInt(e.target.value) || 1,
+                                )
+                              }
                               style={{
                                 width: 34,
                                 height: "100%",
@@ -1338,12 +1610,14 @@ export function AddProductModal({
                           <button
                             type="button"
                             disabled={!inStock}
-                            onClick={() => variant && onSelectVariant(product, variant, qty)}
+                            onClick={() =>
+                              variant && onSelectVariant(product, variant, qty)
+                            }
                             style={{
                               background: inStock
-                                ? "linear-gradient(135deg, #c026d3, #9333ea)"
-                                : "#d8b4fe",
-                              color: "#fff",
+                                ? "linear-gradient(135deg, var(--sales-portal-accent), var(--sales-portal-accent-dark))"
+                                : "var(--sales-portal-accent-soft)",
+                              color: inStock ? "#fff" : "var(--sales-portal-accent-dark)",
                               border: "none",
                               borderRadius: 999,
                               padding: "9px 18px",
@@ -1365,16 +1639,30 @@ export function AddProductModal({
           </>
         ) : (
           /* Manual entry form */
-          <div style={{ padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div
+            style={{
+              padding: 20,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
             <div
               className="sales-add-product-grid"
-              style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 14,
+              }}
             >
               <label style={fieldLabelStyle}>
                 Product title
                 <input
                   value={form?.productTitle ?? ""}
-                  onChange={(e) => handleManualFieldChange("productTitle", e.target.value)}
+                  onChange={(e) =>
+                    handleManualFieldChange("productTitle", e.target.value)
+                  }
                   style={fieldInputStyle}
                 />
               </label>
@@ -1382,7 +1670,9 @@ export function AddProductModal({
                 SKU
                 <input
                   value={form?.sku ?? ""}
-                  onChange={(e) => handleManualFieldChange("sku", e.target.value)}
+                  onChange={(e) =>
+                    handleManualFieldChange("sku", e.target.value)
+                  }
                   style={fieldInputStyle}
                 />
               </label>
@@ -1390,7 +1680,9 @@ export function AddProductModal({
                 Variant title
                 <input
                   value={form?.variantTitle ?? ""}
-                  onChange={(e) => handleManualFieldChange("variantTitle", e.target.value)}
+                  onChange={(e) =>
+                    handleManualFieldChange("variantTitle", e.target.value)
+                  }
                   style={fieldInputStyle}
                 />
               </label>
@@ -1398,7 +1690,9 @@ export function AddProductModal({
                 Image URL
                 <input
                   value={form?.image ?? ""}
-                  onChange={(e) => handleManualFieldChange("image", e.target.value)}
+                  onChange={(e) =>
+                    handleManualFieldChange("image", e.target.value)
+                  }
                   style={fieldInputStyle}
                 />
               </label>
@@ -1409,7 +1703,9 @@ export function AddProductModal({
                   min="0"
                   step="0.01"
                   value={form?.unitPrice ?? ""}
-                  onChange={(e) => handleManualFieldChange("unitPrice", e.target.value)}
+                  onChange={(e) =>
+                    handleManualFieldChange("unitPrice", e.target.value)
+                  }
                   style={fieldInputStyle}
                 />
               </label>
@@ -1420,7 +1716,9 @@ export function AddProductModal({
                   min="0"
                   step="0.01"
                   value={form?.discount ?? ""}
-                  onChange={(e) => handleManualFieldChange("discount", e.target.value)}
+                  onChange={(e) =>
+                    handleManualFieldChange("discount", e.target.value)
+                  }
                   style={fieldInputStyle}
                 />
               </label>
@@ -1430,7 +1728,12 @@ export function AddProductModal({
                   type="number"
                   min="1"
                   value={form?.quantity ?? 1}
-                  onChange={(e) => handleManualFieldChange("quantity", parseInt(e.target.value, 10) || 1)}
+                  onChange={(e) =>
+                    handleManualFieldChange(
+                      "quantity",
+                      parseInt(e.target.value, 10) || 1,
+                    )
+                  }
                   style={fieldInputStyle}
                 />
               </label>
@@ -1516,7 +1819,11 @@ export default function QuoteDetailPage() {
   const [notification, setNotification] = useState<{
     type: "success" | "error";
     message: string;
-  } | null>(initialSuccessMessage ? { type: "success", message: initialSuccessMessage } : null);
+  } | null>(
+    initialSuccessMessage
+      ? { type: "success", message: initialSuccessMessage }
+      : null,
+  );
   const notificationTimerRef = useRef<number | null>(null);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showAllActivities, setShowAllActivities] = useState(false);
@@ -1561,7 +1868,11 @@ export default function QuoteDetailPage() {
     setShowAddProductModal(false);
   };
 
-  const handleSelectProductVariant = (product: any, variant: any, quantity: number = 1) => {
+  const handleSelectProductVariant = (
+    product: any,
+    variant: any,
+    quantity: number = 1,
+  ) => {
     const selected = {
       productId: product?.id || "",
       productTitle: product.title || "",
@@ -1639,7 +1950,10 @@ export default function QuoteDetailPage() {
   };
 
   const addRowWithLoader = async () => {
-    setNewProductRows((rows) => [...rows, { ...addProductForm, rowKey: String(rows.length) }]);
+    setNewProductRows((rows) => [
+      ...rows,
+      { ...addProductForm, rowKey: String(rows.length) },
+    ]);
   };
 
   const fetchProducts = async (query = "all") => {
@@ -1702,12 +2016,22 @@ export default function QuoteDetailPage() {
   const dateInput = quote.expiresAt.slice(0, 10);
   const sendIntent = quote.status === "draft" ? "send_quote" : "resend_quote";
   const savedCustomerDetails = {
-    firstName: quote.invoiceData?.quoteEditMeta?.customerDetails?.firstName || quote.customerFirstName || "",
-    lastName: quote.invoiceData?.quoteEditMeta?.customerDetails?.lastName || quote.customerLastName || "",
-    email: quote.invoiceData?.quoteEditMeta?.customerDetails?.email || quote.customerEmail || "",
+    firstName:
+      quote.invoiceData?.quoteEditMeta?.customerDetails?.firstName ||
+      quote.customerFirstName ||
+      "",
+    lastName:
+      quote.invoiceData?.quoteEditMeta?.customerDetails?.lastName ||
+      quote.customerLastName ||
+      "",
+    email:
+      quote.invoiceData?.quoteEditMeta?.customerDetails?.email ||
+      quote.customerEmail ||
+      "",
   };
   const savedDeliveryDetails = {
-    locationName: quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName || "",
+    locationName:
+      quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName || "",
     address: quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address || "",
     phone: quote.invoiceData?.quoteEditMeta?.deliveryDetails?.phone || "",
   };
@@ -1722,35 +2046,49 @@ export default function QuoteDetailPage() {
   );
   const initialLocationId =
     requestedLocationId &&
-    companyLocations.some((location: any) => location.id === requestedLocationId)
+    companyLocations.some(
+      (location: any) => location.id === requestedLocationId,
+    )
       ? requestedLocationId
       : initialLocationMatch?.id || "";
-  const [selectedDeliveryLocationId, setSelectedDeliveryLocationId] = useState<string>(
-    initialLocationId,
-  );
-  const [deliveryLocationNameValue, setDeliveryLocationNameValue] = useState<string>(
-    savedDeliveryDetails.locationName || deliveryDetails.locationName || "",
-  );
+  const [selectedDeliveryLocationId, setSelectedDeliveryLocationId] =
+    useState<string>(initialLocationId);
+  const [deliveryLocationNameValue, setDeliveryLocationNameValue] =
+    useState<string>(
+      savedDeliveryDetails.locationName || deliveryDetails.locationName || "",
+    );
   const [deliveryPhoneValue, setDeliveryPhoneValue] = useState<string>(
     savedDeliveryDetails.phone || deliveryDetails.phone || "",
   );
   const [deliveryAddress1Value, setDeliveryAddress1Value] = useState<string>(
-    savedDeliveryDetails.address?.split("\n")[0] || deliveryDetails.addressLines?.[0] || "",
+    savedDeliveryDetails.address?.split("\n")[0] ||
+      deliveryDetails.addressLines?.[0] ||
+      "",
   );
   const [deliveryAddress2Value, setDeliveryAddress2Value] = useState<string>(
-    savedDeliveryDetails.address?.split("\n")[1] || deliveryDetails.addressLines?.[1] || "",
+    savedDeliveryDetails.address?.split("\n")[1] ||
+      deliveryDetails.addressLines?.[1] ||
+      "",
   );
   const [deliveryCityValue, setDeliveryCityValue] = useState<string>(
-    savedDeliveryDetails.address?.split("\n")[2] || deliveryDetails.addressLines?.[2] || "",
+    savedDeliveryDetails.address?.split("\n")[2] ||
+      deliveryDetails.addressLines?.[2] ||
+      "",
   );
   const [deliveryProvinceValue, setDeliveryProvinceValue] = useState<string>(
-    savedDeliveryDetails.address?.split("\n")[3] || deliveryDetails.addressLines?.[3] || "",
+    savedDeliveryDetails.address?.split("\n")[3] ||
+      deliveryDetails.addressLines?.[3] ||
+      "",
   );
   const [deliveryZipValue, setDeliveryZipValue] = useState<string>(
-    savedDeliveryDetails.address?.split("\n")[4] || deliveryDetails.addressLines?.[4] || "",
+    savedDeliveryDetails.address?.split("\n")[4] ||
+      deliveryDetails.addressLines?.[4] ||
+      "",
   );
   const [deliveryCountryValue, setDeliveryCountryValue] = useState<string>(
-    savedDeliveryDetails.address?.split("\n")[5] || deliveryDetails.addressLines?.[5] || "",
+    savedDeliveryDetails.address?.split("\n")[5] ||
+      deliveryDetails.addressLines?.[5] ||
+      "",
   );
 
   // --- Location Add/Edit form state ---
@@ -1763,9 +2101,15 @@ export default function QuoteDetailPage() {
   // must not wipe out which saved location we're actually editing/saving.
   const [editingLocationId, setEditingLocationId] = useState<string>("");
   const [locationSubmitting, setLocationSubmitting] = useState(false);
-  const [locationFormError, setLocationFormError] = useState<string | null>(null);
-  const [locationFormSuccess, setLocationFormSuccess] = useState<string | null>(null);
-  const [locationFieldErrors, setLocationFieldErrors] = useState<Record<string, string>>({});
+  const [locationFormError, setLocationFormError] = useState<string | null>(
+    null,
+  );
+  const [locationFormSuccess, setLocationFormSuccess] = useState<string | null>(
+    null,
+  );
+  const [locationFieldErrors, setLocationFieldErrors] = useState<
+    Record<string, string>
+  >({});
 
   useEffect(() => {
     if (!selectedDeliveryLocationId) return;
@@ -1912,10 +2256,13 @@ export default function QuoteDetailPage() {
     }
 
     const fieldErrors: Record<string, string> = {};
-    if (!deliveryLocationNameValue.trim()) fieldErrors.name = "Location name is required.";
-    if (!deliveryAddress1Value.trim()) fieldErrors.address1 = "Street address is required.";
+    if (!deliveryLocationNameValue.trim())
+      fieldErrors.name = "Location name is required.";
+    if (!deliveryAddress1Value.trim())
+      fieldErrors.address1 = "Street address is required.";
     if (!deliveryCityValue.trim()) fieldErrors.city = "City is required.";
-    if (!deliveryCountryValue.trim()) fieldErrors.country = "Country is required.";
+    if (!deliveryCountryValue.trim())
+      fieldErrors.country = "Country is required.";
     if (!deliveryZipValue.trim()) fieldErrors.zip = "Postal code is required.";
 
     if (Object.keys(fieldErrors).length > 0) {
@@ -1929,7 +2276,8 @@ export default function QuoteDetailPage() {
 
     try {
       function getLocationManagementUrl() {
-        const proxyBaseMatch = window.location.pathname.match(/^(\/apps\/[^/]+)/);
+        const proxyBaseMatch =
+          window.location.pathname.match(/^(\/apps\/[^/]+)/);
         const proxyQuery = window.location.search || "";
 
         if (proxyBaseMatch) {
@@ -1963,8 +2311,8 @@ export default function QuoteDetailPage() {
             const field = Array.isArray(error.field)
               ? error.field[0]
               : typeof error.field === "string"
-              ? error.field
-              : undefined;
+                ? error.field
+                : undefined;
             if (field) {
               serverFieldErrors[field] = error.message;
             }
@@ -1994,16 +2342,25 @@ export default function QuoteDetailPage() {
     ? "Edit company location"
     : "Add a Shopify company location";
 
-  const [shippingCountryOptions, setShippingCountryOptions] = useState<ShippingCountryOption[]>(
-    [],
-  );
+  const [shippingCountryOptions, setShippingCountryOptions] = useState<
+    ShippingCountryOption[]
+  >([]);
 
   const getFlagForCountry = (raw: string | undefined) => {
     if (!raw) return "";
     const v = String(raw).toUpperCase().trim();
     if (["IN", "INDIA"].includes(v)) return "🇮🇳";
-    if (["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"].includes(v)) return "🇺🇸";
-    if (["GB", "UK", "UNITED KINGDOM", "UNITED KINGDOM OF GREAT BRITAIN"].includes(v)) return "🇬🇧";
+    if (["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"].includes(v))
+      return "🇺🇸";
+    if (
+      [
+        "GB",
+        "UK",
+        "UNITED KINGDOM",
+        "UNITED KINGDOM OF GREAT BRITAIN",
+      ].includes(v)
+    )
+      return "🇬🇧";
     if (["AU", "AUSTRALIA"].includes(v)) return "🇦🇺";
     if (["CA", "CANADA"].includes(v)) return "🇨🇦";
     return "";
@@ -2041,7 +2398,7 @@ export default function QuoteDetailPage() {
     };
   }, []);
 
-return (
+  return (
     <SalesPortalLayout
       company={{
         id: quote.companyId,
@@ -2069,9 +2426,9 @@ return (
               minHeight: 36,
               padding: "6px 10px",
               borderRadius: 8,
-              border: "1px solid #dfe3ea",
-              background: "#fff",
-              color: "#2c6ecb",
+              border: "1px solid var(--sales-portal-accent-tint)",
+              background: "var(--sales-portal-accent-lighter)",
+              color: "var(--sales-portal-accent)",
               textDecoration: "none",
               fontWeight: 600,
               fontSize: 13,
@@ -2093,8 +2450,12 @@ return (
               >
                 {pendingIntent === sendIntent && <Spinner />}
                 {pendingIntent === sendIntent
-                  ? quote.status === "draft" ? "Sending Quote..." : "Resending Quote..."
-                  : quote.status === "draft" ? "Send Quote" : "Resend Quote"}
+                  ? quote.status === "draft"
+                    ? "Sending Quote..."
+                    : "Resending Quote..."
+                  : quote.status === "draft"
+                    ? "Send Quote"
+                    : "Resend Quote"}
               </button>
             </Form>
             {quote.shopifyDraftOrderId && (
@@ -2106,7 +2467,9 @@ return (
                   style={disabledButtonStyle(styles.secondaryBtn, isSubmitting)}
                 >
                   {pendingIntent === "preview_invoice" && <Spinner dark />}
-                  {pendingIntent === "preview_invoice" ? "Loading..." : "Preview Invoice"}
+                  {pendingIntent === "preview_invoice"
+                    ? "Loading..."
+                    : "Preview Invoice"}
                 </button>
               </Form>
             )}
@@ -2119,7 +2482,9 @@ return (
                   style={disabledButtonStyle(styles.primaryBtn, isSubmitting)}
                 >
                   {pendingIntent === "convert_quote" && <Spinner />}
-                  {pendingIntent === "convert_quote" ? "Converting..." : "Convert To Order"}
+                  {pendingIntent === "convert_quote"
+                    ? "Converting..."
+                    : "Convert To Order"}
                 </button>
               </Form>
             )}
@@ -2141,7 +2506,9 @@ return (
                   style={disabledButtonStyle(styles.secondaryBtn, isSubmitting)}
                 >
                   {pendingIntent === "cancel_quote" && <Spinner dark />}
-                  {pendingIntent === "cancel_quote" ? "Cancelling..." : "Cancel"}
+                  {pendingIntent === "cancel_quote"
+                    ? "Cancelling..."
+                    : "Cancel"}
                 </button>
               </Form>
             )}
@@ -2159,7 +2526,9 @@ return (
           }}
         >
           <div style={{ paddingRight: 28 }}>
-            <strong>{notification.type === "error" ? "Action failed" : "Success"}</strong>
+            <strong>
+              {notification.type === "error" ? "Action failed" : "Success"}
+            </strong>
             <p style={{ margin: "4px 0 0" }}>{notification.message}</p>
           </div>
           <button
@@ -2182,11 +2551,32 @@ return (
               <div className="sales-quote-card" style={styles.card}>
                 <div style={styles.cardHeader}>
                   <h2 style={styles.cardTitle}>Customer Information</h2>
-                  <label style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", minWidth: 180, gap: 6, margin: 0 }}>
-                    <span style={{ color: "#6b7280", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-end",
+                      minWidth: 180,
+                      gap: 6,
+                      margin: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: "#6b7280",
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
                       Status
                     </span>
-                    <select name="status" defaultValue={quote.status} style={styles.input} disabled={isSubmitting}>
+                    <select
+                      name="status"
+                      defaultValue={quote.status}
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    >
                       {quoteStatuses.map((status) => (
                         <option key={status} value={status}>
                           {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -2195,30 +2585,68 @@ return (
                     </select>
                   </label>
                 </div>
-                <div className="sales-quote-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
+                <div
+                  className="sales-quote-info-grid"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 16,
+                  }}
+                >
                   <label style={styles.label}>
                     Company
-                    <input style={styles.input} value={quote.company.name} disabled />
+                    <input
+                      style={styles.input}
+                      value={quote.company.name}
+                      disabled
+                    />
                   </label>
                   <label style={styles.label}>
                     Quote Title
-                    <input name="title" defaultValue={quote.title} style={styles.input} disabled={isSubmitting} />
+                    <input
+                      name="title"
+                      defaultValue={quote.title}
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
                   </label>
                   <label style={styles.label}>
                     First Name
-                    <input name="customerFirstName" defaultValue={savedCustomerDetails.firstName} style={styles.input} disabled={isSubmitting} />
+                    <input
+                      name="customerFirstName"
+                      defaultValue={savedCustomerDetails.firstName}
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
                   </label>
                   <label style={styles.label}>
                     Last Name
-                    <input name="customerLastName" defaultValue={savedCustomerDetails.lastName} style={styles.input} disabled={isSubmitting} />
+                    <input
+                      name="customerLastName"
+                      defaultValue={savedCustomerDetails.lastName}
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
                   </label>
                   <label style={styles.label}>
                     Email
-                    <input name="customerEmail" type="email" defaultValue={savedCustomerDetails.email} style={styles.input} disabled={isSubmitting} />
+                    <input
+                      name="customerEmail"
+                      type="email"
+                      defaultValue={savedCustomerDetails.email}
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
                   </label>
                   <label style={styles.label}>
                     Expiration
-                    <input type="date" name="expiresAt" defaultValue={dateInput} style={styles.input} disabled={isSubmitting} />
+                    <input
+                      type="date"
+                      name="expiresAt"
+                      defaultValue={dateInput}
+                      style={styles.input}
+                      disabled={isSubmitting}
+                    />
                   </label>
                 </div>
               </div>
@@ -2249,7 +2677,10 @@ return (
                         <button
                           type="button"
                           onClick={() => handleOpenLocationForm(true)}
-                          style={{ ...styles.secondaryBtn, padding: "8px 12px" }}
+                          style={{
+                            ...styles.secondaryBtn,
+                            padding: "8px 12px",
+                          }}
                         >
                           Edit location
                         </button>
@@ -2261,24 +2692,39 @@ return (
                   <div style={{ marginBottom: 12 }}>
                     <span style={styles.infoLabel}>{locationFormTitle}</span>
                     {locationFormError ? (
-                      <div style={styles.validationMessage}>{locationFormError}</div>
+                      <div style={styles.validationMessage}>
+                        {locationFormError}
+                      </div>
                     ) : null}
                     {locationFormSuccess ? (
-                      <div style={styles.successMessage}>{locationFormSuccess}</div>
+                      <div style={styles.successMessage}>
+                        {locationFormSuccess}
+                      </div>
                     ) : null}
                   </div>
                 )}
-                <div className="sales-quote-delivery-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
+                <div
+                  className="sales-quote-delivery-grid"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 16,
+                  }}
+                >
                   <label style={styles.label}>
                     Saved location
                     <select
                       name="deliveryLocationId"
                       value={selectedDeliveryLocationId}
-                      onChange={(e) => setSelectedDeliveryLocationId(e.target.value)}
+                      onChange={(e) =>
+                        setSelectedDeliveryLocationId(e.target.value)
+                      }
                       style={styles.input}
                       disabled={isSubmitting || showLocationForm}
                     >
-                      <option value="">-- Use custom delivery details --</option>
+                      <option value="">
+                        -- Use custom delivery details --
+                      </option>
                       {companyLocations.map((location: any) => (
                         <option key={location.id} value={location.id}>
                           {location.name}
@@ -2293,7 +2739,8 @@ return (
                       value={deliveryLocationNameValue}
                       onChange={(e) => {
                         setDeliveryLocationNameValue(e.target.value);
-                        if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                        if (selectedDeliveryLocationId && !showLocationForm)
+                          setSelectedDeliveryLocationId("");
                       }}
                       placeholder="e.g. Warehouse / Store name"
                       style={
@@ -2304,7 +2751,9 @@ return (
                       disabled={isSubmitting}
                     />
                     {locationFieldErrors.name ? (
-                      <div style={styles.fieldError}>{locationFieldErrors.name}</div>
+                      <div style={styles.fieldError}>
+                        {locationFieldErrors.name}
+                      </div>
                     ) : null}
                   </label>
                   <label style={styles.label}>
@@ -2314,7 +2763,8 @@ return (
                       value={deliveryAddress1Value}
                       onChange={(e) => {
                         setDeliveryAddress1Value(e.target.value);
-                        if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                        if (selectedDeliveryLocationId && !showLocationForm)
+                          setSelectedDeliveryLocationId("");
                       }}
                       placeholder="Street address"
                       style={
@@ -2325,7 +2775,9 @@ return (
                       disabled={isSubmitting}
                     />
                     {locationFieldErrors.address1 ? (
-                      <div style={styles.fieldError}>{locationFieldErrors.address1}</div>
+                      <div style={styles.fieldError}>
+                        {locationFieldErrors.address1}
+                      </div>
                     ) : null}
                   </label>
                   <label style={styles.label}>
@@ -2335,7 +2787,8 @@ return (
                       value={deliveryAddress2Value}
                       onChange={(e) => {
                         setDeliveryAddress2Value(e.target.value);
-                        if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                        if (selectedDeliveryLocationId && !showLocationForm)
+                          setSelectedDeliveryLocationId("");
                       }}
                       placeholder="Apartment, suite, unit, etc."
                       style={styles.input}
@@ -2349,7 +2802,8 @@ return (
                       value={deliveryCountryValue}
                       onChange={(e) => {
                         setDeliveryCountryValue(e.target.value);
-                        if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                        if (selectedDeliveryLocationId && !showLocationForm)
+                          setSelectedDeliveryLocationId("");
                         setDeliveryProvinceValue("");
                       }}
                       style={
@@ -2362,12 +2816,15 @@ return (
                       <option value="">Select country</option>
                       {shippingCountryOptions.map((country) => (
                         <option key={country.value} value={country.value}>
-                          {getFlagForCountry(country.value || country.label)} {country.label}
+                          {getFlagForCountry(country.value || country.label)}{" "}
+                          {country.label}
                         </option>
                       ))}
                     </select>
                     {locationFieldErrors.country ? (
-                      <div style={styles.fieldError}>{locationFieldErrors.country}</div>
+                      <div style={styles.fieldError}>
+                        {locationFieldErrors.country}
+                      </div>
                     ) : null}
                   </label>
                   <label style={styles.label}>
@@ -2378,13 +2835,14 @@ return (
                         value={deliveryProvinceValue}
                         onChange={(e) => {
                           setDeliveryProvinceValue(e.target.value);
-                          if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                          if (selectedDeliveryLocationId && !showLocationForm)
+                            setSelectedDeliveryLocationId("");
                         }}
                         style={styles.input}
                         disabled={isSubmitting}
                       >
                         <option value="">Select state / province</option>
-                        {deliveryProvinceOptions.map((province:any) => (
+                        {deliveryProvinceOptions.map((province: any) => (
                           <option key={province.value} value={province.value}>
                             {province.label}
                           </option>
@@ -2396,7 +2854,8 @@ return (
                         value={deliveryProvinceValue}
                         onChange={(e) => {
                           setDeliveryProvinceValue(e.target.value);
-                          if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                          if (selectedDeliveryLocationId && !showLocationForm)
+                            setSelectedDeliveryLocationId("");
                         }}
                         placeholder="State or province"
                         style={styles.input}
@@ -2411,7 +2870,8 @@ return (
                       value={deliveryCityValue}
                       onChange={(e) => {
                         setDeliveryCityValue(e.target.value);
-                        if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                        if (selectedDeliveryLocationId && !showLocationForm)
+                          setSelectedDeliveryLocationId("");
                       }}
                       placeholder="City"
                       style={
@@ -2422,7 +2882,9 @@ return (
                       disabled={isSubmitting}
                     />
                     {locationFieldErrors.city ? (
-                      <div style={styles.fieldError}>{locationFieldErrors.city}</div>
+                      <div style={styles.fieldError}>
+                        {locationFieldErrors.city}
+                      </div>
                     ) : null}
                   </label>
                   <label style={styles.label}>
@@ -2432,7 +2894,8 @@ return (
                       value={deliveryZipValue}
                       onChange={(e) => {
                         setDeliveryZipValue(e.target.value);
-                        if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                        if (selectedDeliveryLocationId && !showLocationForm)
+                          setSelectedDeliveryLocationId("");
                       }}
                       placeholder="Zip / postal code"
                       style={
@@ -2443,7 +2906,9 @@ return (
                       disabled={isSubmitting}
                     />
                     {locationFieldErrors.zip ? (
-                      <div style={styles.fieldError}>{locationFieldErrors.zip}</div>
+                      <div style={styles.fieldError}>
+                        {locationFieldErrors.zip}
+                      </div>
                     ) : null}
                   </label>
                   <label style={styles.label}>
@@ -2453,7 +2918,8 @@ return (
                       value={deliveryPhoneValue}
                       onChange={(e) => {
                         setDeliveryPhoneValue(e.target.value);
-                        if (selectedDeliveryLocationId && !showLocationForm) setSelectedDeliveryLocationId("");
+                        if (selectedDeliveryLocationId && !showLocationForm)
+                          setSelectedDeliveryLocationId("");
                       }}
                       style={styles.input}
                       disabled={isSubmitting}
@@ -2462,16 +2928,26 @@ return (
                 </div>
                 {companyLocations.length > 0 ? (
                   <p style={{ ...styles.muted, marginTop: 10 }}>
-                    Select one of the saved company locations to auto-fill address and phone, or use "Add location" / "Edit location" above to manage saved locations.
+                    Select one of the saved company locations to auto-fill
+                    address and phone, or use "Add location" / "Edit location"
+                    above to manage saved locations.
                   </p>
                 ) : (
                   <p style={{ ...styles.muted, marginTop: 10 }}>
-                    No saved company locations are available. Use "Add location" above to create one.
+                    No saved company locations are available. Use "Add location"
+                    above to create one.
                   </p>
                 )}
 
                 {showLocationForm && (
-                  <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                  <div
+                    style={{
+                      marginTop: 16,
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 10,
+                    }}
+                  >
                     <button
                       type="button"
                       onClick={handleCancelLocationForm}
@@ -2492,47 +2968,43 @@ return (
                 )}
               </div>
 
-              {/* Notes */}
-              <div className="sales-quote-card" style={styles.card}>
-                <h2 style={styles.cardTitle}>Notes</h2>
-                <label style={styles.label}>
-                  Customer Notes
-                  <textarea
-                    name="customerNotes"
-                    defaultValue={quote.customerNotes || ""}
-                    style={styles.textarea}
-                    disabled={isSubmitting}
-                  />
-                </label>
-                <label style={styles.label}>
-                  Internal Notes
-                  <textarea
-                    name="internalNotes"
-                    defaultValue={quote.internalNotes || ""}
-                    style={styles.textarea}
-                    disabled={isSubmitting}
-                  />
-                </label>
-              </div>
-
               {/* Product Information */}
               <div className="sales-quote-card" style={styles.card}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                  <h2 style={{ ...styles.cardTitle, margin: 0 }}>Product Information</h2>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 16,
+                  }}
+                >
+                  <h2 style={{ ...styles.cardTitle, margin: 0 }}>
+                    Product Information
+                  </h2>
                   <button
                     type="button"
                     disabled={isSubmitting}
                     onClick={openAddProductModal}
-                    style={{ ...styles.secondaryBtn, padding: "8px 12px", fontSize: 13 }}
+                    style={{
+                      ...styles.secondaryBtn,
+                      padding: "8px 12px",
+                      fontSize: 13,
+                    }}
                   >
                     + Add Product
                   </button>
                 </div>
 
-                <div className="sales-quote-products-table-wrap" style={{ overflowX: "auto" }}>
+                <div
+                  className="sales-quote-products-table-wrap"
+                  style={{ overflowX: "auto" }}
+                >
                   <div style={styles.productsTable}>
                     {/* Header row */}
-                    <div className="sales-quote-product-header" style={styles.productHeaderRow}>
+                    <div
+                      className="sales-quote-product-header"
+                      style={styles.productHeaderRow}
+                    >
                       <span>Product</span>
                       <span>SKU</span>
                       <span>Variant</span>
@@ -2545,26 +3017,49 @@ return (
 
                     {/* Existing items */}
                     {quote.items.map((item: any) => (
-                      <div key={item.id} className="sales-quote-product-row" style={styles.productRow}>
+                      <div
+                        key={item.id}
+                        className="sales-quote-product-row"
+                        style={styles.productRow}
+                      >
                         <div style={styles.productCellMain}>
                           <img
                             src={item.image || ""}
                             alt=""
                             style={styles.productThumbSm}
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }}
+                            onError={(e) => {
+                              (
+                                e.currentTarget as HTMLImageElement
+                              ).style.visibility = "hidden";
+                            }}
                           />
-                          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 6,
+                            }}
+                          >
                             <input
                               name={`productTitle_${item.id}`}
                               defaultValue={item.productTitle}
-                              style={{ ...styles.productRowInput, fontWeight: 700 }}
+                              style={{
+                                ...styles.productRowInput,
+                                fontWeight: 700,
+                              }}
                               disabled={isSubmitting}
                             />
                             <input
                               name={`image_${item.id}`}
                               defaultValue={item.image || ""}
                               placeholder="Image URL"
-                              style={{ ...styles.productRowInput, fontSize: 11, color: "#6b7280" }}
+                              style={{
+                                ...styles.productRowInput,
+                                fontSize: 11,
+                                color: "#6b7280",
+                              }}
                               disabled={isSubmitting}
                             />
                           </div>
@@ -2614,11 +3109,22 @@ return (
                           disabled={isSubmitting}
                         />
 
-                        <div style={{ textAlign: "right", fontWeight: 700, fontSize: 14 }}>
+                        <div
+                          style={{
+                            textAlign: "right",
+                            fontWeight: 700,
+                            fontSize: 14,
+                          }}
+                        >
                           {fmtMoney(item.totalPrice, item.currencyCode)}
                         </div>
 
-                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "flex-end",
+                          }}
+                        >
                           <button
                             type="submit"
                             name="intent"
@@ -2626,7 +3132,8 @@ return (
                             formNoValidate
                             title="Remove item"
                             onClick={(e) => {
-                              if (!confirm("Remove this item from the quote?")) e.preventDefault();
+                              if (!confirm("Remove this item from the quote?"))
+                                e.preventDefault();
                             }}
                             disabled={isSubmitting}
                             style={styles.removeIconBtn}
@@ -2640,40 +3147,127 @@ return (
 
                     {/* Newly added (pending save) rows */}
                     {newProductRows.map((row) => (
-                      <div key={row.rowKey} className="sales-quote-product-row" style={{ ...styles.productRow, background: "#faf5ff" }}>
-                        <input type="hidden" name="newProductRow" value={row.rowKey} />
-                        <input type="hidden" name={`newProductId_${row.rowKey}`} value={row.productId || ""} />
-                        <input type="hidden" name={`newProductTitle_${row.rowKey}`} value={row.productTitle} />
-                        <input type="hidden" name={`newSku_${row.rowKey}`} value={row.sku} />
-                        <input type="hidden" name={`newVariantTitle_${row.rowKey}`} value={row.variantTitle} />
-                        <input type="hidden" name={`newVariantId_${row.rowKey}`} value={row.variantId} />
-                        <input type="hidden" name={`newImage_${row.rowKey}`} value={row.image} />
-                        <input type="hidden" name={`newUnitPrice_${row.rowKey}`} value={row.unitPrice} />
-                        <input type="hidden" name={`newDiscount_${row.rowKey}`} value={row.discount} />
-                        <input type="hidden" name={`newQuantity_${row.rowKey}`} value={row.quantity} />
+                      <div
+                        key={row.rowKey}
+                        className="sales-quote-product-row"
+                        style={{ ...styles.productRow, background: "#faf5ff" }}
+                      >
+                        <input
+                          type="hidden"
+                          name="newProductRow"
+                          value={row.rowKey}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newProductId_${row.rowKey}`}
+                          value={row.productId || ""}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newProductTitle_${row.rowKey}`}
+                          value={row.productTitle}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newSku_${row.rowKey}`}
+                          value={row.sku}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newVariantTitle_${row.rowKey}`}
+                          value={row.variantTitle}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newVariantId_${row.rowKey}`}
+                          value={row.variantId}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newImage_${row.rowKey}`}
+                          value={row.image}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newUnitPrice_${row.rowKey}`}
+                          value={row.unitPrice}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newDiscount_${row.rowKey}`}
+                          value={row.discount}
+                        />
+                        <input
+                          type="hidden"
+                          name={`newQuantity_${row.rowKey}`}
+                          value={row.quantity}
+                        />
 
                         <div style={styles.productCellMain}>
-                          <div style={{ ...styles.productThumbSm, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                          <div
+                            style={{
+                              ...styles.productThumbSm,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              overflow: "hidden",
+                            }}
+                          >
                             {row.image ? (
-                              <img src={row.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                              <img
+                                src={row.image}
+                                alt=""
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                }}
+                              />
                             ) : (
-                              <span style={{ color: "#9ca3af", fontSize: 9 }}>No image</span>
+                              <span style={{ color: "#9ca3af", fontSize: 9 }}>
+                                No image
+                              </span>
                             )}
                           </div>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 700, fontSize: 13.5 }}>{row.productTitle}</div>
+                            <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                              {row.productTitle}
+                            </div>
                             <span style={styles.pillPending}>Pending Save</span>
                           </div>
                         </div>
                         <div style={{ fontSize: 13 }}>{row.sku || "N/A"}</div>
-                        <div style={{ fontSize: 13 }}>{row.variantTitle || "Default variant"}</div>
-                        <div style={{ fontSize: 13 }}>{row.quantity}</div>
-                        <div style={{ fontSize: 13 }}>US${Number(row.unitPrice || 0).toFixed(2)}</div>
-                        <div style={{ fontSize: 13 }}>US${Number(row.discount || 0).toFixed(2)}</div>
-                        <div style={{ textAlign: "right", fontWeight: 700, fontSize: 14 }}>
-                          US${Math.max(0, Number(row.unitPrice || 0) * Number(row.quantity || 1) - Number(row.discount || 0)).toFixed(2)}
+                        <div style={{ fontSize: 13 }}>
+                          {row.variantTitle || "Default variant"}
                         </div>
-                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <div style={{ fontSize: 13 }}>{row.quantity}</div>
+                        <div style={{ fontSize: 13 }}>
+                          US${Number(row.unitPrice || 0).toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: 13 }}>
+                          US${Number(row.discount || 0).toFixed(2)}
+                        </div>
+                        <div
+                          style={{
+                            textAlign: "right",
+                            fontWeight: 700,
+                            fontSize: 14,
+                          }}
+                        >
+                          US$
+                          {Math.max(
+                            0,
+                            Number(row.unitPrice || 0) *
+                              Number(row.quantity || 1) -
+                              Number(row.discount || 0),
+                          ).toFixed(2)}
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "flex-end",
+                          }}
+                        >
                           <button
                             type="button"
                             onClick={() => removePendingProduct(row.rowKey)}
@@ -2689,9 +3283,37 @@ return (
                 </div>
               </div>
 
+              {/* Notes */}
+              <div className="sales-quote-card" style={styles.card}>
+                <h2 style={styles.cardTitle}>Notes</h2>
+                <label style={styles.label}>
+                  Customer Notes
+                  <textarea
+                    name="customerNotes"
+                    defaultValue={quote.customerNotes || ""}
+                    style={styles.textarea}
+                    disabled={isSubmitting}
+                  />
+                </label>
+                <label style={styles.label}>
+                  Internal Notes
+                  <textarea
+                    name="internalNotes"
+                    defaultValue={quote.internalNotes || ""}
+                    style={styles.textarea}
+                    disabled={isSubmitting}
+                  />
+                </label>
+              </div>
               {/* Activity History */}
               <div className="sales-quote-card" style={styles.card}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
                   <h2 style={styles.cardTitle}>Activity History</h2>
                   {quote.activities.length > 0 && (
                     <button
@@ -2703,7 +3325,7 @@ return (
                         cursor: "pointer",
                         padding: "2px 6px",
                         fontSize: 16,
-                        color: "#2c6ecb",
+                        color: "var(--sales-portal-accent)",
                         lineHeight: 1,
                       }}
                       title={showAllActivities ? "Collapse" : "Expand"}
@@ -2712,9 +3334,17 @@ return (
                     </button>
                   )}
                 </div>
-                {showAllActivities && (
-                  quote.activities.length ? (
-                    <div className="hide-scrollbar" style={{ maxHeight: 440, overflowY: "auto", paddingRight: 4 }}>
+
+                {showAllActivities &&
+                  (quote.activities.length ? (
+                    <div
+                      className="hide-scrollbar"
+                      style={{
+                        maxHeight: 440,
+                        overflowY: "auto",
+                        paddingRight: 4,
+                      }}
+                    >
                       <div style={styles.timeline}>
                         {quote.activities.map((activity: any) => (
                           <div key={activity.id} style={styles.activity}>
@@ -2727,8 +3357,7 @@ return (
                     </div>
                   ) : (
                     <p style={styles.muted}>No activity yet.</p>
-                  )
-                )}
+                  ))}
               </div>
             </section>
 
@@ -2752,7 +3381,9 @@ return (
                     Copy
                   </button>
                 </div>
-                <p style={styles.muted}>Copy this secure quote link for the customer.</p>
+                <p style={styles.muted}>
+                  Copy this secure quote link for the customer.
+                </p>
               </div>
 
               <div className="sales-quote-card" style={styles.card}>
@@ -2808,9 +3439,18 @@ return (
                   </label>
                 </div>
                 <Summary label="Subtotal" value={fmtMoney(quote.subtotal)} />
-                <Summary label="Discount" value={`-${fmtMoney(quote.discountTotal)}`} />
-                <Summary label={`Tax (${quote.taxRate}%)`} value={fmtMoney(quote.taxAmount)} />
-                <Summary label="Shipping" value={fmtMoney(quote.shippingAmount)} />
+                <Summary
+                  label="Discount"
+                  value={`-${fmtMoney(quote.discountTotal)}`}
+                />
+                <Summary
+                  label={`Tax (${quote.taxRate}%)`}
+                  value={fmtMoney(quote.taxAmount)}
+                />
+                <Summary
+                  label="Shipping"
+                  value={fmtMoney(quote.shippingAmount)}
+                />
                 <div style={styles.totalRow}>
                   <strong>Grand Total</strong>
                   <strong>{fmtMoney(quote.totalAmount)}</strong>
@@ -2829,17 +3469,32 @@ return (
                   value="update_quote"
                   disabled={isSubmitting}
                   aria-busy={pendingIntent === "update_quote"}
-                  style={{ ...disabledButtonStyle(styles.primaryBtn, isSubmitting), width: "100%" }}
+                  style={{
+                    ...disabledButtonStyle(styles.primaryBtn, isSubmitting),
+                    width: "100%",
+                  }}
                 >
                   {pendingIntent === "update_quote" && <Spinner />}
-                  {pendingIntent === "update_quote" ? "Saving Changes..." : "Save Changes"}
+                  {pendingIntent === "update_quote"
+                    ? "Saving Changes..."
+                    : "Save Changes"}
                 </button>
               </div>
 
               <div className="sales-quote-card" style={styles.card}>
                 <h2 style={styles.cardTitle}>Customer Note</h2>
-                <div style={{ padding: "10px 0", color: "#374151", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                  {quote.customerNotes?.trim() ? quote.customerNotes : "No customer note has been added yet."}
+                <div
+                  style={{
+                    padding: "10px 0",
+                    color: "#374151",
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {quote.customerNotes?.trim()
+                    ? quote.customerNotes
+                    : "No customer note has been added yet."}
                 </div>
               </div>
             </aside>
@@ -2865,18 +3520,30 @@ return (
                 <Info label="Email" value={quote.customerEmail} />
                 <Info
                   label="Sales Agent"
-                  value={quote.salesAgent?.firstName || quote.salesAgent?.email || "Sales Agent"}
+                  value={
+                    quote.salesAgent?.firstName ||
+                    quote.salesAgent?.email ||
+                    "Sales Agent"
+                  }
                 />
                 <Info label="Created" value={fmtDate(quote.createdAt)} />
                 <Info label="Expires" value={fmtDate(quote.expiresAt)} />
               </div>
             </div>
 
-            <DeliveryDetailsCard deliveryDetails={deliveryDetails} quote={quote} />
+            <DeliveryDetailsCard
+              deliveryDetails={deliveryDetails}
+              quote={quote}
+            />
 
-            <div className="sales-quote-card" style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
+            <div
+              className="sales-quote-card"
+              style={{ ...styles.card, padding: 0, overflow: "hidden" }}
+            >
               <div style={styles.cardHeading}>
-                <h2 style={{ ...styles.cardTitle, margin: 0 }}>Product Summary</h2>
+                <h2 style={{ ...styles.cardTitle, margin: 0 }}>
+                  Product Summary
+                </h2>
               </div>
               <div className="sales-quote-table-wrap">
                 <table style={styles.table}>
@@ -2887,7 +3554,9 @@ return (
                       <th style={styles.th}>Qty</th>
                       <th style={styles.th}>Unit</th>
                       <th style={styles.th}>Actions</th>
-                      <th style={{ ...styles.th, textAlign: "right" }}>Total</th>
+                      <th style={{ ...styles.th, textAlign: "right" }}>
+                        Total
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2898,23 +3567,42 @@ return (
                           <br />
                           <small>{item.sku || "No SKU"}</small>
                         </td>
-                        <td style={styles.td}>{item.variantTitle || "Default"}</td>
+                        <td style={styles.td}>
+                          {item.variantTitle || "Default"}
+                        </td>
                         <td style={styles.td}>{item.quantity}</td>
-                        <td style={styles.td}>{fmtMoney(item.unitPrice, item.currencyCode)}</td>
+                        <td style={styles.td}>
+                          {fmtMoney(item.unitPrice, item.currencyCode)}
+                        </td>
                         <td style={styles.td}>
                           {editableStatuses.includes(quote.status) && (
                             <Form
                               method="post"
                               onSubmit={(e) => {
-                                if (!confirm("Remove this item from the quote?")) e.preventDefault();
+                                if (
+                                  !confirm("Remove this item from the quote?")
+                                )
+                                  e.preventDefault();
                               }}
                             >
-                              <input type="hidden" name="intent" value="delete_item" />
-                              <input type="hidden" name="itemId" value={item.id} />
+                              <input
+                                type="hidden"
+                                name="intent"
+                                value="delete_item"
+                              />
+                              <input
+                                type="hidden"
+                                name="itemId"
+                                value={item.id}
+                              />
                               <button
                                 type="submit"
                                 disabled={isSubmitting}
-                                style={{ ...styles.secondaryBtn, padding: "6px 10px", fontSize: 13 }}
+                                style={{
+                                  ...styles.secondaryBtn,
+                                  padding: "6px 10px",
+                                  fontSize: 13,
+                                }}
                               >
                                 Remove
                               </button>
@@ -2932,7 +3620,13 @@ return (
             </div>
 
             <div className="sales-quote-card" style={styles.card}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
                 <h2 style={styles.cardTitle}>Activity History</h2>
                 {quote.activities.length > 0 && (
                   <button
@@ -2944,7 +3638,7 @@ return (
                       cursor: "pointer",
                       padding: "2px 6px",
                       fontSize: 16,
-                      color: "#2c6ecb",
+                      color: "var(--sales-portal-accent)",
                       lineHeight: 1,
                     }}
                     title={showAllActivities ? "Collapse" : "Expand"}
@@ -2953,9 +3647,16 @@ return (
                   </button>
                 )}
               </div>
-              {showAllActivities && (
-                quote.activities.length ? (
-                  <div className="hide-scrollbar" style={{ maxHeight: 440, overflowY: "auto", paddingRight: 4 }}>
+              {showAllActivities &&
+                (quote.activities.length ? (
+                  <div
+                    className="hide-scrollbar"
+                    style={{
+                      maxHeight: 440,
+                      overflowY: "auto",
+                      paddingRight: 4,
+                    }}
+                  >
                     <div style={styles.timeline}>
                       {quote.activities.map((activity: any) => (
                         <div key={activity.id} style={styles.activity}>
@@ -2968,8 +3669,7 @@ return (
                   </div>
                 ) : (
                   <p style={styles.muted}>No activity yet.</p>
-                )
-              )}
+                ))}
             </div>
           </section>
 
@@ -2993,15 +3693,26 @@ return (
                   Copy
                 </button>
               </div>
-              <p style={styles.muted}>Copy this secure quote link for the customer.</p>
+              <p style={styles.muted}>
+                Copy this secure quote link for the customer.
+              </p>
             </div>
 
             <div className="sales-quote-card" style={styles.card}>
               <h2 style={styles.cardTitle}>Grand Total</h2>
               <Summary label="Subtotal" value={fmtMoney(quote.subtotal)} />
-              <Summary label="Discount" value={`-${fmtMoney(quote.discountTotal)}`} />
-              <Summary label={`Tax (${quote.taxRate}%)`} value={fmtMoney(quote.taxAmount)} />
-              <Summary label="Shipping" value={fmtMoney(quote.shippingAmount)} />
+              <Summary
+                label="Discount"
+                value={`-${fmtMoney(quote.discountTotal)}`}
+              />
+              <Summary
+                label={`Tax (${quote.taxRate}%)`}
+                value={fmtMoney(quote.taxAmount)}
+              />
+              <Summary
+                label="Shipping"
+                value={fmtMoney(quote.shippingAmount)}
+              />
               <div style={styles.totalRow}>
                 <strong>Total</strong>
                 <strong>{fmtMoney(quote.totalAmount)}</strong>
@@ -3055,7 +3766,10 @@ return (
             justifyContent: "center",
             background: "rgba(0,0,0,0.5)",
           }}
-          onClick={() => { setShowInvoiceModal(false); setInvoiceData(null); }}
+          onClick={() => {
+            setShowInvoiceModal(false);
+            setInvoiceData(null);
+          }}
         >
           <div
             style={{
@@ -3071,35 +3785,97 @@ return (
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #e3e7ec" }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Invoice Preview — {quote.quoteNumber}</h3>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "12px 16px",
+                borderBottom: "1px solid #e3e7ec",
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+                Invoice Preview — {quote.quoteNumber}
+              </h3>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid transparent", fontWeight: 600, fontSize: 12, cursor: "pointer", background: "#005bd3", color: "#fff" }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid transparent",
+                    fontWeight: 600,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    background: "#005bd3",
+                    color: "#fff",
+                  }}
                 >
                   Print / Save PDF
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setShowInvoiceModal(false); setInvoiceData(null); }}
-                  style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#5c5f62", padding: "0 4px", lineHeight: 1 }}
+                  onClick={() => {
+                    setShowInvoiceModal(false);
+                    setInvoiceData(null);
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: 22,
+                    cursor: "pointer",
+                    color: "#5c5f62",
+                    padding: "0 4px",
+                    lineHeight: 1,
+                  }}
                 >
                   &times;
                 </button>
               </div>
             </div>
             <div style={{ padding: "24px 32px", overflowY: "auto", flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 24,
+                }}
+              >
                 <div>
-                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>INVOICE</h2>
-                  <p style={{ margin: "4px 0 0", color: "#5c5f62", fontSize: 13 }}>{quote.quoteNumber}</p>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
+                    INVOICE
+                  </h2>
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      color: "#5c5f62",
+                      fontSize: 13,
+                    }}
+                  >
+                    {quote.quoteNumber}
+                  </p>
                 </div>
-                <div style={{ textAlign: "right", fontSize: 13, color: "#5c5f62" }}>
-                  <p style={{ margin: 0 }}><strong>Date:</strong> {invoiceData.createdAt ? new Date(invoiceData.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "–"}</p>
+                <div
+                  style={{ textAlign: "right", fontSize: 13, color: "#5c5f62" }}
+                >
+                  <p style={{ margin: 0 }}>
+                    <strong>Date:</strong>{" "}
+                    {invoiceData.createdAt
+                      ? new Date(invoiceData.createdAt).toLocaleDateString(
+                          "en-IN",
+                          { day: "2-digit", month: "short", year: "numeric" },
+                        )
+                      : "–"}
+                  </p>
                   {invoiceData.invoiceSentAt && (
-                    <p style={{ margin: "2px 0 0" }}><strong>Sent:</strong> {new Date(invoiceData.invoiceSentAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                    <p style={{ margin: "2px 0 0" }}>
+                      <strong>Sent:</strong>{" "}
+                      {new Date(invoiceData.invoiceSentAt).toLocaleDateString(
+                        "en-IN",
+                        { day: "2-digit", month: "short", year: "numeric" },
+                      )}
+                    </p>
                   )}
                 </div>
               </div>
@@ -3108,57 +3884,244 @@ return (
                 <div style={{ marginBottom: 24, fontSize: 13 }}>
                   <strong>Bill To:</strong>
                   <p style={{ margin: "4px 0 0" }}>
-                    {[invoiceData.customer.firstName, invoiceData.customer.lastName].filter(Boolean).join(" ")}
+                    {[
+                      invoiceData.customer.firstName,
+                      invoiceData.customer.lastName,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                   </p>
-                  {invoiceData.customer.email && <p style={{ margin: "2px 0 0", color: "#5c5f62" }}>{invoiceData.customer.email}</p>}
+                  {invoiceData.customer.email && (
+                    <p style={{ margin: "2px 0 0", color: "#5c5f62" }}>
+                      {invoiceData.customer.email}
+                    </p>
+                  )}
                 </div>
               )}
 
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 24 }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 13,
+                  marginBottom: 24,
+                }}
+              >
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Product</th>
-                    <th style={{ textAlign: "left", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>SKU</th>
-                    <th style={{ textAlign: "center", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Qty</th>
-                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Unit Price</th>
-                    <th style={{ textAlign: "right", padding: "8px 10px", background: "#f4f6f8", borderBottom: "1px solid #e3e7ec", fontWeight: 600, color: "#5c5f62" }}>Total</th>
+                    <th
+                      style={{
+                        textAlign: "left",
+                        padding: "8px 10px",
+                        background: "#f4f6f8",
+                        borderBottom: "1px solid #e3e7ec",
+                        fontWeight: 600,
+                        color: "#5c5f62",
+                      }}
+                    >
+                      Product
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "left",
+                        padding: "8px 10px",
+                        background: "#f4f6f8",
+                        borderBottom: "1px solid #e3e7ec",
+                        fontWeight: 600,
+                        color: "#5c5f62",
+                      }}
+                    >
+                      SKU
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "center",
+                        padding: "8px 10px",
+                        background: "#f4f6f8",
+                        borderBottom: "1px solid #e3e7ec",
+                        fontWeight: 600,
+                        color: "#5c5f62",
+                      }}
+                    >
+                      Qty
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "8px 10px",
+                        background: "#f4f6f8",
+                        borderBottom: "1px solid #e3e7ec",
+                        fontWeight: 600,
+                        color: "#5c5f62",
+                      }}
+                    >
+                      Unit Price
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "8px 10px",
+                        background: "#f4f6f8",
+                        borderBottom: "1px solid #e3e7ec",
+                        fontWeight: 600,
+                        color: "#5c5f62",
+                      }}
+                    >
+                      Total
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(invoiceData.lineItems || []).map((item: any, idx: number) => (
-                    <tr key={idx}>
-                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0" }}>
-                        {item.title}
-                        {item.variantTitle && <span style={{ color: "#5c5f62" }}> — {item.variantTitle}</span>}
-                      </td>
-                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", color: "#5c5f62" }}>{item.sku || "–"}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "center" }}>{item.quantity}</td>
-                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right" }}>
-                        {fmtMoney(item.originalUnitPrice, invoiceData.currencyCode)}
-                      </td>
-                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f0f0f0", textAlign: "right", fontWeight: 600 }}>
-                        {fmtMoney(item.discountedTotal, invoiceData.currencyCode)}
-                      </td>
-                    </tr>
-                  ))}
+                  {(invoiceData.lineItems || []).map(
+                    (item: any, idx: number) => (
+                      <tr key={idx}>
+                        <td
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid #f0f0f0",
+                          }}
+                        >
+                          {item.title}
+                          {item.variantTitle && (
+                            <span style={{ color: "#5c5f62" }}>
+                              {" "}
+                              — {item.variantTitle}
+                            </span>
+                          )}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid #f0f0f0",
+                            color: "#5c5f62",
+                          }}
+                        >
+                          {item.sku || "–"}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid #f0f0f0",
+                            textAlign: "center",
+                          }}
+                        >
+                          {item.quantity}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid #f0f0f0",
+                            textAlign: "right",
+                          }}
+                        >
+                          {fmtMoney(
+                            item.originalUnitPrice,
+                            invoiceData.currencyCode,
+                          )}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid #f0f0f0",
+                            textAlign: "right",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {fmtMoney(
+                            item.discountedTotal,
+                            invoiceData.currencyCode,
+                          )}
+                        </td>
+                      </tr>
+                    ),
+                  )}
                 </tbody>
               </table>
 
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <div style={{ width: 280, fontSize: 13 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Subtotal</span><span>{fmtMoney(invoiceData.subtotal, invoiceData.currencyCode)}</span></div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <span>Subtotal</span>
+                    <span>
+                      {fmtMoney(invoiceData.subtotal, invoiceData.currencyCode)}
+                    </span>
+                  </div>
                   {Number(invoiceData.totalDiscounts) > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Discount</span><span style={{ color: "#b91b1b" }}>-{fmtMoney(invoiceData.totalDiscounts, invoiceData.currencyCode)}</span></div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <span>Discount</span>
+                      <span style={{ color: "#b91b1b" }}>
+                        -
+                        {fmtMoney(
+                          invoiceData.totalDiscounts,
+                          invoiceData.currencyCode,
+                        )}
+                      </span>
+                    </div>
                   )}
                   {Number(invoiceData.totalShipping) > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Shipping</span><span>{fmtMoney(invoiceData.totalShipping, invoiceData.currencyCode)}</span></div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <span>Shipping</span>
+                      <span>
+                        {fmtMoney(
+                          invoiceData.totalShipping,
+                          invoiceData.currencyCode,
+                        )}
+                      </span>
+                    </div>
                   )}
                   {Number(invoiceData.totalTax) > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span>Tax</span><span>{fmtMoney(invoiceData.totalTax, invoiceData.currencyCode)}</span></div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <span>Tax</span>
+                      <span>
+                        {fmtMoney(
+                          invoiceData.totalTax,
+                          invoiceData.currencyCode,
+                        )}
+                      </span>
+                    </div>
                   )}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, borderTop: "2px solid #e3e7ec", marginTop: 8, paddingTop: 8 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontWeight: 700,
+                      fontSize: 15,
+                      borderTop: "2px solid #e3e7ec",
+                      marginTop: 8,
+                      paddingTop: 8,
+                    }}
+                  >
                     <span>Total</span>
-                    <span>{fmtMoney(invoiceData.totalPrice, invoiceData.currencyCode)}</span>
+                    <span>
+                      {fmtMoney(
+                        invoiceData.totalPrice,
+                        invoiceData.currencyCode,
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -3188,7 +4151,6 @@ function Summary({ label, value }: { label: string; value: string }) {
   );
 }
 
-
 function DeliveryDetailsCard({
   deliveryDetails,
   quote,
@@ -3196,8 +4158,12 @@ function DeliveryDetailsCard({
   deliveryDetails: DeliveryDetails;
   quote?: any;
 }) {
-  const manualDelivery = quote?.invoiceData?.quoteEditMeta?.deliveryDetails || {};
-  const locationName = manualDelivery.locationName || deliveryDetails.locationName || "Not captured";
+  const manualDelivery =
+    quote?.invoiceData?.quoteEditMeta?.deliveryDetails || {};
+  const locationName =
+    manualDelivery.locationName ||
+    deliveryDetails.locationName ||
+    "Not captured";
   const addressLines = manualDelivery.address
     ? manualDelivery.address
         .split(/\n+/)
@@ -3265,7 +4231,7 @@ function disabledButtonStyle(
 
 const styles: Record<string, React.CSSProperties> = {
   backLink: {
-    color: "#2c6ecb",
+    color: "var(--sales-portal-accent)",
     textDecoration: "none",
     fontWeight: 600,
     fontSize: 13,
@@ -3375,8 +4341,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   muted: { color: "#6b7280", fontSize: 13 },
   primaryBtn: {
-    background: "#111827",
-    color: "#fff",
+    background: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
     border: "none",
     borderRadius: 8,
     padding: "10px 14px",
@@ -3384,9 +4350,9 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   secondaryBtn: {
-    background: "#fff",
-    color: "#374151",
-    border: "1px solid #c9cccf",
+    background: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent-dark)",
+    border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: 8,
     padding: "10px 14px",
     fontWeight: 600,
@@ -3394,10 +4360,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   copyRow: { display: "flex", gap: 8 },
   copyBtn: {
-    border: "1px solid #c9cccf",
+    border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: 8,
-    background: "#fff",
-    color: "#2c6ecb",
+    background: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent)",
     padding: "0 13px",
     fontWeight: 600,
     cursor: "pointer",
@@ -3518,27 +4484,27 @@ const styles: Record<string, React.CSSProperties> = {
   removeIconBtn: {
     background: "none",
     border: "none",
-    color: "#9ca3af",
+    color: "var(--sales-portal-accent-dark)",
     cursor: "pointer",
     fontSize: 13,
     fontWeight: 600,
     padding: "6px 4px",
   },
   sidebarTabBtn: {
-    background: "#f9fafb",
-    border: "1px solid #d1d5db",
+    background: "var(--sales-portal-accent-soft)",
+    border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: 999,
-    color: "#374151",
+    color: "var(--sales-portal-accent-dark)",
     cursor: "pointer",
     fontSize: 13,
     fontWeight: 700,
     padding: "8px 14px",
   },
   sidebarTabActive: {
-    background: "#111827",
-    border: "1px solid #111827",
+    background: "var(--sales-portal-accent)",
+    border: "1px solid var(--sales-portal-accent)",
     borderRadius: 999,
-    color: "#ffffff",
+    color: "var(--sales-portal-accent-contrast)",
     cursor: "pointer",
     fontSize: 13,
     fontWeight: 700,
@@ -3574,11 +4540,20 @@ const styles: Record<string, React.CSSProperties> = {
     marginRight: 6,
     marginTop: 4,
   },
-  productPriceLabel: { fontSize: 11, color: "#9333ea", fontWeight: 700, marginBottom: 2 },
-  productPriceValue: { fontSize: 16, fontWeight: 800, color: "#9333ea" },
+  productPriceLabel: {
+    fontSize: 11,
+    color: "var(--sales-portal-accent)",
+    fontWeight: 700,
+    marginBottom: 2,
+  },
+  productPriceValue: {
+    fontSize: 16,
+    fontWeight: 800,
+    color: "var(--sales-portal-accent)",
+  },
   productActionBtn: {
-    background: "#9333ea",
-    color: "#fff",
+    background: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
     border: "none",
     borderRadius: 8,
     padding: "9px 16px",
@@ -3590,9 +4565,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: 28,
     height: 28,
     borderRadius: 7,
-    border: "1px solid #d1d5db",
-    background: "#f9fafb",
-    color: "#374151",
+    border: "1px solid var(--sales-portal-accent-tint)",
+    background: "var(--sales-portal-accent-soft)",
+    color: "var(--sales-portal-accent-dark)",
     fontSize: 16,
     fontWeight: 700,
     cursor: "pointer",
@@ -3639,17 +4614,27 @@ const styles: Record<string, React.CSSProperties> = {
   },
   pillPending: {
     display: "inline-block",
-    background: "#f3e8ff",
-    color: "#7e22ce",
+    background: "var(--sales-portal-accent-soft)",
+    color: "var(--sales-portal-accent-dark)",
     borderRadius: 999,
     padding: "3px 10px",
     fontSize: 11,
     fontWeight: 700,
   },
-  storefrontPriceLabel: { fontSize: 12, color: "#a21caf", fontWeight: 700 },
-  storefrontPriceValue: { fontSize: 18, fontWeight: 800, color: "#a21caf", marginTop: 2 },
+  storefrontPriceLabel: {
+    fontSize: 12,
+    color: "var(--sales-portal-accent)",
+    fontWeight: 700,
+  },
+  storefrontPriceValue: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "var(--sales-portal-accent)",
+    marginTop: 2,
+  },
   addToQuoteBtn: {
-    background: "linear-gradient(135deg, #c026d3, #9333ea)",
+    background:
+      "linear-gradient(135deg, var(--sales-portal-accent), var(--sales-portal-accent-dark))",
     color: "#fff",
     border: "none",
     borderRadius: 999,
@@ -3693,15 +4678,24 @@ interface AddProductModalProps {
   productResults: Product[];
   fetchProducts: (q: string) => void;
   isFetchingProducts: boolean;
-  onSelectVariant: (product: Product, variant: Variant, quantity: number) => void;
+  onSelectVariant: (
+    product: Product,
+    variant: Variant,
+    quantity: number,
+  ) => void;
   defaultCurrencyCode?: string;
+  themeAccent?: string;
 }
 
 function isVariantInStock(variant?: Variant): boolean {
   if (!variant) return false;
   if (variant.availableForSale === false) return false;
   if (variant.tracked === false) return true;
-  if (variant.inventoryQuantity === undefined || variant.inventoryQuantity === null) return true;
+  if (
+    variant.inventoryQuantity === undefined ||
+    variant.inventoryQuantity === null
+  )
+    return true;
   if (variant.inventoryPolicy === "CONTINUE") return true;
   return variant.inventoryQuantity > 0;
 }
@@ -3718,8 +4712,6 @@ function fmtPrice(amount: string | number | undefined, currencyCode = "USD") {
     return `${currencyCode} ${num.toFixed(2)}`;
   }
 }
-
-
 
 const pillStyle: React.CSSProperties = {
   display: "inline-block",

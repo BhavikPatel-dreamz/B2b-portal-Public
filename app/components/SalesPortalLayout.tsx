@@ -331,7 +331,7 @@ export const salesPortalButtonStyles = {
     gap: 8,
     minHeight: 40,
     padding: "10px 18px",
-    background: "#fff",
+    background: "var(--sales-portal-accent-lighter)",
     color: "var(--sales-portal-accent)",
     border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: 8,

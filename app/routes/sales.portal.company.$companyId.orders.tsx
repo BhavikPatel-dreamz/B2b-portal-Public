@@ -1073,7 +1073,7 @@ export default function OrderManageScreen() {
               </select>
               <button
                 type="submit"
-                style={{ padding: "6px 14px", fontSize: 13, borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer" }}
+                style={{ padding: "6px 14px", fontSize: 13, borderRadius: 6, border: "1px solid var(--sales-portal-accent-tint)", background: "var(--sales-portal-accent-lighter)", cursor: "pointer" }}
               >
                 Filter
               </button>
@@ -1301,10 +1301,10 @@ const styles = {
     display: "inline-block",
     marginRight: "8px",
     padding: "7px 10px",
-    border: "1px solid #2c6ecb",
+    border: "1px solid var(--sales-portal-accent)",
     borderRadius: "6px",
-    background: "white",
-    color: "#2c6ecb",
+    background: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent)",
     fontSize: "12px",
     fontWeight: 600,
     textDecoration: "none",
@@ -1402,9 +1402,9 @@ const styles = {
     width: "36px",
     height: "36px",
     borderRadius: "8px",
-    border: "1px solid #e5e7eb",
-    backgroundColor: "white",
-    color: "#374151",
+    border: "1px solid var(--sales-portal-accent-tint)",
+    backgroundColor: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent-dark)",
     fontSize: "24px",
     lineHeight: 1,
     cursor: "pointer",
@@ -1459,10 +1459,10 @@ const styles = {
   },
   cancelBtn: {
     padding: "11px 18px",
-    border: "1px solid #d1d5db",
+    border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: "8px",
-    backgroundColor: "white",
-    color: "#374151",
+    backgroundColor: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent-dark)",
     fontSize: "14px",
     fontWeight: 700,
     cursor: "pointer",
@@ -1471,8 +1471,8 @@ const styles = {
     padding: "11px 18px",
     border: "none",
     borderRadius: "8px",
-    backgroundColor: "#111827",
-    color: "white",
+    backgroundColor: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
     fontSize: "14px",
     fontWeight: 700,
     cursor: "pointer",

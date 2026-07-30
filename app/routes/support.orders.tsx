@@ -854,10 +854,10 @@ const styles: Record<string, React.CSSProperties> = {
   exportActions: { display: "flex", gap: 8 },
   exportButton: {
     padding: "8px 11px",
-    border: "1px solid #c9cccf",
+    border: "1px solid var(--sales-portal-accent-tint)",
     borderRadius: 8,
-    background: "#fff",
-    color: "#374151",
+    background: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent-dark)",
     textDecoration: "none",
     fontSize: 12,
     fontWeight: 600,

@@ -37,22 +37,6 @@ type ShippingZonesPayload = {
   };
 };
 
-type MarketsPayload = {
-  errors?: unknown;
-  data?: {
-    markets?: {
-      nodes?: Array<{
-        regions?: {
-          nodes?: Array<{
-            name?: string | null;
-            code?: string | null;
-          }>;
-        } | null;
-      }>;
-    } | null;
-  };
-};
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (request.method === "OPTIONS") {
     return new Response(null, {
@@ -219,55 +203,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }
 
-    let marketCountryCodes: Set<string> | null = null;
-    try {
-      const marketsResponse = await admin.graphql(
-        `#graphql
-        query GetMarketCountries {
-          markets(first: 250) {
-            nodes {
-              regions(first: 250) {
-                nodes {
-                  name
-                  ... on MarketRegionCountry {
-                    code
-                  }
-                }
-              }
-            }
-          }
-        }
-        `
-      );
-      const marketsPayload = (await marketsResponse.json()) as MarketsPayload;
-
-      if (marketsResponse.ok && !marketsPayload.errors) {
-        marketCountryCodes = new Set<string>();
-
-        for (const market of marketsPayload.data?.markets?.nodes || []) {
-          for (const region of market.regions?.nodes || []) {
-            if (!region.code) continue;
-
-            marketCountryCodes.add(region.code);
-            upsertCountry(region.code, region.name);
-          }
-        }
-      } else {
-        console.warn("Unable to load Shopify Markets countries:", {
-          status: marketsResponse.status,
-          errors: marketsPayload.errors,
-        });
-      }
-    } catch (marketsError) {
-      console.warn("Unable to load Shopify Markets countries:", marketsError);
-    }
-
     const countries = Array.from(countriesMap.values())
       .filter(
         (country) =>
-          marketCountryCodes?.size
-            ? marketCountryCodes.has(country.value)
-            : validCountryCodes.size === 0 || validCountryCodes.has(country.value),
+          validCountryCodes.size === 0 || validCountryCodes.has(country.value),
       )
       .sort((a, b) => a.label.localeCompare(b.label));
 

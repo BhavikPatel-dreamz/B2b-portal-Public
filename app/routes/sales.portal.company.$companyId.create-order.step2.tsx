@@ -1028,7 +1028,6 @@ export default function CreateOrderProductCatalog() {
   const [discountType, setDiscountType] = useState<"PERCENTAGE" | "FIXED_AMOUNT">("FIXED_AMOUNT");
   const [estShipping, setEstShipping] = useState(45);
   const [estTaxRate, setEstTaxRate] = useState(company.defaultTaxRate || 8); // Initialize with store's default tax rate
-  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [lastRemovedItem, setLastRemovedItem] = useState<any>(null);
   const [showUndoBanner, setShowUndoBanner] = useState(false);
   const [draftSaveStatus, setDraftSaveStatus] = useState<{
@@ -1176,22 +1175,6 @@ export default function CreateOrderProductCatalog() {
       draftSubmitLock.current = false;
     }
   }, [draftFetcher.state]);
-
-  useEffect(() => {
-    if (!isMobileCartOpen) return;
-
-    const previousOverflow = document.body.style.overflow;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsMobileCartOpen(false);
-    };
-
-    document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [isMobileCartOpen]);
 
   useEffect(() => {
     if (!draftFetcher.data) {
@@ -1358,7 +1341,6 @@ export default function CreateOrderProductCatalog() {
     }
 
     saveCart(newCart);
-    setIsMobileCartOpen(true);
     setItemAddedMessage(`${product.title} added successfully`);
   };
 
@@ -1545,7 +1527,7 @@ export default function CreateOrderProductCatalog() {
                       <button 
                         type="button"
                         onClick={() => removeFromCart(item.variantId)} 
-                        style={{ ...styles.cartRemoveBtn, color: "#ef4444", display: "flex", alignItems: "center", gap: "2px" }}
+                        style={{ ...styles.cartRemoveBtn, color: "var(--sales-portal-accent)", display: "flex", alignItems: "center", gap: "2px" }}
                       >
                         🗑️ <span style={{ fontSize: "11px" }}>Remove</span>
                       </button>
@@ -2183,111 +2165,6 @@ export default function CreateOrderProductCatalog() {
             </div>
           </section>
 
-          {/* Floating Mobile Cart Button */}
-          <button 
-            type="button"
-            onClick={() => setIsMobileCartOpen(true)} 
-            className="mobile-cart-btn"
-            style={{
-              position: "fixed",
-              bottom: "24px",
-              right: "24px",
-              width: "60px",
-              height: "60px",
-              borderRadius: "50%",
-              background: `linear-gradient(135deg, ${theme.accent} 0%, ${theme.accentDark} 100%)`,
-              color: "white",
-              border: "none",
-              boxShadow: "0 10px 15px -3px rgba(233, 30, 99, 0.3), 0 4px 6px -2px rgba(233, 30, 99, 0.05)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "24px",
-              cursor: "pointer",
-              zIndex: 9999,
-              transition: "transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-            }}
-            aria-label={`Open cart with ${totalUnits} ${totalUnits === 1 ? "item" : "items"}`}
-          >
-            <span>🛒</span>
-            {cartItems.length > 0 && (
-              <span style={{
-                position: "absolute",
-                top: "-2px",
-                right: "-2px",
-                backgroundColor: "white",
-                color: theme.accent,  
-                borderRadius: "50%",
-                padding: "2px 6px",
-                fontSize: "12px",
-                fontWeight: 700,
-                border: `2px solid ${theme.accent}`,  
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-              }}>
-                {totalUnits}
-              </span>
-            )}
-          </button>
-
-          {/* Mobile Cart Drawer Overlay */}
-          {isMobileCartOpen && (
-            <div 
-              className="mobile-cart-drawer"
-              style={{
-                position: "fixed",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: "rgba(0,0,0,0.5)",
-                backdropFilter: "blur(4px)",
-                zIndex: 10000,
-                display: "flex",
-                justifyContent: "flex-end",
-              }}
-            >
-              <button
-                type="button"
-                aria-label="Close cart"
-                onClick={() => setIsMobileCartOpen(false)}
-                style={styles.drawerBackdrop}
-              />
-              <div 
-                className="mobile-cart-panel"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Cart summary"
-                style={{
-                  width: "100%",
-                  maxWidth: "460px",
-                  height: "100%",
-                  backgroundColor: "white",
-                  display: "flex",
-                  flexDirection: "column",
-                  padding: "20px",
-                  boxShadow: "-10px 0 25px -5px rgba(0,0,0,0.1)",
-                  overflowY: "auto",
-                  boxSizing: "border-box",
-                  position: "relative",
-                  zIndex: 1,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                  <h3 style={{ ...styles.sidebarTitle, borderBottom: "none", margin: 0, paddingBottom: 0 }}>Cart Summary</h3>
-                  <button 
-                    type="button"
-                    aria-label="Close cart"
-                    onClick={() => setIsMobileCartOpen(false)}
-                    style={{ background: "none", border: "none", fontSize: "24px", cursor: "pointer", color: "#6b7280" }}
-                  >
-                    ✕
-                  </button>
-                </div>
-                {renderCartContents()}
-              </div>
-            </div>
-          )}
-
           {/* Column 3: Desktop Cart Sidebar */}
           <aside className="desktop-cart-sidebar" style={styles.cartSidebar}>
             <div style={{ ...styles.card, position: "sticky", top: "20px", maxHeight: "calc(100vh - 40px)", overflowY: "auto", overflowX: "hidden", width: "100%", minWidth: 0 }}>
@@ -2571,7 +2448,7 @@ const createStyles = (theme: any) => ({
     width: "100%",
     height: "38px",
     backgroundColor: theme.accent,
-    color: "white",
+    color: "var(--sales-portal-accent-contrast)",
     border: "none",
     borderRadius: "8px",
     fontWeight: 600,
@@ -2582,8 +2459,8 @@ const createStyles = (theme: any) => ({
   clearBtn: {
     width: "100%",
     height: "38px",
-    backgroundColor: "#f3f4f6",
-    color: "#4b5563",
+    backgroundColor: "var(--sales-portal-accent-soft)",
+    color: "var(--sales-portal-accent-dark)",
     border: "none",
     borderRadius: "8px",
     fontWeight: 600,
@@ -2610,8 +2487,8 @@ const createStyles = (theme: any) => ({
   searchBtn: {
     height: "44px",
     padding: "0 24px",
-    backgroundColor: "#111827",
-    color: "white",
+    backgroundColor: "var(--sales-portal-accent)",
+    color: "var(--sales-portal-accent-contrast)",
     border: "none",
     borderRadius: "8px",
     fontWeight: 600,
@@ -2834,9 +2711,9 @@ const createStyles = (theme: any) => ({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: "8px",
-    border: "1px solid #d1d5db",
-    backgroundColor: "#ffffff",
-    color: "#374151",
+    border: "1px solid var(--sales-portal-accent-tint)",
+    backgroundColor: "var(--sales-portal-accent-lighter)",
+    color: "var(--sales-portal-accent-dark)",
     textDecoration: "none",
     fontWeight: 700,
     fontSize: "13px",
@@ -2952,7 +2829,7 @@ const createStyles = (theme: any) => ({
   qtyBtn: {
     width: "28px",
     height: "100%",
-    backgroundColor: "#f3f4f6",
+    backgroundColor: "var(--sales-portal-accent-soft)",
     border: "none",
     fontSize: "16px",
     fontWeight: 600,
@@ -2971,7 +2848,7 @@ const createStyles = (theme: any) => ({
     flex: 1,
     height: "34px",
     backgroundColor: theme.accent,
-    color: "white",
+    color: "var(--sales-portal-accent-contrast)",
     border: "none",
     borderRadius: "6px",
     fontWeight: 600,
@@ -3034,7 +2911,7 @@ const createStyles = (theme: any) => ({
     width: "20px",
     height: "100%",
     border: "none",
-    backgroundColor: "#f9fafb",
+    backgroundColor: "var(--sales-portal-accent-soft)",
     cursor: "pointer",
     fontSize: "12px",
   },
@@ -3077,7 +2954,7 @@ const createStyles = (theme: any) => ({
     width: "100%",
     height: "42px",
     background: `linear-gradient(90deg, ${theme.accent} 0%, ${theme.accentDark} 100%)`,
-    color: "white",
+    color: "var(--sales-portal-accent-contrast)",
     textDecoration: "none",
     borderRadius: "8px",
     fontWeight: 600,
