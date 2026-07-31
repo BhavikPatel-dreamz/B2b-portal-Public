@@ -27,12 +27,7 @@ export const loader = async ({ request }) => {
     return text(`NetSuite connect failed: ${err?.message || err}`, 200);
   }
   // return text(`NetSuite connect succeeded: ${shop}`, 200);
-  // Land the admin back inside the embedded app on its index page (app._index),
-  // not on the bare /admin/apps list. The app handle is the subdomain of the app
-  // URL, e.g. "smartb2b" for https://smartb2b.dynamicdreamz.com.
-  const appHandle =
-    process.env.SHOPIFY_APP_URL?.split("//")[1]?.split(".")[0] || "smartb2b";
-  return redirect(`https://${shop}/admin/apps/${appHandle}`);
+  return redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_APP_HANDLE}`);
 };
 
 function text(body, status = 200) {
