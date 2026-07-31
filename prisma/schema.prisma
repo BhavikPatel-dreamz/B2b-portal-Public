@@ -530,3 +530,74 @@ model Invitation {
   @@index([userId])
   @@index([shopId])
 }
+
+// One row per order touched by an order-sync run, plus one row for a run that
+// died before it could process anything. This is what the log page reads: the
+// page filters by date, status and free text and pages through the result, which
+// is a query the database does with indexes and a file would need a full parse
+// for on every page view. The human-readable
+// storage/logs/order-sync-<shop>-<date>.log is written alongside it and kept for
+// tailing/grep on the server and for the case where this write itself fails.
+model OrderSyncLog {
+  id         String    @id @default(cuid())
+  shop       String
+
+  // The run's start time — the "cron time" every row of a run shares.
+  runAt      DateTime
+  finishedAt DateTime?
+  // "live" or "export" (a dry run that wrote nothing to Shopify).
+  mode       String    @default("live")
+
+  externalId String? // NetSuite internal id
+  reference  String? // NetSuite tranId, e.g. SO20249
+  // create | tracking | delete | skip | fetch | run
+  action     String
+  // success | failed | skipped
+  status     String
+
+  orderName  String?
+  orderId    String?
+  company    String?
+
+  // The error, or the reason it was skipped — whichever applies.
+  message    String?   @db.Text
+  // The full result object, for the row's detail dialog.
+  detail     String?   @db.Text
+
+  createdAt  DateTime  @default(now())
+
+  @@index([shop, runAt])
+  @@index([shop, status, runAt])
+  @@index([shop, action, runAt])
+  @@index([shop, externalId])
+}
+
+// Per-shop NetSuite OAuth 2.0 connection (authorization code grant).
+model NetsuiteAppSettings {
+  id             String    @id @default(cuid())
+  shop           String    @unique
+
+  accessToken    String?   @db.Text
+  refreshToken   String?   @db.Text
+  tokenExpiresAt DateTime?
+  connectedAt    DateTime?
+
+  // Watermark for incremental order sync: the start time of the last successful
+  // run. The next run pulls NetSuite orders with lastModifiedDate on/after this
+  // timestamp's DAY (NetSuite's q filter is date-granularity, so the whole day
+  // is re-pulled — harmless, the sync is idempotent). Null until the first
+  // successful sync.
+  lastSyncedAt   DateTime?
+
+  // Set while an order sync is running for this shop, and cleared when it
+  // finishes. Cron fires on a fixed interval with no idea whether the last run is
+  // still going, and two runs over the same window race each other: both look up
+  // the same new B2B company, both find nothing, and both create it — after which
+  // every later order for that company fails on "the shop has 2 companies named
+  // X". A run older than the stale timeout is taken over, so a process that dies
+  // without clearing this doesn't block the shop forever.
+  syncStartedAt  DateTime?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
