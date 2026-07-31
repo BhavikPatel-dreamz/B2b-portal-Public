@@ -35,8 +35,12 @@ export function redirectUri() {
 // Signs `shop` into a state param NetSuite echoes back on the callback, so we
 // can recover which shop started the flow without cookies/session storage
 // across the external redirect (NetSuite's redirect is a bare top-level nav).
+//
+// A random nonce is included so every Connect click produces a unique state —
+// NetSuite rejects repeated state values with a "login attempt" error.
 export function signState(shop) {
-  const payload = Buffer.from(shop, "utf8").toString("base64url");
+  const nonce = crypto.randomBytes(16).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ shop, nonce }), "utf8").toString("base64url");
   const sig = crypto
     .createHmac("sha256", required("SHOPIFY_API_SECRET"))
     .update(payload)
@@ -54,7 +58,13 @@ export function verifyState(state) {
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  return Buffer.from(payload, "base64url").toString("utf8");
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return data.shop || null;
+  } catch {
+    // Fallback: old-format state without nonce (plain shop string)
+    return Buffer.from(payload, "base64url").toString("utf8");
+  }
 }
 
 export function buildAuthorizeUrl(shop) {

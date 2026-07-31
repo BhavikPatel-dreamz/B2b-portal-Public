@@ -188,6 +188,11 @@ export default [
   route("api/company-customers", "routes/api.company-customers.tsx"),
   route("api/sales-product-search", "routes/api.sales-product-search.tsx"),
 
+  // NetSuite API routes
+  route("api/netsuite/connect", "routes/api.netsuite.connect.jsx"),
+  route("api/netsuite/disconnect", "routes/api.netsuite.disconnect.jsx"),
+  route("api/netsuite/callback", "routes/api.netsuite.callback.jsx"),
+
   // Index route
   index("routes/_index/route.tsx"),
 ] satisfies RouteConfig;

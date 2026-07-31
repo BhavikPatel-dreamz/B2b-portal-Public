@@ -3,8 +3,10 @@ import {
   Link,
   useFetcher,
   useNavigate,
+  useRevalidator,
   type ActionFunctionArgs,
-  type HeadersFunction
+  type HeadersFunction,
+  type LoaderFunctionArgs,
 } from "react-router";
 import { PAID_PLAN } from "app/billing-plans.shared";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -12,13 +14,13 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import  { useEffect, useState } from "react";
 import prisma from "app/db.server";
 import { authenticate } from "app/shopify.server";
-import { LoaderFunctionArgs } from "react-router";
 import { syncShopifyCompanies } from "app/utils/company.server";
 import { countRegistrations } from "../services/registration.server";
 import { clearAdminCompaniesCache } from "./app.companies";
 import { clearSelectPlanCache } from "./app.select-plan"; 
 import { getFreePlanUsage } from "app/utils/free-plan-limits.server";
 import { hasCustomPlanConfiguration } from "app/services/store.server";
+import { getConnectionStatus } from "../lib/netsuite-oauth.server.js";
 
 
 type Tutorial = {
@@ -47,6 +49,31 @@ type ThemeSummary = {
   numericId: string | undefined;
 };
 
+type LoaderData = {
+  netsuite: {
+    connected: boolean;
+    connectedAt: Date | null;
+  };
+  themes: ThemeSummary[];
+  missingScope: boolean;
+  store: {
+    shopDomain: string;
+    id: string;
+    completedSetupSteps?: string[] | null;
+    setupFinished?: boolean;
+    plan?: string | null;
+    planKey?: string | null;
+    customPlanKey?: string | null;
+    customAmount?: number | null;
+    customPlanActive?: boolean | null;
+  } | null;
+  completedSetupSteps: string[];
+  setupFinished: boolean;
+  pendingRegistrations: number;
+  isFreePlan: boolean;
+  freePlanCompanyCount: number;
+};
+
 const hasReadThemesScopeError = (error: unknown) => {
   if (!error || typeof error !== "object") {
     return false;
@@ -68,6 +95,8 @@ const hasReadThemesScopeError = (error: unknown) => {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   // ✅ Add billing to destructuring
   const { admin, session, billing } = await authenticate.admin(request);
+  const netsuite = await getConnectionStatus(session.shop);
+
 
   let themes: ThemeSummary[] = [];
   let missingScope = false;
@@ -101,7 +130,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!store) {
     return Response.json(
-      { submissions: [], storeMissing: true, themes: [] },
+      {
+        netsuite,
+        themes: [],
+        missingScope,
+        store: null,
+        completedSetupSteps: [],
+        setupFinished: false,
+        pendingRegistrations: 0,
+        isFreePlan: false,
+        freePlanCompanyCount: 0,
+      },
       { status: 404 },
     );
   }
@@ -156,6 +195,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   return Response.json({
+    netsuite,
     themes,
     missingScope,
     store,
@@ -251,26 +291,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Welcome() {
-const {
-  store,
-  themes = [],
-  completedSetupSteps = [],
-  setupFinished = false,
-  pendingRegistrations = 0,
-  isFreePlan = false,
-  freePlanCompanyCount = 0,
-} = useLoaderData<typeof loader>() as {
-  themes: ThemeSummary[];
-  store: { shopDomain: string; id: string } | null;
-  completedSetupSteps: string[];
-  setupFinished: boolean;
-  pendingRegistrations: number;
-  isFreePlan: boolean;
-  freePlanCompanyCount: number;
-};
+  const {
+    store,
+    themes = [],
+    completedSetupSteps = [],
+    setupFinished = false,
+    pendingRegistrations = 0,
+    isFreePlan = false,
+    freePlanCompanyCount = 0,
+    netsuite,
+  } = useLoaderData<LoaderData>();
+
   const syncFetcher = useFetcher<ActionResponse>();
   const setupFetcher = useFetcher();
   const navigate = useNavigate();
+  const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const [showSetupEssentials, setShowSetupEssentials] = useState(!setupFinished);
 
@@ -332,6 +367,23 @@ const {
       thumbnailTitle: "How To Manage\nCompany Access?"
     }
   ];
+  const netsuiteFetcher = useFetcher();
+  useEffect(() => {
+    if (netsuiteFetcher.data?.url) {
+      window.open(netsuiteFetcher.data.url, "_top");
+    }
+  }, [netsuiteFetcher.data]);
+  const connectNetsuite = () =>
+    netsuiteFetcher.submit({}, { method: "POST", action: "/api/netsuite/connect" });
+
+  const disconnectFetcher = useFetcher();
+  useEffect(() => {
+    if (disconnectFetcher.data?.ok) {
+      revalidator.revalidate();
+    }
+  }, [disconnectFetcher.data, revalidator]);
+  const disconnectNetsuite = () =>
+    disconnectFetcher.submit({}, { method: "POST", action: "/api/netsuite/disconnect" });
 
 
   const isSetupItemComplete = (label: string) =>
@@ -1819,92 +1871,32 @@ const {
             </div>
           </div>
         </div>
-
-        {/* Tutorials */}
-        {/* <div className="tutorials-section">
-          <div className="tutorials-header">
-            <div>
-              <h2 className="tutorials-title">Guide videos</h2>
-              <p className="tutorials-subtitle">
-                Step-by-step instruction videos, just a few minutes to know the app!
-              </p>
-            </div>
-        
-          </div>
-          <div
-            className={`tutorials-grid${
-              tutorials.length === 2 ? " tutorials-grid--two" : ""
-            }`}
-          >
-            {tutorials.map((tutorial) => (
-              <div 
-                key={tutorial.id} 
-                className="tutorial-card"
-                onClick={() => openModal(tutorial)}
-              >
-                <div className="tutorial-card-visual">
-                  <span className="tutorial-card-badge">B2B Portal Guide</span>
-                  <div className="tutorial-thumbnail-title">{tutorial.thumbnailTitle}</div>
-                  <div className="tutorial-duration">
-                    <span className="tutorial-duration-icon">▶</span>
-                    <span>{tutorial.duration}</span>
-                  </div>
-                </div>
-                <div className="tutorial-card-body">
-                  <span className={`tutorial-tag ${tutorial.tagClass}`}>
-                    {tutorial.tag}
-                  </span>
-                  <h3 className="tutorial-card-title">{tutorial.title}</h3>
-                  <p className="tutorial-card-description">{tutorial.description}</p>
-                  <button className="watch-tutorial-btn" type="button">
-                    Watch video
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-
-     
-        {selectedTutorial && (
-          <div className="modal-overlay" onClick={closeModal}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        
-              <button className="modal-close-btn" onClick={closeModal}>
-                ✕
-              </button>
-
-       
-              <div className="modal-main">
-           
-                <div className="modal-main-header">
-                  <div className="header-left">
-                    <h2>{selectedTutorial.title}</h2>  
-                  </div>
-                </div>
-
-               
-                <div className="video-wrapper">
-                  <iframe
-                    width="100%"
-                    height="100%"
-                    src={`${selectedTutorial.videoUrl}?autoplay=1`}
-                    title={selectedTutorial.title}
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  ></iframe>
-                </div>
-
-               
-                <div className="modal-footer">
-                </div>
-              </div>
-            </div>
-          </div>
-        )} */}
-
+     <s-section heading="NetSuite Integration">
+       {netsuite.connected ? (
+          <s-stack direction="inline" gap="base">
+            <s-paragraph>
+              Connected since {netsuite.connectedAt ? new Date(netsuite.connectedAt).toLocaleString() : "unknown time"}
+            </s-paragraph>
+            <s-button
+              onClick={disconnectNetsuite}
+              variant="tertiary"
+              {...(disconnectFetcher.state !== "idle" ? { loading: true } : {})}
+            >
+              Disconnect
+            </s-button>
+          </s-stack>
+        ) : (
+          <s-stack direction="inline" gap="base">
+            <s-paragraph>Not connected to NetSuite yet.</s-paragraph>
+            <s-button
+              onClick={connectNetsuite}
+              {...(netsuiteFetcher.state !== "idle" ? { loading: true } : {})}
+            >
+              Connect NetSuite
+            </s-button>
+          </s-stack>
+        )}
+      </s-section>
      
       </div>
     </div>

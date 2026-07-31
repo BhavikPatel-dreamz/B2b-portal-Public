@@ -22,6 +22,8 @@ const SALES_ONLY_STORES = new Set([
 ]);
 
 const SALES_ONLY_ALLOWED_PATHS = new Set([
+  "/app",
+  "/app/",
   "/app/sales-users",
   "/app/sales-dashboard",
 ]);
@@ -186,7 +188,11 @@ export default function App() {
     <AppProvider embedded apiKey={apiKey}>
       <PolarisAppProvider i18n={enTranslations}>
         <s-app-nav>
-          {!salesOnlyStore && <s-link href="/app/home">Home</s-link>}
+          {salesOnlyStore ? (
+            <s-link href="/app">Home</s-link>
+          ) : (
+            <s-link href="/app/home">Home</s-link>
+          )}
           {!salesOnlyStore && <s-link href="/app/reports">Reports</s-link>}
           {!salesOnlyStore && <s-link href="/app/companies">B2B Companies</s-link>}
           {/* <s-link href="/app/companies?tab=pending">Registrations</s-link> */}
