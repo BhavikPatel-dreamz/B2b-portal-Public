@@ -1,0 +1,68 @@
+{
+  "_comment": "Demo stand-in for the NetSuite SuiteTalk REST salesOrder API response. Shape mirrors a real `GET /services/rest/record/v1/salesorder/:id` payload (id, tranId, entity, status, currency, item.items[]). In production, fetchExternalOrders() calls NetSuite and returns { items: [...] }; mapNetsuiteOrder() then converts each record into the internal order shape the sync uses. status.id 'cancelled'/'closed' -> delete in Shopify, everything else -> create-or-update.",
+  "items": [
+    {
+      "id": "1504",
+      "tranId": "SO1504",
+      "entity": { "id": "203", "refName": "Jane Doe" },
+      "email": "jane.doe@example.com",
+      "status": { "id": "pendingFulfillment", "refName": "Pending Fulfillment" },
+      "currency": { "id": "1", "refName": "USD" },
+      "memo": "Q1 hardware order",
+      "shippingAddress": { "addr1": "123 Market St", "addr2": "Suite 400", "city": "San Francisco", "state": { "id": "CA", "refName": "California" }, "zip": "94103", "country": { "id": "US", "refName": "United States" }, "addrPhone": "+14155550123", "addressee": "Jane Doe" },
+      "billingAddress": { "addr1": "500 Finance Ave", "city": "San Francisco", "state": { "id": "CA", "refName": "California" }, "zip": "94104", "country": { "id": "US", "refName": "United States" }, "addressee": "Jane Doe" },
+      "shipMethod": { "id": "10", "refName": "UPS Ground" },
+      "shippingCost": 12.5,
+      "taxTotal": 7.42,
+      "linkedTrackingNumbers": "1Z999AA10123456784",
+      "item": {
+        "items": [
+          { "line": 1, "item": { "id": "328", "refName": "Demo Widget" }, "quantity": 2.0, "rate": 19.99, "amount": 39.98 },
+          { "line": 2, "item": { "id": "331", "refName": "Demo Gadget" }, "quantity": 1.0, "rate": 49.0, "amount": 49.0 }
+        ]
+      }
+    },
+    {
+      "id": "1505",
+      "tranId": "SO1505",
+      "entity": { "id": "204", "refName": "John Smith" },
+      "email": "john.smith@example.com",
+      "status": { "id": "pendingApproval", "refName": "Pending Approval" },
+      "currency": { "id": "1", "refName": "USD" },
+      "memo": "Starter pack order",
+      "item": {
+        "items": [
+          { "line": 1, "item": { "id": "500", "refName": "Starter Pack" }, "quantity": 1.0, "rate": 9.99, "amount": 9.99 }
+        ]
+      }
+    },
+    {
+      "id": "1506",
+      "tranId": "SO1506",
+      "entity": { "id": "205", "refName": "Cancelled Buyer" },
+      "email": "cancelled.buyer@example.com",
+      "status": { "id": "cancelled", "refName": "Cancelled" },
+      "currency": { "id": "1", "refName": "USD" },
+      "memo": "Order cancelled in NetSuite",
+      "item": {
+        "items": [
+          { "line": 1, "item": { "id": "328", "refName": "Demo Widget" }, "quantity": 1.0, "rate": 19.99, "amount": 19.99 }
+        ]
+      }
+    },
+    {
+      "id": "1507",
+      "tranId": "SO1507",
+      "entity": { "id": "206", "refName": "Prefix Test" },
+      "email": "prefix.test@example.com",
+      "status": { "id": "pendingFulfillment", "refName": "Pending Fulfillment" },
+      "currency": { "id": "1", "refName": "USD" },
+      "memo": "Verifies prefixed order name on create",
+      "item": {
+        "items": [
+          { "line": 1, "item": { "id": "900", "refName": "Prefix Widget" }, "quantity": 3.0, "rate": 5.0, "amount": 15.0 }
+        ]
+      }
+    }
+  ]
+}
