@@ -192,6 +192,7 @@ export default [
   route("api/netsuite/connect", "routes/api.netsuite.connect.jsx"),
   route("api/netsuite/disconnect", "routes/api.netsuite.disconnect.jsx"),
   route("api/netsuite/callback", "routes/api.netsuite.callback.jsx"),
+  route("api/cron/orders-sync", "routes/api.cron.orders-sync.jsx"),
 
   // Index route
   index("routes/_index/route.tsx"),
