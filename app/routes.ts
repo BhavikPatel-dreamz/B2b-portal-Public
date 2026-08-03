@@ -147,8 +147,14 @@ export default [
   ),
   route("support/drafts/:draftId", "routes/support.drafts.$draftId.tsx"),
   route(
+    "sales/portal/quotes",
+    "routes/sales.portal.company.$companyId.quotes.tsx",
+    { id: "sales-portal-quotes" },
+  ),
+  route(
     "sales/portal/company/:companyId/quotes",
     "routes/sales.portal.company.$companyId.quotes.tsx",
+    { id: "sales-portal-company-quotes" },
   ),
   route(
     "sales/portal/company/:companyId/quotes/:quoteId",
@@ -187,6 +193,7 @@ export default [
   route("api/support-form", "routes/api.support-form.tsx"),
   route("api/company-customers", "routes/api.company-customers.tsx"),
   route("api/sales-product-search", "routes/api.sales-product-search.tsx"),
+  route("api/admin-product-search", "routes/api.admin-product-search.tsx"),
 
   // NetSuite API routes
   route("api/netsuite/connect", "routes/api.netsuite.connect.jsx"),

@@ -3,8 +3,110 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, HeadersFunction } from "re
 import { redirect } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "app/db.server";
-import { authenticate } from "app/shopify.server";
+import { authenticate, apiVersion } from "app/shopify.server";
 import { logQuoteActivity, serializeQuote } from "app/services/quote.server";
+import { getDeliveryDetailsForRecord } from "app/services/delivery-details.server";
+import { getCompanyLocations, createCompanyLocation, updateCompanyLocation } from "app/utils/b2b-customer.server";
+
+type ShippingCountryOption = {
+  value: string;
+  label: string;
+  provinces: Array<{ value: string; label: string }>;
+};
+
+async function loadShippingCountries(shopDomain: string, accessToken: string): Promise<ShippingCountryOption[]> {
+  const endpoint = `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": accessToken,
+    },
+    body: JSON.stringify({
+      query: `
+        query GetShippingCountriesWithProvinces {
+          shop {
+            countriesInShippingZones {
+              countryCodes
+              includeRestOfWorld
+            }
+          }
+          deliveryProfiles(first: 10) {
+            nodes {
+              profileLocationGroups {
+                locationGroupZones(first: 100) {
+                  nodes {
+                    zone {
+                      countries {
+                        code { countryCode }
+                        name
+                        provinces { code name }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `,
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok || payload.errors) {
+    return [];
+  }
+
+  const shippingZoneData = payload.data?.shop?.countriesInShippingZones;
+  const validCountryCodes = new Set<string>(shippingZoneData?.countryCodes || []);
+  const includeRestOfWorld = shippingZoneData?.includeRestOfWorld ?? false;
+
+  const countriesMap = new Map<string, ShippingCountryOption>();
+
+  const upsertCountry = (
+    countryCode: string,
+    label: string | null | undefined,
+    provinces: Array<{ value: string; label: string }> = [],
+  ) => {
+    const existing = countriesMap.get(countryCode);
+    if (existing) {
+      if (label && existing.label === countryCode) existing.label = label;
+      const existingCodes = new Set(existing.provinces.map((p) => p.value));
+      for (const province of provinces) {
+        if (!existingCodes.has(province.value)) existing.provinces.push(province);
+      }
+      return;
+    }
+    countriesMap.set(countryCode, { value: countryCode, label: label ?? countryCode, provinces });
+  };
+
+  for (const profile of payload.data?.deliveryProfiles?.nodes || []) {
+    for (const group of profile.profileLocationGroups || []) {
+      for (const zoneNode of group.locationGroupZones?.nodes || []) {
+        for (const country of zoneNode.zone?.countries || []) {
+          const countryCode = country.code?.countryCode;
+          if (!countryCode) continue;
+          const provinces = (country.provinces || []).map((province: { code: string; name: string }) => ({
+            value: province.code,
+            label: province.name,
+          }));
+          upsertCountry(countryCode, country.name, provinces);
+        }
+      }
+    }
+  }
+
+  if (includeRestOfWorld || validCountryCodes.size === 0) {
+    for (const code of validCountryCodes) {
+      if (!countriesMap.has(code)) upsertCountry(code, code);
+    }
+  }
+
+  return Array.from(countriesMap.values())
+    .filter((country) => validCountryCodes.size === 0 || validCountryCodes.has(country.value))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -33,9 +135,49 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     quote.status = "expired";
   }
 
+  let companyLocations: any[] = [];
+  let deliveryDetails = null;
+  let shippingCountryOptions: ShippingCountryOption[] = [];
+
+  if (quote.company?.shopifyCompanyId && store.accessToken) {
+    try {
+      const locationsResult = await getCompanyLocations(
+        quote.company.shopifyCompanyId,
+        store.shopDomain,
+        store.accessToken,
+      );
+      if (!locationsResult.error) {
+        companyLocations = locationsResult.locations || [];
+      }
+    } catch (error) {
+      console.error("[admin quote] Failed to load company locations", error);
+    }
+
+    try {
+      deliveryDetails = await getDeliveryDetailsForRecord({
+        ...quote,
+        company: {
+          ...quote.company,
+          shop: { shopDomain: store.shopDomain, accessToken: store.accessToken },
+        },
+      });
+    } catch (error) {
+      console.error("[admin quote] Failed to load delivery details", error);
+    }
+
+    try {
+      shippingCountryOptions = await loadShippingCountries(store.shopDomain, store.accessToken);
+    } catch (error) {
+      console.error("[admin quote] Failed to load shipping countries", error);
+    }
+  }
+
   return Response.json({
     quote: serializeQuote(quote),
     shopDomain: store.shopDomain,
+    companyLocations,
+    deliveryDetails,
+    shippingCountryOptions,
   });
 };
 
@@ -647,7 +789,69 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return redirect(request.url);
     }
 
-    // ── ADD PRODUCT ────────────────────────────────────────────
+    // ── SAVE COMPANY LOCATION (create / edit) ─────────────────
+    if (intent === "save_company_location") {
+      const locationId = String(formData.get("deliveryLocationId") || "").trim();
+      const name = String(formData.get("deliveryLocationName") || "").trim();
+      const address1 = String(formData.get("deliveryAddress1") || "").trim();
+      const address2 = String(formData.get("deliveryAddress2") || "").trim();
+      const city = String(formData.get("deliveryCity") || "").trim();
+      const province = String(formData.get("deliveryProvince") || "").trim();
+      const zip = String(formData.get("deliveryZip") || "").trim();
+      const country = String(formData.get("deliveryCountry") || "").trim();
+      const phone = String(formData.get("deliveryPhone") || "").trim();
+
+      const fieldErrors: Record<string, string> = {};
+      if (!name) fieldErrors.name = "Location name is required.";
+      if (!address1) fieldErrors.address1 = "Street address is required.";
+      if (!city) fieldErrors.city = "City is required.";
+      if (!country) fieldErrors.country = "Country is required.";
+      if (!zip) fieldErrors.zip = "Postal code is required.";
+
+      if (Object.keys(fieldErrors).length) {
+        return Response.json(
+          { error: "Please complete the required location fields before saving.", fieldErrors },
+          { status: 400 },
+        );
+      }
+
+      if (!store.accessToken) {
+        return Response.json({ error: "Store access token not available." }, { status: 500 });
+      }
+      if (!quote.company?.shopifyCompanyId) {
+        return Response.json({ error: "Company Shopify ID not available for this quote." }, { status: 400 });
+      }
+
+      const locationData = {
+        name,
+        address1,
+        address2: address2 || undefined,
+        city,
+        province: province || undefined,
+        zip,
+        country,
+        phone: phone || undefined,
+      };
+
+      let result: any;
+      if (locationId) {
+        result = await updateCompanyLocation(locationId, store.shopDomain, store.accessToken, locationData);
+      } else {
+        result = await createCompanyLocation(quote.company.shopifyCompanyId, store.shopDomain, store.accessToken, locationData);
+      }
+
+      if (result?.success || result?.locationId) {
+        return Response.json({
+          success: true,
+          message: "Location saved successfully.",
+          locationId: result.locationId || locationId || "",
+        });
+      }
+
+      return Response.json({ error: result?.error || "Unable to save location." }, { status: 400 });
+    }
+
+    // ── ADD PRODUCT (single) ───────────────────────────────────
     if (intent === "add_product") {
       const productTitle = String(formData.get("newProductTitle") || "").trim();
       const variantTitle = String(formData.get("newVariantTitle") || "").trim();
@@ -698,6 +902,91 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       });
 
       return Response.json({ success: true, message: "Product added to quote." });
+    }
+
+    // ── ADD PRODUCTS (bulk) ────────────────────────────────────
+    if (intent === "add_products") {
+      const rowKeys = formData.getAll("newProductRow").map(String).filter(Boolean);
+      const quoteCurrency = quote.currencyCode || quote.items?.[0]?.currencyCode || "USD";
+
+      const newItems = rowKeys
+        .map((rowKey) => {
+          const productTitle = String(formData.get(`newProductTitle_${rowKey}`) || "").trim();
+          const variantTitle = String(formData.get(`newVariantTitle_${rowKey}`) || "").trim();
+          const sku = String(formData.get(`newSku_${rowKey}`) || "").trim();
+          const variantId = String(formData.get(`newVariantId_${rowKey}`) || "").trim();
+          const image = String(formData.get(`newImage_${rowKey}`) || "").trim();
+          const quantity = Number(formData.get(`newQuantity_${rowKey}`));
+          const unitPrice = Number(formData.get(`newUnitPrice_${rowKey}`));
+          const discount = Number(formData.get(`newDiscount_${rowKey}`));
+
+          const isAnyValueFilled = Boolean(
+            productTitle || variantTitle || sku || image || quantity || unitPrice || discount,
+          );
+          if (!isAnyValueFilled) return null;
+          if (!productTitle) return null;
+
+          const validQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+          const validUnitPrice = Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0;
+          const validDiscount = Number.isFinite(discount) && discount >= 0 ? discount : 0;
+
+          return {
+            productTitle,
+            variantTitle,
+            sku,
+            variantId,
+            image,
+            quantity: validQuantity,
+            unitPrice: validUnitPrice,
+            discount: validDiscount,
+            totalPrice: Math.max(0, validUnitPrice * validQuantity - validDiscount),
+          };
+        })
+        .filter(Boolean) as Array<{
+        productTitle: string;
+        variantTitle: string;
+        sku: string;
+        variantId: string;
+        image: string;
+        quantity: number;
+        unitPrice: number;
+        discount: number;
+        totalPrice: number;
+      }>;
+
+      if (!newItems.length) {
+        return Response.json({ error: "No products to add." }, { status: 400 });
+      }
+
+      for (const item of newItems) {
+        await prisma.quoteItem.create({
+          data: {
+            quoteId,
+            productTitle: item.productTitle,
+            variantTitle: item.variantTitle || null,
+            sku: item.sku || null,
+            image: item.image || null,
+            variantId: item.variantId || "",
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discount: item.discount,
+            totalPrice: item.totalPrice,
+            currencyCode: quoteCurrency,
+          },
+        });
+      }
+
+      await recalculateQuoteTotals(quoteId);
+
+      await logQuoteActivity({
+        quoteId,
+        companyId: quote.companyId,
+        customerEmail: quote.customerEmail,
+        action: "Products Added",
+        message: `Added ${newItems.length} product${newItems.length > 1 ? "s" : ""} to quote.`,
+      });
+
+      return Response.json({ success: true, message: `${newItems.length} product${newItems.length > 1 ? "s" : ""} added to quote.` });
     }
 
     // ── DELETE ITEM ────────────────────────────────────────────

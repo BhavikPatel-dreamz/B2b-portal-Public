@@ -394,20 +394,6 @@ export default function QuoteListingPage() {
       )}
 
       <Form method="get" className="sales-quote-filters" style={styles.filters}>
-        {companies.length > 1 && (
-          <select
-            name="company"
-            defaultValue={filters.companyId}
-            style={styles.input}
-          >
-            <option value="all">All companies</option>
-            {companies.map((company: any) => (
-              <option key={company.id} value={company.id}>
-                {company.name}
-              </option>
-            ))}
-          </select>
-        )}
         <input
           name="customer"
           placeholder="Customer"
@@ -419,7 +405,7 @@ export default function QuoteListingPage() {
           defaultValue={filters.status}
           style={styles.input}
         >
-          <option value="">All statuses</option>
+          <option value="">All status</option>
           {[
             "draft",
             "sent",
@@ -432,14 +418,6 @@ export default function QuoteListingPage() {
           ].map((s) => (
             <option key={s} value={s}>
               {s}
-            </option>
-          ))}
-        </select>
-        <select name="agent" defaultValue={filters.agent} style={styles.input}>
-          <option value="">All agents</option>
-          {agents.map((agent: any) => (
-            <option key={agent.id} value={agent.id}>
-              {agent.firstName || agent.email} {agent.lastName || ""}
             </option>
           ))}
         </select>

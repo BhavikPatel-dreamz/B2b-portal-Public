@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   useLoaderData,
   Link,
@@ -8,7 +8,6 @@ import {
   useRevalidator,
 } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { useEffect } from "react";
 
 function fmtMoney(amount: string | number, currency: string) {
   return new Intl.NumberFormat(undefined, {
@@ -38,6 +37,687 @@ function fmtDateTime(iso: string) {
   }).format(new Date(iso));
 }
 
+type Variant = {
+  id: string;
+  title?: string;
+  sku?: string;
+  price?: string | number;
+  currencyCode?: string;
+  inventoryQuantity?: number;
+  inventoryPolicy?: "CONTINUE" | "DENY" | string;
+  tracked?: boolean;
+  availableForSale?: boolean;
+};
+
+type ShippingCountryOption = {
+  value: string;
+  label: string;
+  provinces: Array<{ value: string; label: string }>;
+};
+
+type Product = {
+  id: string;
+  title: string;
+  vendor?: string;
+  productType?: string;
+  tags?: string[];
+  image?: string;
+  variants: Variant[];
+};
+
+type AddProductForm = {
+  productId: string;
+  productTitle: string;
+  sku: string;
+  variantTitle: string;
+  variantId: string;
+  image: string;
+  unitPrice: string;
+  discount: string;
+  quantity: number;
+};
+
+type NewProductRow = AddProductForm & { rowKey: string };
+
+const defaultAddProductForm: AddProductForm = {
+  productId: "",
+  productTitle: "",
+  sku: "",
+  variantTitle: "Default variant",
+  variantId: "",
+  image: "",
+  unitPrice: "0",
+  discount: "0",
+  quantity: 1,
+};
+
+const ACCENT = "#005bd3";
+const ACCENT_DARK = "#003e94";
+
+function getFlagForCountry(raw: string | undefined) {
+  if (!raw) return "";
+  const v = String(raw).toUpperCase().trim();
+  if (["IN", "INDIA"].includes(v)) return "🇮🇳";
+  if (["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"].includes(v)) return "🇺🇸";
+  if (["GB", "UK", "UNITED KINGDOM", "UNITED KINGDOM OF GREAT BRITAIN"].includes(v)) return "🇬🇧";
+  if (["AU", "AUSTRALIA"].includes(v)) return "🇦🇺";
+  if (["CA", "CANADA"].includes(v)) return "🇨🇦";
+  return "";
+}
+
+function isVariantInStock(variant?: Variant): boolean {
+  if (!variant) return false;
+  if (variant.availableForSale === false) return false;
+  if (variant.tracked === false) return true;
+  if (variant.inventoryQuantity === undefined || variant.inventoryQuantity === null)
+    return true;
+  if (variant.inventoryPolicy === "CONTINUE") return true;
+  return variant.inventoryQuantity > 0;
+}
+
+function fmtPrice(amount: string | number | undefined, currencyCode = "USD") {
+  const num = Number(amount) || 0;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currencyCode,
+      minimumFractionDigits: 2,
+    }).format(num);
+  } catch {
+    return `${currencyCode} ${num.toFixed(2)}`;
+  }
+}
+
+const modalPillStyle: React.CSSProperties = {
+  display: "inline-block",
+  background: "#f1f2f4",
+  color: "#4b5563",
+  borderRadius: 999,
+  padding: "3px 10px",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const modalLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#6b7280",
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+  marginBottom: 4,
+};
+
+const modalStepBtnStyle: React.CSSProperties = {
+  width: 24,
+  height: "100%",
+  border: "none",
+  background: "#f9fafb",
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 700,
+};
+
+const modalFieldLabelStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  fontSize: 13,
+  color: "#374151",
+  fontWeight: 700,
+};
+
+const modalFieldInputStyle: React.CSSProperties = {
+  height: 38,
+  border: "1px solid #c9cccf",
+  borderRadius: 8,
+  padding: "0 10px",
+  font: "inherit",
+  fontSize: 13,
+};
+
+interface AddProductModalProps {
+  form?: any;
+  setForm?: (updater: any) => void;
+  onCancel: () => void;
+  onConfirm?: () => void;
+  productQuery: string;
+  setProductQuery: (q: string) => void;
+  productResults: Product[];
+  fetchProducts: (q: string) => void;
+  isFetchingProducts: boolean;
+  onSelectVariant: (product: Product, variant: Variant, quantity: number) => void;
+  defaultCurrencyCode?: string;
+}
+
+function AddProductModal({
+  form,
+  setForm,
+  onCancel,
+  onConfirm,
+  productQuery,
+  setProductQuery,
+  productResults,
+  fetchProducts,
+  isFetchingProducts,
+  onSelectVariant,
+  defaultCurrencyCode = "USD",
+}: AddProductModalProps) {
+  const manualEntryEnabled = Boolean(form && setForm && onConfirm);
+  const handleManualFieldChange = (field: string, value: string | number) => {
+    if (!setForm) return;
+    setForm((f: any) => ({ ...(f || {}), [field]: value }));
+  };
+  const [mode, setMode] = useState<"search" | "manual">("search");
+  const [searchInput, setSearchInput] = useState(productQuery || "");
+  const [selection, setSelection] = useState<Record<string, { variantId: string; qty: number }>>({});
+
+  useEffect(() => {
+    setSearchInput(productQuery || "");
+  }, [productQuery]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setProductQuery(searchInput.trim() || "all");
+  };
+
+  const getSelection = useCallback(
+    (product: Product) => {
+      const existing = selection[product.id];
+      const variantId = existing?.variantId || product.variants?.[0]?.id || "";
+      const qty = existing?.qty || 1;
+      return { variantId, qty };
+    },
+    [selection],
+  );
+
+  const setVariantId = (productId: string, variantId: string) => {
+    setSelection((prev) => ({
+      ...prev,
+      [productId]: { variantId, qty: prev[productId]?.qty || 1 },
+    }));
+  };
+
+  const setQty = (productId: string, qty: number) => {
+    if (qty < 1) return;
+    setSelection((prev) => ({
+      ...prev,
+      [productId]: { variantId: prev[productId]?.variantId || "", qty },
+    }));
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        style={{
+          width: "min(760px, 100%)",
+          maxHeight: "88vh",
+          background: "#fff",
+          borderRadius: 14,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "16px 20px",
+            borderBottom: "1px solid #e3e7ec",
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>
+            Add Product
+          </h3>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Close"
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: 22,
+              cursor: "pointer",
+              color: "#5c5f62",
+              lineHeight: 1,
+            }}
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Mode toggle */}
+        {manualEntryEnabled && (
+          <div style={{ display: "flex", gap: 8, padding: "14px 20px 0" }}>
+            <button
+              type="button"
+              onClick={() => setMode("search")}
+              style={{
+                background: mode === "search" ? "#111827" : "#f9fafb",
+                color: mode === "search" ? "#fff" : "#374151",
+                border: "1px solid " + (mode === "search" ? "#111827" : "#d1d5db"),
+                borderRadius: 999,
+                padding: "7px 14px",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              Search Catalog
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("manual")}
+              style={{
+                background: mode === "manual" ? "#111827" : "#f9fafb",
+                color: mode === "manual" ? "#fff" : "#374151",
+                border: "1px solid " + (mode === "manual" ? "#111827" : "#d1d5db"),
+                borderRadius: 999,
+                padding: "7px 14px",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              Manual Entry
+            </button>
+          </div>
+        )}
+
+        {!manualEntryEnabled || mode === "search" ? (
+          <>
+            {/* Search bar */}
+            <form
+              onSubmit={handleSearchSubmit}
+              style={{ display: "flex", gap: 10, padding: "14px 20px 0" }}
+            >
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search products by title or SKU..."
+                style={{
+                  flex: 1,
+                  height: 40,
+                  border: "1px solid #c9cccf",
+                  borderRadius: 8,
+                  padding: "0 12px",
+                  fontSize: 13,
+                }}
+              />
+              <button
+                type="submit"
+                disabled={isFetchingProducts}
+                style={{
+                  height: 40,
+                  padding: "0 18px",
+                  background: "#111827",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: isFetchingProducts ? "not-allowed" : "pointer",
+                  opacity: isFetchingProducts ? 0.7 : 1,
+                }}
+              >
+                {isFetchingProducts ? "Searching..." : "Search"}
+              </button>
+            </form>
+
+            {/* Results */}
+            <div
+              style={{
+                overflowY: "auto",
+                padding: 20,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+              }}
+            >
+              {isFetchingProducts ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+                  Loading products...
+                </div>
+              ) : productResults.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#6b7280", fontSize: 13 }}>
+                  No products found. Try a different search term.
+                </div>
+              ) : (
+                productResults.map((product) => {
+                  const { variantId, qty } = getSelection(product);
+                  const variant = product.variants.find((v) => v.id === variantId) || product.variants[0];
+                  const inStock = isVariantInStock(variant);
+
+                  return (
+                    <div
+                      key={product.id}
+                      style={{
+                        display: "flex",
+                        gap: 14,
+                        border: "1px solid #eceef1",
+                        borderRadius: 12,
+                        padding: 16,
+                        alignItems: "center",
+                        background: "#fff",
+                      }}
+                    >
+                      {/* Image */}
+                      <div
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 10,
+                          overflow: "hidden",
+                          border: "1px solid #eceef1",
+                          background: "#f9fafb",
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        {product.image ? (
+                          <img src={product.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          <span style={{ fontSize: 22 }}>📦</span>
+                        )}
+                      </div>
+
+                      {/* Middle info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14.5, color: "#111827" }}>
+                          {product.title}
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                          {product.vendor && <span style={modalPillStyle}>{product.vendor}</span>}
+                          {product.productType && <span style={modalPillStyle}>{product.productType}</span>}
+                          {(product.tags || []).slice(0, 2).map((tag) => (
+                            <span key={tag} style={modalPillStyle}>
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+
+                        <div style={{ marginTop: 10 }}>
+                          <div style={modalLabelStyle}>Variant</div>
+                          {product.variants.length > 1 ? (
+                            <select
+                              value={variantId}
+                              onChange={(e) => setVariantId(product.id, e.target.value)}
+                              style={{
+                                width: "100%",
+                                maxWidth: 320,
+                                height: 36,
+                                border: "1px solid #d1d5db",
+                                borderRadius: 7,
+                                padding: "0 8px",
+                                fontSize: 13,
+                              }}
+                            >
+                              {product.variants.map((v) => (
+                                <option key={v.id} value={v.id}>
+                                  {v.title || "Default variant"} · SKU {v.sku || "N/A"} ·{" "}
+                                  {fmtPrice(v.price, v.currencyCode || defaultCurrencyCode)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <div
+                              style={{
+                                height: 36,
+                                display: "flex",
+                                alignItems: "center",
+                                color: "#374151",
+                                background: "#f9fafb",
+                                border: "1px solid #e5e7eb",
+                                borderRadius: 7,
+                                padding: "0 8px",
+                                fontSize: 13,
+                                maxWidth: 320,
+                              }}
+                            >
+                              {variant?.title && variant.title !== "Default Title" ? variant.title : "Default variant"}
+                            </div>
+                          )}
+                          <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+                            SKU: {variant?.sku || "N/A"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right column: price + stepper + action */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-end",
+                          gap: 10,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 12, color: ACCENT, fontWeight: 700 }}>Unit price</div>
+                          <div style={{ fontSize: 17, fontWeight: 800, color: ACCENT }}>
+                            {fmtPrice(variant?.price, variant?.currencyCode || defaultCurrencyCode)}
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              border: "1px solid #d1d5db",
+                              borderRadius: 7,
+                              overflow: "hidden",
+                              height: 30,
+                            }}
+                          >
+                            <button type="button" onClick={() => setQty(product.id, qty - 1)} style={modalStepBtnStyle}>
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              value={qty}
+                              onChange={(e) => setQty(product.id, parseInt(e.target.value) || 1)}
+                              style={{
+                                width: 34,
+                                height: "100%",
+                                border: "none",
+                                textAlign: "center",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                outline: "none",
+                              }}
+                            />
+                            <button type="button" onClick={() => setQty(product.id, qty + 1)} style={modalStepBtnStyle}>
+                              +
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={!inStock}
+                            onClick={() => variant && onSelectVariant(product, variant, qty)}
+                            style={{
+                              background: inStock
+                                ? `linear-gradient(135deg, ${ACCENT}, ${ACCENT_DARK})`
+                                : "#f1f2f4",
+                              color: inStock ? "#fff" : "#6b7280",
+                              border: "none",
+                              borderRadius: 999,
+                              padding: "9px 18px",
+                              fontWeight: 700,
+                              fontSize: 13,
+                              cursor: inStock ? "pointer" : "not-allowed",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {inStock ? "Add" : "Out of stock"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        ) : (
+          /* Manual entry form */
+          <div
+            style={{
+              padding: 20,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 14,
+              }}
+            >
+              <label style={modalFieldLabelStyle}>
+                Product title
+                <input
+                  value={form?.productTitle ?? ""}
+                  onChange={(e) => handleManualFieldChange("productTitle", e.target.value)}
+                  style={modalFieldInputStyle}
+                />
+              </label>
+              <label style={modalFieldLabelStyle}>
+                SKU
+                <input
+                  value={form?.sku ?? ""}
+                  onChange={(e) => handleManualFieldChange("sku", e.target.value)}
+                  style={modalFieldInputStyle}
+                />
+              </label>
+              <label style={modalFieldLabelStyle}>
+                Variant title
+                <input
+                  value={form?.variantTitle ?? ""}
+                  onChange={(e) => handleManualFieldChange("variantTitle", e.target.value)}
+                  style={modalFieldInputStyle}
+                />
+              </label>
+              <label style={modalFieldLabelStyle}>
+                Image URL
+                <input
+                  value={form?.image ?? ""}
+                  onChange={(e) => handleManualFieldChange("image", e.target.value)}
+                  style={modalFieldInputStyle}
+                />
+              </label>
+              <label style={modalFieldLabelStyle}>
+                Unit price
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form?.unitPrice ?? ""}
+                  onChange={(e) => handleManualFieldChange("unitPrice", e.target.value)}
+                  style={modalFieldInputStyle}
+                />
+              </label>
+              <label style={modalFieldLabelStyle}>
+                Discount
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form?.discount ?? ""}
+                  onChange={(e) => handleManualFieldChange("discount", e.target.value)}
+                  style={modalFieldInputStyle}
+                />
+              </label>
+              <label style={modalFieldLabelStyle}>
+                Quantity
+                <input
+                  type="number"
+                  min="1"
+                  value={form?.quantity ?? 1}
+                  onChange={(e) =>
+                    handleManualFieldChange("quantity", parseInt(e.target.value, 10) || 1)
+                  }
+                  style={modalFieldInputStyle}
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+            padding: "14px 20px",
+            borderTop: "1px solid #e3e7ec",
+          }}
+        >
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              background: "#fff",
+              color: "#374151",
+              border: "1px solid #c9cccf",
+              borderRadius: 8,
+              padding: "10px 16px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          {manualEntryEnabled && mode === "manual" && (
+            <button
+              type="button"
+              onClick={() => onConfirm?.()}
+              disabled={!form?.productTitle?.trim()}
+              style={{
+                background: "#111827",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 16px",
+                fontWeight: 600,
+                cursor: form?.productTitle?.trim() ? "pointer" : "not-allowed",
+                opacity: form?.productTitle?.trim() ? 1 : 0.6,
+              }}
+            >
+              Add to Quote
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const STATUS_COLORS: Record<string, string> = {
   draft: "#6b21a8",
   sent: "#0369a1",
@@ -50,7 +730,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function AdminQuoteDetailPage() {
-  const { quote, shopDomain } = useLoaderData<any>();
+  const { quote, shopDomain, companyLocations, deliveryDetails, shippingCountryOptions } = useLoaderData<any>();
   const actionData = useActionData<any>();
   const navigation = useNavigation();
   const revalidator = useRevalidator();
@@ -65,11 +745,327 @@ export default function AdminQuoteDetailPage() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceData, setInvoiceData] = useState<any>(null);
   const [editCustomer, setEditCustomer] = useState(false);
-  const [editDelivery, setEditDelivery] = useState(false);
-  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [productQuery, setProductQuery] = useState("all");
+  const [productResults, setProductResults] = useState<Product[]>([]);
+  const [isFetchingProducts, setIsFetchingProducts] = useState(false);
+  const productsFetchControllerRef = useRef<AbortController | null>(null);
+  const [addProductForm, setAddProductForm] = useState<AddProductForm>(defaultAddProductForm);
+  const [newProductRows, setNewProductRows] = useState<NewProductRow[]>([]);
 
   const isSubmitting = navigation.state !== "idle";
   const submittingIntent = isSubmitting ? String(navigation.formData?.get("intent") || "") : "";
+
+  const openAddProductModal = () => {
+    setAddProductForm(defaultAddProductForm);
+    setShowAddProductModal(true);
+  };
+
+  const fetchProducts = async (query = "all") => {
+    setIsFetchingProducts(true);
+    try {
+      if (productsFetchControllerRef.current) {
+        productsFetchControllerRef.current.abort();
+        productsFetchControllerRef.current = null;
+      }
+      const controller = new AbortController();
+      productsFetchControllerRef.current = controller;
+
+      const normalizedQuery = String(query || "").trim() || "all";
+      const url = `/api/admin-product-search?q=${encodeURIComponent(normalizedQuery)}`;
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        setProductResults([]);
+        return;
+      }
+      const data = await res.json();
+      setProductResults(data.products || []);
+    } catch (error: any) {
+      if (error && error.name === "AbortError") {
+        // aborted - ignore
+      } else {
+        console.error("Failed to load product search results", error);
+        setProductResults([]);
+      }
+    } finally {
+      setIsFetchingProducts(false);
+      productsFetchControllerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!showAddProductModal) return;
+    fetchProducts(productQuery || "all");
+    return () => {
+      if (productsFetchControllerRef.current) {
+        productsFetchControllerRef.current.abort();
+        productsFetchControllerRef.current = null;
+      }
+    };
+  }, [showAddProductModal, productQuery]);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setNewProductRows([]);
+    }
+  }, [actionData]);
+
+  const confirmAddProduct = () => {
+    if (!addProductForm.productTitle.trim()) return;
+    const rowKey = String(Date.now());
+    setNewProductRows((rows) => [...rows, { ...addProductForm, rowKey }]);
+    setShowAddProductModal(false);
+  };
+
+  const handleSelectProductVariant = (
+    product: Product,
+    variant: Variant,
+    quantity: number = 1,
+  ) => {
+    const selected: AddProductForm = {
+      productId: product?.id || "",
+      productTitle: product.title || "",
+      sku: variant?.sku || "",
+      variantTitle: variant?.title || "Default variant",
+      variantId: variant?.id || "",
+      image: product.image || "",
+      unitPrice: String(variant?.price ?? "0"),
+      discount: "0",
+      quantity,
+    };
+    const rowKey = String(Date.now());
+    setNewProductRows((rows) => [...rows, { ...selected, rowKey }]);
+    setShowAddProductModal(false);
+  };
+
+  const removePendingProduct = (rowKey: string) => {
+    setNewProductRows((rows) => rows.filter((r) => r.rowKey !== rowKey));
+  };
+
+  // ── Delivery Details (sales-portal style add/edit) ─────────
+  const savedDelivery = quote.invoiceData?.quoteEditMeta?.deliveryDetails || {};
+  const legacyAddressLines = savedDelivery.address
+    ? String(savedDelivery.address)
+        .split(/\n+/)
+        .map((line: string) => line.trim())
+        .filter(Boolean)
+    : [];
+  const [selectedDeliveryLocationId, setSelectedDeliveryLocationId] = useState<string>("");
+  const [deliveryLocationNameValue, setDeliveryLocationNameValue] = useState<string>(
+    savedDelivery.locationName || deliveryDetails?.locationName || "",
+  );
+  const [deliveryPhoneValue, setDeliveryPhoneValue] = useState<string>(
+    savedDelivery.phone || deliveryDetails?.phone || "",
+  );
+  const [deliveryAddress1Value, setDeliveryAddress1Value] = useState<string>(
+    savedDelivery.address1 || legacyAddressLines[0] || "",
+  );
+  const [deliveryAddress2Value, setDeliveryAddress2Value] = useState<string>(
+    savedDelivery.address2 || legacyAddressLines[1] || "",
+  );
+  const [deliveryCityValue, setDeliveryCityValue] = useState<string>(
+    savedDelivery.city || legacyAddressLines[2] || "",
+  );
+  const [deliveryProvinceValue, setDeliveryProvinceValue] = useState<string>(
+    savedDelivery.province || legacyAddressLines[3] || "",
+  );
+  const [deliveryZipValue, setDeliveryZipValue] = useState<string>(
+    savedDelivery.zip || legacyAddressLines[4] || "",
+  );
+  const [deliveryCountryValue, setDeliveryCountryValue] = useState<string>(
+    savedDelivery.country || legacyAddressLines[5] || "",
+  );
+
+  const [showLocationForm, setShowLocationForm] = useState(false);
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [editingLocationId, setEditingLocationId] = useState<string>("");
+  const [locationSubmitting, setLocationSubmitting] = useState(false);
+  const [locationFormError, setLocationFormError] = useState<string | null>(null);
+  const [locationFormSuccess, setLocationFormSuccess] = useState<string | null>(null);
+  const [locationFieldErrors, setLocationFieldErrors] = useState<Record<string, string>>({});
+
+  const selectedLocation = (companyLocations || []).find(
+    (loc: any) => loc.id === selectedDeliveryLocationId,
+  );
+  const locationBeingEdited = (companyLocations || []).find(
+    (loc: any) => loc.id === editingLocationId,
+  );
+
+  const selectedDeliveryCountry = (shippingCountryOptions || []).find((country: ShippingCountryOption) => {
+    const rawValue = (deliveryCountryValue || "").trim();
+    return (
+      country.value === rawValue ||
+      country.label.toLowerCase() === rawValue.toLowerCase()
+    );
+  });
+  const deliveryProvinceOptions = selectedDeliveryCountry?.provinces ?? [];
+
+  useEffect(() => {
+    if (!selectedDeliveryLocationId) return;
+    const location = (companyLocations || []).find(
+      (loc: any) => loc.id === selectedDeliveryLocationId,
+    );
+    if (!location) return;
+    const shipping = location.shippingAddress || {};
+    setDeliveryLocationNameValue(location.name || "");
+    setDeliveryAddress1Value(shipping.address1 || "");
+    setDeliveryAddress2Value(shipping.address2 || "");
+    setDeliveryCityValue(shipping.city || "");
+    setDeliveryProvinceValue(shipping.province || "");
+    setDeliveryZipValue(shipping.zip || "");
+    setDeliveryCountryValue(shipping.country || "US");
+    setDeliveryPhoneValue(shipping.phone || location.phone || "");
+  }, [selectedDeliveryLocationId, companyLocations]);
+
+  const applyLocationToForm = (location: any) => {
+    const shipping = location?.shippingAddress || {};
+    setDeliveryLocationNameValue(location?.name || "");
+    setDeliveryAddress1Value(shipping.address1 || "");
+    setDeliveryAddress2Value(shipping.address2 || "");
+    setDeliveryCityValue(shipping.city || "");
+    setDeliveryProvinceValue(shipping.province || "");
+    setDeliveryZipValue(shipping.zip || "");
+    setDeliveryCountryValue(shipping.country || "US");
+    setDeliveryPhoneValue(shipping.phone || location?.phone || "");
+  };
+
+  const resetLocationForm = (editing: boolean, targetLocation: any) => {
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+    setLocationFieldErrors({});
+    if (editing && targetLocation) {
+      applyLocationToForm(targetLocation);
+    } else if (!editing) {
+      setSelectedDeliveryLocationId("");
+      setEditingLocationId("");
+      setDeliveryLocationNameValue("");
+      setDeliveryAddress1Value("");
+      setDeliveryAddress2Value("");
+      setDeliveryCityValue("");
+      setDeliveryProvinceValue("");
+      setDeliveryZipValue("");
+      setDeliveryCountryValue("US");
+      setDeliveryPhoneValue("");
+    }
+  };
+
+  const handleOpenLocationForm = (editing: boolean) => {
+    const targetId = editing ? selectedDeliveryLocationId : "";
+    const targetLocation = editing
+      ? (companyLocations || []).find((loc: any) => loc.id === targetId)
+      : null;
+    setShowLocationForm(true);
+    setIsEditingLocation(editing);
+    setEditingLocationId(targetId);
+    resetLocationForm(editing, targetLocation);
+  };
+
+  const handleCancelLocationForm = () => {
+    setShowLocationForm(false);
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+    setLocationFieldErrors({});
+    if (locationBeingEdited) {
+      applyLocationToForm(locationBeingEdited);
+    }
+    setEditingLocationId("");
+  };
+
+  const handleSaveLocation = async () => {
+    setLocationSubmitting(true);
+    setLocationFormError(null);
+    setLocationFormSuccess(null);
+
+    const fieldErrors: Record<string, string> = {};
+    if (!deliveryLocationNameValue.trim()) fieldErrors.name = "Location name is required.";
+    if (!deliveryAddress1Value.trim()) fieldErrors.address1 = "Street address is required.";
+    if (!deliveryCityValue.trim()) fieldErrors.city = "City is required.";
+    if (!deliveryCountryValue.trim()) fieldErrors.country = "Country is required.";
+    if (!deliveryZipValue.trim()) fieldErrors.zip = "Postal code is required.";
+
+    if (Object.keys(fieldErrors).length > 0) {
+      setLocationFieldErrors(fieldErrors);
+      setLocationFormError("Please complete the required location fields before saving.");
+      setLocationSubmitting(false);
+      return;
+    }
+
+    try {
+      const body = new URLSearchParams();
+      body.set("intent", "save_company_location");
+      if (isEditingLocation && locationBeingEdited?.id) {
+        body.set("deliveryLocationId", locationBeingEdited.id);
+      }
+      body.set("deliveryLocationName", deliveryLocationNameValue.trim());
+      body.set("deliveryAddress1", deliveryAddress1Value.trim());
+      body.set("deliveryAddress2", deliveryAddress2Value.trim());
+      body.set("deliveryCity", deliveryCityValue.trim());
+      body.set("deliveryProvince", deliveryProvinceValue.trim());
+      body.set("deliveryZip", deliveryZipValue.trim());
+      body.set("deliveryCountry", deliveryCountryValue.trim());
+      body.set("deliveryPhone", deliveryPhoneValue.trim());
+
+      const res = await fetch(window.location.pathname + window.location.search, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        credentials: "same-origin",
+        body,
+      });
+      const result = await res.json().catch(() => null);
+      if (res.ok && result?.success) {
+        const locationId = result.locationId || locationBeingEdited?.id;
+        setLocationFormSuccess("Location saved successfully.");
+        setShowLocationForm(false);
+        if (locationId) {
+          setSelectedDeliveryLocationId(locationId);
+        }
+        revalidator.revalidate();
+      } else {
+        if (result?.fieldErrors && typeof result.fieldErrors === "object") {
+          setLocationFieldErrors(result.fieldErrors);
+        }
+        setLocationFormError(result?.error || "Unable to save location.");
+      }
+    } catch (error: any) {
+      console.error(error);
+      setLocationFormError(error?.message || "Unable to save location. Please try again.");
+    } finally {
+      setLocationSubmitting(false);
+    }
+  };
+
+  const clearLocationFromForm = (field: "name" | "address1" | "address2" | "city" | "province" | "zip" | "country" | "phone", value: string) => {
+    if (selectedDeliveryLocationId && !showLocationForm) {
+      setSelectedDeliveryLocationId("");
+    }
+    switch (field) {
+      case "name":
+        setDeliveryLocationNameValue(value);
+        break;
+      case "address1":
+        setDeliveryAddress1Value(value);
+        break;
+      case "address2":
+        setDeliveryAddress2Value(value);
+        break;
+      case "city":
+        setDeliveryCityValue(value);
+        break;
+      case "province":
+        setDeliveryProvinceValue(value);
+        break;
+      case "zip":
+        setDeliveryZipValue(value);
+        break;
+      case "country":
+        setDeliveryCountryValue(value);
+        setDeliveryProvinceValue("");
+        break;
+      case "phone":
+        setDeliveryPhoneValue(value);
+        break;
+    }
+  };
 
   useEffect(() => {
     if (actionData?.invoiceData) {
@@ -297,147 +1293,244 @@ export default function AdminQuoteDetailPage() {
 
             {/* Delivery Details */}
             <div style={styles.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
                 <h3 style={{ ...styles.cardTitle, margin: 0 }}>Delivery Details</h3>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => setEditDelivery(!editDelivery)}
-                    style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
-                  >
-                    {editDelivery ? "Cancel" : (quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName ? "Edit Location" : "Add Location")}
-                  </button>
+                {!showLocationForm && canEdit && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenLocationForm(false)}
+                      style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
+                    >
+                      Add location
+                    </button>
+                    {selectedLocation && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLocationForm(true)}
+                        style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", fontSize: 13 }}
+                      >
+                        Edit location
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-              {editDelivery && canEdit ? (
-                <Form method="post" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <input type="hidden" name="intent" value="update_delivery_details" />
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-                    <div>
-                      <label style={styles.label}>Location Name</label>
-                      <input
-                        name="deliveryLocationName"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.locationName || ""}
-                        placeholder="e.g. Main Warehouse"
-                        style={styles.inputFull}
-                      />
+
+              {showLocationForm && (
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ ...styles.label, fontSize: 13, fontWeight: 650, color: "#202223" }}>
+                    {isEditingLocation ? "Edit company location" : "Add a Shopify company location"}
+                  </span>
+                  {locationFormError && (
+                    <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, background: "#fff4f4", border: "1px solid #ffd9d9", color: "#b01000", fontSize: 13 }}>
+                      {locationFormError}
                     </div>
-                    <div>
-                      <label style={styles.label}>Delivery Phone</label>
-                      <input
-                        name="deliveryPhone"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.phone || ""}
-                        placeholder="+1 234 567 890"
-                        style={styles.inputFull}
-                      />
+                  )}
+                  {locationFormSuccess && (
+                    <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, background: "#f1f8f5", border: "1px solid #c0e0d4", color: "#006e52", fontSize: 13 }}>
+                      {locationFormSuccess}
                     </div>
-                    <div>
-                      <label style={styles.label}>Address line 1</label>
-                      <input
-                        name="deliveryAddress1"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address1 || quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address?.split("\n")[0] || ""}
-                        placeholder="Street address"
-                        style={styles.inputFull}
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.label}>Address line 2</label>
-                      <input
-                        name="deliveryAddress2"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.address2 || ""}
-                        placeholder="Apartment, suite, unit, etc."
-                        style={styles.inputFull}
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.label}>Country</label>
-                      <input
-                        name="deliveryCountry"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.country || ""}
-                        placeholder="Country"
-                        style={styles.inputFull}
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.label}>State / Province</label>
-                      <input
-                        name="deliveryProvince"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.province || ""}
-                        placeholder="State or province"
-                        style={styles.inputFull}
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.label}>City</label>
-                      <input
-                        name="deliveryCity"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.city || ""}
-                        placeholder="City"
-                        style={styles.inputFull}
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.label}>Postal code</label>
-                      <input
-                        name="deliveryZip"
-                        defaultValue={quote.invoiceData?.quoteEditMeta?.deliveryDetails?.zip || ""}
-                        placeholder="Zip / postal code"
-                        style={styles.inputFull}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      style={{ ...styles.btn, background: "#005bd3", color: "white" }}
-                    >
-                      {submittingIntent === "update_delivery_details" ? "Saving..." : "Save Delivery Details"}
-                    </button>
-                  </div>
-                </Form>
-              ) : (
-                <div>
-                  {(() => {
-                    const dd = quote.invoiceData?.quoteEditMeta?.deliveryDetails || {};
-                    const locName = dd.locationName || "";
-                    const addr1 = dd.address1 || "";
-                    const addr2 = dd.address2 || "";
-                    const city = dd.city || "";
-                    const province = dd.province || "";
-                    const zip = dd.zip || "";
-                    const country = dd.country || "";
-                    const phone = dd.phone || "";
-                    const hasAny = locName || addr1 || city || country || phone;
-                    const addressParts = [addr1, addr2, [city, province, zip].filter(Boolean).join(", "), country].filter(Boolean);
-                    return hasAny ? (
-                      <div style={styles.infoGrid}>
-                        {locName && (
-                          <div>
-                            <span style={styles.label}>Location</span>
-                            <span>{locName}</span>
-                          </div>
-                        )}
-                        {addressParts.length > 0 && (
-                          <div style={{ gridColumn: "span 2" }}>
-                            <span style={styles.label}>Address</span>
-                            <address style={{ whiteSpace: "pre-wrap", fontStyle: "normal" }}>
-                              {addressParts.map((line, i) => <span key={i}>{line}<br /></span>)}
-                            </address>
-                          </div>
-                        )}
-                        {phone && (
-                          <div>
-                            <span style={styles.label}>Phone</span>
-                            <span>{phone}</span>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p style={{ margin: 0, color: "#5c5f62", fontSize: 13 }}>No delivery details added yet.</p>
-                    );
-                  })()}
+                  )}
                 </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+                <div>
+                  <label style={styles.label}>Saved location</label>
+                  <select
+                    name="deliveryLocationId"
+                    value={selectedDeliveryLocationId}
+                    onChange={(e) => setSelectedDeliveryLocationId(e.target.value)}
+                    style={styles.inputFull}
+                    disabled={isSubmitting || showLocationForm}
+                  >
+                    <option value="">-- Use custom delivery details --</option>
+                    {(companyLocations || []).map((location: any) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={styles.label}>Location name</label>
+                  <input
+                    name="deliveryLocationName"
+                    value={deliveryLocationNameValue}
+                    onChange={(e) => clearLocationFromForm("name", e.target.value)}
+                    placeholder="e.g. Warehouse / Store name"
+                    style={locationFieldErrors.name ? { ...styles.inputFull, borderColor: "#d72c0d" } : styles.inputFull}
+                    disabled={isSubmitting}
+                  />
+                  {locationFieldErrors.name && (
+                    <div style={{ color: "#b01000", fontSize: 12, marginTop: 4 }}>{locationFieldErrors.name}</div>
+                  )}
+                </div>
+                <div>
+                  <label style={styles.label}>Address line 1</label>
+                  <input
+                    name="deliveryAddress1"
+                    value={deliveryAddress1Value}
+                    onChange={(e) => clearLocationFromForm("address1", e.target.value)}
+                    placeholder="Street address"
+                    style={locationFieldErrors.address1 ? { ...styles.inputFull, borderColor: "#d72c0d" } : styles.inputFull}
+                    disabled={isSubmitting}
+                  />
+                  {locationFieldErrors.address1 && (
+                    <div style={{ color: "#b01000", fontSize: 12, marginTop: 4 }}>{locationFieldErrors.address1}</div>
+                  )}
+                </div>
+                <div>
+                  <label style={styles.label}>Address line 2</label>
+                  <input
+                    name="deliveryAddress2"
+                    value={deliveryAddress2Value}
+                    onChange={(e) => clearLocationFromForm("address2", e.target.value)}
+                    placeholder="Apartment, suite, unit, etc."
+                    style={styles.inputFull}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div>
+                  <label style={styles.label}>Country</label>
+                  <select
+                    name="deliveryCountry"
+                    value={deliveryCountryValue}
+                    onChange={(e) => clearLocationFromForm("country", e.target.value)}
+                    style={locationFieldErrors.country ? { ...styles.inputFull, borderColor: "#d72c0d" } : styles.inputFull}
+                    disabled={isSubmitting}
+                  >
+                    <option value="">Select country</option>
+                    {(shippingCountryOptions || []).map((country: ShippingCountryOption) => (
+                      <option key={country.value} value={country.value}>
+                        {getFlagForCountry(country.value || country.label)}{" "}
+                        {country.label}
+                      </option>
+                    ))}
+                  </select>
+                  {locationFieldErrors.country && (
+                    <div style={{ color: "#b01000", fontSize: 12, marginTop: 4 }}>{locationFieldErrors.country}</div>
+                  )}
+                </div>
+                <div>
+                  <label style={styles.label}>State / Province</label>
+                  {deliveryProvinceOptions.length > 0 ? (
+                    <select
+                      name="deliveryProvince"
+                      value={deliveryProvinceValue}
+                      onChange={(e) => clearLocationFromForm("province", e.target.value)}
+                      style={styles.inputFull}
+                      disabled={isSubmitting}
+                    >
+                      <option value="">Select state / province</option>
+                      {deliveryProvinceOptions.map((province: any) => (
+                        <option key={province.value} value={province.value}>
+                          {province.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      name="deliveryProvince"
+                      value={deliveryProvinceValue}
+                      onChange={(e) => clearLocationFromForm("province", e.target.value)}
+                      placeholder="State or province"
+                      style={styles.inputFull}
+                      disabled={isSubmitting}
+                    />
+                  )}
+                </div>
+                <div>
+                  <label style={styles.label}>City</label>
+                  <input
+                    name="deliveryCity"
+                    value={deliveryCityValue}
+                    onChange={(e) => clearLocationFromForm("city", e.target.value)}
+                    placeholder="City"
+                    style={locationFieldErrors.city ? { ...styles.inputFull, borderColor: "#d72c0d" } : styles.inputFull}
+                    disabled={isSubmitting}
+                  />
+                  {locationFieldErrors.city && (
+                    <div style={{ color: "#b01000", fontSize: 12, marginTop: 4 }}>{locationFieldErrors.city}</div>
+                  )}
+                </div>
+                <div>
+                  <label style={styles.label}>Postal code</label>
+                  <input
+                    name="deliveryZip"
+                    value={deliveryZipValue}
+                    onChange={(e) => clearLocationFromForm("zip", e.target.value)}
+                    placeholder="Zip / postal code"
+                    style={locationFieldErrors.zip ? { ...styles.inputFull, borderColor: "#d72c0d" } : styles.inputFull}
+                    disabled={isSubmitting}
+                  />
+                  {locationFieldErrors.zip && (
+                    <div style={{ color: "#b01000", fontSize: 12, marginTop: 4 }}>{locationFieldErrors.zip}</div>
+                  )}
+                </div>
+                <div>
+                  <label style={styles.label}>Delivery Phone</label>
+                  <input
+                    name="deliveryPhone"
+                    value={deliveryPhoneValue}
+                    onChange={(e) => clearLocationFromForm("phone", e.target.value)}
+                    style={styles.inputFull}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+
+              {(companyLocations || []).length > 0 ? (
+                <p style={{ margin: "10px 0 0", color: "#5c5f62", fontSize: 13 }}>
+                  Select one of the saved company locations to auto-fill address and phone, or use {"\u201C"}Add location{"\u201D"} / {"\u201C"}Edit location{"\u201D"} above to manage saved locations.
+                </p>
+              ) : (
+                <p style={{ margin: "10px 0 0", color: "#5c5f62", fontSize: 13 }}>
+                  No saved company locations are available. Use {"\u201C"}Add location{"\u201D"} above to create one.
+                </p>
+              )}
+
+              {showLocationForm && (
+                <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={handleCancelLocationForm}
+                    disabled={locationSubmitting}
+                    style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveLocation}
+                    disabled={locationSubmitting}
+                    style={{ ...styles.btn, background: "#005bd3", color: "white" }}
+                  >
+                    {locationSubmitting ? "Saving..." : "Save location"}
+                  </button>
+                </div>
+              )}
+
+              {canEdit && (
+                <Form method="post" style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                  <input type="hidden" name="intent" value="update_delivery_details" />
+                  <input type="hidden" name="deliveryLocationName" value={deliveryLocationNameValue} />
+                  <input type="hidden" name="deliveryAddress1" value={deliveryAddress1Value} />
+                  <input type="hidden" name="deliveryAddress2" value={deliveryAddress2Value} />
+                  <input type="hidden" name="deliveryCity" value={deliveryCityValue} />
+                  <input type="hidden" name="deliveryProvince" value={deliveryProvinceValue} />
+                  <input type="hidden" name="deliveryZip" value={deliveryZipValue} />
+                  <input type="hidden" name="deliveryCountry" value={deliveryCountryValue} />
+                  <input type="hidden" name="deliveryPhone" value={deliveryPhoneValue} />
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    style={{ ...styles.btn, background: "#005bd3", color: "white" }}
+                  >
+                    {submittingIntent === "update_delivery_details" ? "Saving..." : "Save Delivery Details"}
+                  </button>
+                </Form>
               )}
             </div>
 
@@ -449,10 +1542,10 @@ export default function AdminQuoteDetailPage() {
                   {canEdit && (
                     <button
                       type="button"
-                      onClick={() => setShowAddProduct(!showAddProduct)}
-                      style={{ ...styles.btn, background: showAddProduct ? "#f3f4f6" : "#005bd3", color: showAddProduct ? "#374151" : "white", border: showAddProduct ? "1px solid #c9ccd0" : "1px solid transparent", fontSize: 13 }}
+                      onClick={openAddProductModal}
+                      style={{ ...styles.btn, background: "#005bd3", color: "white", border: "1px solid transparent", fontSize: 13 }}
                     >
-                      {showAddProduct ? "Cancel" : "+ Add Product"}
+                      + Add Product
                     </button>
                   )}
                   {canEditDiscount && (
@@ -467,53 +1560,81 @@ export default function AdminQuoteDetailPage() {
                 </div>
               </div>
 
-              {/* Add Product Form */}
-              {showAddProduct && canEdit && (
+              {/* Pending products (awaiting save) */}
+              {newProductRows.length > 0 && canEdit && (
                 <div style={{ padding: 14, background: "#f8fbff", border: "1px solid #dde3ea", borderRadius: 10, marginBottom: 14 }}>
-                  <Form method="post" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <input type="hidden" name="intent" value="add_product" />
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Add New Product</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                      <div>
-                        <label style={styles.label}>Product Name *</label>
-                        <input name="newProductTitle" required placeholder="Product name" style={styles.inputFull} />
-                      </div>
-                      <div>
-                        <label style={styles.label}>SKU</label>
-                        <input name="newSku" placeholder="SKU" style={styles.inputFull} />
-                      </div>
-                      <div>
-                        <label style={styles.label}>Variant Title</label>
-                        <input name="newVariantTitle" placeholder="Variant" style={styles.inputFull} />
-                      </div>
-                      <div>
-                        <label style={styles.label}>Variant ID</label>
-                        <input name="newVariantId" placeholder="gid://shopify/ProductVariant/..." style={styles.inputFull} />
-                      </div>
-                      <div>
-                        <label style={styles.label}>Image URL</label>
-                        <input name="newImage" placeholder="https://..." style={styles.inputFull} />
-                      </div>
-                      <div>
-                        <label style={styles.label}>Quantity *</label>
-                        <input name="newQuantity" type="number" min="1" defaultValue="1" style={styles.inputFull} />
-                      </div>
-                      <div>
-                        <label style={styles.label}>Unit Price *</label>
-                        <input name="newUnitPrice" type="number" min="0" step="0.01" defaultValue="0" style={styles.inputFull} />
-                      </div>
-                      <div>
-                        <label style={styles.label}>Discount</label>
-                        <input name="newDiscount" type="number" min="0" step="0.01" defaultValue="0" style={styles.inputFull} />
-                      </div>
+                  <Form method="post">
+                    <input type="hidden" name="intent" value="add_products" />
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 10 }}>
+                      New products ({newProductRows.length})
                     </div>
-                    <div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {newProductRows.map((row) => (
+                        <div
+                          key={row.rowKey}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            border: "1px solid #e3e7ec",
+                            background: "#fff",
+                            borderRadius: 8,
+                            padding: "8px 10px",
+                          }}
+                        >
+                          <input type="hidden" name="newProductRow" value={row.rowKey} />
+                          <input type="hidden" name={`newProductId_${row.rowKey}`} value={row.productId || ""} />
+                          <input type="hidden" name={`newProductTitle_${row.rowKey}`} value={row.productTitle} />
+                          <input type="hidden" name={`newSku_${row.rowKey}`} value={row.sku} />
+                          <input type="hidden" name={`newVariantTitle_${row.rowKey}`} value={row.variantTitle} />
+                          <input type="hidden" name={`newVariantId_${row.rowKey}`} value={row.variantId} />
+                          <input type="hidden" name={`newImage_${row.rowKey}`} value={row.image} />
+                          <input type="hidden" name={`newUnitPrice_${row.rowKey}`} value={row.unitPrice} />
+                          <input type="hidden" name={`newDiscount_${row.rowKey}`} value={row.discount} />
+                          <input type="hidden" name={`newQuantity_${row.rowKey}`} value={row.quantity} />
+
+                          {row.image && (
+                            <img
+                              src={row.image}
+                              alt=""
+                              style={{ width: 36, height: 36, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
+                            />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {row.productTitle}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#5c5f62", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {row.variantTitle} · SKU {row.sku || "N/A"} · Qty {row.quantity}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                            {fmtMoney(row.unitPrice, quote.currencyCode)}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removePendingProduct(row.rowKey)}
+                            style={{ ...styles.smallBtn, background: "#fff", border: "1px solid #fecaca", color: "#b91b1b", flexShrink: 0 }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
                       <button
                         type="submit"
                         disabled={isSubmitting}
                         style={{ ...styles.btn, background: "#166534", color: "white" }}
                       >
-                        {submittingIntent === "add_product" ? "Adding..." : "Add Product to Quote"}
+                        {submittingIntent === "add_products" ? "Saving..." : "Add to Quote"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewProductRows([])}
+                        style={{ ...styles.btn, background: "#fff", border: "1px solid #c9ccd0", color: "#374151" }}
+                      >
+                        Clear
                       </button>
                     </div>
                   </Form>
@@ -910,6 +2031,23 @@ export default function AdminQuoteDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Add Product Modal */}
+      {showAddProductModal && (
+        <AddProductModal
+          form={addProductForm}
+          setForm={setAddProductForm}
+          onCancel={() => setShowAddProductModal(false)}
+          onConfirm={confirmAddProduct}
+          productQuery={productQuery}
+          setProductQuery={setProductQuery}
+          productResults={productResults}
+          fetchProducts={fetchProducts}
+          isFetchingProducts={isFetchingProducts}
+          onSelectVariant={handleSelectProductVariant}
+          defaultCurrencyCode={quote.currencyCode}
+        />
       )}
     </div>
   );
