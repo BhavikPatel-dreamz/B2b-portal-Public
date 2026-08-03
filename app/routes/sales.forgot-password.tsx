@@ -1,7 +1,7 @@
 import { ActionFunctionArgs, LoaderFunctionArgs, redirect } from "react-router";
 import { Form, Link, useActionData, useNavigation, useLoaderData } from "react-router";
 import prisma from "app/db.server";
-import { sendSalesUserPasswordResetEmail } from "app/utils/email";
+import { sendSalesUserPasswordResetEmail } from "app/utils/email.server";
 import { randomUUID } from "node:crypto";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {

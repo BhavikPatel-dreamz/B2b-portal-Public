@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import prisma from "app/db.server";
 import { getAdminForShop } from "app/shopify.server";
 import type { SalesSessionUser } from "app/utils/sales-session.server";
-import { sendOrderPaymentLinkEmail } from "app/utils/email";
+import { sendOrderPaymentLinkEmail } from "app/utils/email.server";
 
 export type SalesOrderAccessLevel = "agent" | "manager" | "admin";
 

@@ -7753,48 +7753,7 @@ export async function assignCatalogToLocation(
   return { success: true, errors: [] };
 }
 
-export async function removeCatalogFromLocation(
-  admin: any,
-  catalogId: string,
-  locationId: string,
-): Promise<{ success: boolean; errors: string[] }> {
-  console.log("🔗 Removing catalog from location:", { catalogId, locationId });
 
-  const response = await admin.graphql(
-    `#graphql
-  mutation CatalogContextUpdate($catalogId: ID!, $contextsToAdd: [ID!]!) {
-    catalogContextUpdate(catalogId: $catalogId, contextsToAdd: $contextsToAdd) {
-      catalog {
-        id
-        title
-      }
-      userErrors {
-        field
-        message
-        code
-      }
-    }
-  }`,
-    {
-      variables: {
-        catalogId: catalogId,
-        contextsToAdd: [locationId],
-      },
-    },
-  );
-
-  const payload = await response.json();
-  const userErrors: Array<{ message: string }> =
-    payload?.data?.catalogContextUpdate?.userErrors || [];
-
-  if (userErrors.length > 0) {
-    console.error("❌ catalogContextUpdate (remove) userErrors:", userErrors);
-    return { success: false, errors: userErrors.map((e) => e.message) };
-  }
-
-  console.log("✅ Catalog removed from location:", locationId);
-  return { success: true, errors: [] };
-}
 
 export async function deleteCatalog(
   admin: any,

@@ -11,7 +11,7 @@ import { Prisma } from "@prisma/client";
 import prisma from "./db.server";
 import { PAID_PLAN, PLAN_99, CUSTOM_PLAN } from "./billing-plans.shared";
 import { upsertStore } from "./services/store.server";
-import { sendAppWelcomeEmail } from "./utils/email";
+import { sendAppWelcomeEmail } from "./utils/email.server";
 import {
   registerCartValidationFunction,
   debugListAllShopifyFunctions,

@@ -7,7 +7,7 @@ import prisma from "app/db.server";
 import { authenticate, getAdminForShop } from "app/shopify.server";
 import { PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
 import { hasCustomPlanConfiguration } from "app/services/store.server";
-import { sendSalesUserInvitationEmail } from "app/utils/email";
+import { sendSalesUserInvitationEmail } from "app/utils/email.server";
 import { syncCompaniesFromShopify, syncCompaniesAndDetails } from "app/services/company.server";
 import { syncShopifyUsers, syncShopifyOrders } from "app/utils/company.server";
 

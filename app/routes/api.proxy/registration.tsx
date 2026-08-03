@@ -6,7 +6,7 @@ import {
   sendCustomerRegistrationApprovalEmail,
   sendRegistrationEmailForAdmin,
   sendRegistrationEmailForCustomer,
-} from "app/utils/email";
+} from "app/utils/email.server";
 import { getStoreByDomain } from "app/services/store.server";
 import prisma from "app/db.server";
 import {
@@ -1086,8 +1086,8 @@ export const loader: LoaderFunction = async ({ request }) => {
       const session = await authenticateCustomerAccountSession(request, {
         requireCustomer: false,
       });
-      shop = session.shop;
-      shopifyCustomerId = session.customerId || shopifyCustomerId;
+      shop = session?.shop ?? undefined;
+      shopifyCustomerId = session?.customerId ?? shopifyCustomerId;
     } catch (e) {
       console.warn("⚠️ [Registration Loader] Customer Account Session auth failed:", e);
     }
@@ -1141,8 +1141,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // 1. Try Shopify App Proxy auth (requests through Shopify proxy)
   try {
-    const { session } = await authenticate.public.appProxy(request);
-    authenticatedShop = session.shop;
+    const result = await authenticate.public.appProxy(request);
+    authenticatedShop = result.session?.shop ?? null;
   } catch (e) {
     console.warn("⚠️ [Registration] App Proxy auth failed, trying Customer Account Session:", e);
   }

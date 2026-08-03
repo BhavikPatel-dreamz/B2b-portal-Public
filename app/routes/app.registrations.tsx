@@ -27,7 +27,7 @@ import { authenticate } from "../shopify.server";
 import {
   sendCustomerRegistrationApprovalEmail,
   sendCustomerRegistrationRejectedEmail,
-} from "app/utils/email";
+} from "app/utils/email.server";
 import { updateCompanyMetafield } from "app/services/company.server";
 import EditDetailsModal, {
   type CountryOption,

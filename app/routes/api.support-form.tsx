@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { sendEmail } from "app/utils/email";
+import { sendEmail } from "app/utils/email.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {

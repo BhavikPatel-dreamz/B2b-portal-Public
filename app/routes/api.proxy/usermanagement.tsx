@@ -11,7 +11,7 @@ import {
   getCompanyContactEmail,
 } from "../../utils/b2b-customer.server";
 import prisma from "app/db.server";
-import { sendEmployeeAssignmentEmail } from "app/utils/email";
+import { sendEmployeeAssignmentEmail } from "app/utils/email.server";
 
 /**
  * API Proxy Route for User Management

@@ -30,7 +30,7 @@ import {
   getSalesOrderAccessLevel,
   isSalesPortalPaymentLinkEligible,
 } from "app/services/sales-order-management.shared";
-import { sendOrderPaymentLinkEmail } from "app/utils/email";
+import { sendOrderPaymentLinkEmail } from "app/utils/email.server";
 
 type ActionResponse = {
   success?: boolean;

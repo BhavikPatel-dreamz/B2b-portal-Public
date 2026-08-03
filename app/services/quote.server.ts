@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import prisma from "app/db.server";
-import { sendQuoteEmail } from "app/utils/email";
+import { sendQuoteEmail } from "app/utils/email.server";
 import { sendPendingOrderPaymentRequestEmail } from "app/services/sales-order-management.server";
 import {
   buildSalesDraftLineItems,

@@ -26,8 +26,9 @@ export const loader = async ({ request }) => {
     // code is expected to fail here rather than silently redirect.
     return text(`NetSuite connect failed: ${err?.message || err}`, 200);
   }
-  // return text(`NetSuite connect succeeded: ${shop}`, 200);
-  return redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_APP_HANDLE}`);
+
+  const appHandle = process.env.SHOPIFY_APP_HANDLE || "b2b-portal-public-dev";
+  return redirect(`https://${shop}/admin/apps/${appHandle}/app`);
 };
 
 function text(body, status = 200) {
