@@ -26,6 +26,7 @@ import {
   getAccessibleOrder,
   getSalesOrderAccessLevel,
   getShopifyOrderWhere,
+  fetchShopifyOrderMetadata,
   fetchShopifyOrderNames,
 } from "app/services/sales-order-management.server";
 import { restoreCredit } from "app/services/creditService";
@@ -147,6 +148,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const orderNames = await fetchShopifyOrderNames(orders);
+  const shopifyMetadata = await fetchShopifyOrderMetadata(orders);
 
   if (exportType === "csv" || exportType === "excel") {
     const headings = [
@@ -165,23 +167,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       "Last Updated",
     ];
     const separator = exportType === "excel" ? "\t" : ",";
-    const rows = orders.map((order) => [
-      orderNames.get(order.id) || getOrderNumber(order),
-      order.customerName,
-      order.customerEmail,
-      order.company.name,
-      [order.createdByUser.firstName, order.createdByUser.lastName]
-        .filter(Boolean)
-        .join(" ") || order.createdByUser.email,
-      order.items.length,
-      order.items.reduce((sum, item) => sum + item.quantity, 0),
-      order.orderTotal.toString(),
-      order.paymentStatus,
-      // order.orderStatus,
-      order.poNumber,
-      order.createdAt.toISOString(),
-      order.updatedAt.toISOString(),
-    ]);
+    const rows = orders.map((order) => {
+      const metadata = shopifyMetadata.get(order.id);
+      return [
+        orderNames.get(order.id) || getOrderNumber(order),
+        metadata?.customerName || order.customerName,
+        metadata?.customerEmail || order.customerEmail,
+        order.company.name,
+        [order.createdByUser.firstName, order.createdByUser.lastName]
+          .filter(Boolean)
+          .join(" ") || order.createdByUser.email,
+        metadata?.itemCount ?? order.items.length,
+        metadata?.quantity ?? order.items.reduce((sum, item) => sum + item.quantity, 0),
+        order.orderTotal.toString(),
+        metadata?.paymentStatus || order.paymentStatus,
+        // order.orderStatus,
+        order.poNumber,
+        order.createdAt.toISOString(),
+        order.updatedAt.toISOString(),
+      ];
+    });
     const content = [headings, ...rows]
       .map((row) => row.map(csvCell).join(separator))
       .join("\n");
@@ -283,24 +288,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ).length,
       revenue: totalRevenue,
     },
-    orders: orders.map((order) => ({
-      id: order.id,
-      orderNumber: getOrderNumber(order),
-      shopifyOrderName: orderNames.get(order.id) || null,
-      customerName: order.customerName,
-      customerEmail: order.customerEmail,
-      company: { id: order.company.id, name: order.company.name },
-      salesAgent: order.createdByUser,
-      itemCount: order.items.length,
-      quantity: order.items.reduce((sum, item) => sum + item.quantity, 0),
-      orderTotal: order.orderTotal.toString(),
-      currencyCode: order.currencyCode,
-      paymentStatus: order.paymentStatus,
-      // orderStatus: order.orderStatus,
-      createdAt: order.createdAt.toISOString(),
-      updatedAt: order.updatedAt.toISOString(),
-      paymentLink: order.paymentLink,
-    })),
+    orders: orders.map((order) => {
+      const metadata = shopifyMetadata.get(order.id);
+      return {
+        id: order.id,
+        orderNumber: getOrderNumber(order),
+        shopifyOrderName: orderNames.get(order.id) || null,
+        customerName: metadata?.customerName || order.customerName,
+        customerEmail: metadata?.customerEmail || order.customerEmail,
+        company: { id: order.company.id, name: order.company.name },
+        salesAgent: order.createdByUser,
+        itemCount: metadata?.itemCount ?? order.items.length,
+        quantity:
+          metadata?.quantity ??
+          order.items.reduce((sum, item) => sum + item.quantity, 0),
+        orderTotal: order.orderTotal.toString(),
+        currencyCode: order.currencyCode,
+        paymentStatus: metadata?.paymentStatus || order.paymentStatus,
+        // orderStatus: order.orderStatus,
+        createdAt: order.createdAt.toISOString(),
+        updatedAt: order.updatedAt.toISOString(),
+        paymentLink: order.paymentLink,
+      };
+    }),
   });
 };
 

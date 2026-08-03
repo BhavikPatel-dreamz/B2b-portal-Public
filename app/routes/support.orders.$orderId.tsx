@@ -158,13 +158,9 @@ async function getShopifyDeliveryDetails(order: any): Promise<DeliveryDetails> {
   };
   const shopDomain = order.company?.shop?.shopDomain;
   const accessToken = order.company?.shop?.accessToken;
-  const shopifyOrder = normalizeShopifyOrderId(order);
+  const shopifyOrderIds = normalizeShopifyOrderIds(order);
 
-  if (
-    !shopDomain ||
-    !accessToken ||
-    !shopifyOrder
-  ) {
+  if (!shopDomain || !accessToken || !shopifyOrderIds.length) {
     return getCompanyLocationDeliveryDetails(order, empty);
   }
 
@@ -198,33 +194,64 @@ async function getShopifyDeliveryDetails(order: any): Promise<DeliveryDetails> {
               value
             }
           }
+          ... on DraftOrder {
+            shippingAddress {
+              firstName
+              lastName
+              company
+              address1
+              address2
+              city
+              province
+              country
+              zip
+              phone
+            }
+            purchasingEntity {
+              ... on PurchasingCompany {
+                location {
+                  id
+                  name
+                }
+              }
+            }
+            customAttributes {
+              key
+              value
+            }
+          }
         }
       }
     `;
-    const orderResponse = await fetch(
-      `https://${shopDomain}/admin/api/2025-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          query: orderQuery,
-          variables: { id: shopifyOrder.id },
-        }),
-      },
-    );
-    const orderPayload = await orderResponse.json();
-    if (orderPayload.errors?.length) {
-      console.warn("[support-order] delivery lookup failed", {
-        orderId: order.id,
-        errors: orderPayload.errors,
-      });
-      return getCompanyLocationDeliveryDetails(order, empty);
-    }
 
-    const shopifyOrderNode = orderPayload.data?.node;
+    let shopifyOrderNode = null;
+    for (const shopifyOrderId of shopifyOrderIds) {
+      const orderResponse = await fetch(
+        `https://${shopDomain}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query: orderQuery,
+            variables: { id: shopifyOrderId },
+          }),
+        },
+      );
+      const orderPayload = await orderResponse.json();
+      if (orderPayload.errors?.length) {
+        console.warn("[support-order] delivery lookup failed", {
+          orderId: order.id,
+          shopifyOrderId,
+          errors: orderPayload.errors,
+        });
+        continue;
+      }
+      shopifyOrderNode = orderPayload.data?.node;
+      if (shopifyOrderNode) break;
+    }
     const purchasingLocation =
       shopifyOrderNode?.purchasingEntity?.location || null;
     const customLocationName =
@@ -313,8 +340,8 @@ async function getShopifyDeliveryDetails(order: any): Promise<DeliveryDetails> {
 async function getShopifyOrderDetails(order: any) {
   const shopDomain = order.company?.shop?.shopDomain;
   const accessToken = order.company?.shop?.accessToken;
-  const shopifyOrder = normalizeShopifyOrderId(order);
-  if (!shopDomain || !accessToken || !shopifyOrder) return null;
+  const shopifyOrderIds = normalizeShopifyOrderIds(order);
+  if (!shopDomain || !accessToken || !shopifyOrderIds.length) return null;
 
   try {
     const query = `
@@ -358,8 +385,6 @@ async function getShopifyOrderDetails(order: any) {
           ... on DraftOrder {
             id
             name
-            displayFinancialStatus
-            displayFulfillmentStatus
             customer {
               firstName
               lastName
@@ -394,31 +419,36 @@ async function getShopifyOrderDetails(order: any) {
       }
     `;
 
-    const response = await fetch(
-      `https://${shopDomain}/admin/api/2025-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
+    let payload: any = null;
+    let node: any = null;
+    for (const shopifyOrderId of shopifyOrderIds) {
+      const response = await fetch(
+        `https://${shopDomain}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            query,
+            variables: { id: shopifyOrderId },
+          }),
         },
-        body: JSON.stringify({
-          query,
-          variables: { id: shopifyOrder.id },
-        }),
-      },
-    );
-
-    const payload = await response.json();
-    if (payload.errors?.length) {
-      console.warn("[support-order] Shopify order details lookup failed", {
-        orderId: order.id,
-        errors: payload.errors,
-      });
-      return null;
+      );
+      payload = await response.json();
+      if (payload.errors?.length) {
+        console.warn("[support-order] Shopify order details lookup failed", {
+          orderId: order.id,
+          shopifyOrderId,
+          errors: payload.errors,
+        });
+        continue;
+      }
+      node = payload.data?.node;
+      if (node) break;
     }
-
-    const node = payload.data?.node;
+    if (!node) return null;
     if (!node) return null;
 
     const customerName = [
@@ -514,20 +544,22 @@ function normalizeShopifyFulfillmentStatus(status?: string | null) {
   }
 }
 
-function normalizeShopifyOrderId(order: any) {
+function normalizeShopifyOrderIds(order: any) {
   const rawId = String(order.shopifyOrderId || "").trim();
-  if (!rawId) return null;
+  if (!rawId) return [];
   if (rawId.startsWith("gid://shopify/Order/")) {
-    return { id: rawId };
+    return [rawId];
   }
   if (rawId.startsWith("gid://shopify/DraftOrder/")) {
-    return { id: rawId };
+    return [rawId];
   }
   if (/^\d+$/.test(rawId)) {
-    const resource = order.orderStatus === "draft" ? "DraftOrder" : "Order";
-    return { id: `gid://shopify/${resource}/${rawId}` };
+    return [
+      `gid://shopify/Order/${rawId}`,
+      `gid://shopify/DraftOrder/${rawId}`,
+    ];
   }
-  return null;
+  return [];
 }
 
 async function getCompanyLocationDeliveryDetails(

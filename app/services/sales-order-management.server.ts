@@ -198,6 +198,205 @@ export async function fetchShopifyOrderNames(
   return names;
 }
 
+export type ShopifyOrderMetadata = {
+  shopifyOrderName: string | null;
+  customerEmail: string | null;
+  customerName: string | null;
+  itemCount: number;
+  quantity: number;
+  paymentStatus: string | null;
+};
+
+type ShopifyOrderMetadataLookupOrder = {
+  id: string;
+  shopifyOrderId: string | null;
+  company: {
+    shop: { shopDomain: string; accessToken: string | null } | null;
+  };
+};
+
+export async function fetchShopifyOrderMetadata(
+  orders: ShopifyOrderMetadataLookupOrder[],
+): Promise<Map<string, ShopifyOrderMetadata>> {
+  const metadata = new Map<string, ShopifyOrderMetadata>();
+  const byShop = new Map<
+    string,
+    { accessToken: string; entries: Array<{ gid: string; orderId: string }> }
+  >();
+
+  for (const order of orders) {
+    const rawId = order.shopifyOrderId;
+    if (
+      !rawId?.startsWith("gid://shopify/Order/") &&
+      !rawId?.startsWith("gid://shopify/DraftOrder/")
+    ) {
+      continue;
+    }
+    const shop = order.company?.shop;
+    if (!shop?.shopDomain || !shop.accessToken) continue;
+    const entry = { gid: rawId, orderId: order.id };
+    const existing = byShop.get(shop.shopDomain);
+    if (existing) {
+      existing.entries.push(entry);
+    } else {
+      byShop.set(shop.shopDomain, {
+        accessToken: shop.accessToken,
+        entries: [entry],
+      });
+    }
+  }
+
+  const query = `
+    query GetShopifyOrderMetadata($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Order {
+          id
+          name
+          displayFinancialStatus
+          customer {
+            email
+            firstName
+            lastName
+          }
+          lineItems(first: 250) {
+            edges {
+              node {
+                quantity
+              }
+            }
+          }
+        }
+        ... on DraftOrder {
+          id
+          name
+          customer {
+            email
+            firstName
+            lastName
+          }
+          lineItems(first: 250) {
+            edges {
+              node {
+                quantity
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  for (const [shopDomain, { accessToken, entries }] of byShop) {
+    for (let i = 0; i < entries.length; i += 250) {
+      const chunk = entries.slice(i, i + 250);
+      try {
+        const response = await fetch(
+          `https://${shopDomain}/admin/api/2025-01/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": accessToken,
+            },
+            body: JSON.stringify({
+              query,
+              variables: { ids: chunk.map((entry) => entry.gid) },
+            }),
+          },
+        );
+        const payload = (await response.json()) as {
+          data?: {
+            nodes?: Array<{
+              id: string;
+              name?: string;
+              displayFinancialStatus?: string | null;
+              customer?: {
+                email?: string | null;
+                firstName?: string | null;
+                lastName?: string | null;
+              } | null;
+              lineItems?: {
+                edges?: Array<{
+                  node?: {
+                    quantity?: number;
+                  } | null;
+                } | null>;
+              } | null;
+            } | null>;
+          };
+          errors?: Array<{ message: string }>;
+        };
+        if (payload.errors?.length) {
+          console.warn("[sales-orders] Shopify order metadata lookup failed", {
+            shopDomain,
+            errors: payload.errors,
+          });
+          continue;
+        }
+        const nodes = payload.data?.nodes || [];
+        nodes.forEach((node) => {
+          if (!node?.id) return;
+          const entry = chunk.find((item) => item.gid === node.id);
+          if (!entry) return;
+          const email = node.customer?.email || null;
+          const customerName =
+            [node.customer?.firstName, node.customer?.lastName]
+              .filter(Boolean)
+              .join(" ")
+              .trim() || null;
+          const edges = node.lineItems?.edges || [];
+          const itemCount = edges.filter((edge) => edge?.node != null).length;
+          const quantity = edges.reduce(
+            (sum, edge) => sum + Number(edge?.node?.quantity ?? 0),
+            0,
+          );
+          const paymentStatus =
+            node.displayFinancialStatus &&
+            normalizeShopifyFinancialStatus(node.displayFinancialStatus);
+          metadata.set(entry.orderId, {
+            shopifyOrderName: node.name || null,
+            customerEmail: email,
+            customerName,
+            itemCount,
+            quantity,
+            paymentStatus: paymentStatus || null,
+          });
+        });
+      } catch (error) {
+        console.error("[sales-orders] Shopify order metadata unavailable", {
+          shopDomain,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  return metadata;
+}
+
+function normalizeShopifyFinancialStatus(status?: string | null) {
+  const value = String(status || "")
+    .toLowerCase()
+    .replace(/[\s_-]/g, "");
+  switch (value) {
+    case "paid":
+      return "paid";
+    case "partiallypaid":
+      return "partial";
+    case "partiallyrefunded":
+      return "partial";
+    case "pending":
+    case "authorized":
+      return "pending";
+    case "refunded":
+      return "refunded";
+    case "voided":
+      return "cancelled";
+    default:
+      return value || null;
+  }
+}
+
 export function isSalesPortalPaymentLinkEligible(order: {
   source: string | null;
   paymentStatus: string;
