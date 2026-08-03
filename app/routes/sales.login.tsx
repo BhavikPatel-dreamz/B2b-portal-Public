@@ -1,4 +1,5 @@
 import { LoaderFunctionArgs, ActionFunctionArgs, redirect } from "react-router";
+import { useState } from "react";
 import {
   Form,
   useLoaderData,
@@ -89,6 +90,7 @@ export default function SalesLogin() {
   const actionData = useActionData<{ error?: string }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   return (
     <div style={styles.pageContainer}>
@@ -159,16 +161,56 @@ export default function SalesLogin() {
             <label htmlFor="sales-password" style={styles.label}>
               Password
             </label>
-            <input
-              id="sales-password"
-              type="password"
-              name="password"
-              required
-              minLength={6}
-              autoComplete="current-password"
-              style={styles.input}
-              placeholder="Enter your password"
-            />
+            <div style={styles.passwordFieldWrapper}>
+              <input
+                id="sales-password"
+                type={passwordVisible ? "text" : "password"}
+                name="password"
+                required
+                minLength={6}
+                autoComplete="current-password"
+                style={styles.input}
+                placeholder="Enter your password"
+              />
+              <button
+                type="button"
+                onClick={() => setPasswordVisible((prev) => !prev)}
+                style={styles.passwordToggle}
+                aria-label={passwordVisible ? "Hide password" : "Show password"}
+              >
+                {passwordVisible ? (
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C7.58 20 3.73 17.11 1.99 12.76" />
+                    <path d="M9.53 9.53A3 3 0 0 1 14.47 14.47" />
+                    <path d="M1 1l22 22" />
+                    <path d="M16.68 16.68A9.94 9.94 0 0 0 21 12c-1.58-4.36-5.43-7.25-9.85-7.25a9.94 9.94 0 0 0-4.35.95" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
 
           <button
@@ -350,22 +392,47 @@ const styles = {
     color: "#374151",
     letterSpacing: "0.01em",
   },
-  input: {
-    padding: "14px 16px",
-    borderRadius: "12px",
-    border: "1.5px solid #e5e7eb",
-    fontSize: "15px",
-    fontFamily: "'Inter', sans-serif",
-    transition: "border-color 0.2s, box-shadow 0.2s",
-    outline: "none",
-    backgroundColor: "#fafafa",
-  },
+  // input: {
+  //   padding: "14px 16px",
+  //   borderRadius: "12px",
+  //   border: "1.5px solid #e5e7eb",
+  //   fontSize: "15px",
+  //   fontFamily: "'Inter', sans-serif",
+  //   transition: "border-color 0.2s, box-shadow 0.2s",
+  //   outline: "none",
+  //   backgroundColor: "#fafafa",
+  // },
+  // passwordFieldWrapper: {
+  //   display: "flex",
+  //   flexDirection: "column" as const,
+  //   alignItems: "stretch",
+  //   gap: "8px",
+  //   width: "100%",
+  // },
+  // passwordToggle: {
+  //   border: "1px solid #e5e7eb",
+  //   backgroundColor: "#ffffff",
+  //   color: "#6B7280",
+  //   cursor: "pointer",
+  //   display: "flex",
+  //   alignItems: "center",
+  //   justifyContent: "center",
+  //   width: "40px",
+  //   height: "40px",
+  //   padding: 0,
+  //   borderRadius: "12px",
+  //   alignSelf: "flex-end" as const,
+  //   marginTop: "0px",
+  //   boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08)",
+  //   transition: "transform 0.15s ease, box-shadow 0.15s ease",
+  // },
   button: {
     marginTop: "4px",
     padding: "15px 24px",
     borderRadius: "14px",
     border: "none",
-    background: "linear-gradient(135deg, var(--sales-portal-accent) 0%, var(--sales-portal-accent-dark) 100%)",
+    background:
+      "linear-gradient(135deg, var(--sales-portal-accent) 0%, var(--sales-portal-accent-dark) 100%)",
     color: "var(--sales-portal-accent-contrast)",
     fontSize: "16px",
     fontWeight: 600,
@@ -414,5 +481,38 @@ const styles = {
     fontWeight: 600,
     color: "#E91E63",
     textDecoration: "none",
+  },
+   passwordFieldWrapper: {
+    position: "relative" as const,
+    width: "100%",
+  },
+
+  input: {
+    width: "100%",
+    padding: "10px 44px 10px 12px", // right padding for icon space
+    fontSize: "14px",
+    border: "1px solid #E2E2E2",
+    borderRadius: "8px",
+    outline: "none",
+    boxSizing: "border-box" as const,
+    backgroundColor: "#FAFAFA",
+  },
+
+  passwordToggle: {
+    position: "absolute" as const,
+    right: "8px",
+    top: "50%",
+    transform: "translateY(-50%)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "32px",
+    height: "32px",
+    padding: 0,
+    background: "transparent",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    color: "#6B7280",
   },
 };

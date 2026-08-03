@@ -44,7 +44,15 @@ const ORDER_STATUSES = [
   "cancelled",
   "refunded",
 ];
-const PAYMENT_STATUSES = ["pending", "partial", "paid", "failed", "expired"];
+const PAYMENT_STATUSES = [
+  "pending",
+  "partial",
+  "paid",
+  "failed",
+  "expired",
+  "refunded",
+  "cancelled",
+];
 
 function csvCell(value: unknown) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -54,8 +62,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { user } = await requireSalesSession(request);
   const url = new URL(request.url);
   const search = (url.searchParams.get("search") || "").trim();
-  const status = url.searchParams.get("status") || "";
-  const paymentStatus = url.searchParams.get("paymentStatus") || "";
+  const status = (url.searchParams.get("status") || "").trim().toLowerCase();
+  const paymentStatus = (url.searchParams.get("paymentStatus") || "").trim().toLowerCase();
   const companyId = url.searchParams.get("company") || "";
   const customer = url.searchParams.get("customer") || "";
   const agentId = url.searchParams.get("agent") || "";
@@ -69,23 +77,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const accessWhere = getOrderAccessWhere(user);
   const shopifyOrderWhere = getShopifyOrderWhere();
 
+  // NOTE: `search`, `status`, `paymentStatus` and `customer` are intentionally
+  // NOT applied at the DB level. The displayed payment status and customer
+  // details come from the Shopify order record (metadata takes priority), so a
+  // DB-level filter would drop orders whose local record is stale/mismatched.
+  // These filters are applied in-memory below against the effective values.
   const filters: Prisma.B2BOrderWhereInput[] = [];
-  if (search) {
-    filters.push({
-      OR: [
-        { orderNumber: { contains: search, mode: "insensitive" } },
-        { shopifyOrderId: { contains: search, mode: "insensitive" } },
-        { customerName: { contains: search, mode: "insensitive" } },
-        { customerEmail: { contains: search, mode: "insensitive" } },
-        { poNumber: { contains: search, mode: "insensitive" } },
-        { company: { name: { contains: search, mode: "insensitive" } } },
-      ],
-    });
-  }
-  if (status) filters.push({ orderStatus: status });
-  if (paymentStatus) filters.push({ paymentStatus });
   if (companyId && companyId !== "all") filters.push({ companyId });
-  if (customer) filters.push({ customerEmail: customer });
   if (agentId && accessLevel !== "agent")
     filters.push({ createdByUserId: agentId });
   if (dateFrom || dateTo) {
@@ -150,6 +148,63 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const orderNames = await fetchShopifyOrderNames(orders);
   const shopifyMetadata = await fetchShopifyOrderMetadata(orders);
 
+  // Filter the displayed orders in-memory using the effective (Shopify-first)
+  // values so the UI filters match what users actually see. The local DB record
+  // can lag behind the Shopify order (payment/customer fields come from the
+  // Shopify order), so pre-filtering at the DB level would drop real matches.
+  let displayOrders = orders;
+  const normalizeKey = (s: string | null | undefined) =>
+    String(s || "").toLowerCase().trim().replace(/\s+/g, "_").replace(/-+/g, "_");
+  const effectivePaymentStatus = (order: (typeof orders)[number]) =>
+    (shopifyMetadata.get(order.id)?.paymentStatus ||
+      order.paymentStatus ||
+      "").toLowerCase();
+  const effectiveCustomerEmail = (order: (typeof orders)[number]) =>
+    (shopifyMetadata.get(order.id)?.customerEmail ||
+      order.customerEmail ||
+      "").toLowerCase();
+  const effectiveCustomerName = (order: (typeof orders)[number]) =>
+    (shopifyMetadata.get(order.id)?.customerName ||
+      order.customerName ||
+      "").toLowerCase();
+
+  if (search) {
+    const query = search.toLowerCase();
+    displayOrders = displayOrders.filter((order) => {
+      const orderName = orderNames.get(order.id) || getOrderNumber(order);
+      const haystack = [
+        order.orderNumber,
+        order.shopifyOrderId,
+        order.poNumber,
+        order.company.name,
+        orderName,
+        effectiveCustomerEmail(order),
+        effectiveCustomerName(order),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+  if (status) {
+    const normalizedStatus = normalizeKey(status);
+    displayOrders = displayOrders.filter(
+      (order) => normalizeKey(order.orderStatus) === normalizedStatus,
+    );
+  }
+  if (paymentStatus) {
+    displayOrders = displayOrders.filter(
+      (order) => effectivePaymentStatus(order) === paymentStatus,
+    );
+  }
+  if (customer) {
+    const normalizedCustomer = customer.toLowerCase();
+    displayOrders = displayOrders.filter(
+      (order) => effectiveCustomerEmail(order) === normalizedCustomer,
+    );
+  }
+
   if (exportType === "csv" || exportType === "excel") {
     const headings = [
       "Shopify Order Name",
@@ -167,7 +222,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       "Last Updated",
     ];
     const separator = exportType === "excel" ? "\t" : ",";
-    const rows = orders.map((order) => {
+    const rows = displayOrders.map((order) => {
       const metadata = shopifyMetadata.get(order.id);
       return [
         orderNames.get(order.id) || getOrderNumber(order),
@@ -238,11 +293,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const customers = Array.from(
     new Map(
       orders
-        .filter((order) => order.customerEmail)
-        .map((order) => [
-          order.customerEmail,
-          { email: order.customerEmail, name: order.customerName },
-        ]),
+        .map((order) => {
+          const metadata = shopifyMetadata.get(order.id);
+          const email = metadata?.customerEmail || order.customerEmail;
+          const name = metadata?.customerName || order.customerName || email;
+          return email ? [email, { email, name }] : undefined;
+        })
+        .filter((entry): entry is [string, { email: string; name: string }] =>
+          Boolean(entry),
+        ),
     ).values(),
   );
   const totalRevenue = summaryRows
@@ -288,7 +347,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ).length,
       revenue: totalRevenue,
     },
-    orders: orders.map((order) => {
+    orders: displayOrders.map((order) => {
       const metadata = shopifyMetadata.get(order.id);
       return {
         id: order.id,
@@ -572,7 +631,7 @@ export default function CentralOrderListPage() {
           <option value="">All customers</option>
           {data.customers.map((customer: any) => (
             <option key={customer.email} value={customer.email}>
-              {customer.name || customer.email}
+              {customer.name ? `${customer.name} (${customer.email})` : customer.email}
             </option>
           ))}
         </select>
