@@ -4,11 +4,12 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData, Link } from "react-router";
+import { useFetcher, useLoaderData, useRevalidator, Link } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { getConnectionStatus } from "../lib/netsuite-oauth.server.js";
 import {
   deleteStore,
   getStoreByDomain,
@@ -27,6 +28,10 @@ import {
 
 interface LoaderData {
   storeMissing: boolean;
+  netsuite: {
+    connected: boolean;
+    connectedAt: Date | null;
+  };
   store?: {
     shopDomain: string;
     plan: string;
@@ -86,6 +91,10 @@ function clearAdminCompaniesCache(shop: string) {
   }
 }
 
+export function clearSettingsCache(shop: string) {
+  settingsCache.delete(`settings-${shop}`);
+}
+
 function sanitizeNonNegativeDecimal(value: string) {
   if (!value) return value;
   return value.startsWith("-") ? value.replace(/^-+/, "") : value;
@@ -121,9 +130,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!store) {
-    return Response.json({ storeMissing: true } satisfies LoaderData, {
-      status: 404,
-    });
+    return Response.json(
+      { storeMissing: true, netsuite: { connected: false, connectedAt: null } } satisfies LoaderData,
+      {
+        status: 404,
+      },
+    );
   }
 
   const freePlanUsage =
@@ -131,6 +143,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const result = {
     storeMissing: false,
+    netsuite: await getConnectionStatus(session.shop),
     store: {
       shopDomain: store.shopDomain,
       plan: store.plan || "",
@@ -780,7 +793,7 @@ const ToggleRow = ({
   );
 };
 
-type SettingsTabId = "store" | "onboarding" | "company" | "theme" | "pages";
+type SettingsTabId = "store" | "onboarding" | "company" | "theme" | "pages" | "netsuite";
 
 const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
   { id: "store", label: "Store Settings" },
@@ -788,6 +801,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string }> = [
   { id: "company", label: "Order Setting" },
   { id: "theme", label: "Theme Setting" },
   { id: "pages", label: "Page Visibility" },
+  { id: "netsuite", label: "NetSuite Integration" },
 ];
 
 export default function SettingsPage() {
@@ -808,6 +822,26 @@ export default function SettingsPage() {
 
   const loaderData = useLoaderData<LoaderData>();
   const { storeMissing } = loaderData;
+
+  const revalidator = useRevalidator();
+
+  const netsuiteFetcher = useFetcher();
+  useEffect(() => {
+    if (netsuiteFetcher.data?.url) {
+      window.open(netsuiteFetcher.data.url, "_top");
+    }
+  }, [netsuiteFetcher.data]);
+  const connectNetsuite = () =>
+    netsuiteFetcher.submit({}, { method: "POST", action: "/api/netsuite/connect" });
+
+  const disconnectFetcher = useFetcher();
+  useEffect(() => {
+    if (disconnectFetcher.data?.ok) {
+      revalidator.revalidate();
+    }
+  }, [disconnectFetcher.data, revalidator]);
+  const disconnectNetsuite = () =>
+    disconnectFetcher.submit({}, { method: "POST", action: "/api/netsuite/disconnect" });
 
   const [emailHasContent, setEmailHasContent] = useState(false);
   const [privacyHasContent, setPrivacyHasContent] = useState(false);
@@ -1544,7 +1578,119 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   </div>
-                )} */}
+                 )} */}
+              </div>
+
+              {/* ── NetSuite Integration ────────────────────────────────── */}
+              <div style={{ display: activeTab === "netsuite" ? "grid" : "none", gap: 16 }}>
+                <div
+                  style={{
+                    border: "1px solid #e3e7ec",
+                    borderRadius: 12,
+                    padding: 20,
+                    background: "#fff",
+                    display: "grid",
+                    gap: 14,
+                  }}
+                >
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <div style={{ fontSize: 16, fontWeight: 650, color: "#202223" }}>
+                      NetSuite Integration
+                    </div>
+                    <div style={{ fontSize: 13, color: "#5c5f62", lineHeight: 1.5 }}>
+                      Connect your NetSuite account to sync sales orders into Shopify. The connection is
+                      stored per store.
+                    </div>
+                  </div>
+
+                  {loaderData.netsuite?.connected ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        flexWrap: "wrap",
+                        padding: 12,
+                        borderRadius: 8,
+                        background: "#f1f8f5",
+                        border: "1px solid #c0e0d4",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#108043" }} />
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "#006e52" }}>Connected</span>
+                        <span style={{ fontSize: 13, color: "#5c5f62" }}>
+                          since{" "}
+                          {loaderData.netsuite.connectedAt
+                            ? new Date(loaderData.netsuite.connectedAt).toLocaleString()
+                            : "unknown time"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={disconnectNetsuite}
+                        disabled={disconnectFetcher.state !== "idle"}
+                        style={{
+                          padding: "9px 16px",
+                          borderRadius: 8,
+                          border: "1px solid #c9ccd0",
+                          background: "#fff",
+                          color: "#b01000",
+                          fontWeight: 600,
+                          fontSize: 13,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {disconnectFetcher.state !== "idle" ? "Disconnecting..." : "Disconnect"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        flexWrap: "wrap",
+                        padding: 12,
+                        borderRadius: 8,
+                        background: "#fbfbfc",
+                        border: "1px solid #e3e7ec",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#b98900" }} />
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "#202223" }}>Not connected</span>
+                        <span style={{ fontSize: 13, color: "#5c5f62" }}>
+                          NetSuite connection has not been set up yet.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={connectNetsuite}
+                        disabled={netsuiteFetcher.state !== "idle"}
+                        style={{
+                          padding: "9px 16px",
+                          borderRadius: 8,
+                          border: "1px solid transparent",
+                          background: "#005bd3",
+                          color: "#fff",
+                          fontWeight: 600,
+                          fontSize: 13,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {netsuiteFetcher.state !== "idle" ? "Connecting..." : "Connect NetSuite"}
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 13, color: "#5c5f62", lineHeight: 1.5 }}>
+                    After clicking Connect, you&apos;ll be redirected to NetSuite to authorize this app. When
+                    finished you&apos;ll be brought back here and the connection will show as Connected.
+                  </div>
+                </div>
               </div>
 
                    {isFreePlan  ? (

@@ -1444,7 +1444,7 @@ export default function DraftDetailsPage() {
       draftCount={data.counts.drafts}
       quoteCount={data.counts.quotes}
     >
-      <Link
+      {/* <Link
         to="/sales/portal/drafts"
         aria-disabled={busy}
         style={{
@@ -1454,7 +1454,32 @@ export default function DraftDetailsPage() {
         }}
       >
         Back to Drafts
-      </Link>
+      </Link> */}
+        {/* startAction={ */}
+                <Link
+                 to="/sales/portal/drafts"
+                  aria-disabled={busy}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    minHeight: 36,
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid var(--sales-portal-accent-tint)",
+                    background: "var(--sales-portal-accent-lighter)",
+                    color: "var(--sales-portal-accent)",
+                    textDecoration: "none",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    opacity:  1,
+                    pointerEvents:"auto",
+                    margin:"8px"
+                  }}
+                >
+                 Back to Drafts
+                </Link>
+              {/* } */}
       <SalesPortalHeader
         title={draft.orderNumber}
         subtitle="Draft Details"

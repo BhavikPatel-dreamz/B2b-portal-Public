@@ -3,7 +3,6 @@ import {
   Link,
   useFetcher,
   useNavigate,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -20,7 +19,6 @@ import { clearAdminCompaniesCache } from "./app.companies";
 import { clearSelectPlanCache } from "./app.select-plan"; 
 import { getFreePlanUsage } from "app/utils/free-plan-limits.server";
 import { hasCustomPlanConfiguration } from "app/services/store.server";
-import { getConnectionStatus } from "../lib/netsuite-oauth.server.js";
 
 
 type Tutorial = {
@@ -50,10 +48,6 @@ type ThemeSummary = {
 };
 
 type LoaderData = {
-  netsuite: {
-    connected: boolean;
-    connectedAt: Date | null;
-  };
   themes: ThemeSummary[];
   missingScope: boolean;
   store: {
@@ -95,8 +89,6 @@ const hasReadThemesScopeError = (error: unknown) => {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   // ✅ Add billing to destructuring
   const { admin, session, billing } = await authenticate.admin(request);
-  const netsuite = await getConnectionStatus(session.shop);
-
 
   let themes: ThemeSummary[] = [];
   let missingScope = false;
@@ -131,7 +123,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!store) {
     return Response.json(
       {
-        netsuite,
         themes: [],
         missingScope,
         store: null,
@@ -195,7 +186,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   return Response.json({
-    netsuite,
     themes,
     missingScope,
     store,
@@ -299,13 +289,11 @@ export default function Welcome() {
     pendingRegistrations = 0,
     isFreePlan = false,
     freePlanCompanyCount = 0,
-    netsuite,
   } = useLoaderData<LoaderData>();
 
   const syncFetcher = useFetcher<ActionResponse>();
   const setupFetcher = useFetcher();
   const navigate = useNavigate();
-  const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const [showSetupEssentials, setShowSetupEssentials] = useState(!setupFinished);
 
@@ -367,25 +355,6 @@ export default function Welcome() {
       thumbnailTitle: "How To Manage\nCompany Access?"
     }
   ];
-  const netsuiteFetcher = useFetcher();
-  useEffect(() => {
-    if (netsuiteFetcher.data?.url) {
-      window.open(netsuiteFetcher.data.url, "_top");
-    }
-  }, [netsuiteFetcher.data]);
-  const connectNetsuite = () =>
-    netsuiteFetcher.submit({}, { method: "POST", action: "/api/netsuite/connect" });
-
-  const disconnectFetcher = useFetcher();
-  useEffect(() => {
-    if (disconnectFetcher.data?.ok) {
-      revalidator.revalidate();
-    }
-  }, [disconnectFetcher.data, revalidator]);
-  const disconnectNetsuite = () =>
-    disconnectFetcher.submit({}, { method: "POST", action: "/api/netsuite/disconnect" });
-
-
   const isSetupItemComplete = (label: string) =>
     completedSetupSteps.includes(label);
 
@@ -1869,35 +1838,9 @@ export default function Welcome() {
                 </button>
               </syncFetcher.Form>
             </div>
-          </div>
-        </div>
-     <s-section heading="NetSuite Integration">
-       {netsuite.connected ? (
-          <s-stack direction="inline" gap="base">
-            <s-paragraph>
-              Connected since {netsuite.connectedAt ? new Date(netsuite.connectedAt).toLocaleString() : "unknown time"}
-            </s-paragraph>
-            <s-button
-              onClick={disconnectNetsuite}
-              variant="tertiary"
-              {...(disconnectFetcher.state !== "idle" ? { loading: true } : {})}
-            >
-              Disconnect
-            </s-button>
-          </s-stack>
-        ) : (
-          <s-stack direction="inline" gap="base">
-            <s-paragraph>Not connected to NetSuite yet.</s-paragraph>
-            <s-button
-              onClick={connectNetsuite}
-              {...(netsuiteFetcher.state !== "idle" ? { loading: true } : {})}
-            >
-              Connect NetSuite
-            </s-button>
-          </s-stack>
-        )}
-      </s-section>
-     
+         </div>
+       </div>
+
       </div>
     </div>
   );

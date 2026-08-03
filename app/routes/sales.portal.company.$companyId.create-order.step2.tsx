@@ -4,6 +4,7 @@ import {
   redirect,
   useLoaderData,
   Link,
+  useLocation,
   useNavigation,
   useSearchParams,
   useFetcher,
@@ -1002,6 +1003,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 export default function CreateOrderProductCatalog() {
   const { company, selectedCustomer, products, collections, filterOptions, pageInfo, pagination, searchParams, user, mode } = useLoaderData<any>();
   const navigation = useNavigation();
+  const location = useLocation();
   const draftFetcher = useFetcher<SaveDraftResponse>();
   const [, setUrlParams] = useSearchParams();
   
@@ -1229,7 +1231,10 @@ export default function CreateOrderProductCatalog() {
     });
   };
 
-  const isLoading = navigation.state === "loading";
+  const isLoading =
+    navigation.state === "loading" &&
+    navigation.location?.pathname === location.pathname &&
+    navigation.location?.search === location.search;
   const currentCatalogPage = pagination?.currentPage || 1;
   const currentPageSize = pagination?.pageSize || DEFAULT_PRODUCT_PAGE_SIZE;
   const pageSizeOptions = pagination?.pageSizeOptions || PRODUCT_PAGE_SIZE_OPTIONS;

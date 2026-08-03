@@ -103,6 +103,7 @@ export default [
     route("select-plan", "routes/app.select-plan.tsx"),
     route("cancel-subscription", "routes/app.cancel-subscription.tsx"),
     route("billing-example", "routes/app.billing-example.tsx"),
+    route("netsuite-logs", "routes/app.netsuite-logs.jsx"),
   ]),
 
   // Unified Sales Portal (single login for all companies/stores)

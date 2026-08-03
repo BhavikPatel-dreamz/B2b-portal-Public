@@ -6,6 +6,7 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
+import { getConnectionStatus } from "../lib/netsuite-oauth.server.js";
 import { APP_BILLING_PLANS, getIsTestBilling } from "app/utils/billing.server";
 import { FREE_PLAN, PAID_PLAN, PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
 import {
@@ -47,11 +48,11 @@ function requiresPlan(pathname: string) {
 // ── IN-MEMORY CACHE for app layout data ─────────────────────────
 declare global {
   var __appLayoutCache:
-    | Map<string, { data: { apiKey: string; showSalesLinks: boolean; salesOnlyStore: boolean }; timestamp: number }>
+    | Map<string, { data: { apiKey: string; showSalesLinks: boolean; salesOnlyStore: boolean; netsuiteConnected: boolean }; timestamp: number }>
     | undefined;
 }
 
-const appLayoutCache: Map<string, { data: { apiKey: string; showSalesLinks: boolean; salesOnlyStore: boolean }; timestamp: number }> =
+const appLayoutCache: Map<string, { data: { apiKey: string; showSalesLinks: boolean; salesOnlyStore: boolean; netsuiteConnected: boolean }; timestamp: number }> =
   globalThis.__appLayoutCache ?? (globalThis.__appLayoutCache = new Map());
 
 const APP_LAYOUT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -155,7 +156,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const isSalesOnlyStore = SALES_ONLY_STORES.has(session.shop);
 
-  const result = { apiKey: process.env.SHOPIFY_API_KEY || "", showSalesLinks, salesOnlyStore: isSalesOnlyStore };
+  const netsuiteConnected = isSalesOnlyStore ? false : (await getConnectionStatus(session.shop)).connected;
+
+  const result = { apiKey: process.env.SHOPIFY_API_KEY || "", showSalesLinks, salesOnlyStore: isSalesOnlyStore, netsuiteConnected };
 
   // Store in cache
   appLayoutCache.set(cacheKey, { data: result, timestamp: Date.now() });
@@ -182,7 +185,7 @@ export function shouldRevalidate({
 }
 
 export default function App() {
-  const { apiKey, showSalesLinks, salesOnlyStore } = useLoaderData<typeof loader>();
+  const { apiKey, showSalesLinks, salesOnlyStore, netsuiteConnected } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
@@ -199,6 +202,7 @@ export default function App() {
           {!salesOnlyStore && <s-link href="/app/registration-form">Registrations Form</s-link>}
           {!salesOnlyStore && <s-link href="/app/settings">Settings</s-link>}
           {!salesOnlyStore && <s-link href="/app/notifications">Email Template</s-link>}
+          {!salesOnlyStore && netsuiteConnected && <s-link href="/app/netsuite-logs">NetSuite Logs</s-link>}
           {(salesOnlyStore || showSalesLinks) && <s-link href="/app/sales-users">Sales Users</s-link>}
           {(salesOnlyStore || showSalesLinks) && <s-link href="/app/sales-dashboard">Sales Dashboard</s-link>}
           {!salesOnlyStore && <s-link href="/app/select-plan">Select Plan</s-link>}

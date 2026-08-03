@@ -498,10 +498,12 @@ export default function SalesDashboard() {
                     <tr key={item.id} style={trStyle}>
                       <td style={tdStyle}>
                         <strong style={{ color: "#2c6ecb" }}>
-                          {item.orderNumber ||
-                            (item.orderNumber
-                              ? `#${item.orderNumber.split("/").pop()}`
-                              : item.orderNumber.slice(0, 8))}
+                          {item.orderNumber
+                            ? `#${String(item.orderNumber)
+                                .replace(/^#/, "")
+                                .split("/")
+                                .pop()}`
+                            : item.id.slice(0, 8)}
                         </strong>
                       </td>
                       <td style={tdStyle}>{item.company.name}</td>
