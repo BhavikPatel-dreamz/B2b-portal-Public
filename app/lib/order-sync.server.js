@@ -4,6 +4,7 @@ import XLSX from "xlsx";
 import prisma from "../db.server.js";
 import { unauthenticated } from "../shopify.server.js";
 import demoFeed from "../data/demo-orders.json";
+import { extraFunction } from "./extra-function.server.js";
 import { fetchNetsuiteOrders, targetedOrderIds, INVOICE_PAID_IN_FULL } from "./netsuite.server.js";
 import { orderAttemptLimit, quarantinedOrders } from "./order-sync-log.server.js";
 import { windowLabel } from "./sync-windows.js";
@@ -534,7 +535,7 @@ function syncLogOrderLines(r) {
 }
 
 function syncLogBlock(run) {
-  const { shop, startedAt, finishedAt, since, window, targeted, mode, summary, results, error, files } = run;
+  const { shop, startedAt, finishedAt, since, window, targeted, mode, summary, results, error, files, extra } = run;
   const seconds = ((new Date(finishedAt) - new Date(startedAt)) / 1000).toFixed(1);
   const manual = mode === MANUAL_MODE;
   const lines = [
@@ -599,6 +600,10 @@ function syncLogBlock(run) {
       lines.push(`  watermark NOT advanced (${why}) — the next run re-pulls this window and continues.`);
     }
   }
+  // Only worth a line when it did something or broke — an empty slot saying
+  // "nothing to do" on every single run would be noise.
+  if (extra?.failed) lines.push(`  extra work FAILED: ${extra.error}`);
+  else if (extra && !extra.skipped) lines.push(`  extra work: ${JSON.stringify(extra)}`);
   for (const [label, file] of Object.entries(files || {})) lines.push(`  ${label}: ${file}`);
   return `${lines.join("\n")}\n`;
 }
@@ -894,6 +899,24 @@ export async function resyncOrders(shop, ids) {
     });
 
     const summary = summarise(results);
+
+    // The extra work runs after a re-sync too, so this path doesn't quietly do
+    // less than the others. The cron and Sync now reach it through CRON_JOBS; a
+    // re-sync never touches that list — it is deliberately narrowed to the orders
+    // that were ticked — so the one job that is about the SHOP rather than about
+    // this run's orders is called here directly.
+    //
+    // Best effort, because by this point the orders are already in Shopify:
+    // failing to do the extra work is not a reason to report the re-sync as
+    // broken. It is reported instead.
+    let extra;
+    try {
+      extra = await extraFunction(shop);
+    } catch (err) {
+      extra = { failed: true, error: err?.message || String(err) };
+      console.warn(`[order-sync] ${shop}: extraFunction failed after the re-sync: ${extra.error}`);
+    }
+
     const run = {
       shop,
       mode: MANUAL_MODE,
@@ -903,6 +926,7 @@ export async function resyncOrders(shop, ids) {
       summary,
       results,
       stoppedEarly,
+      extra,
     };
     const logFile = writeSyncLog(run);
     await saveSyncLogRows(run);
@@ -912,6 +936,7 @@ export async function resyncOrders(shop, ids) {
       summary,
       results,
       logFile,
+      extra,
       ...(stoppedEarly ? { stoppedEarly } : {}),
     };
   } finally {
@@ -1677,9 +1702,9 @@ async function createCompanyWithLocation(admin, entry, contactEmail) {
   // become the main one would otherwise stall the chain here.
   const contact = contactEmail
     ? company.mainContact
-      || (company.contacts?.nodes || []).find(
-        (c) => companyNameKey(c?.customer?.defaultEmailAddress?.emailAddress) === companyNameKey(contactEmail),
-      )
+    || (company.contacts?.nodes || []).find(
+      (c) => companyNameKey(c?.customer?.defaultEmailAddress?.emailAddress) === companyNameKey(contactEmail),
+    )
     : null;
   return {
     companyId: company.id,

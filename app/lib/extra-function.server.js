@@ -41,26 +41,24 @@ export async function adminFor(shop) {
   return admin;
 }
 
+// The Shopify -> app pull: companies, their contacts (customers), and every one
+// of those companies' orders back into the local database. This is the direction
+// the old cron ran through syncShopifyToApp; putting it here means the schedule
+// now does both directions again — the NetSuite order push in the order-sync job,
+// and this Shopify pull — with nothing else to wire up (CRON_JOBS already runs it
+// once per shop on every tick and every "Sync now").
+//
+// syncShopifyToApp (app/lib/shopify-sync.server.js) reuses the same
+// syncShopifyCompanies / syncAllShopifyOrders the manual "Sync Companies" button
+// calls, and returns a { companies, orders } summary — so that summary becomes
+// this job's result in the cron's JSON response and the Sync now toast.
+//
+// Imported lazily, like adminFor above: shopify-sync.server.js pulls in the whole
+// Shopify app config at its top, and importing this module must not require that
+// (a plain script or a test with no environment set up still has to load it).
 export async function extraFunction(shop = null) {
   if (!shop) return { skipped: true, reason: "no shop given" };
 
-  // =========================================================================
-  // >>> WRITE YOUR WORK HERE <<<
-  //
-  // Example — count this shop's draft orders:
-  //
-  //   const admin = await adminFor(shop);
-  //   const resp = await admin.graphql(`#graphql
-  //     query DraftCount { draftOrders(first: 1) { nodes { id } } }`);
-  //   const body = await resp.json();
-  //   return { drafts: body?.data?.draftOrders?.nodes?.length ?? 0 };
-  //
-  // =========================================================================
-
-  // Delete this once there is real work above — it is what makes an empty job
-  // say so in the cron's response instead of quietly reporting success.
-  return {
-    skipped: true,
-    reason: "extraFunction is empty — add your work in app/lib/extra-function.server.js",
-  };
+  const { syncShopifyToApp } = await import("./shopify-sync.server.js");
+  return syncShopifyToApp(shop);
 }

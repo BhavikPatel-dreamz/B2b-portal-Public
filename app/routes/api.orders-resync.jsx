@@ -76,6 +76,9 @@ export const action = async ({ request }) => {
   // would otherwise look untouched for no visible reason.
   if (run.stoppedEarly) parts.push(`stopped early: ${run.stoppedEarly}`);
   if (dropped > 0) parts.push(`${dropped} selected row(s) named no order and were skipped`);
+  // The extra work runs after a re-sync too (see resyncOrders). It is best
+  // effort, so a failure is reported rather than turning the re-sync into one.
+  if (run.extra?.failed) parts.push(`extra work failed: ${run.extra.error}`);
 
-  return { ok: true, message: `${parts.join(" · ")}.`, failed };
+  return { ok: true, message: `${parts.join(" · ")}.`, failed: failed || (run.extra?.failed ? 1 : 0) };
 };
