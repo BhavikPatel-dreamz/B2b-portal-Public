@@ -2,7 +2,7 @@ import { Prisma, UserRole, UserStatus } from "@prisma/client";
 import prisma from "../db.server";
 import { sendCompanyWelcomeEmail } from "../services/notification.server";
 import { Decimal } from "@prisma/client/runtime/library";
-import { FREE_PLAN_MAX_COMPANIES } from "./free-plan-limits.server";
+import { FREE_PLAN_MAX_COMPANIES, FREE_PLAN_MAX_ORDERS } from "./free-plan-limits.server";
 import { getCompanyLocations } from "./b2b-customer.server";
 
 type ShopifyAdminClient = {
@@ -974,6 +974,7 @@ export const syncShopifyOrders = async (
         return {
           success: false,
           syncedCount: 0,
+          skippedCount: 0,
           errors: ["Company not found or missing Shopify company ID"],
           message: "Company not found",
         };
@@ -989,15 +990,28 @@ export const syncShopifyOrders = async (
       targetShopifyCompanyId = `gid://shopify/Company/${targetShopifyCompanyId}`;
     }
 
-    console.log(targetShopifyCompanyId, localCompanyId, "companyId11111");
     if (!targetShopifyCompanyId || !localCompanyId) {
       return {
         success: false,
         syncedCount: 0,
+        skippedCount: 0,
         errors: ["companyId is required for order sync"],
         message: "Missing companyId",
       };
     }
+
+    // The free plan caps how many B2B orders may exist. New rows stop being
+    // created past the limit; existing rows are still refreshed.
+    const isFreePlan =
+      (
+        await prisma.store.findUnique({
+          where: { id: store.id },
+          select: { plan: true },
+        })
+      )?.plan === "free";
+    let freePlanOrderCount = isFreePlan
+      ? await prisma.b2BOrder.count({ where: { shopId: store.id } })
+      : 0;
 
     // ── Paginate through all company orders ──────────────────────────────
     let allOrders: ShopifyOrder[] = [];
@@ -1016,40 +1030,51 @@ export const syncShopifyOrders = async (
                   createdAt
                   displayFinancialStatus
                   displayFulfillmentStatus
+                  poNumber
+                  customer {
+                    id
+                    firstName
+                    lastName
+                    email
+                  }
                   totalPriceSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
+                    shopMoney { amount currencyCode }
                   }
                   subtotalPriceSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
+                    shopMoney { amount currencyCode }
                   }
                   totalShippingPriceSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
+                    shopMoney { amount currencyCode }
                   }
                   totalTaxSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
+                    shopMoney { amount currencyCode }
                   }
-                  currentTotalDiscountSet {
-                    shopMoney {
-                      amount
-                      currencyCode
+                  totalDiscountsSet {
+                    shopMoney { amount currencyCode }
+                  }
+                  lineItems(first: 100) {
+                    nodes {
+                      title
+                      quantity
+                      sku
+                      variant { id }
+                      product { id }
+                      image { url }
+                      discountedUnitPriceSet {
+                        shopMoney { amount currencyCode }
+                      }
                     }
                   }
                 }
               }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
             }
-          `;
+          }
+        }
+      `;
       const response = await admin.graphql(orderQuery, {
         variables: { companyId: targetShopifyCompanyId, cursor },
       });
@@ -1059,6 +1084,7 @@ export const syncShopifyOrders = async (
         return {
           success: false,
           syncedCount: allOrders.length,
+          skippedCount: 0,
           errors: result.errors.map((e: any) => e.message),
           message: `GraphQL error: ${result.errors[0].message}`,
         };
@@ -1068,6 +1094,7 @@ export const syncShopifyOrders = async (
         return {
           success: false,
           syncedCount: allOrders.length,
+          skippedCount: 0,
           errors: [`Company not found in Shopify: ${targetShopifyCompanyId}`],
           message: "Company not found in Shopify",
         };
@@ -1088,6 +1115,7 @@ export const syncShopifyOrders = async (
 
     // ── Upsert each order into b2BOrder ─────────────────────────────────
     let syncedCount = 0;
+    let skippedCount = 0;
     const errors: string[] = [];
 
     for (const order of allOrders) {
@@ -1098,7 +1126,11 @@ export const syncShopifyOrders = async (
           order.totalPriceSet?.shopMoney?.amount ?? "0",
         );
 
-        // Resolve the local user from the order's customer email
+        // Resolve the local user from the order's customer email, falling back
+        // to any user of this company. A company with no local user at all
+        // (e.g. it has no contact email) means the order can't be attributed —
+        // it's recorded as skipped rather than throwing, so the rest of the
+        // company's orders still sync.
         let createdByUserId: string | undefined;
         if (order.customer?.email) {
           const localUser = await prisma.user.findFirst({
@@ -1123,8 +1155,25 @@ export const syncShopifyOrders = async (
         }
 
         if (!createdByUserId) {
+          skippedCount++;
           errors.push(
             `Skipped order ${order.name ?? order.id}: no local company user found`,
+          );
+          continue;
+        }
+
+        // Does a local row already exist for this Shopify order? Determines
+        // whether we may create under the free-plan cap, and whether we must
+        // preserve manually-set statuses (mirrors the orders/create webhook).
+        const existingOrder = await prisma.b2BOrder.findUnique({
+          where: { shopifyOrderId: order.id },
+          select: { id: true },
+        });
+
+        if (!existingOrder && isFreePlan && freePlanOrderCount >= FREE_PLAN_MAX_ORDERS) {
+          skippedCount++;
+          errors.push(
+            `Skipped order ${order.name ?? order.id}: free plan order limit (${FREE_PLAN_MAX_ORDERS}) reached`,
           );
           continue;
         }
@@ -1135,6 +1184,7 @@ export const syncShopifyOrders = async (
             .join(" ")
             .trim() || null;
         const customerEmail = order.customer?.email || null;
+        const customerId = order.customer?.id || null;
         const currencyCode =
           order.totalPriceSet?.shopMoney?.currencyCode || "USD";
         const subtotal = new Decimal(
@@ -1147,51 +1197,87 @@ export const syncShopifyOrders = async (
           order.totalTaxSet?.shopMoney?.amount ?? "0",
         );
         const discountTotal = new Decimal(
-          order.currentTotalDiscountSet?.shopMoney?.amount ?? "0",
+          order.totalDiscountsSet?.shopMoney?.amount ?? "0",
         );
         const orderNumber = order.name || null;
-        const paymentStatus = "pending";
-        const orderStatus = "payment_pending";
+        const poNumber = order.poNumber || null;
 
-        await prisma.b2BOrder.upsert({
-          where: {
-            shopifyOrderId: order.id,
-          },
-          update: {
-            orderTotal: totalAmount,
-            customerName,
-            customerEmail,
-            orderNumber,
-            currencyCode,
-            subtotal,
-            shippingAmount,
-            taxAmount,
-            discountTotal,
-            updatedAt: new Date(),
-          },
-          create: {
-            shopifyOrderId: order.id,
-            companyId: localCompanyId,
-            shopId: store.id,
-            createdByUserId,
-            orderTotal: totalAmount,
-            creditUsed: new Decimal(0),
-            userCreditUsed: new Decimal(0),
-            paymentStatus,
-            orderStatus,
-            remainingBalance: new Decimal(0),
-            paidAmount: new Decimal(0),
-            orderNumber,
-            customerName,
-            customerEmail,
-            currencyCode,
-            subtotal,
-            shippingAmount,
-            taxAmount,
-            discountTotal,
-            createdAt: order.createdAt ? new Date(order.createdAt) : new Date(),
-          },
+        // Line items, replaced on every sync so counts/totals stay in step with
+        // Shopify. deleteMany + create rather than a diff — the order rarely has
+        // more than a page of lines and this keeps it simple and correct.
+        const lineItemNodes = order.lineItems?.nodes ?? [];
+        const items = lineItemNodes.map((li) => {
+          const quantity = li.quantity ?? 1;
+          const unitPrice = new Decimal(
+            li.discountedUnitPriceSet?.shopMoney?.amount ?? "0",
+          );
+          return {
+            productId: li.product?.id ?? null,
+            productTitle: li.title || "Product",
+            variantId: li.variant?.id ?? null,
+            variantTitle: null,
+            sku: li.sku ?? null,
+            image: li.image?.url ?? null,
+            quantity,
+            unitPrice,
+            discount: new Decimal(0),
+            lineTotal: unitPrice.mul(quantity),
+          };
         });
+
+        if (existingOrder) {
+          // Update only Shopify-sourced facts. Payment/order status are left
+          // untouched so a manual status set in the portal survives the sync
+          // (same rule as the orders/create webhook).
+          await prisma.b2BOrder.update({
+            where: { id: existingOrder.id },
+            data: {
+              orderTotal: totalAmount,
+              customerName,
+              customerEmail,
+              customerId,
+              orderNumber,
+              poNumber,
+              currencyCode,
+              subtotal,
+              shippingAmount,
+              taxAmount,
+              discountTotal,
+              ...(items.length
+                ? { items: { deleteMany: {}, create: items } }
+                : {}),
+            },
+          });
+        } else {
+          await prisma.b2BOrder.create({
+            data: {
+              shopifyOrderId: order.id,
+              companyId: localCompanyId,
+              shopId: store.id,
+              createdByUserId,
+              orderTotal: totalAmount,
+              creditUsed: new Decimal(0),
+              userCreditUsed: new Decimal(0),
+              paymentStatus: "pending",
+              orderStatus: "payment_pending",
+              remainingBalance: totalAmount,
+              paidAmount: new Decimal(0),
+              orderNumber,
+              poNumber,
+              customerName,
+              customerEmail,
+              customerId,
+              currencyCode,
+              subtotal,
+              shippingAmount,
+              taxAmount,
+              discountTotal,
+              createdAt: order.createdAt ? new Date(order.createdAt) : new Date(),
+              ...(items.length ? { items: { create: items } } : {}),
+            },
+          });
+          if (isFreePlan) freePlanOrderCount++;
+        }
 
         syncedCount++;
       } catch (orderError) {
@@ -1207,6 +1293,7 @@ export const syncShopifyOrders = async (
     return {
       success: true,
       syncedCount,
+      skippedCount,
       errors,
       message:
         errors.length > 0
@@ -1218,13 +1305,72 @@ export const syncShopifyOrders = async (
     return {
       success: false,
       syncedCount: 0,
+      skippedCount: 0,
       errors: [error instanceof Error ? error.message : "Unknown error"],
       message: "Sync failed",
     };
   }
 };
 
+/**
+ * Sync every company's orders for a store. Runs syncShopifyOrders for each
+ * local company that carries a Shopify company id (so it must run AFTER
+ * syncShopifyCompanies, which is what creates those rows). Aggregates the
+ * per-company results into one summary.
+ * SERVER ONLY - Uses Prisma and admin context
+ */
+export const syncAllShopifyOrders = async (
+  admin: ShopifyAdminClient,
+  store: StoreRef,
+) => {
+  const companies = await prisma.companyAccount.findMany({
+    where: { shopId: store.id, shopifyCompanyId: { not: null } },
+    select: { id: true, name: true },
+  });
+
+  let syncedCount = 0;
+  let skippedCount = 0;
+  let companiesProcessed = 0;
+  const errors: string[] = [];
+
+  for (const company of companies) {
+    const result = await syncShopifyOrders(admin, store, company.id);
+    syncedCount += result.syncedCount || 0;
+    skippedCount += result.skippedCount || 0;
+    if (result.errors?.length) {
+      errors.push(
+        ...result.errors.map((e: string) => `[${company.name}] ${e}`),
+      );
+    }
+    if (result.success) companiesProcessed++;
+  }
+
+  return {
+    success: true,
+    companiesProcessed,
+    companyCount: companies.length,
+    syncedCount,
+    skippedCount,
+    errors,
+    message: `Synced ${syncedCount} order(s) across ${companiesProcessed}/${companies.length} companies${
+      errors.length ? ` with ${errors.length} error(s)` : ""
+    }`,
+  };
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ShopifyOrderLineItem {
+  title: string;
+  quantity: number;
+  sku?: string | null;
+  variant?: { id: string } | null;
+  product?: { id: string } | null;
+  image?: { url: string } | null;
+  discountedUnitPriceSet?: {
+    shopMoney: { amount: string; currencyCode: string };
+  } | null;
+}
 
 interface ShopifyOrder {
   id: string;
@@ -1232,6 +1378,7 @@ interface ShopifyOrder {
   createdAt: string;
   displayFinancialStatus: string;
   displayFulfillmentStatus: string;
+  poNumber?: string | null;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   subtotalPriceSet?: {
     shopMoney: { amount: string; currencyCode: string };
@@ -1240,7 +1387,7 @@ interface ShopifyOrder {
     shopMoney: { amount: string; currencyCode: string };
   } | null;
   totalTaxSet?: { shopMoney: { amount: string; currencyCode: string } } | null;
-  currentTotalDiscountSet?: {
+  totalDiscountsSet?: {
     shopMoney: { amount: string; currencyCode: string };
   } | null;
   customer: {
@@ -1249,4 +1396,5 @@ interface ShopifyOrder {
     lastName: string | null;
     email: string;
   } | null;
+  lineItems?: { nodes: ShopifyOrderLineItem[] } | null;
 }
