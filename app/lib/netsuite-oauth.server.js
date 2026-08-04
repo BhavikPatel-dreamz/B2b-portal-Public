@@ -187,12 +187,29 @@ export async function getLastSyncedAt(shop) {
 // silently never written and every run re-pulled the initial window forever.
 // `shop` is @unique, and every other column is optional, so creating the row
 // here is safe.
-export async function setLastSyncedAt(shop, date) {
+//
+// `from` is the other end of the window this run covered (the `since` it ran
+// with, null on a first run). Stored alongside the watermark so the app can say
+// what the last scheduled run actually looked at, not just when it happened —
+// see getSyncSchedule.
+export async function setLastSyncedAt(shop, date, from = null) {
   await prisma.netsuiteAppSettings.upsert({
     where: { shop },
-    update: { lastSyncedAt: date },
-    create: { shop, lastSyncedAt: date },
+    update: { lastSyncedAt: date, lastSyncFrom: from },
+    create: { shop, lastSyncedAt: date, lastSyncFrom: from },
   });
+}
+
+// What the last successful scheduled run covered: { from, to }. `to` is the
+// watermark — the run's own start time, which is where the next run picks up —
+// and `from` is where that run started reading. Both null before the first
+// successful sync.
+export async function getLastSyncWindow(shop) {
+  const settings = await prisma.netsuiteAppSettings.findUnique({
+    where: { shop },
+    select: { lastSyncedAt: true, lastSyncFrom: true },
+  });
+  return { from: settings?.lastSyncFrom ?? null, to: settings?.lastSyncedAt ?? null };
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +270,25 @@ export async function releaseSyncLock(shop, token) {
     where: { shop, syncStartedAt: token },
     data: { syncStartedAt: null },
   });
+}
+
+// When the currently-running sync started, or null if none is running.
+//
+// This is what the log page watches after Sync now: the run happens in the
+// background, so "is it still going" has to be a question about shared state
+// rather than about an HTTP request that has long since returned.
+//
+// A lock past the stale timeout reports as NOT running, matching what
+// acquireSyncLock would do with it — a process that died without releasing must
+// not leave the page spinning forever.
+export async function getSyncRunningSince(shop) {
+  const settings = await prisma.netsuiteAppSettings.findUnique({
+    where: { shop },
+    select: { syncStartedAt: true },
+  });
+  const startedAt = settings?.syncStartedAt ?? null;
+  if (!startedAt) return null;
+  return startedAt.getTime() > Date.now() - lockStaleMs() ? startedAt : null;
 }
 
 export async function getConnectionStatus(shop) {

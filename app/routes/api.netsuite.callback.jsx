@@ -4,8 +4,6 @@ import {
   exchangeCodeForTokens,
   saveTokens,
 } from "../lib/netsuite-oauth.server.js";
-import { clearSettingsCache } from "./app.settings";
-import { clearAppLayoutCache } from "./app";
 
 // NetSuite's redirect back is a bare top-level browser navigation with no
 // Shopify session token, so this route (unlike the embedded app routes)
@@ -23,16 +21,13 @@ export const loader = async ({ request }) => {
   try {
     const tokens = await exchangeCodeForTokens(code);
     await saveTokens(shop, tokens);
-    clearSettingsCache(shop);
-    clearAppLayoutCache(shop);
   } catch (err) {
     // Authorization codes are single-use and short-lived — a stale/reused
     // code is expected to fail here rather than silently redirect.
     return text(`NetSuite connect failed: ${err?.message || err}`, 200);
   }
-
-  const appHandle = process.env.SHOPIFY_APP_HANDLE || "b2b-portal-public-dev";
-  return redirect(`https://${shop}/admin/apps/${appHandle}/app`);
+  // return text(`NetSuite connect succeeded: ${shop}`, 200);
+  return redirect(`https://${shop}/admin/apps/${process.env.SHOPIFY_APP_HANDLE}`);
 };
 
 function text(body, status = 200) {

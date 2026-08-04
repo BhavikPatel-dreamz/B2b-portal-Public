@@ -123,6 +123,108 @@ const mapShopifyAddressToRegistrationJson = (
   return hasAnyValue ? mapped : EMPTY_ADDRESS_JSON;
 };
 
+// ---------------------------------------------------------------------------
+// upsertCompanyUser — one local User row per (shop, email), admin role wins
+// ---------------------------------------------------------------------------
+// The User table is unique on [shopId, email, role], so the SAME customer used
+// to end up as TWO rows when both sync paths touched them: syncShopifyCompanies
+// writes the main contact as STORE_ADMIN, while syncShopifyUsers re-writes that
+// same person as STORE_USER when Shopify reports no admin role. That produced
+// the "jest deo / member" + "jest deo / admin" duplicate.
+//
+// This helper collapses that to a single row keyed on (shopId, email):
+//   - It ignores role when looking the user up, so it always lands on the same
+//     person regardless of which role a previous sync stored.
+//   - Admin wins: if the caller says the contact is an admin, OR any existing
+//     row for this email is already an admin, OR more than one row exists for
+//     this email (i.e. we're cleaning up a past duplicate), the survivor is
+//     promoted to STORE_ADMIN. Otherwise a lone contact stays STORE_USER.
+//   - When duplicate rows already exist, it picks one survivor, re-points the
+//     blocking foreign keys (B2BOrder.createdByUser, Quote.salesAgent,
+//     OrderActivity.user) at it, deletes the extras (cascades clean up
+//     sessions / invitations / sales-company links), then updates the survivor.
+// SALES_USER / SUPER_ADMIN rows are never merged — only STORE_ADMIN/STORE_USER
+// are considered "the same B2B contact".
+const upsertCompanyUser = async (params: {
+  shopId: string;
+  email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  shopifyCustomerId?: string | null;
+  companyId?: string | null;
+  isAdmin: boolean;
+}) => {
+  const email = params.email.trim().toLowerCase();
+  const { shopId } = params;
+
+  const existing = await prisma.user.findMany({
+    where: {
+      shopId,
+      email,
+      role: { in: [UserRole.STORE_ADMIN, UserRole.STORE_USER] },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const hasAdminRow = existing.some((u) => u.role === UserRole.STORE_ADMIN);
+  // Admin wins when the caller flags admin, an admin row already exists, or we
+  // found more than one row for this email (a duplicate to consolidate).
+  const promoteToAdmin = params.isAdmin || hasAdminRow || existing.length > 1;
+  const finalRole = promoteToAdmin ? UserRole.STORE_ADMIN : UserRole.STORE_USER;
+  const finalCompanyRole = promoteToAdmin ? "admin" : "member";
+
+  const dataCommon = {
+    ...(params.firstName ? { firstName: params.firstName } : {}),
+    ...(params.lastName ? { lastName: params.lastName } : {}),
+    shopifyCustomerId: params.shopifyCustomerId ?? null,
+    ...(params.companyId ? { companyId: params.companyId } : {}),
+    companyRole: finalCompanyRole,
+    role: finalRole,
+    isActive: true,
+    status: UserStatus.APPROVED,
+  };
+
+  if (existing.length === 0) {
+    return prisma.user.create({
+      data: {
+        email,
+        firstName: params.firstName || null,
+        lastName: params.lastName || null,
+        password: "",
+        shopId,
+        ...dataCommon,
+      },
+    });
+  }
+
+  // Keep an existing admin row as the survivor when there is one, else the
+  // oldest row. Re-point blocking FKs from the losers onto the survivor.
+  const survivor =
+    existing.find((u) => u.role === UserRole.STORE_ADMIN) ?? existing[0];
+  const losers = existing.filter((u) => u.id !== survivor.id);
+
+  for (const loser of losers) {
+    await prisma.b2BOrder.updateMany({
+      where: { createdByUserId: loser.id },
+      data: { createdByUserId: survivor.id },
+    });
+    await prisma.quote.updateMany({
+      where: { salesAgentId: loser.id },
+      data: { salesAgentId: survivor.id },
+    });
+    await prisma.orderActivity.updateMany({
+      where: { userId: loser.id },
+      data: { userId: survivor.id },
+    });
+    await prisma.user.delete({ where: { id: loser.id } });
+  }
+
+  return prisma.user.update({
+    where: { id: survivor.id },
+    data: dataCommon,
+  });
+};
+
 export const syncShopifyCompanies = async (
   admin: ShopifyAdminClient,
   store: StoreRef,
@@ -368,42 +470,17 @@ export const syncShopifyCompanies = async (
             continue;
           }
 
-          await prisma.user.upsert({
-            where: {
-              shopId_email_role: {
-                shopId: store.id,
-                email: effectiveContact.email,
-                role: UserRole.STORE_ADMIN,
-              },
-            },
-            update: {
-              // ✅ Only overwrite firstName/lastName if Shopify provides a real value
-              ...(effectiveContact.firstName && {
-                firstName: effectiveContact.firstName,
-              }),
-              ...(effectiveContact.lastName && {
-                lastName: effectiveContact.lastName,
-              }),
-              shopifyCustomerId,
-              shopId: store.id,
-              companyId: upsertedCompany.id,
-              companyRole: "admin",
-              role: UserRole.STORE_ADMIN,
-              isActive: true,
-            },
-            create: {
-              email: effectiveContact.email,
-              firstName: effectiveContact.firstName || null,
-              lastName: effectiveContact.lastName || null,
-              password: "",
-              shopifyCustomerId,
-              shopId: store.id,
-              companyId: upsertedCompany.id,
-              companyRole: "admin",
-              role: UserRole.STORE_ADMIN,
-              status: UserStatus.APPROVED,
-              isActive: true,
-            },
+          // Main contact of the company is its admin. upsertCompanyUser keeps
+          // this to a single row per email and never produces an admin/member
+          // duplicate for the same person.
+          await upsertCompanyUser({
+            shopId: store.id,
+            email: effectiveContact.email,
+            firstName: effectiveContact.firstName,
+            lastName: effectiveContact.lastName,
+            shopifyCustomerId,
+            companyId: upsertedCompany.id,
+            isAdmin: true,
           });
 
           if (existingRegistration) {
@@ -696,44 +773,24 @@ export const syncShopifyUsers = async (
         .map((edge) => edge.node?.role?.name)
         .filter(Boolean) as string[];
 
-      const isAdmin =
+      const isAdmin = Boolean(
         roleAssignments.some((name) => /admin/i.test(name)) ||
-        (contact.title as string | undefined)?.toLowerCase().includes("admin");
-      const role = isAdmin ? UserRole.STORE_ADMIN : UserRole.STORE_USER;
-      const companyRole = isAdmin ? "admin" : "member";
+          (contact.title as string | undefined)
+            ?.toLowerCase()
+            .includes("admin"),
+      );
       const shopifyCustomerId = customer.id || null;
 
-      await prisma.user.upsert({
-        where: {
-          shopId_email_role: {
-            shopId: store.id,
-            email: normalizedEmail,
-            role,
-          },
-        },
-        update: {
-          firstName: customer.firstName || null,
-          lastName: customer.lastName || null,
-          shopifyCustomerId,
-          companyId,
-          companyRole,
-          role,
-          isActive: true,
-          status: UserStatus.APPROVED,
-        },
-        create: {
-          email: normalizedEmail,
-          firstName: customer.firstName || null,
-          lastName: customer.lastName || null,
-          password: "",
-          shopifyCustomerId,
-          shopId: store.id,
-          companyId,
-          companyRole,
-          role,
-          status: UserStatus.APPROVED,
-          isActive: true,
-        },
+      // Use the shared dedupe helper so this contact ends up as a single user
+      // row, never as both "member" + "admin" for the same email.
+      await upsertCompanyUser({
+        shopId: store.id,
+        email: normalizedEmail,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+        shopifyCustomerId,
+        companyId,
+        isAdmin,
       });
 
       await prisma.registrationSubmission.upsert({

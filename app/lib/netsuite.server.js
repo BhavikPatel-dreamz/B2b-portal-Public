@@ -158,6 +158,92 @@ function nsQueryDate(d) {
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
 }
 
+// Whether a fetched record really falls inside an explicit window.
+//
+// It has to be re-checked here because the q filter is date-granular (see
+// nsQueryDate): "last 2 hours" can only be asked of NetSuite as the whole day
+// (or two) it spans, so the list comes back wider than what was asked for and
+// the surplus is dropped once the records — which do carry a full
+// lastModifiedDate timestamp — have been expanded.
+//
+// A record with no readable lastModifiedDate is KEPT rather than dropped: the
+// demo feed carries no dates at all, and judging a window by a field that isn't
+// there would turn every demo-mode window sync into a silent no-op.
+function inWindow(rec, window) {
+  const t = Date.parse(rec?.lastModifiedDate ?? "");
+  if (!Number.isFinite(t)) return true;
+  return t >= window.from.getTime() && t <= window.to.getTime();
+}
+
+// How many orders one run will SYNC. (Targeted mode bypasses it — an explicit
+// list of orders is the scope.)
+const DEFAULT_ORDER_LIMIT = 10;
+
+function orderLimit() {
+  return Number(process.env.NETSUITE_ORDER_LIMIT) || DEFAULT_ORDER_LIMIT;
+}
+
+// How many order ids a WINDOWED run may list and expand while looking for
+// orderLimit() orders inside its window.
+//
+// It has to be bigger than the order limit, because NetSuite can only be asked
+// for whole days: to find the 6 orders modified in the last 2 hours, the run has
+// to walk the day's ids and check each one's real timestamp. It also has to be
+// BOUNDED, because each id costs an expand call and a second of rate-limit sleep
+// — an unbounded scan of a busy day would spend ten minutes to sync six orders.
+//
+// The default gives the window ten times the limit to find its orders in, with a
+// floor for small limits. NETSUITE_WINDOW_SCAN_LIMIT overrides it.
+function windowScanLimit(maxOrders) {
+  const n = Number(process.env.NETSUITE_WINDOW_SCAN_LIMIT);
+  if (Number.isFinite(n) && n > 0) return Math.max(n, maxOrders);
+  return Math.max(maxOrders * 10, 200);
+}
+
+// Walks listed order ids, expands each one, and keeps the ones that belong to the
+// run. Split out of fetchNetsuiteOrders so this — the part with the decisions in
+// it — can be tested without a NetSuite account: `expand` is the only thing that
+// touches the network, and a test passes its own.
+//
+// Two things it decides:
+//
+//   • which records to keep. With a window, the expanded record's real
+//     lastModifiedDate is the first place the true timestamp is available (the
+//     list call could only be asked for whole days), so the window is applied
+//     here and nowhere else.
+//
+//   • when to stop. Once `keepLimit` records are IN the window there is no
+//     reason to keep paying an expand call and a second of sleep for the rest of
+//     the day's ids. `scanStoppedAt` says how far it got, which is what tells the
+//     caller whether anything was left unexamined.
+//
+// An expand that throws is collected, not raised: one unreadable order must not
+// cost the run the others.
+export async function scanOrders(refs, { window, keepLimit = Infinity, expand }) {
+  const items = [];
+  const errors = [];
+  let outsideWindow = 0;
+  let scanned = 0;
+  let scanStoppedAt = null;
+
+  for (const ref of refs) {
+    if (!ref?.id) continue;
+    if (items.length >= keepLimit) {
+      scanStoppedAt = scanned;
+      break;
+    }
+    scanned += 1;
+    try {
+      const full = await expand(ref.id);
+      if (window && !inWindow(full, window)) outsideWindow += 1;
+      else items.push(full);
+    } catch (err) {
+      errors.push({ id: ref.id, error: err?.message || String(err) });
+    }
+  }
+  return { items, errors, outsideWindow, scanned, scanStoppedAt };
+}
+
 // Builds the `q` filter expression for the sales-order list call.
 // NETSUITE_ORDERS_QUERY, when set, is a raw q expression that overrides the
 // automatic incremental window (manual/backfill mode). Otherwise we filter on
@@ -187,15 +273,52 @@ function beforeLastSyncMs() {
   return Number.isFinite(n) && n > 0 ? n * 60 * 60 * 1000 : 0;
 }
 
-function buildOrdersQuery(since) {
+function dateRangeQuery({ from, to }) {
+  return `lastModifiedDate ON_OR_AFTER "${nsQueryDate(from)}" AND lastModifiedDate ON_OR_BEFORE "${nsQueryDate(to)}"`;
+}
+
+// The stretch of modification time a scheduled run covers: from the watermark
+// (less the overlap buffer) to the moment it runs. No watermark yet — a first
+// run for this shop, or one that was reset — falls back to a fixed lookback
+// instead of pulling the account's entire history.
+function watermarkWindow(since, now) {
+  return {
+    from: since
+      ? new Date(since.getTime() - beforeLastSyncMs())
+      : new Date(now.getTime() - initialSyncDays() * 24 * 60 * 60 * 1000),
+    to: now,
+  };
+}
+
+function buildOrdersQuery(since, window) {
+  // An explicit window is what an operator just asked for by name ("last 2
+  // hours"), so the manual/backfill override does not get to silently replace
+  // it — nor does the overlap buffer, which exists to protect the watermark and
+  // has no watermark to protect here.
+  if (window) return dateRangeQuery(window);
   if (process.env.NETSUITE_ORDERS_QUERY) return process.env.NETSUITE_ORDERS_QUERY;
-  const now = new Date();
-  // No watermark yet (first run for this shop, or it was reset) — fall back to
-  // a fixed lookback window instead of pulling the account's entire history.
-  const from = since
-    ? new Date(since.getTime() - beforeLastSyncMs())
-    : new Date(now.getTime() - initialSyncDays() * 24 * 60 * 60 * 1000);
-  return `lastModifiedDate ON_OR_AFTER "${nsQueryDate(from)}" AND lastModifiedDate ON_OR_BEFORE "${nsQueryDate(now)}"`;
+  return dateRangeQuery(watermarkWindow(since, new Date()));
+}
+
+// What a scheduled run starting at `at` would ask NetSuite for, given the
+// watermark. Exported for the log page's schedule card, which has to answer
+// "which dates will the next run cover" — and answers it by asking the code that
+// will really build that query, so the two cannot drift apart.
+//
+// `query` is what NetSuite is actually sent, and it is worth showing next to
+// from/to: the q filter is date-granular (see nsQueryDate), so both ends round
+// out to whole days and a run always reads a little wider than its window.
+export function plannedOrdersWindow(since, at = new Date()) {
+  const window = watermarkWindow(since, at);
+  const override = process.env.NETSUITE_ORDERS_QUERY || null;
+  return {
+    from: window.from,
+    to: window.to,
+    query: override || dateRangeQuery(window),
+    // NETSUITE_ORDERS_QUERY replaces the window outright, so when it is set the
+    // from/to above are not what the run will really read.
+    override: Boolean(override),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +375,11 @@ async function resolveOrderId(shop, raw) {
 // [{ id, links }], hasMore, ... } with only ids, so we page through it and then
 // expand each id into the full record. `since` (the sync watermark) drives the
 // incremental lastModifiedDate window — see buildOrdersQuery.
-export async function fetchNetsuiteOrders(shop, { since } = {}) {
+// `window` ({ from, to }) is the other way to scope a run: an explicit stretch of
+// modification time, asked for from the log page's "Sync now" control. It replaces
+// the watermark window rather than narrowing it, and it is re-applied exactly after
+// the records are expanded — see inWindow.
+export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
   const items = [];
   const errors = [];
   let refs;
@@ -260,11 +387,16 @@ export async function fetchNetsuiteOrders(shop, { since } = {}) {
   // where it's assigned.
   let capped = null;
 
-  const targeted = targetedOrderIds();
+  // `ids` is the same targeted mode NETSUITE_ORDER_IDS gives, decided per call
+  // instead of per process — it's what a manual re-sync of specific orders (the
+  // log page's Sync buttons) passes. An explicit list wins over the env var.
+  const requested = (ids || []).map((v) => String(v).trim()).filter(Boolean);
+  const targeted = requested.length ? requested : targetedOrderIds();
+  const source = requested.length ? "requested orders" : "NETSUITE_ORDER_IDS";
   if (targeted.length) {
-    // Targeted mode: resolve each configured identifier to an internal id and
-    // skip the list call entirely. No date window, no limit.
-    console.log(`[netsuite] NETSUITE_ORDER_IDS set — syncing only: ${targeted.join(", ")}`);
+    // Targeted mode: resolve each identifier to an internal id and skip the list
+    // call entirely. No date window, no limit.
+    console.log(`[netsuite] ${source} — syncing only: ${targeted.join(", ")}`);
     refs = [];
     for (const raw of targeted) {
       const { id, via } = await resolveOrderId(shop, raw);
@@ -273,20 +405,29 @@ export async function fetchNetsuiteOrders(shop, { since } = {}) {
         refs.push({ id });
       } else {
         console.error(`[netsuite] could not resolve "${raw}" to a sales order`);
-        errors.push({ id: raw, error: `NETSUITE_ORDER_IDS: "${raw}" did not match any sales order` });
+        errors.push({ id: raw, error: `${source}: "${raw}" did not match any sales order` });
       }
     }
     // Two identifiers can point at the same order (e.g. "SO20742" and "20742").
     const seen = new Set();
     refs = refs.filter((r) => !seen.has(r.id) && seen.add(r.id));
   } else {
-    const q = buildOrdersQuery(since);
+    const q = buildOrdersQuery(since, window);
     // NETSUITE_ORDER_LIMIT is the cap on how many orders one run will process,
     // NOT the page size. The list endpoint returns at most PAGE_SIZE ids per
     // call along with hasMore/offset/totalResults; those were previously
     // ignored, so a window matching more than the limit was silently truncated
     // and the surplus orders were never synced at all.
-    const maxOrders = Number(process.env.NETSUITE_ORDER_LIMIT) || 10;
+    const maxOrders = orderLimit();
+    // How many ids to LIST. Without a window these are the same number: every
+    // listed order is an order to sync. With one they are not, and that was a
+    // bug: the q filter is date-granular, so a "last 2 hours" window lists a
+    // whole day, and listing exactly maxOrders of them meant the cap fell on the
+    // first 50 ids of the DAY — orders that mostly aren't in the window, while
+    // the ones that are sat unlisted behind them. The window could then sync
+    // nothing at all and look like NetSuite had no recent changes. So a windowed
+    // run lists further ahead and lets the window decide what counts.
+    const maxRefs = window ? windowScanLimit(maxOrders) : maxOrders;
     // SuiteTalk REST rejects a page whose offset is not divisible by its limit
     // ("Invalid limit and offset values. The offset 20 must be divisible by the
     // limit 3"), so the page size has to stay CONSTANT for the whole loop —
@@ -304,15 +445,15 @@ export async function fetchNetsuiteOrders(shop, { since } = {}) {
       const page = Array.isArray(list?.items) ? list.items : [];
       if (totalResults === null) totalResults = list?.totalResults ?? null;
       refs.push(...page);
-      if (!list?.hasMore || !page.length || refs.length >= maxOrders) break;
+      if (!list?.hasMore || !page.length || refs.length >= maxRefs) break;
       offset += pageSize;
       await sleep(500);
     }
-    // A full page can overshoot the cap; keep the first maxOrders.
-    if (refs.length > maxOrders) refs = refs.slice(0, maxOrders);
+    // A full page can overshoot; keep the first maxRefs.
+    if (refs.length > maxRefs) refs = refs.slice(0, maxRefs);
 
     console.log(
-      `[netsuite] q=${q} matched ${totalResults ?? refs.length} order(s); fetched ${refs.length}.`,
+      `[netsuite] q=${q} matched ${totalResults ?? refs.length} order(s); listed ${refs.length}.`,
     );
     // Never let a cap truncate silently — a run that skips orders has to say so,
     // otherwise the log reads as "everything is in sync" when it is not. The
@@ -321,47 +462,84 @@ export async function fetchNetsuiteOrders(shop, { since } = {}) {
     // orders it never fetched and they were skipped for good. It is reported back
     // now and the watermark stays put (see runOrderSync).
     if (totalResults != null && totalResults > refs.length) {
+      // Which limit stopped the listing decides which one to name — telling
+      // someone to raise NETSUITE_ORDER_LIMIT when it was the scan ceiling that
+      // ran out sends them to the wrong knob.
+      const which = window ? "NETSUITE_WINDOW_SCAN_LIMIT" : "NETSUITE_ORDER_LIMIT";
       capped = {
-        limit: maxOrders,
+        limit: maxRefs,
         matched: totalResults,
         fetched: refs.length,
         skipped: totalResults - refs.length,
+        reason: `${which} stopped the listing`,
       };
       console.warn(
-        `[netsuite] NETSUITE_ORDER_LIMIT=${maxOrders} capped this run: ${capped.skipped} matching order(s) were NOT synced. Raise the limit or narrow the window.`,
+        `[netsuite] ${which}=${maxRefs} capped this run: ${capped.skipped} matching order(s) were never listed. Raise it or narrow the window.`,
       );
     }
   }
 
+  // Expand each listed id into the full record, keeping the ones that really
+  // fall in the window. The walk itself is scanOrders (below) so it can be
+  // tested without a NetSuite account; everything account-shaped — the request,
+  // the diagnostics, the rate-limit sleep — stays in this callback.
   let dumped = false;
-  for (const ref of refs) {
-    if (!ref?.id) continue;
-    try {
+  const scan = await scanOrders(refs, {
+    window,
+    // Without a window every listed order is one to sync, and the list call was
+    // already capped at that number.
+    keepLimit: window ? orderLimit() : Infinity,
+    expand: async (id) => {
       // Without expandSubResources, SuiteTalk REST returns sublists (e.g.
       // "item") as a bare link reference instead of inline line data, which
       // left mapNetsuiteOrder() with an empty lineItems array.
-      const full = await nsGet(shop, `/salesorder/${ref.id}?expandSubResources=true`);
+      const full = await nsGet(shop, `/salesorder/${id}?expandSubResources=true`);
       // Diagnostic: dump the full expanded record for the FIRST order of each
       // run so the account's real field shape stays visible without flooding
       // the logs when a window spans many orders.
       if (!dumped) {
-        console.log(`[netsuite] sample record ${ref.id}:`, JSON.stringify(full));
+        console.log(`[netsuite] sample record ${id}:`, JSON.stringify(full));
         dumped = true;
       }
       if (!(full?.item?.items?.length > 0)) {
         console.warn(
-          `[netsuite] order ${ref.id}: no inline line items — "item" was:`,
+          `[netsuite] order ${id}: no inline line items — "item" was:`,
           JSON.stringify(full?.item),
         );
       }
-      items.push(full);
       await sleep(1000);
-    } catch (err) {
-      const message = err?.message || String(err);
-      console.error(`[netsuite] expand order ${ref.id} failed:`, message);
-      errors.push({ id: ref.id, error: message });
+      return full;
+    },
+  });
+  items.push(...scan.items);
+  for (const err of scan.errors) {
+    console.error(`[netsuite] expand order ${err.id} failed:`, err.error);
+    errors.push(err);
+  }
+  const { outsideWindow, scanned, scanStoppedAt } = scan;
+
+  if (window) {
+    console.log(
+      `[netsuite] window ${window.from.toISOString()} → ${window.to.toISOString()}: scanned ${scanned} listed order(s), kept ${items.length}, ${outsideWindow} were modified outside it.`,
+    );
+    // The scan hit the order limit with ids still unexamined, so there may be
+    // more orders in this window than were synced. Reported like any other cap:
+    // the watermark stays put and the log says so, rather than the run looking
+    // complete.
+    if (!capped && scanStoppedAt !== null && scanStoppedAt < refs.length) {
+      capped = {
+        limit: orderLimit(),
+        matched: refs.length,
+        fetched: items.length,
+        skipped: refs.length - scanStoppedAt,
+        reason: "window scan reached NETSUITE_ORDER_LIMIT",
+      };
+      console.warn(
+        `[netsuite] NETSUITE_ORDER_LIMIT=${capped.limit} reached inside the window: ${capped.skipped} listed order(s) were never examined.`,
+      );
     }
   }
+
   // Fetch tracking numbers from linked Item Fulfillment records and attach
   // them to each order. Sales Orders don't carry tracking — it lives on the
   // separate ItemFulfillment record created when goods ship.
@@ -406,7 +584,7 @@ export async function fetchNetsuiteOrders(shop, { since } = {}) {
     }
   }
 
-  return { items, errors, capped };
+  return { items, errors, capped, ...(window ? { outsideWindow } : {}) };
 }
 
 // ---------------------------------------------------------------------------

@@ -104,6 +104,7 @@ export default [
     route("cancel-subscription", "routes/app.cancel-subscription.tsx"),
     route("billing-example", "routes/app.billing-example.tsx"),
     route("netsuite-logs", "routes/app.netsuite-logs.jsx"),
+    route("order-sync-logs", "routes/app.order-sync-logs.jsx"),
   ]),
 
   // Unified Sales Portal (single login for all companies/stores)
@@ -201,6 +202,8 @@ export default [
   route("api/netsuite/disconnect", "routes/api.netsuite.disconnect.jsx"),
   route("api/netsuite/callback", "routes/api.netsuite.callback.jsx"),
   route("api/cron/orders-sync", "routes/api.cron.orders-sync.jsx"),
+  route("api/orders-sync-now", "routes/api.orders-sync-now.jsx"),
+  route("api/orders-resync", "routes/api.orders-resync.jsx"),
 
   
   // Index route

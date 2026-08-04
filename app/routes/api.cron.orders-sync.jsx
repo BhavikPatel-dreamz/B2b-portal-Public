@@ -1,17 +1,19 @@
 import prisma from "../db.server.js";
-import { syncOrdersFromFeed, logSyncCrash } from "../lib/order-sync.server.js";
-import { syncShopifyToApp } from "../lib/shopify-sync.server.js";
+import { startCronJobs } from "../lib/cron-jobs.server.js";
+import { cronIntervalMinutes, crontabLine, intervalLabel } from "../lib/cron-schedule.js";
 
-// Cron-triggered order sync.
-//   GET/POST /api/cron/orders-sync?token=CRON_SECRET[&shop=xxx.myshopify.com][&direction=both]
+// Cron-triggered scheduled run.
+//   GET/POST /api/cron/orders-sync?token=CRON_SECRET[&shop=xxx.myshopify.com]
 //
-// Example crontab entry (every 15 min):
-//   */15 * * * * curl -s "https://YOUR_APP_URL/api/cron/orders-sync?token=THE_SECRET"
+// The interval lives in CRON_INTERVAL_MINUTES (default 180) and the crontab line
+// for it is printed by this endpoint's response and shown on the log page, so the
+// schedule the app describes and the one the host runs come from one number.
+// Install the line it gives you, e.g. every 15 minutes:
+//   */15 * * * * curl -fsS "https://YOUR_APP_URL/api/cron/orders-sync?token=THE_SECRET" > /dev/null
 //
-// direction controls which way orders flow:
-//   netsuite -> push app orders out to Shopify via the NetSuite feed (syncOrdersFromFeed)
-//   shopify  -> pull Shopify companies + their B2B orders into the app (syncShopifyToApp)
-//   both     -> run both (default)
+// WHAT it runs is not decided here: it walks CRON_JOBS (app/lib/cron-jobs.server.js),
+// which is where another scheduled task gets added. This route only works out
+// which shops to run for, and reports what came back.
 //
 // Auth: pass CRON_SECRET as ?token= or the "x-cron-secret" header. There is no
 // browser session on a cron call, so we authenticate to Shopify with the stored
@@ -42,52 +44,38 @@ async function handle(request) {
     return json({ ok: false, error: "no installed shops found" }, 404);
   }
 
-  // Which direction(s) to run. Default runs both.
-  const direction = (url.searchParams.get("direction") || "both").toLowerCase();
-  const runNetsuite = direction === "both" || direction === "netsuite";
-  const runShopify = direction === "both" || direction === "shopify";
-
-  if (!runNetsuite && !runShopify) {
-    return json(
-      { ok: false, error: `invalid direction "${direction}" (use netsuite|shopify|both)` },
-      400,
-    );
-  }
-
+  // One shop at a time, and inside each shop one job at a time (runCronJobs) —
+  // they share the same Shopify and NetSuite rate limits, and a scheduled run has
+  // nowhere to be.
   const runs = [];
   for (const shop of shops) {
-    const startedAt = new Date();
-
-    // NetSuite -> Shopify: push app orders out through the feed.
-    if (runNetsuite) {
-      try {
-        runs.push(await syncOrdersFromFeed(shop));
-      } catch (err) {
-        // A run that died before producing a summary (NetSuite auth, a Shopify
-        // connection error) writes its own log entry — syncOrdersFromFeed only logs
-        // the runs it finishes, and a cron process's console output is gone.
-        const logFile = await logSyncCrash(shop, startedAt, err);
-        runs.push({ shop, ok: false, error: err?.message || String(err), logFile });
-      }
+    // The cron waits for its own run: it is a server-to-server call with no
+    // browser on the other end, and a caller that gets the summary back can log
+    // and alert on it. (The log page's Sync now uses the same starter but
+    // deliberately does NOT wait — see api.orders-sync-now.jsx.)
+    const { started, promise, heldSince } = await startCronJobs(shop);
+    if (!started) {
+      const since = heldSince?.toISOString() || "unknown";
+      console.warn(`[cron] ${shop}: a run started at ${since} is still going — skipping this tick.`);
+      runs.push({ shop, skipped: true, reason: `a run started at ${since} is still in progress` });
+      continue;
     }
-
-    // Shopify -> app: pull Shopify companies + their B2B orders into the app.
-    if (runShopify) {
-      try {
-        const result = await syncShopifyToApp(shop);
-        runs.push({ shop, direction: "shopify", ok: true, ...result });
-      } catch (err) {
-        runs.push({
-          shop,
-          direction: "shopify",
-          ok: false,
-          error: err?.message || String(err),
-        });
-      }
-    }
+    runs.push({ shop, jobs: await promise });
   }
 
-  return json({ ok: true, ranAt: new Date().toISOString(), direction, runs });
+  const minutes = cronIntervalMinutes(process.env.CRON_INTERVAL_MINUTES);
+  return json({
+    ok: true,
+    ranAt: new Date().toISOString(),
+    // Echoed so a `curl` of this endpoint answers "am I installed on the schedule
+    // this app thinks it has?" without anyone reading the code for it.
+    schedule: {
+      everyMinutes: minutes,
+      every: intervalLabel(minutes),
+      crontab: crontabLine(minutes, process.env.SHOPIFY_APP_URL),
+    },
+    runs,
+  });
 }
 
 function json(data, status = 200) {

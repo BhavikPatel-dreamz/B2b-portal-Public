@@ -5,6 +5,8 @@ import prisma from "../db.server.js";
 import { unauthenticated } from "../shopify.server.js";
 import demoFeed from "../data/demo-orders.json";
 import { fetchNetsuiteOrders, targetedOrderIds, INVOICE_PAID_IN_FULL } from "./netsuite.server.js";
+import { orderAttemptLimit, quarantinedOrders } from "./order-sync-log.server.js";
+import { windowLabel } from "./sync-windows.js";
 import {
   acquireSyncLock,
   getLastSyncedAt,
@@ -21,7 +23,27 @@ import {
 // Either way the returned shape is { items: [ salesOrder, ... ] }.
 export async function fetchExternalOrders(shop, opts = {}) {
   if (process.env.NETSUITE_USE_DEMO !== "false") {
-    return demoFeed;
+    // opts.window is ignored here on purpose: the demo records carry no
+    // lastModifiedDate, so every window would match none of them and a windowed
+    // run in demo mode would look broken rather than like a demo.
+    // A targeted call (opts.ids — a manual re-sync) has to narrow the demo feed
+    // the same way it narrows a live fetch, or re-syncing one order would run the
+    // whole feed. Both identifiers resolveOrderId() accepts are matched: the
+    // internal id ("1504") and the document number ("SO1504", or bare "1504").
+    const ids = (opts.ids || []).map((v) => String(v).trim()).filter(Boolean);
+    if (!ids.length) return demoFeed;
+    const key = (v) => String(v).trim().toUpperCase().replace(/^SO/, "");
+    const wanted = new Set(ids.map(key));
+    const items = (demoFeed.items || []).filter(
+      (rec) => wanted.has(key(rec.id)) || (rec.tranId && wanted.has(key(rec.tranId))),
+    );
+    const found = new Set(items.flatMap((rec) => [key(rec.id), key(rec.tranId || "")]));
+    return {
+      items,
+      errors: ids
+        .filter((raw) => !found.has(key(raw)))
+        .map((raw) => ({ id: raw, error: `requested orders: "${raw}" is not in the demo feed` })),
+    };
   }
   return fetchNetsuiteOrders(shop, opts);
 }
@@ -470,6 +492,11 @@ function ordersToExcel(orders) {
 // swallowed with a warning.
 const LOG_DIR = "storage/logs";
 
+// The run mode a manual re-sync logs under (see resyncOrders). It reads as a
+// normal live run to saveSyncLogRows — only "export…" modes are dry runs — but the
+// file log words a few lines differently for it.
+const MANUAL_MODE = "manual re-sync";
+
 function syncLogPath(shop, startedAt) {
   const day = startedAt.toISOString().slice(0, 10);
   return path.join(path.resolve(LOG_DIR), `order-sync-${shop}-${day}.log`);
@@ -507,14 +534,34 @@ function syncLogOrderLines(r) {
 }
 
 function syncLogBlock(run) {
-  const { shop, startedAt, finishedAt, since, targeted, mode, summary, results, error, files } = run;
+  const { shop, startedAt, finishedAt, since, window, targeted, mode, summary, results, error, files } = run;
   const seconds = ((new Date(finishedAt) - new Date(startedAt)) / 1000).toFixed(1);
+  const manual = mode === MANUAL_MODE;
   const lines = [
     "=".repeat(78),
     `[${startedAt}] order-sync ${shop}${mode ? ` (${mode})` : ""} — finished in ${seconds}s`,
-    `  window: ${since ? `modified since ${since}` : "first run (initial lookback window)"}`,
   ];
-  if (targeted?.length) lines.push(`  targeted: NETSUITE_ORDER_IDS=${targeted.join(", ")} (date window and watermark ignored)`);
+  // A manual re-sync has no date window to report — the order list *is* the scope.
+  if (window) {
+    // Both ends, not just "since": this run was asked for a stretch that has
+    // already ended, so what it did NOT look at is as much of the story as what
+    // it did. The watermark note is here because a windowed run leaves it alone,
+    // which is what stops "I synced the last hour" from skipping yesterday.
+    lines.push(`  window: modified between ${window.from.toISOString()} and ${window.to.toISOString()} (${window.label}) — watermark not moved`);
+    // NetSuite can only be asked for whole days (its q filter is date-granular),
+    // so a short window always pulls more than it needs and drops the surplus.
+    // Said out loud, because otherwise "the last hour matched 40 orders and synced
+    // 3" reads like orders went missing.
+    if (run.outsideWindow) {
+      lines.push(`  ${run.outsideWindow} fetched order(s) fell outside the window (NetSuite filters by day) and were not synced`);
+    }
+  } else if (!manual) {
+    lines.push(`  window: ${since ? `modified since ${since}` : "first run (initial lookback window)"}`);
+  }
+  if (targeted?.length) {
+    const how = manual ? "requested" : "NETSUITE_ORDER_IDS";
+    lines.push(`  targeted (${how}): ${targeted.join(", ")} (date window and watermark ignored)`);
+  }
   if (run.stoppedEarly) lines.push(`  STOPPED EARLY: ${run.stoppedEarly}`);
 
   if (error) {
@@ -536,8 +583,19 @@ function syncLogBlock(run) {
     // Failures first: the reason anyone opens this file.
     const ordered = [...(results || [])].sort((a, b) => Number(Boolean(a.ok)) - Number(Boolean(b.ok)));
     for (const r of ordered) lines.push(...syncLogOrderLines(r));
-    if (summary.failed > 0 || run.stoppedEarly) {
-      const why = summary.failed > 0 ? `${summary.failed} failed` : "stopped early";
+    // Quarantined orders are the reason a run can show failures AND still move
+    // the watermark, so they have to be named — otherwise the two lines below
+    // look like they contradict each other.
+    if (run.quarantined?.length) {
+      const list = run.quarantined.map((q) => `${q.order} (${q.attempts} runs)`).join(", ");
+      lines.push(`  quarantined (SYNC_MAX_ORDER_ATTEMPTS=${orderAttemptLimit()}): ${list}`);
+      lines.push("  ^ these keep failing and no longer hold the watermark back. They are still in the failed list and can be re-synced by hand.");
+    }
+    // A windowed run never moves the watermark in the first place, and its window
+    // line has already said so.
+    const holding = summary.failed - (run.quarantined?.length || 0);
+    if (!manual && !window && (holding > 0 || run.stoppedEarly)) {
+      const why = holding > 0 ? `${holding} failed` : "stopped early";
       lines.push(`  watermark NOT advanced (${why}) — the next run re-pulls this window and continues.`);
     }
   }
@@ -659,14 +717,24 @@ export async function logSyncCrash(shop, startedAt, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Main entry — called by the cron route
+// Main entry — called by the scheduled run
 // ---------------------------------------------------------------------------
-// Two runs for the same shop must never overlap (see acquireSyncLock), so this
-// wrapper holds the lock for the whole run and releases it however the run ends.
-// A cron call that arrives while the previous one is still working is reported as
-// skipped rather than queued — the next tick will pick the window up anyway.
-export async function syncOrdersFromFeed(shop) {
+// Two runs for the same shop must never overlap (see acquireSyncLock), so the
+// lock is held for the whole run and released however the run ends. A call that
+// arrives while the previous one is still working is reported as skipped rather
+// than queued — the next tick will pick the window up anyway.
+//
+// `options.window` ({ from, to, hours }) narrows the run to the NetSuite orders
+// modified in that stretch instead of the watermark's — see buildSyncWindow.
+//
+// `options.lock` is a lock the CALLER already holds (startCronJobs takes it for
+// the whole job list, so a run that is started in the background is visibly
+// running before its route returns). When it is passed, this function neither
+// acquires nor releases — whoever took it owns it.
+export async function syncOrdersFromFeed(shop, options = {}) {
   const runStartedAt = new Date();
+  if (options.lock) return runOrderSync(shop, runStartedAt, options);
+
   const lock = await acquireSyncLock(shop, runStartedAt);
   if (!lock.acquired) {
     const heldSince = lock.heldSince?.toISOString() || "unknown";
@@ -678,10 +746,30 @@ export async function syncOrdersFromFeed(shop) {
     };
   }
   try {
-    return await runOrderSync(shop, runStartedAt);
+    return await runOrderSync(shop, runStartedAt, options);
   } finally {
     await releaseSyncLock(shop, lock.token);
   }
+}
+
+// An explicit stretch of NetSuite modification time, ending now — "everything
+// that changed in the last 2 hours", as picked from the log page's range
+// dropdown. Handed to syncOrdersFromFeed as `options.window`, which makes the run
+// the scheduled one with its window supplied by hand instead of by the watermark:
+// same lock (it must not run alongside the cron and fight it over an order), same
+// per-order path, same logging.
+//
+// Such a run never moves the watermark, for the same reason a targeted re-sync
+// doesn't: it answered a question about one stretch of time, and advancing the
+// watermark to now would permanently skip everything the scheduled run still owes
+// from before that stretch.
+export function buildSyncWindow(hours) {
+  const n = Number(hours);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`invalid sync window: ${hours}`);
+  }
+  const to = new Date();
+  return { from: new Date(to.getTime() - n * 60 * 60 * 1000), to, hours: n, label: windowLabel(n) };
 }
 
 // How long a single run may spend processing orders. Cron intervals are short and
@@ -695,12 +783,151 @@ function maxRunMs() {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_RUN_MS;
 }
 
-async function runOrderSync(shop, runStartedAt) {
+// The per-order sync itself, over whatever set of NetSuite records it was handed.
+// Shared by the scheduled run and by a manual re-sync of hand-picked orders
+// (resyncOrders), so both take exactly the same path per order.
+//
+// `results` is appended to in place — the caller has usually already put the
+// fetch failures in it, and the stopped-early message counts them as work done.
+// Returns the stopped-early reason, or null if it got through every record.
+async function processOrderRecords({ admin, shop, records, currencyCode, caches, deadline, results }) {
+  for (const rec of records) {
+    const entry = mapNetsuiteOrder(rec);
+    const { externalId, action } = entry;
+    // Checked between orders, never inside one: an order is created, tagged and
+    // linked to its company across several calls, and abandoning it half way is
+    // worse than running a minute over.
+    if (Date.now() > deadline) {
+      const stoppedEarly = `run time budget reached after ${results.length} of ${records.length} order(s) — the rest are left for the next run`;
+      console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
+      return stoppedEarly;
+    }
+    try {
+      let outcome;
+      if (action === "delete") {
+        outcome = await deleteOrder(admin, entry);
+      } else {
+        // upsert: work out which Shopify order (if any) this NetSuite order
+        // belongs to. A match is a tracking-only update — never a full
+        // overwrite. Only an unmatched NetSuite-native order is created.
+        const match = await resolveShopifyOrder(admin, entry);
+        if (match.id) {
+          outcome = await syncTracking(admin, entry, match.id, match.via);
+        } else if (match.allowCreate) {
+          outcome = await createOrder(admin, entry, currencyCode, caches);
+        } else {
+          outcome = { ok: true, action: "skip", skipped: true, matchedBy: match.via, reason: match.reason };
+        }
+      }
+      // `reference` (the SO number) rides along so the run log and the API
+      // response name orders the way NetSuite users do, not just by internal id.
+      results.push({ externalId, reference: entry.reference, action: outcome.action || action, ...outcome });
+    } catch (err) {
+      results.push({ externalId, reference: entry.reference, action, ok: false, error: err?.message || String(err) });
+    }
+  }
+  return null;
+}
+
+function summarise(results) {
+  return {
+    total: results.length,
+    ok: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Manual re-sync — called by the log page's Sync buttons
+// ---------------------------------------------------------------------------
+// Re-runs specific NetSuite orders, given as internal ids or SO numbers. It is
+// the scheduled run narrowed to a hand-picked set: same lock (a re-sync must not
+// run alongside the cron and fight it over the same order), same per-order path,
+// same file/database logging — so the retry shows up in the log table as its own
+// run, next to the failure it was retrying.
+//
+// The watermark is never moved. Like a targeted run, this looked at only the
+// orders it was asked about, so advancing it would permanently skip everything
+// else modified in the meantime. SYNC_ORDER_EXPORT is ignored too: a re-sync is
+// an explicit "write this order to Shopify now", not a preview.
+export async function resyncOrders(shop, ids) {
+  const requested = [...new Set((ids || []).map((v) => String(v).trim()).filter(Boolean))];
+  if (!requested.length) {
+    return { shop, requested, summary: { total: 0, ok: 0, failed: 0 }, results: [] };
+  }
+
+  const runStartedAt = new Date();
+  const lock = await acquireSyncLock(shop, runStartedAt);
+  if (!lock.acquired) {
+    const heldSince = lock.heldSince?.toISOString() || "unknown";
+    console.warn(`[order-sync] ${shop}: a sync started at ${heldSince} is still running — not re-syncing ${requested.join(", ")}.`);
+    return {
+      shop,
+      requested,
+      skipped: true,
+      reason: `another sync run (started ${heldSince}) is still in progress`,
+    };
+  }
+  try {
+    const feed = await fetchExternalOrders(shop, { ids: requested });
+    const records = Array.isArray(feed?.items) ? feed.items : [];
+    // Orders that could not be fetched (or resolved to a sales order at all) are
+    // failures of this re-sync, not silent no-ops.
+    const results = (feed?.errors || []).map(({ id, error }) => ({
+      externalId: String(id),
+      action: "fetch",
+      ok: false,
+      error: `NetSuite fetch failed: ${error}`,
+    }));
+
+    const { admin } = await unauthenticated.admin(shop);
+    const currencyCode = await getShopCurrency(admin);
+    const caches = { company: new Map(), variant: new Map() };
+    const stoppedEarly = await processOrderRecords({
+      admin,
+      shop,
+      records,
+      currencyCode,
+      caches,
+      deadline: runStartedAt.getTime() + maxRunMs(),
+      results,
+    });
+
+    const summary = summarise(results);
+    const run = {
+      shop,
+      mode: MANUAL_MODE,
+      startedAt: runStartedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      targeted: requested,
+      summary,
+      results,
+      stoppedEarly,
+    };
+    const logFile = writeSyncLog(run);
+    await saveSyncLogRows(run);
+    return {
+      shop,
+      requested,
+      summary,
+      results,
+      logFile,
+      ...(stoppedEarly ? { stoppedEarly } : {}),
+    };
+  } finally {
+    await releaseSyncLock(shop, lock.token);
+  }
+}
+
+async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // Targeted mode (NETSUITE_ORDER_IDS) fetches a hand-picked set of orders and
   // ignores the date window, so such a run must never move the watermark.
   const targeted = targetedOrderIds();
-  const since = await getLastSyncedAt(shop);
-  const feed = await fetchExternalOrders(shop, { since });
+  // A windowed run doesn't read the watermark at all — its window was given to it.
+  // `since` still stands for "the oldest modification time this run looked at", so
+  // the log lines below read the same either way.
+  const since = window ? window.from : await getLastSyncedAt(shop);
+  const feed = await fetchExternalOrders(shop, window ? { window } : { since });
   const records = Array.isArray(feed?.items) ? feed.items : [];
 
   if (process.env.SYNC_ORDER_EXPORT === "true") {
@@ -735,8 +962,8 @@ async function runOrderSync(shop, runStartedAt) {
     const previewPath = path.join(exportDir, `shopify-preview-${shop}-${timestamp}.json`);
     fs.writeFileSync(previewPath, JSON.stringify({ shop, currencyCode, exportedAt: runStartedAt.toISOString(), orders: shopifyInputs }, null, 2));
 
-    if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length) {
-      await setLastSyncedAt(shop, runStartedAt);
+    if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length && !window) {
+      await setLastSyncedAt(shop, runStartedAt, since);
     }
     const exportRun = {
       shop,
@@ -744,6 +971,7 @@ async function runOrderSync(shop, runStartedAt) {
       startedAt: runStartedAt.toISOString(),
       finishedAt: new Date().toISOString(),
       since: since?.toISOString() || null,
+      window,
       targeted,
       summary: { total: mapped.length, ok: mapped.length, failed: (feed?.errors || []).length },
       results: (feed?.errors || []).map(({ id, error }) => ({
@@ -774,51 +1002,30 @@ async function runOrderSync(shop, runStartedAt) {
   const deadline = runStartedAt.getTime() + maxRunMs();
   // A capped fetch means the same thing to the watermark as running out of time:
   // orders inside this window were never looked at, so it must not move past them.
-  let stoppedEarly = feed?.capped
+  const capped = feed?.capped
     ? `NETSUITE_ORDER_LIMIT=${feed.capped.limit} capped this run — ${feed.capped.skipped} of ${feed.capped.matched} matching order(s) were not fetched. Raise the limit or narrow the window; the sync cannot get past them.`
     : null;
-  for (const rec of records) {
-    const entry = mapNetsuiteOrder(rec);
-    const { externalId, action } = entry;
-    // Checked between orders, never inside one: an order is created, tagged and
-    // linked to its company across several calls, and abandoning it half way is
-    // worse than running a minute over.
-    if (Date.now() > deadline) {
-      const done = results.length;
-      stoppedEarly = `run time budget reached after ${done} of ${records.length} order(s) — the rest are left for the next run`;
-      console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
-      break;
-    }
-    try {
-      let outcome;
-      if (action === "delete") {
-        outcome = await deleteOrder(admin, entry);
-      } else {
-        // upsert: work out which Shopify order (if any) this NetSuite order
-        // belongs to. A match is a tracking-only update — never a full
-        // overwrite. Only an unmatched NetSuite-native order is created.
-        const match = await resolveShopifyOrder(admin, entry);
-        if (match.id) {
-          outcome = await syncTracking(admin, entry, match.id, match.via);
-        } else if (match.allowCreate) {
-          outcome = await createOrder(admin, entry, currencyCode, caches);
-        } else {
-          outcome = { ok: true, action: "skip", skipped: true, matchedBy: match.via, reason: match.reason };
-        }
-      }
-      // `reference` (the SO number) rides along so the run log and the API
-      // response name orders the way NetSuite users do, not just by internal id.
-      results.push({ externalId, reference: entry.reference, action: outcome.action || action, ...outcome });
-    } catch (err) {
-      results.push({ externalId, reference: entry.reference, action, ok: false, error: err?.message || String(err) });
+  const stoppedEarly =
+    (await processOrderRecords({ admin, shop, records, currencyCode, caches, deadline, results })) || capped;
+
+  const summary = summarise(results);
+
+  // Orders that have failed so many runs in a row that they are no longer allowed
+  // to hold the watermark back (see quarantinedOrders). Marked on the result
+  // itself so the log row and its detail dialog say so — a quarantined order is
+  // still failed, still listed, still re-syncable by hand; the only thing that
+  // changed is that the rest of the sync gets to move past it.
+  const failures = results.filter((r) => !r.ok);
+  const quarantined = failures.length ? await quarantinedOrders(shop, failures) : new Map();
+  for (const failure of failures) {
+    const attempts = quarantined.get(String(failure.externalId || "") || failure.reference);
+    if (attempts) {
+      failure.attempts = attempts;
+      failure.quarantined = true;
     }
   }
-
-  const summary = {
-    total: results.length,
-    ok: results.filter((r) => r.ok).length,
-    failed: results.filter((r) => !r.ok).length,
-  };
+  // A failure that is NOT quarantined is what parks the watermark.
+  const blocking = failures.length - quarantined.size;
 
   // Advance the watermark only on a fully clean run. If anything failed (a
   // NetSuite fetch error or a Shopify create/update error), we leave it where
@@ -830,14 +1037,23 @@ async function runOrderSync(shop, runStartedAt) {
   // and neither does a targeted run — it only looked at a hand-picked set of
   // orders, so moving the watermark would permanently skip everything else
   // modified in the meantime.
-  if (process.env.NETSUITE_USE_DEMO === "false" && summary.failed === 0 && !stoppedEarly && !targeted.length) {
-    await setLastSyncedAt(shop, runStartedAt);
+  // …and neither does a windowed run: it was asked about one stretch of
+  // modification time, so moving the watermark to now would skip everything the
+  // scheduled run still owes from before it.
+  if (process.env.NETSUITE_USE_DEMO === "false" && blocking === 0 && !stoppedEarly && !targeted.length && !window) {
+    // `since` rides along so the schedule card can say what this run covered,
+    // not only when it ran.
+    await setLastSyncedAt(shop, runStartedAt, since);
   }
   const run = {
     shop,
+    mode: window ? `window sync (${window.label})` : undefined,
     startedAt: runStartedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     since: since?.toISOString() || null,
+    window,
+    outsideWindow: feed?.outsideWindow || 0,
+    quarantined: [...quarantined.entries()].map(([order, attempts]) => ({ order, attempts })),
     targeted,
     summary,
     results,
@@ -853,6 +1069,9 @@ async function runOrderSync(shop, runStartedAt) {
     logFile,
     ...(stoppedEarly ? { stoppedEarly } : {}),
     since: since?.toISOString() || null,
+    ...(window
+      ? { window: { hours: window.hours, label: window.label, from: window.from.toISOString(), to: window.to.toISOString() } }
+      : {}),
     ...(targeted.length ? { targetedOrderIds: targeted } : {}),
   };
 }

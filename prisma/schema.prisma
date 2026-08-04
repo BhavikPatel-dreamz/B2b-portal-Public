@@ -589,6 +589,14 @@ model NetsuiteAppSettings {
   // successful sync.
   lastSyncedAt   DateTime?
 
+  // The other end of that same run's window — the `since` it was given, i.e. the
+  // previous watermark less the overlap buffer. lastSyncedAt alone says when the
+  // last run happened but not what stretch of NetSuite changes it covered, and
+  // "which dates did the last sync actually look at" is the first question anyone
+  // asks of a schedule. Null on the first run's row (there was no window before
+  // the first one) and for a run whose window started at the initial lookback.
+  lastSyncFrom   DateTime?
+
   // Set while an order sync is running for this shop, and cleared when it
   // finishes. Cron fires on a fixed interval with no idea whether the last run is
   // still going, and two runs over the same window race each other: both look up
