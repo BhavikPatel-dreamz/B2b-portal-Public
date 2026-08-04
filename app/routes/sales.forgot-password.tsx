@@ -40,6 +40,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   if (!user?.shopId) {
+    // No matching APPROVED + active SALES_USER. We intentionally return the same
+    // generic response to avoid leaking which emails exist, but log server-side so
+    // "the email never arrived" can actually be diagnosed.
+    console.warn(
+      `Sales forgot-password: no APPROVED active SALES_USER for email="${email}" — nothing sent.`,
+    );
     return Response.json({ success: "If an account exists for that email, we’ll send reset instructions shortly." });
   }
 
@@ -49,6 +55,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const requestUrl = new URL(request.url);
   const appUrl = (process.env.SHOPIFY_APP_URL || requestUrl.origin || "https://example.com").replace(/\/$/, "");
   const resetLink = `${appUrl}/sales/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
+
+  // Persist the token BEFORE emailing it. Otherwise the reset link can reach the
+  // user's inbox while the token isn't yet stored (or the update fails), leaving
+  // them with a link that never validates.
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordResetToken: resetToken,
+      passwordResetExpiresAt: expiresAt,
+    },
+  });
 
   try {
     const emailResult = await sendSalesUserPasswordResetEmail({
@@ -60,18 +77,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!emailResult.success) {
       console.error("Sales forgot-password email failed", emailResult.error);
+      // Roll back the token so a link that was never delivered can't linger.
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordResetToken: null, passwordResetExpiresAt: null },
+      });
       return Response.json({ error: "We could not send the password reset email right now. Please try again in a few minutes." });
     }
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordResetToken: resetToken,
-        passwordResetExpiresAt: expiresAt,
-      },
-    });
   } catch (error) {
     console.error("Sales forgot-password email error", error);
+    await prisma.user
+      .update({
+        where: { id: user.id },
+        data: { passwordResetToken: null, passwordResetExpiresAt: null },
+      })
+      .catch(() => {});
     return Response.json({ error: "We could not send the password reset email right now. Please try again in a few minutes." });
   }
 
