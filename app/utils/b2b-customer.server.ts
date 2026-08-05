@@ -7297,22 +7297,31 @@ export async function getAdvancedCompanyOrders(
             order.billingAddress?.company || order.shippingAddress?.company || "Company Order";
         }
 
-        const rawSource =
-          (order as any).customAttributes?.find(
-            (attr: any) => attr.key === "_source",
-          )?.value || null;
+        const customAttributes: Array<{ key: string; value: string }> = (order as any).customAttributes || [];
+        const tags: string[] = ((order as any).tags || []).map((t: string) => t.toLowerCase());
 
-        const tags = ((order as any).tags || []).map((t: string) => t.toLowerCase());
+        const rawSource = customAttributes.find((attr) => attr.key === "_source")?.value || null;
+        const hasNetsuiteAttr = customAttributes.some((attr) => attr.key && attr.key.toLowerCase().startsWith("netsuite"));
 
         let sourceType: "NORMAL" | "QUICK_ORDER" | "SALES_PORTAL" | "NETSUITE" = "NORMAL";
         const sourceLower = (rawSource || "").toLowerCase();
 
-        if (sourceLower.includes("quick") || tags.includes("quick order") || tags.includes("quickorder")) {
-          sourceType = "QUICK_ORDER";
-        } else if (sourceLower.includes("sales") || tags.includes("sales portal") || tags.includes("salesportal")) {
-          sourceType = "SALES_PORTAL";
-        } else if (sourceLower.includes("netsuite") || tags.includes("netsuite") || tags.includes("netsuite-sync")) {
+        if (
+          sourceLower.includes("netsuite") ||
+          hasNetsuiteAttr ||
+          tags.some((t) => t.includes("netsuite") || t.startsWith("ext:") || t.startsWith("ns:"))
+        ) {
           sourceType = "NETSUITE";
+        } else if (
+          sourceLower.includes("quick") ||
+          tags.some((t) => t.includes("quick"))
+        ) {
+          sourceType = "QUICK_ORDER";
+        } else if (
+          sourceLower.includes("sales") ||
+          tags.some((t) => t.includes("sales"))
+        ) {
+          sourceType = "SALES_PORTAL";
         }
 
         // Map fulfillments and tracking info
