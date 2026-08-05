@@ -7040,7 +7040,7 @@ export async function getAdvancedCompanyOrders(
 
     const queryString = queryParts.join(" AND ");
 
-    const query = `
+    const buildOrdersQuery = (includePaymentTerms: boolean) => `
       query getOrders($query: String!) {
         orders(query: $query, first: 250, sortKey: CREATED_AT, reverse: true) {
           edges {
@@ -7066,20 +7066,24 @@ export async function getAdvancedCompanyOrders(
                   url
                 }
               }
-              paymentTerms {
-                paymentTermsName
-                paymentSchedules(first: 5) {
-                  edges {
-                    node {
-                      amount {
-                        amount
-                        currencyCode
+              ${
+                includePaymentTerms
+                  ? `paymentTerms {
+                      paymentTermsName
+                      paymentSchedules(first: 5) {
+                        edges {
+                          node {
+                            amount {
+                              amount
+                              currencyCode
+                            }
+                            dueAt
+                            completedAt
+                          }
+                        }
                       }
-                      dueAt
-                      completedAt
-                    }
-                  }
-                }
+                    }`
+                  : ""
               }
               totalPriceSet {
                 shopMoney {
@@ -7230,27 +7234,45 @@ export async function getAdvancedCompanyOrders(
       }
     `;
 
-    const response = await fetch(
-      `https://${shopName}/admin/api/2025-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          query,
-          variables: {
-            query: queryString,
+    const fetchOrdersGql = async (includePaymentTerms: boolean) => {
+      const res = await fetch(
+        `https://${shopName}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
           },
-        }),
-      },
-    );
-    console.log("Fetched orders data", { queryString });
-    const data = await response.json();
+          body: JSON.stringify({
+            query: buildOrdersQuery(includePaymentTerms),
+            variables: {
+              query: queryString,
+            },
+          }),
+        },
+      );
+      return res.json();
+    };
+
+    console.log("Fetching orders data", { queryString });
+    let data = await fetchOrdersGql(true);
 
     if (data.errors) {
       console.error("GraphQL Errors:", data.errors);
+      const firstErr = data.errors[0]?.message || "";
+      if (
+        firstErr.includes("paymentTerms") ||
+        firstErr.includes("read_payment_terms")
+      ) {
+        console.warn(
+          "⚠️ Scope 'read_payment_terms' missing; re-trying query without paymentTerms field.",
+        );
+        data = await fetchOrdersGql(false);
+      }
+    }
+
+    if (data.errors) {
+      console.error("GraphQL Errors after fallback:", data.errors);
       return { error: data.errors[0].message };
     }
 
