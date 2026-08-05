@@ -203,9 +203,9 @@ export default [
   route("api/netsuite/callback", "routes/api.netsuite.callback.jsx"),
   route("api/cron/orders-sync", "routes/api.cron.orders-sync.jsx"),
   route("api/orders-sync-now", "routes/api.orders-sync-now.jsx"),
+  route("api/orders-sync-stop", "routes/api.orders-sync-stop.jsx"),
   route("api/orders-resync", "routes/api.orders-resync.jsx"),
 
-  
   // Index route
   index("routes/_index/route.tsx"),
 ] satisfies RouteConfig;

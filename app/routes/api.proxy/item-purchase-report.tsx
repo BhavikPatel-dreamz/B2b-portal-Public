@@ -22,8 +22,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Determine allowed locations based on user's role
-    const primaryCompany = companyInfo.companies[0];
-    const allowedLocationIds = primaryCompany.hasAllLocationAccess ? [] : primaryCompany.assignedLocationIds;
+    const primaryCompany = companyInfo?.companies?.[0];
+    if (!primaryCompany) {
+      return Response.json(
+        { error: "Company information not found for customer" },
+        { status: 404 }
+      );
+    }
+
+    const allowedLocationIds = primaryCompany.hasAllLocationAccess
+      ? undefined
+      : (primaryCompany.assignedLocationIds || []);
 
     // Fetch orders for the specified date range for the entire company
     const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
@@ -35,8 +44,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (result.error) {
-      console.error("getAdvancedCompanyOrders error:", result.error);
-      return Response.json({ error: result.error }, { status: 500 });
+      console.error("getAdvancedCompanyOrders error in item report:", result.error);
+      return Response.json({ error: result.error }, { status: 400 });
     }
 
     const orders = result.orders || [];
@@ -54,28 +63,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       // Calculate order totals for proportional distribution
       const orderProductSubtotal = lineItems.reduce((sum: number, edge: any) => {
-        const item = edge.node;
+        const item = edge?.node;
+        if (!item) return sum;
         const price = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
         const qty = Number(item.quantity || 0);
-        const discount = Number(item.totalDiscountSet?.shopMoney?.amount || 0);
-        return sum + (price * qty - discount);
+        const discount = Number(item.discountedUnitPriceSet ? (price - Number(item.discountedUnitPriceSet?.shopMoney?.amount || price)) * qty : 0);
+        return sum + Math.max(0, price * qty - discount);
       }, 0);
 
       const totalOrderShipping = shippingLines.reduce((sum: number, edge: any) => {
-        return sum + Number(edge.node.discountedPriceSet?.shopMoney?.amount || 0);
+        return sum + Number(edge?.node?.discountedPriceSet?.shopMoney?.amount || 0);
       }, 0);
 
       const totalOrderShippingTax = shippingLines.reduce((sum: number, edge: any) => {
-        const taxLines = edge.node.taxLines || [];
-        return sum + taxLines.reduce((s: number, t: any) => s + Number(t.priceSet?.shopMoney?.amount || 0), 0);
+        const taxLines = edge?.node?.taxLines || [];
+        return sum + taxLines.reduce((s: number, t: any) => s + Number(t?.priceSet?.shopMoney?.amount || 0), 0);
       }, 0);
 
       for (const edge of lineItems) {
-        const item = edge.node;
+        const item = edge?.node;
         if (!item) continue;
 
         const sku = item.variant?.sku || "No SKU";
-        const productName = item.product?.title || item.name;
+        const productName = item.product?.title || item.name || "Unknown Item";
         const variantName = item.variant?.title && item.variant.title !== "Default Title" 
           ? ` - ${item.variant.title}` 
           : "";
@@ -95,9 +105,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (originalQuantity <= 0) continue;
 
         const originalUnitPrice = Number(item.originalUnitPriceSet?.shopMoney?.amount || 0);
-        const totalDiscounts = Number(item.totalDiscountSet?.shopMoney?.amount || 0);
+        const discountedUnitPrice = Number(item.discountedUnitPriceSet?.shopMoney?.amount || originalUnitPrice);
+        const totalDiscounts = (originalUnitPrice - discountedUnitPrice) * originalQuantity;
         
-        const netLineTotal = (originalUnitPrice * originalQuantity) - totalDiscounts;
+        const netLineTotal = Math.max(0, (originalUnitPrice * originalQuantity) - totalDiscounts);
         
         // Proportional shipping distribution
         const ratio = orderProductSubtotal > 0 ? netLineTotal / orderProductSubtotal : 0;
@@ -105,14 +116,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const distributedShippingTax = ratio * totalOrderShippingTax;
 
         const lineTax = (item.taxLines || []).reduce((sum: number, taxLine: any) => {
-          return sum + Number(taxLine.priceSet?.shopMoney?.amount || 0);
+          return sum + Number(taxLine?.priceSet?.shopMoney?.amount || 0);
         }, 0);
         
         // Landed Values (Item + Distributed Shipping)
         const totalValue = netLineTotal + distributedShipping;
         const totalTax = lineTax + distributedShippingTax;
         const quantityPurchased = originalQuantity;
-        const landedUnitPrice = totalValue / quantityPurchased;
+        const landedUnitPrice = quantityPurchased > 0 ? totalValue / quantityPurchased : 0;
 
         if (reportMap.has(key)) {
           const existing = reportMap.get(key);
@@ -129,7 +140,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             totalValue: totalValue,
             totalTax: totalTax,
             totalIncludingTax: totalValue + totalTax,
-            currencyCode: item.totalDiscountSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
+            currencyCode: item.discountedUnitPriceSet?.shopMoney?.currencyCode || item.originalUnitPriceSet?.shopMoney?.currencyCode || "USD"
           });
         }
       }
@@ -146,7 +157,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Manual Pagination
     const totalCount = allReportData.length;
-    const totalPages = Math.ceil(totalCount / limit);
+    const totalPages = limit > 0 ? Math.ceil(totalCount / limit) : 1;
     const startIndex = (page - 1) * limit;
     const paginatedData = allReportData.slice(startIndex, startIndex + limit);
 
@@ -167,8 +178,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     });
 
-  } catch (error) {
-    if (error instanceof Response) throw error;
+  } catch (error: any) {
+    if (error && typeof error === "object" && "status" in error && typeof error.status === "number") {
+      return error as Response;
+    }
     console.error("Error generating item purchase report:", error);
     return Response.json(
       { error: "Failed to generate report", details: error instanceof Error ? error.message : String(error) },

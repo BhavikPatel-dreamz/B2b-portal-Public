@@ -153,46 +153,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (isMainContact) {
     accessLevel = "main_contact";
-    allowedLocationIds =
-      userAssignedLocationIds.length > 0 ? userAssignedLocationIds : undefined;
-    console.log(
-      allowedLocationIds
-        ? `✅ MAIN CONTACT (with locations): Restricted to ${allowedLocationIds.length} locations`
-        : `✅ MAIN CONTACT (no locations): Full company access`,
-    );
+    allowedLocationIds = undefined;
+    console.log(`✅ MAIN CONTACT: Full company access`);
   } else if (isCompanyAdmin) {
     accessLevel = "company_admin";
+    allowedLocationIds = undefined;
+    console.log(`✅ COMPANY ADMIN: Full company access`);
+  } else if (isLocationAdmin) {
+    accessLevel = "location_admin";
     allowedLocationIds =
       userAssignedLocationIds.length > 0 ? userAssignedLocationIds : undefined;
     console.log(
       allowedLocationIds
-        ? `✅ COMPANY ADMIN (with locations): Restricted to ${allowedLocationIds.length} locations`
-        : `✅ COMPANY ADMIN (no locations): Full company access`,
+        ? `🏢 LOCATION ADMIN: Restricted to ${allowedLocationIds.length} locations`
+        : `🏢 LOCATION ADMIN: Default company access`,
     );
-  } else if (isLocationAdmin) {
-    accessLevel = "location_admin";
-    if (userAssignedLocationIds.length > 0) {
-      allowedLocationIds = userAssignedLocationIds;
-      console.log(`🏢 LOCATION ADMIN: Restricted to ${allowedLocationIds.length} locations`);
-    } else {
-      return Response.json({
-        orders: [], totalCount: 0, accessLevel,
-        message: "No location assignments found",
-        pagination: { page: 1, limit: 20, totalPages: 0 },
-      });
-    }
   } else {
     accessLevel = "location_user";
-    if (userAssignedLocationIds.length > 0) {
-      allowedLocationIds = userAssignedLocationIds;
-      console.log(`👤 LOCATION USER: Own orders only in ${allowedLocationIds.length} locations`);
-    } else {
-      return Response.json({
-        orders: [], totalCount: 0, accessLevel,
-        message: "No location assignments found",
-        pagination: { page: 1, limit: 20, totalPages: 0 },
-      });
-    }
+    allowedLocationIds =
+      userAssignedLocationIds.length > 0 ? userAssignedLocationIds : undefined;
+    console.log(
+      allowedLocationIds
+        ? `👤 LOCATION USER: Assigned to ${allowedLocationIds.length} locations`
+        : `👤 LOCATION USER: Default customer access`,
+    );
   }
 
   // ── STEP 4: Build query filters ──────────────────────────

@@ -6864,6 +6864,8 @@ export async function getAdvancedCompanyOrders(
       };
       financialStatus?: string;
       fulfillmentStatus?: string;
+      sourceType?: string;
+      source?: string;
       query?: string;
       sortKey?: string;
       reverse?: boolean;
@@ -6879,7 +6881,7 @@ export async function getAdvancedCompanyOrders(
     };
 
     const cleanCompanyId = extractId(companyId);
-    const queryParts: string[] = [`company_id:${cleanCompanyId}`];
+    const queryParts: string[] = [];
 
     // Track which filters need post-processing
     let needsLocationPostFilter = false;
@@ -6908,8 +6910,20 @@ export async function getAdvancedCompanyOrders(
       console.log(`📍 Will post-filter by location: ${requestedLocationId}`);
     }
 
-    // 2. Customer Filter - Support both single and multiple
-    if (filters.customerId) {
+    // 2. Company & Customer Query Building
+    if (cleanCompanyId && filters.customerId) {
+      if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
+        const customerQueries = filters.customerId
+          .map((id) => `customer_id:${extractId(id)}`)
+          .join(" OR ");
+        queryParts.push(`(company_id:${cleanCompanyId} OR (${customerQueries}))`);
+      } else if (typeof filters.customerId === "string") {
+        const cleanCustomerId = extractId(filters.customerId);
+        queryParts.push(`(company_id:${cleanCompanyId} OR customer_id:${cleanCustomerId})`);
+      }
+    } else if (cleanCompanyId) {
+      queryParts.push(`company_id:${cleanCompanyId}`);
+    } else if (filters.customerId) {
       if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
         const customerQueries = filters.customerId
           .map((id) => `customer_id:${extractId(id)}`)
@@ -7026,7 +7040,7 @@ export async function getAdvancedCompanyOrders(
 
     const queryString = queryParts.join(" AND ");
 
-    const query = `
+    const buildOrdersQuery = (includePaymentTerms: boolean) => `
       query getOrders($query: String!) {
         orders(query: $query, first: 250, sortKey: CREATED_AT, reverse: true) {
           edges {
@@ -7052,20 +7066,24 @@ export async function getAdvancedCompanyOrders(
                   url
                 }
               }
-              paymentTerms {
-                name
-                paymentSchedules(first: 5) {
-                  edges {
-                    node {
-                      amount {
-                        amount
-                        currencyCode
+              ${
+                includePaymentTerms
+                  ? `paymentTerms {
+                      paymentTermsName
+                      paymentSchedules(first: 5) {
+                        edges {
+                          node {
+                            amount {
+                              amount
+                              currencyCode
+                            }
+                            dueAt
+                            completedAt
+                          }
+                        }
                       }
-                      dueAt
-                      completedAt
-                    }
-                  }
-                }
+                    }`
+                  : ""
               }
               totalPriceSet {
                 shopMoney {
@@ -7216,27 +7234,45 @@ export async function getAdvancedCompanyOrders(
       }
     `;
 
-    const response = await fetch(
-      `https://${shopName}/admin/api/2025-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          query,
-          variables: {
-            query: queryString,
+    const fetchOrdersGql = async (includePaymentTerms: boolean) => {
+      const res = await fetch(
+        `https://${shopName}/admin/api/2025-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
           },
-        }),
-      },
-    );
-    console.log("Fetched orders data", { queryString });
-    const data = await response.json();
+          body: JSON.stringify({
+            query: buildOrdersQuery(includePaymentTerms),
+            variables: {
+              query: queryString,
+            },
+          }),
+        },
+      );
+      return res.json();
+    };
+
+    console.log("Fetching orders data", { queryString });
+    let data = await fetchOrdersGql(true);
 
     if (data.errors) {
       console.error("GraphQL Errors:", data.errors);
+      const firstErr = data.errors[0]?.message || "";
+      if (
+        firstErr.includes("paymentTerms") ||
+        firstErr.includes("read_payment_terms")
+      ) {
+        console.warn(
+          "⚠️ Scope 'read_payment_terms' missing; re-trying query without paymentTerms field.",
+        );
+        data = await fetchOrdersGql(false);
+      }
+    }
+
+    if (data.errors) {
+      console.error("GraphQL Errors after fallback:", data.errors);
       return { error: data.errors[0].message };
     }
 
@@ -7261,22 +7297,31 @@ export async function getAdvancedCompanyOrders(
             order.billingAddress?.company || order.shippingAddress?.company || "Company Order";
         }
 
-        const rawSource =
-          (order as any).customAttributes?.find(
-            (attr: any) => attr.key === "_source",
-          )?.value || null;
+        const customAttributes: Array<{ key: string; value: string }> = (order as any).customAttributes || [];
+        const tags: string[] = ((order as any).tags || []).map((t: string) => t.toLowerCase());
 
-        const tags = ((order as any).tags || []).map((t: string) => t.toLowerCase());
+        const rawSource = customAttributes.find((attr) => attr.key === "_source")?.value || null;
+        const hasNetsuiteAttr = customAttributes.some((attr) => attr.key && attr.key.toLowerCase().startsWith("netsuite"));
 
         let sourceType: "NORMAL" | "QUICK_ORDER" | "SALES_PORTAL" | "NETSUITE" = "NORMAL";
         const sourceLower = (rawSource || "").toLowerCase();
 
-        if (sourceLower.includes("quick") || tags.includes("quick order") || tags.includes("quickorder")) {
-          sourceType = "QUICK_ORDER";
-        } else if (sourceLower.includes("sales") || tags.includes("sales portal") || tags.includes("salesportal")) {
-          sourceType = "SALES_PORTAL";
-        } else if (sourceLower.includes("netsuite") || tags.includes("netsuite") || tags.includes("netsuite-sync")) {
+        if (
+          sourceLower.includes("netsuite") ||
+          hasNetsuiteAttr ||
+          tags.some((t) => t.includes("netsuite") || t.startsWith("ext:") || t.startsWith("ns:"))
+        ) {
           sourceType = "NETSUITE";
+        } else if (
+          sourceLower.includes("quick") ||
+          tags.some((t) => t.includes("quick"))
+        ) {
+          sourceType = "QUICK_ORDER";
+        } else if (
+          sourceLower.includes("sales") ||
+          tags.some((t) => t.includes("sales"))
+        ) {
+          sourceType = "SALES_PORTAL";
         }
 
         // Map fulfillments and tracking info
@@ -7310,7 +7355,12 @@ export async function getAdvancedCompanyOrders(
           source: rawSource || sourceType.toLowerCase(),
           sourceType,
           poNumber: (order as any).poNumber || null,
-          paymentTerms: (order as any).paymentTerms || null,
+          paymentTerms: (order as any).paymentTerms
+            ? {
+                name: (order as any).paymentTerms.paymentTermsName || "Payment Terms",
+                paymentSchedules: (order as any).paymentTerms.paymentSchedules,
+              }
+            : null,
           fulfillments: fulfillmentsList,
           trackingInformation,
           companyLocation: {
@@ -7351,8 +7401,8 @@ export async function getAdvancedCompanyOrders(
         const orderLocationId = extractId(order?.locationId || "");
 
         if (!orderLocationId) {
-          console.warn(`⚠️ Order ${order.name} has no locationId, excluding`);
-          return false;
+          console.log(`ℹ️ Order ${order.name} has no explicit locationId, keeping for company view`);
+          return true;
         }
 
         const isAllowed = normalizedAllowedIds.includes(orderLocationId);

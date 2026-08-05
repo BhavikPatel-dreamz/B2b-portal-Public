@@ -19,8 +19,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Determine allowed locations based on user's role
-    const primaryCompany = companyInfo.companies[0];
-    const allowedLocationIds = primaryCompany.hasAllLocationAccess ? [] : primaryCompany.assignedLocationIds;
+    const primaryCompany = companyInfo?.companies?.[0];
+    if (!primaryCompany) {
+      return Response.json(
+        { error: "Company information not found for customer" },
+        { status: 404 }
+      );
+    }
+
+    const allowedLocationIds = primaryCompany.hasAllLocationAccess
+      ? undefined
+      : (primaryCompany.assignedLocationIds || []);
 
     // Fetch orders for the specified range (entire company)
     const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
@@ -32,7 +41,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (result.error) {
-      return Response.json({ error: result.error }, { status: 500 });
+      console.error("getAdvancedCompanyOrders error in spend report:", result.error);
+      return Response.json({ error: result.error }, { status: 400 });
     }
 
     const orders = result.orders || [];
@@ -95,8 +105,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       currencyCode: orders[0]?.totalPriceSet?.shopMoney?.currencyCode || "USD"
     });
 
-  } catch (error) {
-    if (error instanceof Response) throw error;
+  } catch (error: any) {
+    if (error && typeof error === "object" && "status" in error && typeof error.status === "number") {
+      return error as Response;
+    }
     console.error("Error generating spend report:", error);
     return Response.json(
       { error: "Failed to generate report", details: error instanceof Error ? error.message : String(error) },
