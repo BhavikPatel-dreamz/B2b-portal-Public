@@ -7067,7 +7067,7 @@ export async function getAdvancedCompanyOrders(
                 }
               }
               paymentTerms {
-                name
+                paymentTermsName
                 paymentSchedules(first: 5) {
                   edges {
                     node {
@@ -7324,7 +7324,12 @@ export async function getAdvancedCompanyOrders(
           source: rawSource || sourceType.toLowerCase(),
           sourceType,
           poNumber: (order as any).poNumber || null,
-          paymentTerms: (order as any).paymentTerms || null,
+          paymentTerms: (order as any).paymentTerms
+            ? {
+                name: (order as any).paymentTerms.paymentTermsName || "Payment Terms",
+                paymentSchedules: (order as any).paymentTerms.paymentSchedules,
+              }
+            : null,
           fulfillments: fulfillmentsList,
           trackingInformation,
           companyLocation: {
