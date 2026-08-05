@@ -1,5 +1,5 @@
 import { authenticate } from "../shopify.server";
-import { buildAuthorizeUrl, redirectUri } from "../lib/netsuite-oauth.server.js";
+import { buildAuthorizeUrl, redirectUri } from "../lib/netsuite/oauth.server.js";
 
 // Called from inside the embedded app via an authenticated fetch. Returns the
 // NetSuite authorize URL so the client can open it with target "_top" — a

@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Your extra scheduled work
 // ---------------------------------------------------------------------------
-// Already wired into the schedule: CRON_JOBS in app/lib/cron-jobs.server.js runs
+// Already wired into the schedule: CRON_JOBS in app/lib/cron/jobs.server.js runs
 // this on every cron tick AND on every press of the log page's Sync now button,
 // once per shop. Write what you need in the marked block below — nothing else
 // has to change.
@@ -48,7 +48,7 @@ export async function adminFor(shop) {
 // and this Shopify pull — with nothing else to wire up (CRON_JOBS already runs it
 // once per shop on every tick and every "Sync now").
 //
-// syncShopifyToApp (app/lib/shopify-sync.server.js) reuses the same
+// syncShopifyToApp (app/lib/shopify/sync.server.js) reuses the same
 // syncShopifyCompanies / syncAllShopifyOrders the manual "Sync Companies" button
 // calls, and returns a { companies, orders } summary — so that summary becomes
 // this job's result in the cron's JSON response and the Sync now toast.

@@ -1,6 +1,6 @@
 import prisma from "../db.server.js";
-import { retryableRowIds } from "../lib/order-sync-log.server.js";
-import { startResync } from "../lib/order-sync.server.js";
+import { retryableRowIds } from "../lib/sync/log.server.js";
+import { startResync } from "../lib/sync/orders.server.js";
 import { authenticate } from "../shopify.server";
 
 // Re-sync, triggered from the log page's Sync buttons.

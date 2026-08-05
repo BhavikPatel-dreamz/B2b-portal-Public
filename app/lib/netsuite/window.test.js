@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { buildOrdersQuery, plannedOrdersWindow, scanOrders } from "./netsuite.server.js";
+import { buildOrdersQuery, plannedOrdersWindow, scanOrders } from "./orders-query.server.js";
+import { parseCustomRange } from "../sync/windows.js";
 
 // The window scan: which of a day's listed orders a windowed run keeps, and when
 // it stops looking. `expand` is the only thing that would touch NetSuite, so
@@ -239,6 +240,31 @@ describe("buildOrdersQuery for an explicit window", () => {
     assert.equal(
       buildOrdersQuery(null, window("2026-08-03T04:00:00Z", "2026-08-05T04:00:00Z")),
       'lastModifiedDate ON_OR_AFTER "8/2/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+    );
+  });
+});
+
+// A hand-typed from/to range (the dropdown's "Custom range") takes exactly the
+// same path — parseCustomRange resolves the two dates, and everything after that
+// is the windowed run above. These assert the join between the two, since that is
+// the only part the range adds. What parseCustomRange itself accepts and refuses
+// is covered in sync-custom-range.test.js, which needs no NetSuite imports.
+describe("buildOrdersQuery for a custom from/to range", () => {
+  it("spans both ends of the range the operator typed", () => {
+    const { from, to } = parseCustomRange("2026-08-01", "2026-08-05");
+    assert.equal(
+      buildOrdersQuery(null, { from, to }),
+      // Upper bound is the day AFTER `to` (NetSuite compares a bare date literal
+      // against that date at midnight), lower bound takes the timezone margin.
+      'lastModifiedDate ON_OR_AFTER "7/31/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+    );
+  });
+
+  it("does not collapse a same-day range to the query that matched nothing", () => {
+    const { from, to } = parseCustomRange("2026-08-05", "2026-08-05");
+    assert.equal(
+      buildOrdersQuery(null, { from, to }),
+      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
     );
   });
 });

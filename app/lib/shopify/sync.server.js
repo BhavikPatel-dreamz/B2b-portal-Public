@@ -1,9 +1,9 @@
-import { unauthenticated } from "../shopify.server.js";
-import { getStoreByDomain } from "../services/store.server.js";
+import { unauthenticated } from "../../shopify.server.js";
+import { getStoreByDomain } from "../../services/store.server.js";
 import {
   syncShopifyCompanies,
   syncAllShopifyOrders,
-} from "../utils/company.server.js";
+} from "../../utils/company.server.js";
 
 // ---------------------------------------------------------------------------
 // Shopify -> app sync (the reverse direction of order-sync.server.js)

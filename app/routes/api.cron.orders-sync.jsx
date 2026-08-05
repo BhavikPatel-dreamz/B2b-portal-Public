@@ -1,6 +1,6 @@
 import prisma from "../db.server.js";
-import { startCronJobs } from "../lib/cron-jobs.server.js";
-import { cronIntervalMinutes, crontabLine, intervalLabel } from "../lib/cron-schedule.js";
+import { startCronJobs } from "../lib/cron/jobs.server.js";
+import { cronIntervalMinutes, crontabLine, intervalLabel } from "../lib/cron/schedule.js";
 
 // Cron-triggered scheduled run.
 //   GET/POST /api/cron/orders-sync?token=CRON_SECRET[&shop=xxx.myshopify.com]
@@ -11,7 +11,7 @@ import { cronIntervalMinutes, crontabLine, intervalLabel } from "../lib/cron-sch
 // Install the line it gives you, e.g. every 15 minutes:
 //   */15 * * * * curl -fsS "https://YOUR_APP_URL/api/cron/orders-sync?token=THE_SECRET" > /dev/null
 //
-// WHAT it runs is not decided here: it walks CRON_JOBS (app/lib/cron-jobs.server.js),
+// WHAT it runs is not decided here: it walks CRON_JOBS (app/lib/cron/jobs.server.js),
 // which is where another scheduled task gets added. This route only works out
 // which shops to run for, and reports what came back.
 //

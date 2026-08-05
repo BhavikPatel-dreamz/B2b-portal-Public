@@ -1,4 +1,4 @@
-import { requestSyncStop } from "../lib/netsuite-oauth.server.js";
+import { requestSyncStop } from "../lib/netsuite/oauth.server.js";
 import { authenticate } from "../shopify.server";
 
 // Stop the background run that is going right now, from the log page's Stop

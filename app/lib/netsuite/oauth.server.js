@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
-import prisma from "../db.server.js";
+import prisma from "../../db.server.js";
+import { oauthAuthorizeUrl, oauthTokenUrl } from "./endpoints.server.js";
 
 // ---------------------------------------------------------------------------
 // NetSuite OAuth 2.0 (Authorization Code Grant)
@@ -14,26 +15,6 @@ function required(name) {
   const v = process.env[name];
   if (!v) throw new Error(`NetSuite OAuth: missing ${name} env var`);
   return v;
-}
-
-function accountId() {
-  return required("NETSUITE_ACCOUNT_ID");
-}
-
-// The account id in a NetSuite hostname is lowercase with underscores written as
-// hyphens: account 5895946_SB1 lives at 5895946-sb1.app.netsuite.com. Copying the
-// id straight out of the NetSuite UI gives the underscore form, which resolves to
-// no host at all (or, worse, to the wrong account's login page).
-function accountHost() {
-  return accountId().trim().toLowerCase().replace(/_/g, "-");
-}
-
-function authorizeBase() {
-  return `https://${accountHost()}.app.netsuite.com`;
-}
-
-function tokenUrl() {
-  return `https://${accountHost()}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token`;
 }
 
 // The redirect URI has to match the one registered on the NetSuite Integration
@@ -126,7 +107,7 @@ export function buildAuthorizeUrl(shop) {
   // to see the mismatch is to read both sides: everything else about a wrong
   // redirect URI is invisible until the login page refuses the user.
   console.info(`[netsuite] authorize for ${shop} with redirect_uri=${uri}`);
-  return `${authorizeBase()}/app/login/oauth2/authorize.nl?${params.toString()}`;
+  return oauthAuthorizeUrl(params);
 }
 
 async function tokenRequest(body) {
@@ -134,7 +115,7 @@ async function tokenRequest(body) {
   const consumerSecret = required("NETSUITE_CONSUMER_SECRET");
   const basicAuth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
 
-  const res = await fetch(tokenUrl(), {
+  const res = await fetch(oauthTokenUrl(), {
     method: "POST",
     headers: {
       Authorization: `Basic ${basicAuth}`,
@@ -258,7 +239,7 @@ export async function setLastSyncedAt(shop, date, from = null) {
   });
 }
 
-// The other half of draining a backlog bigger than NETSUITE_ORDER_LIMIT across
+// The other half of draining a backlog bigger than one list call across
 // runs: how far into the current period's list a previous capped-but-clean run
 // got. 0 for a period that hasn't been capped yet (or ever).
 export async function getSyncListOffset(shop) {

@@ -1,6 +1,6 @@
 import { extraFunction } from "./extra-function.server.js";
-import { acquireSyncLock, isSyncStopRequested, releaseSyncLock } from "./netsuite-oauth.server.js";
-import { logSyncCrash, syncOrdersFromFeed } from "./order-sync.server.js";
+import { acquireSyncLock, isSyncStopRequested, releaseSyncLock } from "../netsuite/oauth.server.js";
+import { logSyncCrash, syncOrdersFromFeed } from "../sync/orders.server.js";
 
 // ---------------------------------------------------------------------------
 // What the scheduled run does

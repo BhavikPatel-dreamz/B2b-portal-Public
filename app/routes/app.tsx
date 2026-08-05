@@ -6,7 +6,7 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
-import { getConnectionStatus } from "../lib/netsuite-oauth.server.js";
+import { getConnectionStatus } from "../lib/netsuite/oauth.server.js";
 import { APP_BILLING_PLANS, getIsTestBilling } from "app/utils/billing.server";
 import { FREE_PLAN, PAID_PLAN, PLAN_99, CUSTOM_PLAN } from "app/billing-plans.shared";
 import {

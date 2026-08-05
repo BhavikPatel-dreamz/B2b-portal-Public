@@ -7,7 +7,7 @@ import {
   crontabLine,
   intervalLabel,
   nextCronRunAt,
-} from "./cron-schedule.js";
+} from "./schedule.js";
 
 describe("cronIntervalMinutes", () => {
   it("takes any whole number of minutes under an hour", () => {

@@ -200,6 +200,9 @@ export default [
   route("api/netsuite/connect", "routes/api.netsuite.connect.jsx"),
   route("api/netsuite/disconnect", "routes/api.netsuite.disconnect.jsx"),
   route("api/netsuite/callback", "routes/api.netsuite.callback.jsx"),
+  // Diagnostic, called by hand (Postman/curl) — dumps the NETSUITE_ORDER_IDS
+  // orders to storage/logs as JSON. Reads only; nothing reaches Shopify.
+  route("api/netsuite/order-dump", "routes/api.netsuite.order-dump.jsx"),
   route("api/cron/orders-sync", "routes/api.cron.orders-sync.jsx"),
   route("api/orders-sync-now", "routes/api.orders-sync-now.jsx"),
   route("api/orders-sync-stop", "routes/api.orders-sync-stop.jsx"),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { consecutiveFailures, orderAttemptLimit } from "./order-sync-log.server.js";
-import { DEFAULT_SYNC_WINDOW, SYNC_WINDOWS, windowLabel } from "./sync-windows.js";
+import { consecutiveFailures, orderAttemptLimit } from "./log.server.js";
+import { DEFAULT_SYNC_WINDOW, SYNC_WINDOWS, windowLabel } from "./windows.js";
 
 // The quarantine rule: how many runs in a row an order has failed, which is what
 // decides whether it still gets to hold the watermark back.

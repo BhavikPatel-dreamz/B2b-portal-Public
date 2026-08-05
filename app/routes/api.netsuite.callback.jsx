@@ -3,7 +3,7 @@ import {
   verifyState,
   exchangeCodeForTokens,
   saveTokens,
-} from "../lib/netsuite-oauth.server.js";
+} from "../lib/netsuite/oauth.server.js";
 
 // NetSuite's redirect back is a bare top-level browser navigation with no
 // Shopify session token, so this route (unlike the embedded app routes)

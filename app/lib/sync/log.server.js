@@ -1,5 +1,4 @@
-import prisma from "../db.server.js";
-
+import prisma from "../../db.server.js";
 // Which order-sync log rows can be re-synced. Used by the log page's loader (to
 // decide which rows get a checkbox and a Sync button) and by the re-sync route (to
 // decide which submitted rows it will act on), so the two can't drift apart — see

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { buildAuthorizeUrl, redirectUri } from "./netsuite-oauth.server.js";
+import { buildAuthorizeUrl, redirectUri } from "./oauth.server.js";
 
 // The redirect URI is the one OAuth parameter NetSuite checks silently: a
 // mismatch is only ever reported as "your login attempt was not successful", on
