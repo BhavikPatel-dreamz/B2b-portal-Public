@@ -27,6 +27,12 @@ const SYNC_NOW_URL = "/api/orders-sync-now";
 const SYNC_STOP_URL = "/api/orders-sync-stop";
 // How often the page re-asks the loader while a background sync is running.
 const POLL_MS = 5000;
+// The same question, asked faster, in the seconds after Stop sync is pressed.
+// The run now abandons whatever it was doing almost at once, so on the normal
+// interval the page would sit on "Stopping…" for several seconds after the sync
+// had already ended — the wait would be the polling, not the sync. This window is
+// short and only opens on a press, so it costs nothing the rest of the time.
+const STOPPING_POLL_MS = 700;
 // How often the "will cover" preview under the dropdown is recomputed. It is
 // relative to now, so on a page left open it would otherwise describe a window
 // that ended half an hour ago.
@@ -133,7 +139,7 @@ export const loader = async ({ request }) => {
     getLastSyncWindow(session.shop),
     getSyncRunState(session.shop),
   ]);
-  const { runningSince, stopRequestedAt, totalOrders, doneOrders } = runState;
+  const { runningSince, stopRequestedAt, totalOrders, doneOrders, phase } = runState;
   const everyMinutes = cronIntervalMinutes(process.env.CRON_INTERVAL_MINUTES);
   const nextRunAt = nextCronRunAt(everyMinutes);
   const nextWindow = plannedOrdersWindow(lastWindow.to, nextRunAt);
@@ -165,7 +171,14 @@ export const loader = async ({ request }) => {
     // run is going this is the only thing on the page that moves — its log rows
     // are all written at the end — and afterwards it is what the last run got
     // through. Null before any run has reported a total.
-    progress: totalOrders === null ? null : { total: totalOrders, done: doneOrders ?? 0 },
+    //
+    // `phase` says which stretch these two numbers describe: "fetching" while
+    // NetSuite orders are being listed and expanded (often the longer half —
+    // roughly a second of rate-limit sleep per order), "syncing" while the
+    // fetched set is being written to Shopify. Defaulted to "syncing" for a row
+    // written before this field existed, which is the phase the counters always
+    // meant back then.
+    progress: totalOrders === null ? null : { total: totalOrders, done: doneOrders ?? 0, phase: phase || "syncing" },
     last: {
       from: lastWindow.from?.toISOString() || null,
       to: lastWindow.to?.toISOString() || null,
@@ -267,6 +280,14 @@ function formatRunAt(iso) {
 // rather than printing an empty side.
 function windowText(from, to) {
   return `${from ? formatRunAt(from) : "initial lookback window"} → ${to ? formatRunAt(to) : "now"}`;
+}
+
+// What schedule.progress.done/total describe, in the run's own two phases —
+// see setSyncTotal. Read from NetSuite first, written to Shopify second; the
+// counter resets between them, so the label has to change with it or "3 of 40"
+// during fetching would read as 3 orders already in Shopify.
+function progressVerb(phase) {
+  return phase === "fetching" ? "fetched from NetSuite" : "synced to Shopify";
 }
 
 // One "Label  value" line of the schedule card.
@@ -528,9 +549,19 @@ export default function OrderSyncLogs() {
       // Asking again while the last ask is still out would just queue requests up
       // behind a slow one.
       if (revalidator.state === "idle") revalidator.revalidate();
-    }, POLL_MS);
+    }, stopping ? STOPPING_POLL_MS : POLL_MS);
     return () => clearInterval(timer);
-  }, [syncRunning, revalidator]);
+  }, [syncRunning, stopping, revalidator]);
+
+  // And ask once immediately when the stop is acknowledged, rather than waiting
+  // out even the first short tick: by the time this response comes back the run
+  // has usually already let go.
+  useEffect(() => {
+    if (stopFetcher.data?.ok && revalidator.state === "idle") revalidator.revalidate();
+    // Deliberately keyed on the response alone — re-running this as the
+    // revalidator's own state changes would make it revalidate in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopFetcher.data]);
 
   // "It finished" is the edge from running to not-running, which only this page
   // can see — the run itself ended in a background task with nobody listening.
@@ -617,7 +648,7 @@ export default function OrderSyncLogs() {
               {schedule.progress && (
                 <s-text type="strong">
                   {schedule.progress.done} of {schedule.progress.total} order
-                  {schedule.progress.total === 1 ? "" : "s"} synced
+                  {schedule.progress.total === 1 ? "" : "s"} {progressVerb(schedule.progress.phase)}
                 </s-text>
               )}
               <s-text>
@@ -668,9 +699,9 @@ export default function OrderSyncLogs() {
               questions, and the second is the one asked after a run that was
               stopped or ran out of its time budget. */}
           {schedule.progress && !syncRunning && (
-            <ScheduleRow label="Last run synced">
+            <ScheduleRow label="Last run">
               {schedule.progress.done} of {schedule.progress.total} order
-              {schedule.progress.total === 1 ? "" : "s"}
+              {schedule.progress.total === 1 ? "" : "s"} {progressVerb(schedule.progress.phase)}
               {schedule.progress.done < schedule.progress.total
                 ? " — the rest were left for the next run"
                 : ""}

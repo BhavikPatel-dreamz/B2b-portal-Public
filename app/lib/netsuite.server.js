@@ -1,4 +1,11 @@
-import { getValidAccessToken } from "./netsuite-oauth.server.js";
+import {
+  SyncStoppedError,
+  bumpSyncDone,
+  getValidAccessToken,
+  isSyncStopRequested,
+  setSyncTotal,
+  sleepUnlessStopped,
+} from "./netsuite-oauth.server.js";
 
 // ---------------------------------------------------------------------------
 // NetSuite SuiteTalk REST client (OAuth 2.0 Bearer token)
@@ -12,7 +19,12 @@ function required(name) {
   return v;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Every pause in this file is a rate-limit courtesy, and every one of them is
+// cut short by Stop sync — see sleepUnlessStopped. `shop` is threaded through
+// for that reason alone: without it a stopped run still sat out its remaining
+// sleeps, which on a 50-order run is the best part of a minute of a button that
+// looked like it had done nothing.
+const sleep = (shop, ms) => sleepUnlessStopped(shop, ms);
 
 // Every NetSuite call is bounded. fetch() has no timeout of its own, so a
 // connection that opens and then stalls hangs the run for as long as the platform
@@ -41,9 +53,14 @@ function isTransientNetworkError(err) {
   );
 }
 
+function stoppedDuring(path) {
+  return new SyncStoppedError(`NetSuite GET ${path} abandoned: the sync was stopped by hand`);
+}
+
 // Low-level GET against a SuiteTalk REST path (e.g. "/salesorder/1504" or
 // "/salesorder?limit=100"). Returns the parsed JSON body.
-// Retries up to 4 times on 429 with exponential back-off (3s, 6s, 12s, 24s).
+// Retries up to 4 times on 429 with exponential back-off (3s, 6s, 12s, 24s), or
+// until the run is stopped — whichever comes first.
 async function nsGet(shop, path) {
   const base = required("NETSUITE_ACCOUNT_URL").replace(/\/$/, "");
   const accessToken = await getValidAccessToken(shop);
@@ -68,7 +85,11 @@ async function nsGet(shop, path) {
       }
       const delay = 3000 * Math.pow(2, attempt);
       console.warn(`[netsuite] ${err?.name || "network error"} on ${path}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
-      await sleep(delay);
+      // A back-off that doubles to 24s is the longest a stopped run can sit
+      // still, so the sleep wakes on a stop and the retry is abandoned rather
+      // than served. Giving up here is not a failure of this order — see
+      // SyncStoppedError, which the callers count as stopped work, not broken work.
+      if (!(await sleep(shop, delay))) throw stoppedDuring(path);
       continue;
     }
     if (res.status === 429) {
@@ -78,7 +99,7 @@ async function nsGet(shop, path) {
       }
       const delay = 3000 * Math.pow(2, attempt);
       console.warn(`[netsuite] 429 on ${path}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
-      await sleep(delay);
+      if (!(await sleep(shop, delay))) throw stoppedDuring(path);
       continue;
     }
     if (!res.ok) {
@@ -132,7 +153,14 @@ async function nsSuiteQl(shop, sql) {
     rows.push(...page);
     if (!body?.hasMore || !page.length) break;
     offset += SUITEQL_PAGE;
-    await sleep(300);
+    // Stopped mid-query: the rows already read are returned rather than thrown
+    // away, and the caller (the invoice lookup) treats a short answer the same
+    // way it treats an account with fewer invoices — there is nothing half-made
+    // here to leave behind.
+    if (!(await sleep(shop, 300))) {
+      console.warn(`[netsuite] ${shop}: SuiteQL paging stopped by hand after ${rows.length} row(s).`);
+      break;
+    }
   }
   return rows;
 }
@@ -218,17 +246,33 @@ function windowScanLimit(maxOrders) {
 //     caller whether anything was left unexamined.
 //
 // An expand that throws is collected, not raised: one unreadable order must not
-// cost the run the others.
-export async function scanOrders(refs, { window, keepLimit = Infinity, expand }) {
+// cost the run the others. The exception is a throw that means "the run was
+// stopped" — that is not this order failing, and recording it as one would put a
+// row in the log blaming an order for a button someone pressed.
+//
+// `stopped` is asked before each expand: an optional async predicate, so the real
+// caller can hand it the sync's stop flag while a test needs no notion of one.
+//
+// `onProgress`, if given, is awaited after each ref that was actually scanned —
+// kept, outside the window, or errored alike, since "done" here means "looked
+// at", the same meaning bumpSyncDone gives it in the write phase. Not called for
+// a ref skipped by keepLimit or a stop, which were never looked at.
+export async function scanOrders(refs, { window, keepLimit = Infinity, expand, stopped, onProgress }) {
   const items = [];
   const errors = [];
   let outsideWindow = 0;
   let scanned = 0;
   let scanStoppedAt = null;
+  let stoppedByHand = false;
 
   for (const ref of refs) {
     if (!ref?.id) continue;
     if (items.length >= keepLimit) {
+      scanStoppedAt = scanned;
+      break;
+    }
+    if (stopped && (await stopped())) {
+      stoppedByHand = true;
       scanStoppedAt = scanned;
       break;
     }
@@ -238,10 +282,16 @@ export async function scanOrders(refs, { window, keepLimit = Infinity, expand })
       if (window && !inWindow(full, window)) outsideWindow += 1;
       else items.push(full);
     } catch (err) {
+      if (err?.syncStopped) {
+        stoppedByHand = true;
+        scanStoppedAt = scanned;
+        break;
+      }
       errors.push({ id: ref.id, error: err?.message || String(err) });
     }
+    await onProgress?.();
   }
-  return { items, errors, outsideWindow, scanned, scanStoppedAt };
+  return { items, errors, outsideWindow, scanned, scanStoppedAt, stopped: stoppedByHand };
 }
 
 // Builds the `q` filter expression for the sales-order list call.
@@ -396,9 +446,16 @@ async function resolveOrderId(shop, raw) {
       const hit = (list?.items || []).find((i) => i?.id);
       if (hit) return { id: String(hit.id), via: `tranId IS "${safe}"` };
     } catch (err) {
+      if (err?.syncStopped) throw err;
       console.warn(`[netsuite] tranId lookup "${safe}" failed:`, err?.message);
     }
-    await sleep(400);
+    // Thrown rather than broken out of, because "not resolved" and "not asked"
+    // are different answers: falling through would return { id: null } and the
+    // caller would record this identifier as matching no sales order, which is a
+    // claim about NetSuite that nothing here checked.
+    if (!(await sleep(shop, 400))) {
+      throw new SyncStoppedError(`resolving "${raw}" abandoned: the sync was stopped by hand`);
+    }
   }
 
   if (/^\d+$/.test(raw)) {
@@ -406,6 +463,7 @@ async function resolveOrderId(shop, raw) {
       await nsGet(shop, `/salesorder/${raw}`);
       return { id: raw, via: `internalId ${raw}` };
     } catch (err) {
+      if (err?.syncStopped) throw err;
       console.warn(`[netsuite] internalId ${raw} lookup failed:`, err?.message);
     }
   }
@@ -427,6 +485,11 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
   // Set when NETSUITE_ORDER_LIMIT left matching orders unfetched — see the note
   // where it's assigned.
   let capped = null;
+  // Set when Stop sync cut the fetch short. Reported back so the caller stops
+  // rather than syncing the partial set it happens to have: an interrupted fetch
+  // is not "these are the orders that changed", and a run that treated it as one
+  // would advance the watermark past everything it never listed.
+  let stopped = false;
 
   // `ids` is the same targeted mode NETSUITE_ORDER_IDS gives, decided per call
   // instead of per process — it's what a manual re-sync of specific orders (the
@@ -438,9 +501,27 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
     // Targeted mode: resolve each identifier to an internal id and skip the list
     // call entirely. No date window, no limit.
     console.log(`[netsuite] ${source} — syncing only: ${targeted.join(", ")}`);
+    // "fetching" phase progress for a targeted list: one identifier resolved is
+    // one done, whether or not it turned out to match an order.
+    await setSyncTotal(shop, targeted.length, 0, "fetching");
     refs = [];
     for (const raw of targeted) {
-      const { id, via } = await resolveOrderId(shop, raw);
+      // Resolving costs a lookup and a pause per identifier, so a long targeted
+      // list gets the same per-item stop check the expand pass gets.
+      if (await isSyncStopRequested(shop)) {
+        stopped = true;
+        console.warn(`[netsuite] ${shop}: id resolution stopped by hand after ${refs.length} of ${targeted.length}.`);
+        break;
+      }
+      let resolved;
+      try {
+        resolved = await resolveOrderId(shop, raw);
+      } catch (err) {
+        if (!err?.syncStopped) throw err;
+        stopped = true;
+        break;
+      }
+      const { id, via } = resolved;
       if (id) {
         console.log(`[netsuite] resolved "${raw}" -> internal id ${id} (${via})`);
         refs.push({ id });
@@ -448,6 +529,7 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
         console.error(`[netsuite] could not resolve "${raw}" to a sales order`);
         errors.push({ id: raw, error: `${source}: "${raw}" did not match any sales order` });
       }
+      await bumpSyncDone(shop);
     }
     // Two identifiers can point at the same order (e.g. "SO20742" and "20742").
     const seen = new Set();
@@ -482,13 +564,30 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
     for (;;) {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
       if (q) params.set("q", q);
-      const list = await nsGet(shop, `/salesorder?${params.toString()}`);
+      let list;
+      try {
+        list = await nsGet(shop, `/salesorder?${params.toString()}`);
+      } catch (err) {
+        // A page abandoned because of a stop is not a listing failure — the run
+        // is over either way, and raising here would report it as NetSuite being
+        // unreachable.
+        if (!err?.syncStopped) throw err;
+        stopped = true;
+        break;
+      }
       const page = Array.isArray(list?.items) ? list.items : [];
       if (totalResults === null) totalResults = list?.totalResults ?? null;
       refs.push(...page);
       if (!list?.hasMore || !page.length || refs.length >= maxRefs) break;
       offset += pageSize;
-      await sleep(500);
+      // Listing is pure reading — no Shopify order exists yet and no watermark
+      // has moved — so every page boundary is a safe place to stop, and stopping
+      // here saves the expand pass that would have followed.
+      if (!(await sleep(shop, 500))) {
+        stopped = true;
+        console.warn(`[netsuite] ${shop}: order listing stopped by hand after ${refs.length} id(s).`);
+        break;
+      }
     }
     // A full page can overshoot; keep the first maxRefs.
     if (refs.length > maxRefs) refs = refs.slice(0, maxRefs);
@@ -502,7 +601,12 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
     // box, and the caller had no way to know, so it advanced the watermark past
     // orders it never fetched and they were skipped for good. It is reported back
     // now and the watermark stays put (see runOrderSync).
-    if (totalResults != null && totalResults > refs.length) {
+    // A listing cut short by Stop sync is skipped here on purpose: it did leave
+    // orders unlisted, but not because a limit was too low, and telling someone
+    // to raise NETSUITE_ORDER_LIMIT because they pressed Stop is worse than
+    // saying nothing. The stop is reported on its own terms instead — the run
+    // ends as stopped, and its watermark stays put for that reason.
+    if (!stopped && totalResults != null && totalResults > refs.length) {
       // Which limit stopped the listing decides which one to name — telling
       // someone to raise NETSUITE_ORDER_LIMIT when it was the scan ceiling that
       // ran out sends them to the wrong knob.
@@ -520,6 +624,15 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
     }
   }
 
+  // "fetching" phase progress for the expand pass about to start: refs.length
+  // records, each costing a round trip and a second of rate-limit sleep — the
+  // part of a run that actually takes the time. Overwrites whatever total the
+  // branch above reported (a targeted list's id count, or nothing yet for a
+  // windowed listing): same phase, moving from "how many identifiers" to "how
+  // many records to expand". Skipped once already stopped — the run is ending,
+  // there is nothing left to report progress on.
+  if (!stopped) await setSyncTotal(shop, refs.length, 0, "fetching");
+
   // Expand each listed id into the full record, keeping the ones that really
   // fall in the window. The walk itself is scanOrders (below) so it can be
   // tested without a NetSuite account; everything account-shaped — the request,
@@ -527,6 +640,12 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
   let dumped = false;
   const scan = await scanOrders(refs, {
     window,
+    // Asked before each order is expanded. Expanding is a read, so between two of
+    // them is as safe a place to stop as between two pages — and it is where a
+    // long run spends most of its time, a second of rate-limit sleep and a round
+    // trip per order.
+    stopped: () => isSyncStopRequested(shop),
+    onProgress: () => bumpSyncDone(shop),
     // Without a window every listed order is one to sync, and the list call was
     // already capped at that number.
     keepLimit: window ? orderLimit() : Infinity,
@@ -548,10 +667,11 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
           JSON.stringify(full?.item),
         );
       }
-      await sleep(1000);
+      await sleep(shop, 1000);
       return full;
     },
   });
+  if (scan.stopped) stopped = true;
   items.push(...scan.items);
   for (const err of scan.errors) {
     console.error(`[netsuite] expand order ${err.id} failed:`, err.error);
@@ -567,7 +687,7 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
     // more orders in this window than were synced. Reported like any other cap:
     // the watermark stays put and the log says so, rather than the run looking
     // complete.
-    if (!capped && scanStoppedAt !== null && scanStoppedAt < refs.length) {
+    if (!capped && !stopped && scanStoppedAt !== null && scanStoppedAt < refs.length) {
       capped = {
         limit: orderLimit(),
         matched: refs.length,
@@ -579,6 +699,17 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
         `[netsuite] NETSUITE_ORDER_LIMIT=${capped.limit} reached inside the window: ${capped.skipped} listed order(s) were never examined.`,
       );
     }
+  }
+
+  // Nothing below this line is worth doing for a fetch that was called off. The
+  // three lookups that follow decorate records the caller is about to discard —
+  // between them several SuiteQL queries, each of which can take seconds on a
+  // wide window — so a stopped run returns here instead of paying for them.
+  if (stopped) {
+    console.warn(
+      `[netsuite] ${shop}: fetch stopped by hand — returning ${items.length} order(s) unenriched; the caller will not sync them.`,
+    );
+    return { items, errors, capped, stopped: true, ...(window ? { outsideWindow } : {}) };
   }
 
   // Fetch tracking numbers from linked Item Fulfillment records and attach

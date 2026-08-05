@@ -10,13 +10,17 @@ import { authenticate } from "../shopify.server";
 // startCronJobs) — often by the cron endpoint, possibly in another process — so
 // there is no request to abort and no handle to cancel, and aborting one mid
 // order would leave behind exactly the half-created order the sync lock exists
-// to prevent. What it does is set a flag the run reads at its own safe points:
-// between two orders and between two jobs. So the answer here is "asked", not
-// "stopped", and the page keeps polling the lock to see it actually end.
+// to prevent. What it does is set a flag the run reads at every point where
+// putting the work down is safe: between two orders, between two jobs, between
+// two fetched pages, and around every deliberate pause. So the answer here is
+// "asked", not "stopped", and the page keeps polling the lock to see it end.
 //
-// The delay between the two is one order — up to a few seconds of Shopify calls
-// plus the deliberate rate-limit sleep — which is why the button reports
-// "Stopping…" rather than going quiet.
+// The gap between the two used to be most of a minute — a run asleep in a
+// rate-limit pause or a 429 back-off wasn't looking at the flag, and the whole
+// fetch phase had nowhere to stop at all. Now requestSyncStop also wakes the run
+// in-process (see fireStopSignal) and every pause is cut short, so the worst case
+// is the order currently being written to Shopify, which is finished on purpose:
+// half an order is worse than a slow stop.
 export const action = async ({ request }) => {
   const { session } = await authenticate.admin(request);
 
@@ -31,6 +35,6 @@ export const action = async ({ request }) => {
     stopping: true,
     message: already
       ? `Stop already requested for the run in progress${since} — it finishes the order it is on first.`
-      : `Stopping the sync${since}. It stops after the order it is on; everything already synced stays synced.`,
+      : `Stopping the sync${since}. It puts everything down after the order it is on; everything already synced stays synced.`,
   };
 };

@@ -13,6 +13,7 @@ import {
   bumpSyncDone,
   getLastSyncedAt,
   isSyncStopRequested,
+  isSyncStoppedError,
   releaseSyncLock,
   setLastSyncedAt,
   setSyncTotal,
@@ -872,6 +873,15 @@ async function processOrderRecords({ admin, shop, records, currencyCode, caches,
       // response name orders the way NetSuite users do, not just by internal id.
       results.push({ externalId, reference: entry.reference, action: outcome.action || action, ...outcome });
     } catch (err) {
+      // A NetSuite call that gave up because the run was stopped is not this
+      // order failing — recording it as one would leave a red row in the log
+      // blaming the order for a button someone pressed. The order is simply not
+      // done: the watermark stays put and the next run picks it up.
+      if (isSyncStoppedError(err)) {
+        const stoppedEarly = `stopped by hand after ${results.length} of ${records.length} order(s) — the rest are left for the next run`;
+        console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
+        return stoppedEarly;
+      }
       results.push({ externalId, reference: entry.reference, action, ok: false, error: err?.message || String(err) });
     }
     // Counted here, outside the try, because "done" means "this run is finished
@@ -936,18 +946,34 @@ export async function resyncOrders(shop, ids) {
     const { admin } = await unauthenticated.admin(shop);
     const currencyCode = await getShopCurrency(admin);
     const caches = { company: new Map(), variant: new Map() };
-    // A hand-picked re-sync holds the same lock and shows up in the same place
-    // on the page, so it reports progress the same way a scheduled run does.
-    await setSyncTotal(shop, records.length);
-    const stoppedEarly = await processOrderRecords({
-      admin,
-      shop,
-      records,
-      currencyCode,
-      caches,
-      deadline: runStartedAt.getTime() + maxRunMs(),
-      results,
-    });
+    // Stopped while the ids were still being resolved, or straight after. A
+    // re-sync moves no watermark, so unlike the scheduled run there is nothing to
+    // protect here — it simply does none of the orders rather than an arbitrary
+    // prefix of the ones that were ticked.
+    //
+    // Checked BEFORE setSyncTotal below, same as runOrderSync: fetchNetsuiteOrders
+    // already left "fetching" progress behind (how many of the requested ids it
+    // got through), and a stopped run should keep reporting that rather than
+    // being overwritten with a "syncing" total that never moves off 0.
+    const stopped = feed?.stopped || (await isSyncStopRequested(shop));
+    let stoppedEarly;
+    if (stopped) {
+      stoppedEarly = `stopped by hand before any of the ${records.length} re-synced order(s) were written`;
+      console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
+    } else {
+      // A hand-picked re-sync holds the same lock and shows up in the same place
+      // on the page, so it reports progress the same way a scheduled run does.
+      await setSyncTotal(shop, records.length);
+      stoppedEarly = await processOrderRecords({
+        admin,
+        shop,
+        records,
+        currencyCode,
+        caches,
+        deadline: runStartedAt.getTime() + maxRunMs(),
+        results,
+      });
+    }
 
     const summary = summarise(results);
 
@@ -1008,13 +1034,20 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
 
   // Stop sync, pressed while the fetch was in flight. Fetching is the longest
   // stretch of a big run — NetSuite is paged and then each order is expanded
-  // with a second of rate-limit sleep between — and it has no safe interruption
-  // point of its own, so the request is honoured at the first one after it:
-  // before anything is written to Shopify, exported, or logged as synced. Note
-  // this is checked BEFORE the export branch too, so a stopped dry run doesn't
-  // leave a set of export files behind describing work that was called off.
-  if (await isSyncStopRequested(shop)) {
-    const stoppedEarly = `stopped by hand before any of the ${records.length} fetched order(s) were synced`;
+  // with a second of rate-limit sleep between — so the fetch stops itself part
+  // way through and says so in `feed.stopped`, and this is where that lands:
+  // before anything is written to Shopify, exported, or logged as synced.
+  //
+  // Both conditions are asked, because they are different facts. `feed.stopped`
+  // means the fetch broke off and the records in hand are an arbitrary prefix of
+  // the run's real scope — syncing them and advancing the watermark would skip
+  // the rest for good. The flag means the press landed after the fetch finished.
+  // Note this is checked BEFORE the export branch too, so a stopped dry run
+  // doesn't leave a set of export files behind describing work that was called off.
+  if (feed?.stopped || (await isSyncStopRequested(shop))) {
+    const stoppedEarly = feed?.stopped
+      ? `stopped by hand while fetching — ${records.length} order(s) had been read and none were synced`
+      : `stopped by hand before any of the ${records.length} fetched order(s) were synced`;
     console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
     const run = {
       shop,

@@ -607,6 +607,12 @@ model NetsuiteAppSettings {
   syncStartedAt  DateTime?
   syncTotalOrders Int?
   syncDoneOrders  Int?
+  // Which stretch of the run syncTotalOrders/syncDoneOrders currently describe:
+  // "fetching" while NetSuite orders are being listed and expanded, "syncing"
+  // while the fetched set is being written to Shopify one at a time. Null before
+  // a phase has been set (a run just starting, or an old row from before this
+  // column existed). See setSyncTotal.
+  syncPhase      String?
   syncStopRequestedAt DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

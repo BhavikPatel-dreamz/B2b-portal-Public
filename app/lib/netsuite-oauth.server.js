@@ -308,9 +308,20 @@ export async function acquireSyncLock(shop, startedAt = new Date()) {
     //
     // The progress counters reset here rather than on release, so the numbers
     // from the last run stay readable until a new one actually starts.
-    data: { syncStartedAt: startedAt, syncStopRequestedAt: null, syncTotalOrders: null, syncDoneOrders: null },
+    data: {
+      syncStartedAt: startedAt,
+      syncStopRequestedAt: null,
+      syncTotalOrders: null,
+      syncDoneOrders: null,
+      syncPhase: null,
+    },
   });
-  if (count === 1) return { acquired: true, token: startedAt };
+  if (count === 1) {
+    // Armed with the lock, for the same reason the flag is cleared with it: the
+    // signal belongs to this run and to no other. See fireStopSignal.
+    armStopSignal(shop, startedAt);
+    return { acquired: true, token: startedAt };
+  }
 
   const held = await prisma.netsuiteAppSettings.findUnique({
     where: { shop },
@@ -324,10 +335,14 @@ export async function acquireSyncLock(shop, startedAt = new Date()) {
 // holding.
 export async function releaseSyncLock(shop, token) {
   if (!token) return;
-  await prisma.netsuiteAppSettings.updateMany({
+  const { count } = await prisma.netsuiteAppSettings.updateMany({
     where: { shop, syncStartedAt: token },
     data: { syncStartedAt: null, syncStopRequestedAt: null },
   });
+  // Only when this run really did still own the lock. A run that overran the
+  // stale timeout and was taken over must not drop the signal armed by the run
+  // that took over from it — the same reason the row update is scoped to `token`.
+  if (count) disarmStopSignal(shop, token);
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +359,9 @@ export async function releaseSyncLock(shop, token) {
 //
 // Refused when nothing is running, so the button can't arm a flag that the NEXT
 // run would then pick up.
+//
+// The flag in the database is the thing that is true; the in-process signal
+// beside it (see fireStopSignal) is only how fast the run finds out.
 export async function requestSyncStop(shop) {
   const runningSince = await getSyncRunningSince(shop);
   if (!runningSince) return { requested: false, runningSince: null };
@@ -365,20 +383,136 @@ export async function requestSyncStop(shop) {
     data: { syncStopRequestedAt: requestedAt },
   });
   if (!count) return { requested: false, runningSince: null };
+  // Wake the run NOW if it is in this process — see fireStopSignal.
+  fireStopSignal(shop);
   return { requested: true, already: false, runningSince, requestedAt };
 }
 
-// Read by the run between orders and between jobs — see processOrderRecords and
-// runCronJobs. Cheap enough to ask per order: an order costs a second of
-// deliberate rate-limit sleep and several API calls, so one indexed lookup
-// beside it is noise, and asking any less often is how a stop ends up taking
-// minutes to be noticed.
+// ---------------------------------------------------------------------------
+// The in-process half of a stop: making the run notice at once
+// ---------------------------------------------------------------------------
+// The flag above is durable and works across processes, but on its own it is
+// only ever seen when something goes looking for it, and a run spends most of
+// its time NOT looking: asleep in a rate-limit pause, or waiting out a 429
+// back-off that doubles to 24 seconds. Pressing Stop and then watching the sync
+// carry on for another minute is what that felt like.
+//
+// So the stop is delivered twice. The row is written for correctness — another
+// process's run, or this one at its next boundary, still finds it. This
+// AbortController is written for latency: the Stop route and the background run
+// are usually the same Node process, so aborting it wakes every sleep in that
+// run in the same tick the button was pressed.
+//
+// Keyed by shop and armed when the lock is taken, so a signal can never outlive
+// the run it belongs to and stop the next one — the same hazard the flag itself
+// is cleared for in acquireSyncLock. Each entry carries the lock `token`
+// (syncStartedAt) it was armed with, for the same reason releaseSyncLock scopes
+// its own UPDATE to `token`: a stale-lock takeover and the old run's release can
+// land in either order, and without this the old run's release — resolving
+// after the new run has already armed — could delete the NEW run's controller
+// instead of its own. Scoping the delete to the token it was armed with makes
+// that a no-op: it only ever removes the entry it created.
+const stopSignals = new Map();
+
+// Called when a run takes the lock: a fresh, un-aborted signal for the new run.
+function armStopSignal(shop, token) {
+  stopSignals.set(shop, { controller: new AbortController(), token });
+}
+
+// Called when a run releases the lock. Dropped rather than aborted — an abort
+// here would look, to anything still holding the signal, exactly like a stop
+// nobody asked for. Only removes the entry if it's still the one THIS run
+// armed — see the note above stopSignals.
+function disarmStopSignal(shop, token) {
+  if (stopSignals.get(shop)?.token === token) stopSignals.delete(shop);
+}
+
+// Called by requestSyncStop. A no-op when the run is in another process, which
+// is exactly the case the database flag covers.
+function fireStopSignal(shop) {
+  stopSignals.get(shop)?.controller.abort();
+}
+
+// True when this process's run has already been told to stop — free to ask, no
+// query behind it. Callers use it to avoid a database round trip they know the
+// answer to.
+export function isStopSignalled(shop) {
+  return Boolean(stopSignals.get(shop)?.controller.signal.aborted);
+}
+
+// Read by the run at every point where stopping is safe — between orders, between
+// jobs, between fetched pages, and around every deliberate pause. Cheap enough to
+// ask that often: the in-process signal answers most calls with no query at all,
+// and an order costs several API calls, so one indexed lookup beside it is noise.
 export async function isSyncStopRequested(shop) {
+  if (isStopSignalled(shop)) return true;
   const settings = await prisma.netsuiteAppSettings.findUnique({
     where: { shop },
     select: { syncStopRequestedAt: true },
   });
   return Boolean(settings?.syncStopRequestedAt);
+}
+
+// How often a sleep that is waiting out a long pause re-asks the DATABASE. Only
+// matters when the run and the Stop button are in different processes; in one
+// process the signal has already woken it and this never fires.
+const STOP_POLL_MS = 1000;
+
+// sleep(), except a stop cuts it short.
+//
+// Every deliberate pause in a run goes through this: the per-order rate-limit
+// second, the paging pauses, the 429 back-off. They exist to be polite to
+// NetSuite, and once a run has been called off there is nothing left to be
+// polite about — finishing the pause only delays the stop by exactly its length.
+//
+// Resolves true if it slept the whole way, false if a stop cut it short. Callers
+// that are about to do more work should check the answer rather than assume they
+// waited.
+export async function sleepUnlessStopped(shop, ms) {
+  const controller = stopSignals.get(shop)?.controller;
+  if (controller?.signal.aborted) return false;
+
+  return new Promise((resolve) => {
+    let poll;
+    const finish = (slept) => {
+      clearTimeout(timer);
+      clearInterval(poll);
+      controller?.signal.removeEventListener("abort", onAbort);
+      resolve(slept);
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(true), ms);
+    controller?.signal.addEventListener("abort", onAbort, { once: true });
+
+    // The cross-process fallback, and only worth its queries on a pause long
+    // enough for one to land inside it — a one-second rate-limit sleep is
+    // shorter than the delay polling would save.
+    if (ms > STOP_POLL_MS * 2) {
+      poll = setInterval(async () => {
+        try {
+          if (await isSyncStopRequested(shop)) finish(false);
+        } catch {
+          // A failed lookup is not a stop. Sleep on and let the next boundary ask.
+        }
+      }, STOP_POLL_MS);
+    }
+  });
+}
+
+// Thrown when a NetSuite call gives up because the run was stopped rather than
+// because anything went wrong. Carried out through the same throw path as a real
+// failure — the callers that care tell the two apart by this flag, so a stopped
+// run doesn't fill its log with errors describing work nobody wanted done.
+export class SyncStoppedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "SyncStoppedError";
+    this.syncStopped = true;
+  }
+}
+
+export function isSyncStoppedError(err) {
+  return Boolean(err?.syncStopped);
 }
 
 // When the currently-running sync started, or null if none is running.
@@ -412,6 +546,7 @@ export async function getSyncRunState(shop) {
       syncStopRequestedAt: true,
       syncTotalOrders: true,
       syncDoneOrders: true,
+      syncPhase: true,
     },
   });
   const startedAt = settings?.syncStartedAt ?? null;
@@ -423,25 +558,41 @@ export async function getSyncRunState(shop) {
     // progress; afterwards they are what the last one got through.
     totalOrders: settings?.syncTotalOrders ?? null,
     doneOrders: settings?.syncDoneOrders ?? null,
+    // "fetching" (reading NetSuite) or "syncing" (writing to Shopify) — which
+    // stretch the two numbers above describe. See setSyncTotal.
+    phase: settings?.syncPhase ?? null,
   };
 }
 
-// How many orders this run has to do — set once, as soon as the fetch has
-// answered and before the first one is touched. Until it is set the page can
+// How many orders this run has to do — set once per phase, as soon as the count
+// is known and before the first one is touched. Until it is set the page can
 // only say "running"; after it, it can say how far along.
-// `done` is for the run that finishes its whole set in one step rather than
-// order by order — the export dry run writes every record at once, and leaving
-// it at 0 would report "0 of 50" for a run that handled all fifty.
-export async function setSyncTotal(shop, total, done = 0) {
+//
+// A run has two phases with two different counts: `phase` says which one this
+// call is reporting. "fetching" is set by fetchNetsuiteOrders once the listing
+// is in (before a single order is expanded); "syncing" — the default, and the
+// only phase this had before fetching got its own progress — is set once the
+// fetched set is in hand and about to be written to Shopify. `done` resets to 0
+// on the switch, which is what makes the page's counter restart rather than
+// read "53 of 12" when a run moves from fetching 53 into syncing 12 of them.
+//
+// `done` takes an explicit value, not just a reset, for the run that finishes
+// its whole set in one step rather than order by order — the export dry run
+// writes every record at once, and leaving it at 0 would report "0 of 50" for a
+// run that handled all fifty.
+export async function setSyncTotal(shop, total, done = 0, phase = "syncing") {
   await prisma.netsuiteAppSettings.updateMany({
     where: { shop },
-    data: { syncTotalOrders: total, syncDoneOrders: done },
+    data: { syncTotalOrders: total, syncDoneOrders: done, syncPhase: phase },
   });
 }
 
-// One more done. `increment` rather than a count passed in, so two writers can
-// never talk each other's number backwards, and so a caller does not have to
-// hold the running total.
+// One more done in the CURRENT phase. `increment` rather than a count passed
+// in, so two writers can never talk each other's number backwards, and so a
+// caller does not have to hold the running total. Safe to call from both
+// phases with no extra bookkeeping: setSyncTotal's phase switch already reset
+// the counter this increments, so the same call means "one fetched" during
+// fetching and "one synced" during syncing.
 //
 // Never allowed to fail the run: this is a progress bar. An order that synced
 // and then failed to be counted is still synced, and taking the sync down over
