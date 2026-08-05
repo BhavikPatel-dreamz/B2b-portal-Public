@@ -80,7 +80,7 @@ console.log(`
   range     ${args.from} -> ${args.to}   (read as ${timeZone})
   instants  ${range.from.toISOString()} -> ${range.to.toISOString()}
 
-  NetSuite is asked in whole DAYS, so the filter is wider than the range:
+  filter sent to NetSuite (names the range's own instants):
   q         ${q}
 `);
 

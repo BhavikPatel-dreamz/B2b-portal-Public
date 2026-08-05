@@ -533,7 +533,7 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     console.error(`[netsuite] expand order ${err.id} failed:`, err.error);
     errors.push(err);
   }
-  const { outsideWindow, scanned, scanStoppedAt } = scan;   // scanned: logged only
+  const { outsideWindow, scanned } = scan;   // both logged only
 
   if (window) {
     console.log(

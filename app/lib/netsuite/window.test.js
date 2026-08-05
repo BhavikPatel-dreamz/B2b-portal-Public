@@ -174,36 +174,31 @@ describe("plannedOrdersWindow", () => {
     assert.equal(w.from.toISOString(), "2026-08-02T06:00:00.000Z");
   });
 
-  // The card shows this next to from/to precisely because it is WIDER than
-  // from/to — NetSuite's q filter has no time of day. If this ever stops being
-  // day-granular the card's explanation stops being true.
-  //
-  // The upper bound is the day AFTER `to`, and that is not cosmetic: NetSuite
-  // compares a bare date against that date at midnight, so ON_OR_BEFORE "8/4"
-  // excludes everything that happened ON 8/4. This assertion used to read
-  // ON_OR_BEFORE "8/4/2026" and was locking in a query that matched nothing at
-  // all whenever a run began and ended on the same UTC day.
-  it("emits a day-granular query, which is why it is shown", () => {
+  // The filter carries a time of day now, so it names the watermark and "now"
+  // exactly rather than the whole days they fall in.
+  it("emits a datetime query naming both ends exactly", () => {
     delete process.env.NETSUITE_ORDERS_QUERY;
     process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS = "0";
     const w = plannedOrdersWindow(new Date("2026-08-04T03:00:00Z"), at);
     assert.equal(
       w.query,
-      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/5/2026"',
+      'lastModifiedDate ON_OR_AFTER "8/4/2026 03:00" AND lastModifiedDate ON_OR_BEFORE "8/4/2026 06:00"',
     );
   });
 
-  // The regression itself, stated as the rule rather than as one string: a query
-  // whose two dates are equal is a query NetSuite answers with nothing, and a
-  // scheduled run inside a single UTC day emits exactly that shape.
-  it("never names the same day on both ends", () => {
+  // The bug the day-granular version had: a run beginning and ending inside one
+  // day emitted ON_OR_AFTER "8/4" AND ON_OR_BEFORE "8/4", which NetSuite answers
+  // with nothing. With a time on each end the two are distinct by construction —
+  // asserted as the rule rather than as one string, because it is the rule that
+  // matters.
+  it("never names the same instant on both ends", () => {
     delete process.env.NETSUITE_ORDERS_QUERY;
     process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS = "0";
     for (const sinceIso of ["2026-08-04T00:30:00Z", "2026-08-04T03:00:00Z", "2026-08-04T05:59:00Z"]) {
       const [, after, before] = plannedOrdersWindow(new Date(sinceIso), at).query.match(
         /ON_OR_AFTER "([^"]+)".*ON_OR_BEFORE "([^"]+)"/,
       );
-      assert.notEqual(after, before, `same-day watermark ${sinceIso} matches nothing`);
+      assert.notEqual(after, before, `same-instant watermark ${sinceIso} matches nothing`);
     }
   });
 
@@ -220,51 +215,64 @@ describe("plannedOrdersWindow", () => {
 describe("buildOrdersQuery for an explicit window", () => {
   const window = (fromIso, toIso) => ({ from: new Date(fromIso), to: new Date(toIso) });
 
-  it("spans a real range for a window inside one day", () => {
+  // The filter carries a time of day, so a one-hour window is asked for as that
+  // hour — not as the whole day (or three) it falls in, which is what the
+  // day-granular version had to do.
+  it("names the window's own two instants", () => {
     assert.equal(
       buildOrdersQuery(null, window("2026-08-05T03:39:00Z", "2026-08-05T04:39:00Z")),
-      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+      'lastModifiedDate ON_OR_AFTER "8/5/2026 03:39" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 04:39"',
     );
   });
 
-  // The extra day at the START is the account-timezone margin: NetSuite reads
-  // these literals in the account's own zone, so its "8/5" may begin hours after
-  // 8/5 00:00Z. inWindow trims the surplus back to the exact window afterwards,
-  // so over-reading costs scan time and nothing else.
-  it("keeps a day of margin below the window", () => {
-    const q = buildOrdersQuery(null, window("2026-08-05T00:10:00Z", "2026-08-05T01:10:00Z"));
-    assert.match(q, /ON_OR_AFTER "8\/4\/2026"/);
+  it("reads those instants in the configured zone", () => {
+    assert.equal(
+      buildOrdersQuery(null, window("2026-08-05T03:39:00Z", "2026-08-05T04:39:00Z"), "America/New_York"),
+      'lastModifiedDate ON_OR_AFTER "8/4/2026 23:39" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 00:39"',
+    );
   });
 
   it("still covers a window that spans days", () => {
     assert.equal(
       buildOrdersQuery(null, window("2026-08-03T04:00:00Z", "2026-08-05T04:00:00Z")),
-      'lastModifiedDate ON_OR_AFTER "8/2/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+      'lastModifiedDate ON_OR_AFTER "8/3/2026 04:00" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 04:00"',
+    );
+  });
+
+  // The literal has no seconds, so each end is snapped to a whole minute — the
+  // lower down and the upper UP, so the emitted range is always a superset of the
+  // real one. Snapping the top down would shave off up to 59 seconds, and an
+  // order modified in that sliver would never be returned at all.
+  it("rounds the upper bound outward so no instant is excluded", () => {
+    const q = buildOrdersQuery(null, window("2026-08-05T03:39:12Z", "2026-08-05T04:39:12Z"));
+    assert.match(q, /ON_OR_AFTER "8\/5\/2026 03:39"/, "lower bound floors");
+    assert.match(q, /ON_OR_BEFORE "8\/5\/2026 04:40"/, "upper bound ceils");
+  });
+
+  it("covers the last instant of a whole-day custom range", () => {
+    // 23:59:59.999 must not become 23:59 — that would drop the final second.
+    const q = buildOrdersQuery(null, window("2026-08-01T00:00:00.000Z", "2026-08-05T23:59:59.999Z"));
+    assert.equal(
+      q,
+      'lastModifiedDate ON_OR_AFTER "8/1/2026 00:00" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 00:00"',
     );
   });
 });
 
-// A hand-typed from/to range (the dropdown's "Custom range") takes exactly the
-// same path — parseCustomRange resolves the two dates, and everything after that
-// is the windowed run above. These assert the join between the two, since that is
-// the only part the range adds. What parseCustomRange itself accepts and refuses
-// is covered in sync-custom-range.test.js, which needs no NetSuite imports.
 describe("buildOrdersQuery for a custom from/to range", () => {
   it("spans both ends of the range the operator typed", () => {
     const { from, to } = parseCustomRange("2026-08-01", "2026-08-05");
     assert.equal(
       buildOrdersQuery(null, { from, to }),
-      // Upper bound is the day AFTER `to` (NetSuite compares a bare date literal
-      // against that date at midnight), lower bound takes the timezone margin.
-      'lastModifiedDate ON_OR_AFTER "7/31/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+      'lastModifiedDate ON_OR_AFTER "8/1/2026 00:00" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 00:00"',
     );
   });
 
-  it("does not collapse a same-day range to the query that matched nothing", () => {
+  it("keeps a same-day range as a real span rather than a point", () => {
     const { from, to } = parseCustomRange("2026-08-05", "2026-08-05");
     assert.equal(
       buildOrdersQuery(null, { from, to }),
-      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+      'lastModifiedDate ON_OR_AFTER "8/5/2026 00:00" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 00:00"',
     );
   });
 });

@@ -13,33 +13,38 @@ import { DEFAULT_TIME_ZONE, zonedParts } from "../timezone/index.js";
 // scripts/netsuite-orders.mjs use the SAME query builder the sync uses instead of
 // reimplementing it and drifting from it.
 
-// Formats a Date as NetSuite's N/query date format (M/D/YYYY, no leading zeros).
-// Date-granularity is all the record-collection q filter documents. Truncating
-// the watermark to its date is what keeps that safe: ON_OR_AFTER the watermark's
-// DAY re-includes everything modified earlier that same day, so nothing between
-// the watermark's time-of-day and midnight can slip through. The cost is that
-// the watermark day is re-pulled every run, which is harmless — the sync is
-// idempotent. (NETSUITE_BEFORE_LAST_SYNC_HOURS can widen the window further on
-// top of this truncation; unset, this truncation is the only overlap there is.)
+const MINUTE_MS = 60 * 1000;
+
+// The same instant with its time of day, as NetSuite's 24-hour datetime literal:
+// M/D/YYYY HH:MM. This is what makes the filter mean the window that was asked
+// for instead of the whole day (or three) it falls in.
 //
-// WHICH day an instant falls on is a timezone question, and it is the one that
-// decides what a run fetches. NetSuite evaluates these bare date literals against
-// its ACCOUNT's timezone, so `timeZone` should be that account's — configured as
-// SYNC_TIMEZONE, or the shop's own when the two agree (see timezone.server.js).
-// Defaulted to UTC, which is what this named before a zone could be configured,
-// so an unconfigured install keeps the behaviour it already had.
-function nsQueryDate(d, timeZone = DEFAULT_TIME_ZONE) {
-  const p = zonedParts(d, timeZone);
-  return `${p.month}/${p.day}/${p.year}`;
+// The literal carries no seconds, so the instant is snapped to a whole minute
+// FIRST — and which way it snaps depends on which end of the range it is. `round`
+// is "floor" for the lower bound and "ceil" for the upper, so the emitted range
+// is always a superset of the real one, never a subset. Snapping both down would
+// shave up to 59 seconds off the top of the window, and an order modified in
+// that sliver would simply never be returned — inWindow cannot recover a record
+// NetSuite did not send.
+function nsQueryDateTime(d, timeZone = DEFAULT_TIME_ZONE, round = "floor") {
+  const ms = d.getTime();
+  const snapped = new Date(
+    round === "ceil" ? Math.ceil(ms / MINUTE_MS) * MINUTE_MS : Math.floor(ms / MINUTE_MS) * MINUTE_MS,
+  );
+  const p = zonedParts(snapped, timeZone);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${p.month}/${p.day}/${p.year} ${pad(p.hour)}:${pad(p.minute)}`;
 }
 
 // Whether a fetched record really falls inside an explicit window.
 //
-// It has to be re-checked here because the q filter is date-granular (see
-// nsQueryDate): "last 2 hours" can only be asked of NetSuite as the whole day
-// (or two) it spans, so the list comes back wider than what was asked for and
-// the surplus is dropped once the records — which do carry a full
-// lastModifiedDate timestamp — have been expanded.
+// The q filter names the window's own instants now (see nsQueryDateTime), so
+// NetSuite should already be returning only what was asked for. This stays as the
+// safety net, because the query is evaluated in the NETSUITE ACCOUNT's timezone
+// while the literals are written in SYNC_TIMEZONE — and nothing here can verify
+// those are the same. If they differ, the returned set is shifted by the offset
+// between them, and this is what trims the surplus back off. It also absorbs the
+// upward rounding of the upper bound to a whole minute.
 //
 // A record with no readable lastModifiedDate is KEPT rather than dropped: the
 // demo feed carries no dates at all, and judging a window by a field that isn't
@@ -158,11 +163,7 @@ function beforeLastSyncMs() {
   return Number.isFinite(n) && n > 0 ? n * 60 * 60 * 1000 : 0;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 
-function shiftDays(d, days) {
-  return new Date(d.getTime() + days * DAY_MS);
-}
 
 // NetSuite compares a bare date literal against that date at MIDNIGHT, so
 // ON_OR_BEFORE "8/4/2026" means "at or before 8/4 00:00" — the named day's own
@@ -203,9 +204,8 @@ function shiftDays(d, days) {
 // the configured zone is the NetSuite account's — a wrong guess with no margin
 // silently drops orders at the edges of a window, and the margin costs only scan
 // time that inWindow reclaims.
-function dateRangeQuery({ from, to }, lowerMarginDays = 0, timeZone = DEFAULT_TIME_ZONE) {
-  const start = lowerMarginDays ? shiftDays(from, -lowerMarginDays) : from;
-  return `lastModifiedDate ON_OR_AFTER "${nsQueryDate(start, timeZone)}" AND lastModifiedDate ON_OR_BEFORE "${nsQueryDate(shiftDays(to, 1), timeZone)}"`;
+function dateRangeQuery({ from, to }, timeZone = DEFAULT_TIME_ZONE) {
+  return `lastModifiedDate ON_OR_AFTER "${nsQueryDateTime(from, timeZone, "floor")}" AND lastModifiedDate ON_OR_BEFORE "${nsQueryDateTime(to, timeZone, "ceil")}"`;
 }
 
 // The stretch of modification time a scheduled run covers: from the watermark
@@ -232,9 +232,9 @@ export function buildOrdersQuery(since, window, timeZone = DEFAULT_TIME_ZONE) {
   // hours"), so the manual/backfill override does not get to silently replace
   // it — nor does the overlap buffer, which exists to protect the watermark and
   // has no watermark to protect here.
-  if (window) return dateRangeQuery(window, 1, timeZone);
+  if (window) return dateRangeQuery(window, timeZone);
   if (process.env.NETSUITE_ORDERS_QUERY) return process.env.NETSUITE_ORDERS_QUERY;
-  return dateRangeQuery(watermarkWindow(since, new Date()), 0, timeZone);
+  return dateRangeQuery(watermarkWindow(since, new Date()), timeZone);
 }
 
 // What a scheduled run starting at `at` would ask NetSuite for, given the
@@ -251,7 +251,7 @@ export function plannedOrdersWindow(since, at = new Date(), timeZone = DEFAULT_T
   return {
     from: window.from,
     to: window.to,
-    query: override || dateRangeQuery(window, 0, timeZone),
+    query: override || dateRangeQuery(window, timeZone),
     // NETSUITE_ORDERS_QUERY replaces the window outright, so when it is set the
     // from/to above are not what the run will really read.
     override: Boolean(override),
