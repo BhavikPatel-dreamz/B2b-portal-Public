@@ -6911,18 +6911,19 @@ export async function getAdvancedCompanyOrders(
     }
 
     // 2. Company & Customer Query Building
-    if (cleanCompanyId && filters.customerId) {
-      if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
-        const customerQueries = filters.customerId
-          .map((id) => `customer_id:${extractId(id)}`)
-          .join(" OR ");
-        queryParts.push(`(company_id:${cleanCompanyId} OR (${customerQueries}))`);
-      } else if (typeof filters.customerId === "string") {
-        const cleanCustomerId = extractId(filters.customerId);
-        queryParts.push(`(company_id:${cleanCompanyId} OR customer_id:${cleanCustomerId})`);
-      }
-    } else if (cleanCompanyId) {
+    if (cleanCompanyId) {
       queryParts.push(`company_id:${cleanCompanyId}`);
+      if (filters.customerId) {
+        if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
+          const customerQueries = filters.customerId
+            .map((id) => `customer_id:${extractId(id)}`)
+            .join(" OR ");
+          queryParts.push(`(${customerQueries})`);
+        } else if (typeof filters.customerId === "string") {
+          const cleanCustomerId = extractId(filters.customerId);
+          queryParts.push(`customer_id:${cleanCustomerId}`);
+        }
+      }
     } else if (filters.customerId) {
       if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
         const customerQueries = filters.customerId
@@ -7398,20 +7399,22 @@ export async function getAdvancedCompanyOrders(
       );
 
       processedOrders = processedOrders.filter((order: OrderNode) => {
-        const orderLocationId = extractId(order?.locationId || "");
+        const orderLocationId = extractId(
+          order?.locationId || (order as any)?.purchasingEntity?.location?.id || "",
+        );
 
         if (!orderLocationId) {
-          console.log(`ℹ️ Order ${order.name} has no explicit locationId, keeping for company view`);
-          return true;
+          console.log(`🚫 RBAC location filter: Excluded order ${order.name} (order has no company location)`);
+          return false;
         }
 
         const isAllowed = normalizedAllowedIds.includes(orderLocationId);
 
-        // if (!isAllowed) {
-        //   console.log(
-        //     `🚫 RBAC filter: Excluded order ${order.name} (location: ${orderLocationId})`,
-        //   );
-        // }
+        if (!isAllowed) {
+          console.log(
+            `🚫 RBAC location filter: Excluded order ${order.name} (location ${orderLocationId} not in assigned locations: ${normalizedAllowedIds.join(", ")})`,
+          );
+        }
 
         return isAllowed;
       });
