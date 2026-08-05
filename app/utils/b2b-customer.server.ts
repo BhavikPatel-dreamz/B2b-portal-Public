@@ -6887,44 +6887,23 @@ export async function getAdvancedCompanyOrders(
     let needsLocationPostFilter = false;
     let requestedLocationId: string | undefined = undefined;
 
-    // 1. Location Filter - DON'T add to GraphQL query, we'll post-filter
+    // 1. Location & Company Query Building
     if (filters.locationId) {
-      // Check authorization if user has restricted access
-      if (allowedLocationIds && allowedLocationIds.length > 0) {
-        const hasAccess = allowedLocationIds.some(
-          (id) => extractId(id) === extractId(filters.locationId!),
-        );
-
-        if (!hasAccess) {
-          return {
-            orders: [],
-            totalCount: 0,
-            error: "Unauthorized access to location",
-          };
-        }
-      }
-
-      // Store for post-filtering instead of adding to query
-      requestedLocationId = extractId(filters.locationId);
+      const cleanLocationId = extractId(filters.locationId);
+      requestedLocationId = cleanLocationId;
       needsLocationPostFilter = true;
-      console.log(`📍 Will post-filter by location: ${requestedLocationId}`);
+      queryParts.push(`company_location_id:${cleanLocationId}`);
+    } else if (allowedLocationIds && allowedLocationIds.length > 0) {
+      const locQueries = allowedLocationIds
+        .map((id) => `company_location_id:${extractId(id)}`)
+        .join(" OR ");
+      queryParts.push(`(${locQueries})`);
+    } else if (cleanCompanyId) {
+      queryParts.push(`company_id:${cleanCompanyId}`);
     }
 
-    // 2. Company & Customer Query Building
-    if (cleanCompanyId) {
-      queryParts.push(`company_id:${cleanCompanyId}`);
-      if (filters.customerId) {
-        if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
-          const customerQueries = filters.customerId
-            .map((id) => `customer_id:${extractId(id)}`)
-            .join(" OR ");
-          queryParts.push(`(${customerQueries})`);
-        } else if (typeof filters.customerId === "string") {
-          const cleanCustomerId = extractId(filters.customerId);
-          queryParts.push(`customer_id:${cleanCustomerId}`);
-        }
-      }
-    } else if (filters.customerId) {
+    // 2. Customer Query Building
+    if (filters.customerId) {
       if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
         const customerQueries = filters.customerId
           .map((id) => `customer_id:${extractId(id)}`)
