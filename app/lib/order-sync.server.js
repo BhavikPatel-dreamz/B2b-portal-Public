@@ -5,20 +5,23 @@ import prisma from "../db.server.js";
 import { unauthenticated } from "../shopify.server.js";
 import demoFeed from "../data/demo-orders.json";
 import { extraFunction } from "./extra-function.server.js";
-import { fetchNetsuiteOrders, targetedOrderIds, INVOICE_PAID_IN_FULL } from "./netsuite.server.js";
+import { buildOrdersQuery, fetchNetsuiteOrders, targetedOrderIds, INVOICE_PAID_IN_FULL } from "./netsuite.server.js";
 import { orderAttemptLimit, quarantinedOrders } from "./order-sync-log.server.js";
 import { windowLabel, windowRange } from "./sync-windows.js";
 import {
   acquireSyncLock,
   bumpSyncDone,
+  clearSyncWindowResume,
   getLastSyncedAt,
   getSyncListOffset,
+  getSyncWindowResume,
   isSyncStopRequested,
   isSyncStoppedError,
   releaseSyncLock,
   setLastSyncedAt,
   setSyncListOffset,
   setSyncTotal,
+  setSyncWindowResume,
 } from "./netsuite-oauth.server.js";
 
 // ---------------------------------------------------------------------------
@@ -1119,11 +1122,35 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // `since` still stands for "the oldest modification time this run looked at", so
   // the log lines below read the same either way.
   const since = window ? window.from : await getLastSyncedAt(shop);
-  // Where a previous scheduled run's NETSUITE_ORDER_LIMIT cap left off within
-  // this watermark period — see setSyncListOffset. Meaningless for a windowed
-  // or targeted run (neither has a "period" to resume), so neither asks.
-  const startOffset = window || targeted.length ? 0 : await getSyncListOffset(shop);
-  const feed = await fetchExternalOrders(shop, window ? { window } : { since, startOffset });
+  // Where a previous run's NETSUITE_ORDER_LIMIT cap left off, so this run
+  // resumes further into the backlog instead of re-listing from the top and
+  // capping on the exact same candidates every time — see setSyncListOffset
+  // (scheduled) and setSyncWindowResume (windowed). Meaningless for a
+  // targeted run: a hand-picked id list has no "period" or "session" to
+  // resume, it just asks about exactly what it was given.
+  //
+  // A windowed run's query is recomputed here (not just derived from the
+  // window) because THIS is the exact q the run is about to send — the same
+  // string a resumed session is checked against below, so "does this request
+  // match the saved session" can never silently disagree with "what did the
+  // saved session actually run".
+  const windowQuery = window ? buildOrdersQuery(since, window) : null;
+  let startOffset = 0;
+  if (targeted.length) {
+    startOffset = 0;
+  } else if (window) {
+    const resume = await getSyncWindowResume(shop);
+    // Both the hours choice AND the exact day-granular query have to match —
+    // see the schema comment on syncWindowOffset for the hazard two different
+    // hours choices sharing one query would create if only the query were
+    // checked.
+    if (resume.hours === window.hours && resume.query === windowQuery) {
+      startOffset = resume.offset;
+    }
+  } else {
+    startOffset = await getSyncListOffset(shop);
+  }
+  const feed = await fetchExternalOrders(shop, window ? { window, startOffset } : { since, startOffset });
   const records = Array.isArray(feed?.items) ? feed.items : [];
 
   // Stop sync, pressed while the fetch was in flight. Fetching is the longest
@@ -1314,6 +1341,35 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
     // so the same starting point (and so the same failed orders) comes up
     // again next run. This is the existing retry behavior, unchanged.
   }
+
+  // The windowed equivalent of the block above — a windowed run has no
+  // watermark, so "done with this period" is tracked as its own session (see
+  // setSyncWindowResume) instead. Same shape, same reasoning: a capped-but-
+  // clean run advances the cursor so the SAME hours choice, pressed again,
+  // continues past what this run covered; a fully-drained clean run clears
+  // the session because there is nothing left to resume; anything with a
+  // genuine failure leaves the session exactly where it was, so the failure
+  // stays reachable at the same position rather than the cursor stepping
+  // over it.
+  //
+  // `feed.scanned`, not feed.capped.fetched — see the comment on that field in
+  // fetchNetsuiteOrders. items.length (what capped.fetched counts) is how many
+  // landed IN the window; scanned is how many were looked at, in or out, which
+  // is the number that has to be skipped on resume or an out-of-window
+  // candidate this run already ruled out could get missed by a narrower
+  // window that still needed its own look at it.
+  if (window) {
+    if (blocking === 0 && feed?.capped) {
+      await setSyncWindowResume(shop, {
+        offset: startOffset + (feed.scanned ?? 0),
+        query: windowQuery,
+        hours: window.hours,
+      });
+    } else if (blocking === 0 && !stoppedEarly) {
+      await clearSyncWindowResume(shop);
+    }
+  }
+
   const run = {
     shop,
     mode: window ? `window sync (${window.label})` : undefined,

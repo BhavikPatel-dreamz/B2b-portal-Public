@@ -281,6 +281,44 @@ export async function setSyncListOffset(shop, offset) {
   });
 }
 
+// The windowed-run equivalent of getSyncListOffset/setSyncListOffset — see the
+// schema comment on syncWindowOffset for why a windowed run needs its own
+// session (query + hours) rather than just an offset: unlike the watermark,
+// there is no other state that already identifies "which period is this".
+export async function getSyncWindowResume(shop) {
+  const settings = await prisma.netsuiteAppSettings.findUnique({
+    where: { shop },
+    select: { syncWindowOffset: true, syncWindowQuery: true, syncWindowHours: true },
+  });
+  return {
+    offset: settings?.syncWindowOffset ?? 0,
+    query: settings?.syncWindowQuery ?? null,
+    hours: settings?.syncWindowHours ?? null,
+  };
+}
+
+// Persists where a capped-but-clean windowed run got to, alongside the exact
+// question it was answering (query + hours) so a later request can tell
+// whether it is safe to resume from this or whether it is asking something
+// else and must start over.
+export async function setSyncWindowResume(shop, { offset, query, hours }) {
+  await prisma.netsuiteAppSettings.upsert({
+    where: { shop },
+    update: { syncWindowOffset: offset, syncWindowQuery: query, syncWindowHours: hours },
+    create: { shop, syncWindowOffset: offset, syncWindowQuery: query, syncWindowHours: hours },
+  });
+}
+
+// Called once a windowed run's candidate list is fully drained (not capped) —
+// there is nothing left to resume, and leaving the old session behind would
+// only risk a later, unrelated request mistaking it for a match by coincidence.
+export async function clearSyncWindowResume(shop) {
+  await prisma.netsuiteAppSettings.updateMany({
+    where: { shop },
+    data: { syncWindowOffset: null, syncWindowQuery: null, syncWindowHours: null },
+  });
+}
+
 // What the last successful scheduled run covered: { from, to }. `to` is the
 // watermark — the run's own start time, which is where the next run picks up —
 // and `from` is where that run started reading. Both null before the first

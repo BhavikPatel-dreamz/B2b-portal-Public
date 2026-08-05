@@ -593,19 +593,26 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     const pageSize = Math.min(1000, Math.max(1, maxOrders)); // 1000 = REST maximum
 
     refs = [];
-    // Resumes a backlog a previous capped run couldn't finish (see
-    // setSyncListOffset) instead of always starting the list over at 0 — that
-    // was the bug: NETSUITE_ORDER_LIMIT capped every run at the SAME first N
-    // candidates, forever, because nothing ever told the next run to look
-    // further in. Only meaningful without a window — a windowed run has no
-    // persisted period to resume, so it always gets 0 from its caller.
+    // Resumes a backlog a previous capped run couldn't finish instead of
+    // always starting the list over at 0 — that was the bug: NETSUITE_ORDER_
+    // LIMIT capped every run at the SAME first N candidates, forever, because
+    // nothing ever told the next run to look further in. Used for both a
+    // scheduled run (setSyncListOffset) and a windowed one (setSyncWindowResume)
+    // — the caller decides which session, if any, applies and passes 0 when
+    // none does.
     //
-    // Floored to a multiple of pageSize rather than trusted outright: SuiteTalk
-    // rejects an offset that isn't (see the comment below), which a persisted
-    // offset from a run under a DIFFERENT NETSUITE_ORDER_LIMIT could violate.
-    // Rounding down costs re-scanning a handful of already-done candidates —
-    // safe and idempotent — never skips ahead past ones that were not.
+    // The API call itself starts at a FLOORED multiple of pageSize — SuiteTalk
+    // rejects an offset that isn't (see the comment below), which an exact
+    // startOffset frequently is not: the scheduled path always caps on a page
+    // boundary, but a windowed run's scan can stop mid-page, the instant its
+    // keepLimit-th in-window match turns up, wherever that lands. The precise
+    // resume point is restored below by trimming the handful of leading
+    // candidates between the floor and the real startOffset back out of refs —
+    // fetched an extra time (safe, idempotent) but never re-SCANNED as if they
+    // were new, which flooring alone would have caused: a candidate already
+    // ruled in or out last time would be examined, and possibly kept, again.
     const listStartOffset = Math.floor((startOffset || 0) / pageSize) * pageSize;
+    const leadingOverlap = (startOffset || 0) - listStartOffset;
     let offset = listStartOffset;
     let totalResults = null;
     for (;;) {
@@ -625,7 +632,7 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
       const page = Array.isArray(list?.items) ? list.items : [];
       if (totalResults === null) totalResults = list?.totalResults ?? null;
       refs.push(...page);
-      if (!list?.hasMore || !page.length || refs.length >= maxRefs) break;
+      if (!list?.hasMore || !page.length || refs.length >= maxRefs + leadingOverlap) break;
       offset += pageSize;
       // Listing is pure reading — no Shopify order exists yet and no watermark
       // has moved — so every page boundary is a safe place to stop, and stopping
@@ -636,6 +643,11 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
         break;
       }
     }
+    // The floor-to-page-boundary overlap, trimmed back out — see above. Must
+    // happen BEFORE the maxRefs trim below: it removes from the FRONT, that
+    // one from the BACK, and refs.length has to mean "candidates from the true
+    // startOffset" by the time either count is used for anything.
+    if (leadingOverlap > 0) refs = refs.slice(leadingOverlap);
     // A full page can overshoot; keep the first maxRefs.
     if (refs.length > maxRefs) refs = refs.slice(0, maxRefs);
 
@@ -654,14 +666,16 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     // saying nothing. The stop is reported on its own terms instead — the run
     // ends as stopped, and its watermark stays put for that reason.
     //
-    // `matched`/`skipped` are counted against listStartOffset + refs.length —
+    // `matched`/`skipped` are counted against startOffset + refs.length (the
+    // TRUE resume point, not the page-floored listStartOffset — refs has
+    // already had the floor-to-true overlap trimmed back out above) —
     // everything this PERIOD has covered so far, this run included, not just
     // this run's own slice — because a resumed run (see startOffset above)
     // already has earlier runs' progress behind it. Counting only this run's
     // refs.length would report the same "N skipped" on every run of a draining
     // backlog even as it genuinely got smaller, which is exactly the confusing
     // symptom this whole mechanism exists to fix.
-    const coveredSoFar = listStartOffset + refs.length;
+    const coveredSoFar = (startOffset || 0) + refs.length;
     if (!stopped && totalResults != null && totalResults > coveredSoFar) {
       // Which limit stopped the listing decides which one to name — telling
       // someone to raise NETSUITE_ORDER_LIMIT when it was the scan ceiling that
@@ -768,7 +782,7 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     console.warn(
       `[netsuite] ${shop}: fetch stopped by hand — returning ${items.length} order(s) unenriched; the caller will not sync them.`,
     );
-    return { items, errors, capped, stopped: true, ...(window ? { outsideWindow } : {}) };
+    return { items, errors, capped, stopped: true, ...(window ? { outsideWindow, scanned } : {}) };
   }
 
   // Fetch tracking numbers from linked Item Fulfillment records and attach
@@ -844,7 +858,16 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     }
   }
 
-  return { items, errors, capped, ...(window ? { outsideWindow } : {}) };
+  // `scanned` (windowed only) is how many of THIS run's listed candidates were
+  // actually examined — the number a resumed run needs to add to its own
+  // startOffset to know where the next one should pick up (see
+  // setSyncWindowResume in runOrderSync). It is deliberately NOT items.length:
+  // that only counts the ones that landed IN the window, while `scanned` counts
+  // everything looked at, in or out — resuming has to skip past both, or an
+  // out-of-window candidate this run already ruled out would get re-examined
+  // (harmless) while an unexamined one past it could be missed if the two
+  // counts were conflated.
+  return { items, errors, capped, ...(window ? { outsideWindow, scanned } : {}) };
 }
 
 // ---------------------------------------------------------------------------
