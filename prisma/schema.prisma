@@ -605,7 +605,9 @@ model NetsuiteAppSettings {
   // X". A run older than the stale timeout is taken over, so a process that dies
   // without clearing this doesn't block the shop forever.
   syncStartedAt  DateTime?
-
+  syncTotalOrders Int?
+  syncDoneOrders  Int?
+  syncStopRequestedAt DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }

@@ -123,6 +123,35 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       customerPhone: shopifyOrderDetails?.customerPhone || null,
       shopifyPaymentStatus: shopifyOrderDetails?.paymentStatus || null,
       shopifyFulfillmentStatus: shopifyOrderDetails?.fulfillmentStatus || null,
+      // The complete Shopify-side view of this order (money breakdown,
+      // addresses, tax/discount lines, fulfillments with tracking, and payment
+      // transactions), kept under its own key so it can't collide with the
+      // app's stored fields above and the page can render it as-is.
+      shopifyDetails: shopifyOrderDetails
+        ? {
+            note: shopifyOrderDetails.note,
+            tags: shopifyOrderDetails.tags,
+            email: shopifyOrderDetails.email,
+            phone: shopifyOrderDetails.phone,
+            currencyCode: shopifyOrderDetails.currencyCode,
+            confirmationNumber: shopifyOrderDetails.confirmationNumber,
+            draftStatus: shopifyOrderDetails.draftStatus,
+            createdAt: shopifyOrderDetails.createdAt,
+            processedAt: shopifyOrderDetails.processedAt,
+            cancelledAt: shopifyOrderDetails.cancelledAt,
+            cancelReason: shopifyOrderDetails.cancelReason,
+            closed: shopifyOrderDetails.closed,
+            closedAt: shopifyOrderDetails.closedAt,
+            totals: shopifyOrderDetails.totals,
+            shippingAddress: shopifyOrderDetails.shippingAddress,
+            billingAddress: shopifyOrderDetails.billingAddress,
+            shippingLines: shopifyOrderDetails.shippingLines,
+            taxLines: shopifyOrderDetails.taxLines,
+            discounts: shopifyOrderDetails.discounts,
+            fulfillments: shopifyOrderDetails.fulfillments,
+            transactions: shopifyOrderDetails.transactions,
+          }
+        : null,
       orderNumber: getOrderNumber(order),
       orderTotal: order.orderTotal.toString(),
       paidAmount: order.paidAmount.toString(),
@@ -344,12 +373,58 @@ async function getShopifyOrderDetails(order: any) {
   if (!shopDomain || !accessToken || !shopifyOrderIds.length) return null;
 
   try {
+    // Everything the Shopify side knows about this order — the full money
+    // breakdown, both addresses, tax and discount lines, fulfillments with
+    // tracking, and payment transactions. The Order and DraftOrder fragments
+    // diverge because a draft has no fulfillments, transactions or display
+    // statuses; the fields each type doesn't have are left null in the mapping
+    // below rather than queried.
+    const moneyBag = `shopMoney { amount currencyCode }`;
+    const addressFields = `
+      firstName
+      lastName
+      company
+      address1
+      address2
+      city
+      province
+      provinceCode
+      country
+      countryCodeV2
+      zip
+      phone
+    `;
+    const lineItemFields = `
+      id
+      title
+      quantity
+      sku
+      variantTitle
+      requiresShipping
+      image { url }
+      variant { id }
+      product { id }
+      originalUnitPriceSet { ${moneyBag} }
+      discountedTotalSet { ${moneyBag} }
+    `;
     const query = `
         query GetShopifyOrderDetails($id: ID!) {
           node(id: $id) {
             ... on Order {
               id
               name
+              note
+              tags
+              email
+              phone
+              createdAt
+              processedAt
+              cancelledAt
+              cancelReason
+              closed
+              closedAt
+              confirmationNumber
+              currencyCode
               displayFinancialStatus
               displayFulfillmentStatus
               customer {
@@ -358,65 +433,104 @@ async function getShopifyOrderDetails(order: any) {
                 email
                 phone
               }
-              lineItems(first: 250) {
-              edges {
-                node {
-                  id
-                  title
-                  quantity
-                  sku
-                  variantTitle
-                  originalUnitPriceSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
+              subtotalPriceSet { ${moneyBag} }
+              totalTaxSet { ${moneyBag} }
+              totalShippingPriceSet { ${moneyBag} }
+              totalDiscountsSet { ${moneyBag} }
+              totalPriceSet { ${moneyBag} }
+              totalRefundedSet { ${moneyBag} }
+              taxLines {
+                title
+                ratePercentage
+                priceSet { ${moneyBag} }
+              }
+              shippingLines(first: 10) {
+                edges {
+                  node {
+                    title
+                    originalPriceSet { ${moneyBag} }
                   }
-                  discountedTotalSet {
-                    shopMoney {
-                      amount
-                      currencyCode
+                }
+              }
+              discountApplications(first: 10) {
+                edges {
+                  node {
+                    allocationMethod
+                    targetSelection
+                    targetType
+                    value {
+                      ... on MoneyV2 { amount currencyCode }
+                      ... on PricingPercentageValue { percentage }
                     }
                   }
                 }
               }
+              shippingAddress { ${addressFields} }
+              billingAddress { ${addressFields} }
+              fulfillments(first: 20) {
+                status
+                createdAt
+                deliveredAt
+                trackingInfo {
+                  company
+                  number
+                  url
+                }
+              }
+              transactions(first: 20) {
+                id
+                gateway
+                kind
+                status
+                processedAt
+                amountSet { ${moneyBag} }
+              }
+              lineItems(first: 250) {
+                edges {
+                  node { ${lineItemFields} }
+                }
+              }
             }
-          }
-          ... on DraftOrder {
-            id
-            name
-            customer {
-              firstName
-              lastName
+            ... on DraftOrder {
+              id
+              name
+              note2
+              tags
               email
               phone
-            }
-            lineItems(first: 250) {
-              edges {
-                node {
-                  id
-                  title
-                  quantity
-                  sku
-                  variantTitle
-                  originalUnitPriceSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
-                  }
-                  discountedTotalSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
-                  }
+              createdAt
+              status
+              currencyCode
+              customer {
+                firstName
+                lastName
+                email
+                phone
+              }
+              subtotalPriceSet { ${moneyBag} }
+              totalTaxSet { ${moneyBag} }
+              totalShippingPriceSet { ${moneyBag} }
+              totalDiscountsSet { ${moneyBag} }
+              totalPriceSet { ${moneyBag} }
+              taxLines {
+                title
+                ratePercentage
+                priceSet { ${moneyBag} }
+              }
+              shippingLine {
+                title
+                originalPriceSet { ${moneyBag} }
+              }
+              shippingAddress { ${addressFields} }
+              billingAddress { ${addressFields} }
+              lineItems(first: 250) {
+                edges {
+                  node { ${lineItemFields} }
                 }
               }
             }
           }
         }
-      }
     `;
 
     let payload: any = null;
@@ -473,12 +587,13 @@ async function getShopifyOrderDetails(order: any) {
 
         return {
           id: item.id || null,
-          productId: null,
+          productId: item.product?.id || null,
           productTitle: item.title || "Product",
-          variantId: null,
+          variantId: item.variant?.id || null,
           variantTitle: item.variantTitle || null,
           sku: item.sku || null,
-          image: null,
+          image: item.image?.url || null,
+          requiresShipping: item.requiresShipping ?? null,
           quantity,
           unitPrice: unitPrice || "0",
           discount: String(discount.toFixed(2)),
@@ -486,17 +601,112 @@ async function getShopifyOrderDetails(order: any) {
         };
       });
 
+    // Shipping lines come back as a connection on Order and a single object on
+    // DraftOrder — flatten both to the same {title, price} shape.
+    const shippingLines = node.shippingLines?.edges
+      ? node.shippingLines.edges
+          .map((edge: any) => edge.node)
+          .filter(Boolean)
+          .map((line: any) => ({
+            title: line.title || "Shipping",
+            price: line.originalPriceSet?.shopMoney?.amount || "0",
+          }))
+      : node.shippingLine
+        ? [
+            {
+              title: node.shippingLine.title || "Shipping",
+              price: node.shippingLine.originalPriceSet?.shopMoney?.amount || "0",
+            },
+          ]
+        : [];
+
+    const taxLines = (node.taxLines || []).map((line: any) => ({
+      title: line.title || "Tax",
+      rate: line.ratePercentage ?? null,
+      amount: line.priceSet?.shopMoney?.amount || "0",
+    }));
+
+    const discounts = (node.discountApplications?.edges || [])
+      .map((edge: any) => edge.node)
+      .filter(Boolean)
+      .map((app: any) => ({
+        allocationMethod: app.allocationMethod || null,
+        targetSelection: app.targetSelection || null,
+        targetType: app.targetType || null,
+        amount: app.value?.amount || null,
+        percentage: app.value?.percentage ?? null,
+        currencyCode: app.value?.currencyCode || null,
+      }));
+
+    // Draft orders have no fulfillments/transactions — those stay empty arrays.
+    const fulfillments = (node.fulfillments || []).map((f: any) => ({
+      status: f.status || null,
+      createdAt: f.createdAt || null,
+      deliveredAt: f.deliveredAt || null,
+      tracking: (f.trackingInfo || []).map((t: any) => ({
+        company: t.company || null,
+        number: t.number || null,
+        url: t.url || null,
+      })),
+    }));
+
+    const transactions = (node.transactions || []).map((t: any) => ({
+      id: t.id || null,
+      gateway: t.gateway || null,
+      kind: t.kind || null,
+      status: t.status || null,
+      processedAt: t.processedAt || null,
+      amount: t.amountSet?.shopMoney?.amount || "0",
+      currencyCode: t.amountSet?.shopMoney?.currencyCode || null,
+    }));
+
+    const amount = (bag: any) => bag?.shopMoney?.amount ?? null;
+
     return {
       shopifyOrderName: node.name || null,
       customerName: customerName || null,
       customerEmail,
-      customerPhone: node.customer?.phone || null,
+      customerPhone: node.customer?.phone || node.phone || null,
+      email: node.email || null,
+      phone: node.phone || null,
+      note: node.note ?? node.note2 ?? null,
+      // `tags` is a String[] on both types; join to a display string but keep
+      // it null when empty so the UI can hide the row.
+      tags: Array.isArray(node.tags) && node.tags.length ? node.tags.join(", ") : null,
+      currencyCode: node.currencyCode || null,
+      confirmationNumber: node.confirmationNumber || null,
+      // DraftOrder carries `status` instead of the display statuses.
+      draftStatus: node.status || null,
+      createdAt: node.createdAt || null,
+      processedAt: node.processedAt || null,
+      cancelledAt: node.cancelledAt || null,
+      cancelReason: node.cancelReason || null,
+      closed: node.closed ?? null,
+      closedAt: node.closedAt || null,
       paymentStatus: normalizeShopifyFinancialStatus(
         node.displayFinancialStatus,
       ),
       fulfillmentStatus: normalizeShopifyFulfillmentStatus(
         node.displayFulfillmentStatus,
       ),
+      // The full money breakdown, straight from Shopify's shopMoney bags so it
+      // agrees with what the merchant sees in the admin, not the app's own
+      // stored totals.
+      totals: {
+        subtotal: amount(node.subtotalPriceSet),
+        tax: amount(node.totalTaxSet),
+        shipping: amount(node.totalShippingPriceSet),
+        discount: amount(node.totalDiscountsSet),
+        total: amount(node.totalPriceSet),
+        refunded: amount(node.totalRefundedSet),
+      },
+      shippingAddress: node.shippingAddress || null,
+      billingAddress: node.billingAddress || null,
+      shippingLines,
+      taxLines,
+      discounts,
+      fulfillments,
+      transactions,
       items,
     };
   } catch (error) {
@@ -1216,6 +1426,157 @@ export default function OrderDetailsPage() {
             </div>
           </Card>
 
+          {/* Everything the Shopify side knows about this order that the app
+              doesn't store itself. Each card renders only when that part of the
+              Shopify payload was present, so a draft order (no fulfillments or
+              transactions) or an order with no billing address simply shows
+              fewer cards rather than empty ones. */}
+          {order.shopifyDetails && (
+            <>
+              <Card title="Shopify Addresses">
+                <div className="order-info-grid" style={styles.infoGrid}>
+                  <div>
+                    <span style={styles.metaLabel}>Shipping Address</span>
+                    <AddressBlock address={order.shopifyDetails.shippingAddress} />
+                  </div>
+                  <div>
+                    <span style={styles.metaLabel}>Billing Address</span>
+                    <AddressBlock address={order.shopifyDetails.billingAddress} />
+                  </div>
+                </div>
+              </Card>
+
+              {order.shopifyDetails.fulfillments?.length > 0 && (
+                <Card title="Fulfillment & Tracking">
+                  <div style={styles.timeline}>
+                    {order.shopifyDetails.fulfillments.map(
+                      (f: any, index: number) => (
+                        <div key={index} style={styles.activity}>
+                          <span style={styles.dot} />
+                          <div>
+                            <strong>{label(f.status || "fulfilled")}</strong>
+                            <p style={styles.activityMeta}>
+                              {f.createdAt ? date(f.createdAt) : "-"}
+                              {f.deliveredAt
+                                ? ` · Delivered ${date(f.deliveredAt)}`
+                                : ""}
+                            </p>
+                            {f.tracking?.map((t: any, tIndex: number) => (
+                              <p key={tIndex} style={styles.activityMessage}>
+                                {[t.company, t.number]
+                                  .filter(Boolean)
+                                  .join(" · ") || "Tracking"}
+                                {t.url ? (
+                                  <>
+                                    {" — "}
+                                    <a
+                                      href={t.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      Track
+                                    </a>
+                                  </>
+                                ) : null}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              {order.shopifyDetails.transactions?.length > 0 && (
+                <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
+                  <div style={styles.cardHeader}>
+                    <h2 style={styles.cardTitle}>Payment Transactions</h2>
+                  </div>
+                  <div style={styles.tableWrap}>
+                    <table style={styles.table}>
+                      <thead>
+                        <tr>
+                          {["Gateway", "Kind", "Status", "Processed", "Amount"].map(
+                            (heading) => (
+                              <th key={heading} style={styles.th}>
+                                {heading}
+                              </th>
+                            ),
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.shopifyDetails.transactions.map((t: any) => (
+                          <tr key={t.id}>
+                            <td style={styles.td}>{t.gateway || "-"}</td>
+                            <td style={styles.td}>{label(t.kind || "-")}</td>
+                            <td style={styles.td}>{label(t.status || "-")}</td>
+                            <td style={styles.td}>
+                              {t.processedAt ? date(t.processedAt) : "-"}
+                            </td>
+                            <td style={styles.td}>
+                              <strong>{money(t.amount)}</strong>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {(order.shopifyDetails.note ||
+                order.shopifyDetails.tags ||
+                order.shopifyDetails.cancelReason ||
+                order.shopifyDetails.processedAt) && (
+                <Card title="Shopify Order Details">
+                  <div className="order-info-grid" style={styles.infoGrid}>
+                    {order.shopifyDetails.confirmationNumber && (
+                      <Info
+                        label="Confirmation Number"
+                        value={order.shopifyDetails.confirmationNumber}
+                      />
+                    )}
+                    {order.shopifyDetails.processedAt && (
+                      <Info
+                        label="Processed At"
+                        value={date(order.shopifyDetails.processedAt)}
+                      />
+                    )}
+                    {order.shopifyDetails.closedAt && (
+                      <Info
+                        label="Closed At"
+                        value={date(order.shopifyDetails.closedAt)}
+                      />
+                    )}
+                    {order.shopifyDetails.cancelledAt && (
+                      <Info
+                        label="Cancelled At"
+                        value={date(order.shopifyDetails.cancelledAt)}
+                      />
+                    )}
+                    {order.shopifyDetails.cancelReason && (
+                      <Info
+                        label="Cancel Reason"
+                        value={label(order.shopifyDetails.cancelReason)}
+                      />
+                    )}
+                    {order.shopifyDetails.tags && (
+                      <Info label="Tags" value={order.shopifyDetails.tags} />
+                    )}
+                  </div>
+                  {order.shopifyDetails.note && (
+                    <p style={{ ...styles.activityMessage, marginTop: 12 }}>
+                      <span style={styles.metaLabel}>Note</span>
+                      {order.shopifyDetails.note}
+                    </p>
+                  )}
+                </Card>
+              )}
+            </>
+          )}
+
           <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
             <div style={styles.cardHeader}>
               <h2 style={styles.cardTitle}>Products</h2>
@@ -1326,6 +1687,58 @@ export default function OrderDetailsPage() {
             <Row label="Paid" value={money(order.paidAmount)} />
             <Row label="Balance" value={money(order.remainingBalance)} />
           </Card>
+
+          {/* The same order's money as Shopify reports it. Kept separate from
+              the app's Pricing Summary above so the two are comparable rather
+              than merged — a mismatch between them is a real signal, not
+              something to paper over. Renders only when Shopify returned a
+              total. */}
+          {order.shopifyDetails?.totals?.total != null && (
+            <Card title="Shopify Totals">
+              {order.shopifyDetails.totals.subtotal != null && (
+                <Row
+                  label="Subtotal"
+                  value={money(order.shopifyDetails.totals.subtotal)}
+                />
+              )}
+              {order.shopifyDetails.totals.discount != null && (
+                <Row
+                  label="Discounts"
+                  value={`-${money(order.shopifyDetails.totals.discount)}`}
+                />
+              )}
+              {order.shopifyDetails.taxLines?.length > 0
+                ? order.shopifyDetails.taxLines.map((t: any, index: number) => (
+                    <Row
+                      key={index}
+                      label={`${t.title}${t.rate != null ? ` (${t.rate}%)` : ""}`}
+                      value={money(t.amount)}
+                    />
+                  ))
+                : order.shopifyDetails.totals.tax != null && (
+                    <Row
+                      label="Taxes"
+                      value={money(order.shopifyDetails.totals.tax)}
+                    />
+                  )}
+              {order.shopifyDetails.totals.shipping != null && (
+                <Row
+                  label="Shipping"
+                  value={money(order.shopifyDetails.totals.shipping)}
+                />
+              )}
+              <div style={styles.totalRow}>
+                <strong>Shopify Total</strong>
+                <strong>{money(order.shopifyDetails.totals.total)}</strong>
+              </div>
+              {Number(order.shopifyDetails.totals.refunded) > 0 && (
+                <Row
+                  label="Refunded"
+                  value={`-${money(order.shopifyDetails.totals.refunded)}`}
+                />
+              )}
+            </Card>
+          )}
 
           {canManagePaymentLink ? (
             <Card title="Payment Link">
@@ -1605,6 +2018,32 @@ function Row({ label: title, value }: { label: string; value: string }) {
       <span>{title}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+// A Shopify mailing address rendered as stacked lines, or a muted placeholder
+// when the order carried no address of that kind.
+function AddressBlock({ address }: { address: any }) {
+  if (!address) return <p style={styles.muted}>Not captured</p>;
+  const name = [address.firstName, address.lastName].filter(Boolean).join(" ");
+  const region = [address.city, address.province, address.zip]
+    .filter(Boolean)
+    .join(", ");
+  const lines = [
+    name,
+    address.company,
+    address.address1,
+    address.address2,
+    region,
+    address.country,
+    address.phone,
+  ].filter(Boolean);
+  if (!lines.length) return <p style={styles.muted}>Not captured</p>;
+  return (
+    <address style={styles.addressText}>
+      {lines.map((line: string, index: number) => (
+        <span key={index}>{line}</span>
+      ))}
+    </address>
   );
 }
 
