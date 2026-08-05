@@ -6880,29 +6880,32 @@ export async function getAdvancedCompanyOrders(
       return id.split("/").pop() || id;
     };
 
+    // NOTE: Shopify Admin API orders query does NOT support company_location_id as a filter.
+    // Supported filters: company_id, customer_id, financial_status, fulfillment_status, created_at, etc.
+    // Location filtering MUST be done as a post-filter after fetching by company_id.
+
     const cleanCompanyId = extractId(companyId);
     const queryParts: string[] = [];
-
-    // Track which filters need post-processing
     let needsLocationPostFilter = false;
     let requestedLocationId: string | undefined = undefined;
 
-    // 1. Location & Company Query Building
-    if (filters.locationId) {
-      const cleanLocationId = extractId(filters.locationId);
-      requestedLocationId = cleanLocationId;
-      needsLocationPostFilter = true;
-      queryParts.push(`company_location_id:${cleanLocationId}`);
-    } else if (allowedLocationIds && allowedLocationIds.length > 0) {
-      const locQueries = allowedLocationIds
-        .map((id) => `company_location_id:${extractId(id)}`)
-        .join(" OR ");
-      queryParts.push(`(${locQueries})`);
-    } else if (cleanCompanyId) {
+    // 1. Always scope to company_id first
+    if (cleanCompanyId) {
       queryParts.push(`company_id:${cleanCompanyId}`);
     }
 
-    // 2. Customer Query Building
+    // 2. Track location filters for post-processing
+    if (filters.locationId) {
+      requestedLocationId = extractId(filters.locationId);
+      needsLocationPostFilter = true;
+      console.log(`📍 Will post-filter by specific location: ${requestedLocationId}`);
+    } else if (allowedLocationIds && allowedLocationIds.length > 0) {
+      // For location-restricted users, mark for post-filter
+      needsLocationPostFilter = true;
+      console.log(`📍 Will post-filter by ${allowedLocationIds.length} allowed locations`);
+    }
+
+    // 3. Customer filter
     if (filters.customerId) {
       if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
         const customerQueries = filters.customerId
@@ -7352,10 +7355,11 @@ export async function getAdvancedCompanyOrders(
 
     const originalCount = processedOrders.length;
 
-    // POST-FILTER 1: Filter by requested specific location
+    // POST-FILTER 1: Filter by specific requested location
     if (needsLocationPostFilter && requestedLocationId) {
       processedOrders = processedOrders.filter((order: OrderNode) => {
-        const orderLocationId = extractId(order.location?.id || "");
+        // locationId is extracted from purchasingEntity.location.id during order processing
+        const orderLocationId = extractId((order as any).locationId || "");
         const matches = orderLocationId === requestedLocationId;
 
         if (!matches) {
@@ -7371,16 +7375,13 @@ export async function getAdvancedCompanyOrders(
         `✅ Location filter (specific): ${originalCount} → ${processedOrders.length} orders`,
       );
     }
-    // POST-FILTER 2: Filter by allowed locations (RBAC)
-    else if (allowedLocationIds && allowedLocationIds.length > 0) {
-      const normalizedAllowedIds = allowedLocationIds.map((id) =>
-        extractId(id),
-      );
+    // POST-FILTER 2: Filter by allowed locations (RBAC — location-restricted users)
+    else if (needsLocationPostFilter && allowedLocationIds && allowedLocationIds.length > 0) {
+      const normalizedAllowedIds = allowedLocationIds.map((id) => extractId(id));
 
       processedOrders = processedOrders.filter((order: OrderNode) => {
-        const orderLocationId = extractId(
-          order?.locationId || (order as any)?.purchasingEntity?.location?.id || "",
-        );
+        // locationId is extracted from purchasingEntity.location.id during order processing
+        const orderLocationId = extractId((order as any).locationId || "");
 
         if (!orderLocationId) {
           console.log(`🚫 RBAC location filter: Excluded order ${order.name} (order has no company location)`);
@@ -7391,7 +7392,7 @@ export async function getAdvancedCompanyOrders(
 
         if (!isAllowed) {
           console.log(
-            `🚫 RBAC location filter: Excluded order ${order.name} (location ${orderLocationId} not in assigned locations: ${normalizedAllowedIds.join(", ")})`,
+            `🚫 RBAC location filter: Excluded order ${order.name} (location ${orderLocationId} not in [${normalizedAllowedIds.join(", ")}])`,
           );
         }
 
@@ -7978,15 +7979,13 @@ async function createOrUpdateLocalUser({
       },
       create: {
         email: email,
-        companyName: companyAccount?.name,
+        companyName: companyAccount?.name ?? "",
         firstName: firstName || "",
         lastName: lastName || "",
         shopifyCustomerId,
         status: "APPROVED",
         shopId: store.id,
         contactTitle: "",
-        shipping: "",
-        billing: "",
         workflowCompleted: true,
       },
     });

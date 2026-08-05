@@ -109,7 +109,7 @@ async function createShopifyDraftOrder(
     const response = await admin.graphql(mutation, {
       variables: { input },
     });
-    const data = await response.json();
+    const data = await response.json() as any;
 
     if (data.errors) {
       console.error("Shopify GraphQL errors:", data.errors);

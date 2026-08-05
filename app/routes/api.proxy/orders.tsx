@@ -98,6 +98,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
+  // Narrow shop to string (TypeScript cannot narrow inside async closures)
+  const shopName: string = shop;
+
   // ── STEP 1: Get store (DB — fast) ───────────────────────
   const store = await getCachedProxyStore(shop);
   if (!store || !store.accessToken) {
@@ -118,84 +121,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
+  // company object from getCustomerCompanyInfo already has role/location access precomputed
   const company = companyInfo.companies[0];
-  const extractId = (id: string) => id.split("/").pop() || id;
+  const extractId = (id: string) => (id || "").split("/").pop() || id;
 
-  let allowedLocationIds: string[] | undefined = undefined;
-  let accessLevel: "main_contact" | "company_admin" | "location_admin" | "location_user" =
-    "location_user";
+  // Use precomputed fields from getCustomerCompanyInfo
+  const hasFullAccess = company.hasAllLocationAccess;
+  const allowedLocationIds: string[] | undefined = hasFullAccess
+    ? undefined
+    : (company.assignedLocationIds?.length > 0 ? company.assignedLocationIds : undefined);
 
-  const isMainContact =
-    company.mainContact?.id === `gid://shopify/Customer/${customerId}`;
+  // Derive access level for logging/response
+  const isMainContact = company.mainContact?.id === `gid://shopify/Customer/${customerId}`
+    || company.roles.some((r: string) => r.toLowerCase() === "main contact");
   const isCompanyAdmin = company.roles.some((r: string) => {
-    const roleLower = r.toLowerCase();
-    return (
-      roleLower === "admin" ||
-      roleLower === "company admin" ||
-      (roleLower.includes("admin") && !roleLower.includes("location"))
-    );
+    const l = r.toLowerCase();
+    return (l === "admin" || l === "company admin") && !l.includes("location");
   });
-  const isLocationAdmin = company.roles.some(
-    (r: string) => r.toLowerCase() === "location admin",
-  );
+  const isLocationAdmin = company.roles.some((r: string) => r.toLowerCase() === "location admin");
 
-  const userLocationAssignments = company.roleAssignments.filter(
-    (ra: { locationId?: string }) => ra.locationId,
-  );
-  const userAssignedLocationIds =
-    userLocationAssignments.length > 0
-      ? ([
-          ...new Set(
-            userLocationAssignments.map((ra: { locationId: string }) => ra.locationId),
-          ),
-        ] as string[])
-      : [];
+  const accessLevel: "main_contact" | "company_admin" | "location_admin" | "location_user" =
+    isMainContact ? "main_contact"
+    : isCompanyAdmin ? "company_admin"
+    : isLocationAdmin ? "location_admin"
+    : "location_user";
 
-  if (isMainContact) {
-    accessLevel = "main_contact";
-    allowedLocationIds = undefined;
-    console.log(`✅ MAIN CONTACT: Full company access`);
-  } else if (isCompanyAdmin) {
-    accessLevel = "company_admin";
-    allowedLocationIds = undefined;
-    console.log(`✅ COMPANY ADMIN: Full company access`);
-  } else if (isLocationAdmin) {
-    accessLevel = "location_admin";
-    allowedLocationIds =
-      userAssignedLocationIds.length > 0 ? userAssignedLocationIds : undefined;
-    console.log(
-      allowedLocationIds
-        ? `🏢 LOCATION ADMIN: Restricted to ${allowedLocationIds.length} locations`
-        : `🏢 LOCATION ADMIN: Default company access`,
-    );
-  } else {
-    accessLevel = "location_user";
-    allowedLocationIds =
-      userAssignedLocationIds.length > 0 ? userAssignedLocationIds : undefined;
-    console.log(
-      allowedLocationIds
-        ? `👤 LOCATION USER: Assigned to ${allowedLocationIds.length} locations`
-        : `👤 LOCATION USER: Default customer access`,
-    );
-  }
+  console.log(`🔐 Access: ${accessLevel} | Full access: ${hasFullAccess} | Allowed locations: ${allowedLocationIds?.join(", ") || "all"}`);
 
-  // ── STEP 4: Build query filters ──────────────────────────
-  const queryFilters = {
-    locationId: filters?.locationId,
-    customerId: accessLevel === "location_user" ? customerId : filters?.customerId,
-    dateRange: filters?.dateRange
-      ? { preset: filters.dateRange.preset, start: filters.dateRange.start, end: filters.dateRange.end }
-      : undefined,
-    financialStatus:    filters?.financialStatus,
-    fulfillmentStatus:  filters?.fulfillmentStatus,
-    query:              filters?.query,
-    sortKey:            filters?.sortKey,
-    reverse:            filters?.reverse,
-  };
-
-  if (allowedLocationIds?.length && queryFilters.locationId) {
+  // Validate location filter access for location-restricted users
+  if (allowedLocationIds?.length && filters?.locationId) {
     const hasAccess = allowedLocationIds.some(
-      (id) => extractId(id) === extractId(queryFilters.locationId!),
+      (id) => extractId(id) === extractId(filters.locationId!),
     );
     if (!hasAccess) {
       return Response.json({
@@ -205,6 +161,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
   }
+
 
   const companyData = await prisma.companyAccount.findFirst({
     where: { shopifyCompanyId: company.companyId },
@@ -217,10 +174,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
+  // ── STEP 4: Build query filters ──────────────────────────
+  const queryFilters = {
+    locationId: filters?.locationId,
+    // Location users only see their own orders by customer ID
+    customerId: accessLevel === "location_user" ? customerId : filters?.customerId,
+    dateRange: filters?.dateRange
+      ? { preset: filters.dateRange.preset, start: filters.dateRange.start, end: filters.dateRange.end }
+      : undefined,
+    financialStatus:   filters?.financialStatus,
+    fulfillmentStatus: filters?.fulfillmentStatus,
+    query:             filters?.query,
+    sortKey:           filters?.sortKey,
+    reverse:           filters?.reverse,
+  };
+
+
   // ── STEP 5: Fetch orders from Shopify ───────────────────
+  const companyId: string = company.companyId ?? "";
+  const accessToken: string = store.accessToken ?? "";
   const fetchAndFilterOrders = async (f: OrderRequestFilters) => {
-    const result = await getAdvancedCompanyOrders(shop, store.accessToken, {
-      companyId: company.companyId,
+    const result = await getAdvancedCompanyOrders(shopName, accessToken, {
+      companyId,
       allowedLocationIds,
       filters: f,
     });
