@@ -752,8 +752,44 @@ async function saveSyncLogRows(run) {
     await prisma.orderSyncLog.createMany({ data: rows });
     return rows.length;
   } catch (err) {
-    console.warn(`[order-sync] could not save the run log to the database: ${err?.message || err}`);
-    return 0;
+    // One bad row (an oversized detail payload, an odd character) must not cost
+    // every other order's log entry — createMany is all-or-nothing, so fall back
+    // to inserting one at a time and keep whatever succeeds. Slower, but this
+    // only happens when the batch insert has already failed once.
+    console.warn(`[order-sync] could not save the run log as a batch, retrying row by row: ${err?.message || err}`);
+    let saved = 0;
+    for (const row of rows) {
+      try {
+        await prisma.orderSyncLog.create({ data: row });
+        saved++;
+      } catch (rowErr) {
+        console.warn(`[order-sync] could not save one sync log row: ${rowErr?.message || rowErr}`);
+        // Whatever made this specific row unsaveable (oversized detail, a bad
+        // character) is a formatting problem, not proof nothing happened to
+        // this order — fall back to a minimal row with the same identity so
+        // the order doesn't just vanish from the table, and say why it's thin.
+        try {
+          await prisma.orderSyncLog.create({
+            data: {
+              ...base,
+              externalId: row.externalId ?? null,
+              reference: row.reference ?? null,
+              action: row.action ?? "unknown",
+              status: row.status ?? "failed",
+              orderName: row.orderName ?? null,
+              orderId: row.orderId ?? null,
+              company: row.company ?? null,
+              message: `Could not save full log row: ${rowErr?.message || rowErr}`,
+              detail: JSON.stringify({ reason: "log row save failed", error: rowErr?.message || String(rowErr) }),
+            },
+          });
+          saved++;
+        } catch (fallbackErr) {
+          console.warn(`[order-sync] could not save fallback row either: ${fallbackErr?.message || fallbackErr}`);
+        }
+      }
+    }
+    return saved;
   }
 }
 
@@ -1291,7 +1327,18 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // still failed, still listed, still re-syncable by hand; the only thing that
   // changed is that the rest of the sync gets to move past it.
   const failures = results.filter((r) => !r.ok);
-  const quarantined = failures.length ? await quarantinedOrders(shop, failures) : new Map();
+  // Never allowed to fail the run: quarantine status is an annotation on results
+  // that are already final. A DB hiccup here must not cost every per-order log
+  // row this run already earned — see saveSyncLogRows, the one place they're
+  // written, at the end of this function.
+  let quarantined = new Map();
+  if (failures.length) {
+    try {
+      quarantined = await quarantinedOrders(shop, failures);
+    } catch (err) {
+      console.warn(`[order-sync] ${shop}: could not check quarantine status: ${err?.message || err}`);
+    }
+  }
   for (const failure of failures) {
     const attempts = quarantined.get(String(failure.externalId || "") || failure.reference);
     if (attempts) {
@@ -1316,30 +1363,39 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // …and neither does a windowed run: it was asked about one stretch of
   // modification time, so moving the watermark to now would skip everything the
   // scheduled run still owes from before it.
-  if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length && !window) {
-    if (blocking === 0 && !stoppedEarly) {
-      // Fully clean AND the day-granular candidate list for this period was
-      // exhausted (not capped) — this period is completely drained.
-      // `since` rides along so the schedule card can say what this run
-      // covered, not only when it ran. setLastSyncedAt also resets the
-      // list-offset cursor, so the fresh period that starts next lists from
-      // the top rather than resuming a position that no longer means anything.
-      await setLastSyncedAt(shop, runStartedAt, since);
-    } else if (blocking === 0 && feed?.capped) {
-      // Capped by NETSUITE_ORDER_LIMIT, but everything this run DID process
-      // succeeded — safe to walk the list cursor forward past it, so the NEXT
-      // run resumes further into this SAME period instead of the cap landing
-      // on the exact same first N candidates every time, forever, which is
-      // the bug this whole mechanism exists to fix: a backlog bigger than the
-      // limit now drains across successive runs instead of never finishing.
-      // The watermark itself stays put on purpose — this period is not done,
-      // and moving it would let a later run believe it was.
-      await setSyncListOffset(shop, startOffset + feed.capped.fetched);
+  // Cursor bookkeeping below is best-effort, same reasoning as quarantinedOrders
+  // above: results are already final, so a write failure here must move on to
+  // saveSyncLogRows rather than take the run's log rows down with it. Worst case
+  // a cursor doesn't advance and the next run re-covers the same ground —
+  // annoying, not data loss.
+  try {
+    if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length && !window) {
+      if (blocking === 0 && !stoppedEarly) {
+        // Fully clean AND the day-granular candidate list for this period was
+        // exhausted (not capped) — this period is completely drained.
+        // `since` rides along so the schedule card can say what this run
+        // covered, not only when it ran. setLastSyncedAt also resets the
+        // list-offset cursor, so the fresh period that starts next lists from
+        // the top rather than resuming a position that no longer means anything.
+        await setLastSyncedAt(shop, runStartedAt, since);
+      } else if (blocking === 0 && feed?.capped) {
+        // Capped by NETSUITE_ORDER_LIMIT, but everything this run DID process
+        // succeeded — safe to walk the list cursor forward past it, so the NEXT
+        // run resumes further into this SAME period instead of the cap landing
+        // on the exact same first N candidates every time, forever, which is
+        // the bug this whole mechanism exists to fix: a backlog bigger than the
+        // limit now drains across successive runs instead of never finishing.
+        // The watermark itself stays put on purpose — this period is not done,
+        // and moving it would let a later run believe it was.
+        await setSyncListOffset(shop, startOffset + feed.capped.fetched);
+      }
+      // Any other case — a genuine failure blocked progress, capped or not —
+      // leaves both the watermark and the list-offset exactly where they were,
+      // so the same starting point (and so the same failed orders) comes up
+      // again next run. This is the existing retry behavior, unchanged.
     }
-    // Any other case — a genuine failure blocked progress, capped or not —
-    // leaves both the watermark and the list-offset exactly where they were,
-    // so the same starting point (and so the same failed orders) comes up
-    // again next run. This is the existing retry behavior, unchanged.
+  } catch (err) {
+    console.warn(`[order-sync] ${shop}: could not update the sync watermark/offset: ${err?.message || err}`);
   }
 
   // The windowed equivalent of the block above — a windowed run has no
@@ -1358,15 +1414,22 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // is the number that has to be skipped on resume or an out-of-window
   // candidate this run already ruled out could get missed by a narrower
   // window that still needed its own look at it.
+  // Same best-effort reasoning as the watermark block above — a windowed run's
+  // resume session is a convenience for the next "Sync Now" press, not something
+  // worth losing this run's log rows over.
   if (window) {
-    if (blocking === 0 && feed?.capped) {
-      await setSyncWindowResume(shop, {
-        offset: startOffset + (feed.scanned ?? 0),
-        query: windowQuery,
-        hours: window.hours,
-      });
-    } else if (blocking === 0 && !stoppedEarly) {
-      await clearSyncWindowResume(shop);
+    try {
+      if (blocking === 0 && feed?.capped) {
+        await setSyncWindowResume(shop, {
+          offset: startOffset + (feed.scanned ?? 0),
+          query: windowQuery,
+          hours: window.hours,
+        });
+      } else if (blocking === 0 && !stoppedEarly) {
+        await clearSyncWindowResume(shop);
+      }
+    } catch (err) {
+      console.warn(`[order-sync] ${shop}: could not update the windowed resume session: ${err?.message || err}`);
     }
   }
 
