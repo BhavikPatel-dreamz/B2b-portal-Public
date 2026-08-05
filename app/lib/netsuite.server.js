@@ -273,8 +273,47 @@ function beforeLastSyncMs() {
   return Number.isFinite(n) && n > 0 ? n * 60 * 60 * 1000 : 0;
 }
 
-function dateRangeQuery({ from, to }) {
-  return `lastModifiedDate ON_OR_AFTER "${nsQueryDate(from)}" AND lastModifiedDate ON_OR_BEFORE "${nsQueryDate(to)}"`;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function shiftDays(d, days) {
+  return new Date(d.getTime() + days * DAY_MS);
+}
+
+// NetSuite compares a bare date literal against that date at MIDNIGHT, so
+// ON_OR_BEFORE "8/4/2026" means "at or before 8/4 00:00" — the named day's own
+// records are EXCLUDED. Measured on this account:
+//
+//   ON_OR_AFTER 8/4 AND ON_OR_BEFORE 8/4  ->   0 orders
+//   ON_OR_AFTER 8/4 AND ON_OR_BEFORE 8/5  ->  96
+//   ON_OR_AFTER 8/3 AND ON_OR_BEFORE 8/4  ->  49
+//   ON_OR_AFTER 8/3 AND ON_OR_BEFORE 8/5  -> 145   (= 96 + 49, so the buckets
+//                                                   partition cleanly)
+//
+// The top line is the bug this fixes. A window that begins and ends on the same
+// UTC day — which is EVERY "last 1/2/6 hours" run, and most 12/24 hour ones —
+// emitted exactly that query and NetSuite answered with nothing. The sync looked
+// like it worked (no error, an empty run, green log rows) and the range dropdown
+// looked like it did nothing at all. The watermark path has the same shape and
+// was only spared because the watermark here has never advanced: once it does,
+// every run inside the same UTC day would read zero orders.
+//
+// So the upper bound is the day AFTER `to`. Reading up to a day wider is safe by
+// construction: a windowed run re-checks every expanded record against the real
+// timestamp (inWindow), and the watermark path is idempotent and already
+// re-pulls its own day by truncation.
+//
+// `lowerMarginDays` pushes the lower bound back, and windowed runs pass 1. That
+// is for a different timezone question: NetSuite evaluates these literals in the
+// ACCOUNT's timezone, while nsQueryDate names UTC days. If the account sits
+// behind UTC, its "8/5" starts some hours after 8/5 00:00Z, and a window opening
+// inside that gap would be asked for but never returned. A day of slack makes
+// the query a superset of the window whatever the account's offset is, and
+// inWindow then cuts it back to exactly what was asked for. The watermark path
+// does not take the margin — it has no inWindow to trim the surplus, and
+// NETSUITE_BEFORE_LAST_SYNC_HOURS is the knob that exists for widening it.
+function dateRangeQuery({ from, to }, lowerMarginDays = 0) {
+  const start = lowerMarginDays ? shiftDays(from, -lowerMarginDays) : from;
+  return `lastModifiedDate ON_OR_AFTER "${nsQueryDate(start)}" AND lastModifiedDate ON_OR_BEFORE "${nsQueryDate(shiftDays(to, 1))}"`;
 }
 
 // The stretch of modification time a scheduled run covers: from the watermark
@@ -290,12 +329,14 @@ function watermarkWindow(since, now) {
   };
 }
 
-function buildOrdersQuery(since, window) {
+// Exported for its tests: this is where the same-day window bug lived, and the
+// only way to see it without an account is to read the string it emits.
+export function buildOrdersQuery(since, window) {
   // An explicit window is what an operator just asked for by name ("last 2
   // hours"), so the manual/backfill override does not get to silently replace
   // it — nor does the overlap buffer, which exists to protect the watermark and
   // has no watermark to protect here.
-  if (window) return dateRangeQuery(window);
+  if (window) return dateRangeQuery(window, 1);
   if (process.env.NETSUITE_ORDERS_QUERY) return process.env.NETSUITE_ORDERS_QUERY;
   return dateRangeQuery(watermarkWindow(since, new Date()));
 }
@@ -565,6 +606,35 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
     }
   }
 
+  // Orders whose own Email field is blank get the address off their customer
+  // record instead. Best-effort like the two lookups around it: without it the
+  // order simply keeps the null email it already had.
+  //
+  // Skipped entirely under TEST_EMAIL, which overrides every order's email in
+  // mapNetsuiteOrder — asking NetSuite for an address that is guaranteed to be
+  // discarded is a request per run for nothing.
+  const withoutEmail = process.env.TEST_EMAIL
+    ? []
+    : items.filter((i) => !i.email && i?.entity?.id);
+  if (withoutEmail.length > 0) {
+    try {
+      const emailMap = await fetchCustomerEmails(shop, withoutEmail.map((i) => i.entity.id));
+      let filled = 0;
+      for (const item of withoutEmail) {
+        const email = emailMap[String(item.entity.id)];
+        if (email) {
+          item.linkedCustomerEmail = email;
+          filled++;
+        }
+      }
+      console.log(
+        `[netsuite] customer email fallback: ${withoutEmail.length} order(s) had no email of their own, filled ${filled} from the customer record.`,
+      );
+    } catch (err) {
+      console.warn("[netsuite] customer email lookup failed:", err?.message);
+    }
+  }
+
   // Tracking is best-effort: a failure here leaves linkedTrackingNumbers unset
   // and syncTracking simply reports "no tracking numbers", so it must never take
   // the whole run down.
@@ -638,6 +708,45 @@ async function fetchInvoicesForOrders(shop, orderIds) {
       statusId: r.status ?? null,
       statusLabel: r.statuslabel ?? null,
     });
+  }
+  return map;
+}
+
+// ---------------------------------------------------------------------------
+// Customer email (the fallback when the order carries none)
+// ---------------------------------------------------------------------------
+// A sales order's own Email field is what the sync normally uses, but it is only
+// as reliable as the form the order was entered on: measured on this account,
+// 13 of the 447 sales orders since 1 Jul 2026 have no email at all, and they
+// cluster by custom form (form 153 and 190 carry none, form 152 fills 212 of
+// 218). The customer record behind those orders usually does have one — 7 of
+// those 13 — so it is worth asking for.
+//
+// This matters more than a missing field usually would: a B2B order (one with a
+// company name) is failed outright without an email, because the buyer can't be
+// identified as the company's contact — see lookupCompanyLocation in
+// order-sync.server.js. So the fallback is the difference between the order
+// syncing and not syncing at all.
+//
+// One batched query for the whole run, keyed on customer id, because a window
+// normally holds several orders for the same handful of customers.
+// Returns a map of { customerId: "someone@example.com" }.
+async function fetchCustomerEmails(shop, customerIds) {
+  const ids = [...new Set(customerIds.map((id) => String(id)))].filter((id) => /^\d+$/.test(id));
+  if (!ids.length) return {};
+
+  const rows = [];
+  for (const batch of chunkIds(ids)) {
+    rows.push(...await nsSuiteQl(
+      shop,
+      `SELECT id, email FROM customer WHERE id IN (${batch.join(",")}) AND email IS NOT NULL`,
+    ));
+  }
+
+  const map = {};
+  for (const r of rows) {
+    const email = String(r.email ?? "").trim();
+    if (email) map[String(r.id)] = email;
   }
   return map;
 }

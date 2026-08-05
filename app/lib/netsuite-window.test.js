@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { plannedOrdersWindow, scanOrders } from "./netsuite.server.js";
+import { buildOrdersQuery, plannedOrdersWindow, scanOrders } from "./netsuite.server.js";
 
 // The window scan: which of a day's listed orders a windowed run keeps, and when
 // it stops looking. `expand` is the only thing that would touch NetSuite, so
@@ -176,14 +176,34 @@ describe("plannedOrdersWindow", () => {
   // The card shows this next to from/to precisely because it is WIDER than
   // from/to — NetSuite's q filter has no time of day. If this ever stops being
   // day-granular the card's explanation stops being true.
+  //
+  // The upper bound is the day AFTER `to`, and that is not cosmetic: NetSuite
+  // compares a bare date against that date at midnight, so ON_OR_BEFORE "8/4"
+  // excludes everything that happened ON 8/4. This assertion used to read
+  // ON_OR_BEFORE "8/4/2026" and was locking in a query that matched nothing at
+  // all whenever a run began and ended on the same UTC day.
   it("emits a day-granular query, which is why it is shown", () => {
     delete process.env.NETSUITE_ORDERS_QUERY;
     process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS = "0";
     const w = plannedOrdersWindow(new Date("2026-08-04T03:00:00Z"), at);
     assert.equal(
       w.query,
-      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/4/2026"',
+      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/5/2026"',
     );
+  });
+
+  // The regression itself, stated as the rule rather than as one string: a query
+  // whose two dates are equal is a query NetSuite answers with nothing, and a
+  // scheduled run inside a single UTC day emits exactly that shape.
+  it("never names the same day on both ends", () => {
+    delete process.env.NETSUITE_ORDERS_QUERY;
+    process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS = "0";
+    for (const sinceIso of ["2026-08-04T00:30:00Z", "2026-08-04T03:00:00Z", "2026-08-04T05:59:00Z"]) {
+      const [, after, before] = plannedOrdersWindow(new Date(sinceIso), at).query.match(
+        /ON_OR_AFTER "([^"]+)".*ON_OR_BEFORE "([^"]+)"/,
+      );
+      assert.notEqual(after, before, `same-day watermark ${sinceIso} matches nothing`);
+    }
   });
 
   it("reports the override when NETSUITE_ORDERS_QUERY replaces the window", () => {
@@ -191,5 +211,34 @@ describe("plannedOrdersWindow", () => {
     const w = plannedOrdersWindow(new Date("2026-08-04T03:00:00Z"), at);
     assert.equal(w.override, true);
     assert.equal(w.query, "custbody_thing IS true");
+  });
+});
+
+// A windowed run — the log page's range dropdown — is the case that broke in
+// production: "last 1 hour" is always inside one UTC day.
+describe("buildOrdersQuery for an explicit window", () => {
+  const window = (fromIso, toIso) => ({ from: new Date(fromIso), to: new Date(toIso) });
+
+  it("spans a real range for a window inside one day", () => {
+    assert.equal(
+      buildOrdersQuery(null, window("2026-08-05T03:39:00Z", "2026-08-05T04:39:00Z")),
+      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+    );
+  });
+
+  // The extra day at the START is the account-timezone margin: NetSuite reads
+  // these literals in the account's own zone, so its "8/5" may begin hours after
+  // 8/5 00:00Z. inWindow trims the surplus back to the exact window afterwards,
+  // so over-reading costs scan time and nothing else.
+  it("keeps a day of margin below the window", () => {
+    const q = buildOrdersQuery(null, window("2026-08-05T00:10:00Z", "2026-08-05T01:10:00Z"));
+    assert.match(q, /ON_OR_AFTER "8\/4\/2026"/);
+  });
+
+  it("still covers a window that spans days", () => {
+    assert.equal(
+      buildOrdersQuery(null, window("2026-08-03T04:00:00Z", "2026-08-05T04:00:00Z")),
+      'lastModifiedDate ON_OR_AFTER "8/2/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+    );
   });
 });

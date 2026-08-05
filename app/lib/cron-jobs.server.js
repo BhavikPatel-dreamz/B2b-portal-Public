@@ -1,5 +1,5 @@
 import { extraFunction } from "./extra-function.server.js";
-import { acquireSyncLock, releaseSyncLock } from "./netsuite-oauth.server.js";
+import { acquireSyncLock, isSyncStopRequested, releaseSyncLock } from "./netsuite-oauth.server.js";
 import { logSyncCrash, syncOrdersFromFeed } from "./order-sync.server.js";
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,28 @@ export const CRON_JOBS = [
 // that stops at its first failure would quietly stop doing everything after it.
 export async function runCronJobs(shop, options = {}) {
   const jobs = [];
+  let stopped = false;
   for (const job of CRON_JOBS) {
+    // Stop sync, pressed on the log page (see requestSyncStop). The boundary
+    // between two jobs is a safe place to stop for the same reason the boundary
+    // between two orders is, and it is the one that matters here: without it,
+    // stopping the order sync would still leave every job after it to run, and
+    // "stop" would only have meant "skip ahead".
+    //
+    // Asked once and then remembered, because the flag is cleared when the lock
+    // is released — re-reading it per job would work today only by accident.
+    if (!stopped && (await isSyncStopRequested(shop))) stopped = true;
+    if (stopped) {
+      console.warn(`[cron] ${shop}: stopped by hand — job "${job.name}" was not run.`);
+      jobs.push({
+        name: job.name,
+        label: job.label,
+        ok: true,
+        result: { skipped: true, reason: "the run was stopped by hand before this job started" },
+      });
+      continue;
+    }
+
     const startedAt = new Date();
     try {
       jobs.push({ name: job.name, label: job.label, ok: true, result: await job.run(shop, options) });
