@@ -290,6 +290,48 @@ function progressVerb(phase) {
   return phase === "fetching" ? "fetched from NetSuite" : "synced to Shopify";
 }
 
+// A visible bar, not just a number, for the same reason the number is there at
+// all: the log rows don't arrive until the run ends, so for however long a big
+// run takes, this — and nothing else on the page — is what says it is doing
+// something rather than stuck. Same track/fill shape as the credit-usage bar
+// on the home page, so a bar means the same thing everywhere in this app.
+//
+// Colored by phase (see progressVerb): fetching (reading NetSuite) is blue,
+// syncing (writing to Shopify) is the Shopify green — a glance at the color
+// says which half of the run this is, without reading the text next to it.
+// eslint-disable-next-line react/prop-types -- prop-types isn't a dependency here
+function SyncProgressBar({ done, total, phase }) {
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const fillColor = phase === "fetching" ? "#2c6ecb" : "#008060";
+  return (
+    <div style={{ marginBottom: 2 }}>
+      <div
+        style={{
+          height: 8,
+          background: "#e4e5e7",
+          borderRadius: 6,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: fillColor,
+            borderRadius: 6,
+            // Matches the ~5s poll interval closely enough that a jump between
+            // ticks reads as motion instead of a series of snaps.
+            transition: "width 0.6s ease",
+          }}
+        />
+      </div>
+      <div style={{ textAlign: "right", fontSize: 11, color: "#6d7175", marginTop: 2 }}>
+        {pct}%
+      </div>
+    </div>
+  );
+}
+
 // One "Label  value" line of the schedule card.
 // eslint-disable-next-line react/prop-types -- prop-types isn't a dependency here
 function ScheduleRow({ label, children }) {
@@ -659,10 +701,13 @@ export default function OrderSyncLogs() {
                   run is several minutes of a spinner that cannot tell you
                   whether it is nearly done. */}
               {schedule.progress && (
-                <s-text type="strong">
-                  {schedule.progress.done} of {schedule.progress.total} order
-                  {schedule.progress.total === 1 ? "" : "s"} {progressVerb(schedule.progress.phase)}
-                </s-text>
+                <s-stack direction="block" gap="small-100">
+                  <s-text type="strong">
+                    {schedule.progress.done} of {schedule.progress.total} order
+                    {schedule.progress.total === 1 ? "" : "s"} {progressVerb(schedule.progress.phase)}
+                  </s-text>
+                  <SyncProgressBar done={schedule.progress.done} total={schedule.progress.total} phase={schedule.progress.phase} />
+                </s-stack>
               )}
               <s-text>
                 Sync running since {formatRunAt(schedule.runningSince)} — this page refreshes itself
