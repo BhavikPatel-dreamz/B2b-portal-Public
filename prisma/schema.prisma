@@ -597,6 +597,18 @@ model NetsuiteAppSettings {
   // the first one) and for a run whose window started at the initial lookback.
   lastSyncFrom   DateTime?
 
+  // How far into the CURRENT watermark period's day-granular candidate list a
+  // previous scheduled run got before NETSUITE_ORDER_LIMIT capped it. The list
+  // query is day-granular (see lastSyncedAt) so it returns the same candidates
+  // every run until the watermark itself moves; without this, a backlog bigger
+  // than the limit reprocessed the exact same first N candidates forever and
+  // never reached the rest. Read as the starting `offset` for the next run's
+  // list call instead of 0, so the backlog drains across successive runs. Reset
+  // to null whenever the watermark advances (see setLastSyncedAt) — a fresh
+  // period starts its list from the top. Never used for a windowed or targeted
+  // run: neither reads the watermark, so neither has a "period" to resume.
+  syncListOffset Int?
+
   // Set while an order sync is running for this shop, and cleared when it
   // finishes. Cron fires on a fixed interval with no idea whether the last run is
   // still going, and two runs over the same window race each other: both look up

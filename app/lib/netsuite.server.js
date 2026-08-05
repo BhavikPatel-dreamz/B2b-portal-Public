@@ -197,9 +197,22 @@ function nsQueryDate(d) {
 // A record with no readable lastModifiedDate is KEPT rather than dropped: the
 // demo feed carries no dates at all, and judging a window by a field that isn't
 // there would turn every demo-mode window sync into a silent no-op.
+//
+// A record that HAS the field but fails to parse is a different situation and
+// worth a warning: silently keeping it too (the same fallback, on purpose — an
+// account whose date format Date.parse chokes on should fail open, not start
+// dropping orders) would otherwise look identical to "no window field at all"
+// and hide a real problem — every record in the window would report false and
+// every windowed run would look the same size regardless of which range was
+// picked, with nothing in the logs pointing at why.
 function inWindow(rec, window) {
-  const t = Date.parse(rec?.lastModifiedDate ?? "");
-  if (!Number.isFinite(t)) return true;
+  const raw = rec?.lastModifiedDate;
+  if (raw == null) return true;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t)) {
+    console.warn(`[netsuite] order ${rec?.id}: lastModifiedDate "${JSON.stringify(raw)}" did not parse as a date — keeping it rather than guessing whether it belongs in the window.`);
+    return true;
+  }
   return t >= window.from.getTime() && t <= window.to.getTime();
 }
 
@@ -497,7 +510,7 @@ async function resolveKnownInternalId(shop, raw) {
 // modification time, asked for from the log page's "Sync now" control. It replaces
 // the watermark window rather than narrowing it, and it is re-applied exactly after
 // the records are expanded — see inWindow.
-export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInternalIds } = {}) {
+export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInternalIds, startOffset } = {}) {
   const items = [];
   const errors = [];
   let refs;
@@ -580,7 +593,20 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     const pageSize = Math.min(1000, Math.max(1, maxOrders)); // 1000 = REST maximum
 
     refs = [];
-    let offset = 0;
+    // Resumes a backlog a previous capped run couldn't finish (see
+    // setSyncListOffset) instead of always starting the list over at 0 — that
+    // was the bug: NETSUITE_ORDER_LIMIT capped every run at the SAME first N
+    // candidates, forever, because nothing ever told the next run to look
+    // further in. Only meaningful without a window — a windowed run has no
+    // persisted period to resume, so it always gets 0 from its caller.
+    //
+    // Floored to a multiple of pageSize rather than trusted outright: SuiteTalk
+    // rejects an offset that isn't (see the comment below), which a persisted
+    // offset from a run under a DIFFERENT NETSUITE_ORDER_LIMIT could violate.
+    // Rounding down costs re-scanning a handful of already-done candidates —
+    // safe and idempotent — never skips ahead past ones that were not.
+    const listStartOffset = Math.floor((startOffset || 0) / pageSize) * pageSize;
+    let offset = listStartOffset;
     let totalResults = null;
     for (;;) {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
@@ -627,7 +653,16 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     // to raise NETSUITE_ORDER_LIMIT because they pressed Stop is worse than
     // saying nothing. The stop is reported on its own terms instead — the run
     // ends as stopped, and its watermark stays put for that reason.
-    if (!stopped && totalResults != null && totalResults > refs.length) {
+    //
+    // `matched`/`skipped` are counted against listStartOffset + refs.length —
+    // everything this PERIOD has covered so far, this run included, not just
+    // this run's own slice — because a resumed run (see startOffset above)
+    // already has earlier runs' progress behind it. Counting only this run's
+    // refs.length would report the same "N skipped" on every run of a draining
+    // backlog even as it genuinely got smaller, which is exactly the confusing
+    // symptom this whole mechanism exists to fix.
+    const coveredSoFar = listStartOffset + refs.length;
+    if (!stopped && totalResults != null && totalResults > coveredSoFar) {
       // Which limit stopped the listing decides which one to name — telling
       // someone to raise NETSUITE_ORDER_LIMIT when it was the scan ceiling that
       // ran out sends them to the wrong knob.
@@ -635,12 +670,15 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
       capped = {
         limit: maxRefs,
         matched: totalResults,
+        // Local to THIS run — setSyncListOffset (runOrderSync) adds this to
+        // startOffset to get where the NEXT run should resume from. Do not
+        // change this to a cumulative count without updating that math too.
         fetched: refs.length,
-        skipped: totalResults - refs.length,
+        skipped: totalResults - coveredSoFar,
         reason: `${which} stopped the listing`,
       };
       console.warn(
-        `[netsuite] ${which}=${maxRefs} capped this run: ${capped.skipped} matching order(s) were never listed. Raise it or narrow the window.`,
+        `[netsuite] ${which}=${maxRefs} capped this run: ${capped.skipped} matching order(s) still not looked at (${coveredSoFar} of ${totalResults} covered so far this period). Raise it, narrow the window, or let the next run continue draining it.`,
       );
     }
   }

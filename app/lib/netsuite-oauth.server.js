@@ -243,11 +243,41 @@ export async function getLastSyncedAt(shop) {
 // with, null on a first run). Stored alongside the watermark so the app can say
 // what the last scheduled run actually looked at, not just when it happened —
 // see getSyncSchedule.
+//
+// Also clears syncListOffset: the watermark only ever advances here when a
+// period is FULLY drained (see runOrderSync), so whatever cursor a previous
+// capped run left behind belongs to a period that no longer exists — a fresh
+// one starts its list from the top. Leaving a stale offset in place would have
+// the next period's first run skip straight past however many candidates the
+// old period happened to end on, silently dropping that many real orders.
 export async function setLastSyncedAt(shop, date, from = null) {
   await prisma.netsuiteAppSettings.upsert({
     where: { shop },
-    update: { lastSyncedAt: date, lastSyncFrom: from },
+    update: { lastSyncedAt: date, lastSyncFrom: from, syncListOffset: null },
     create: { shop, lastSyncedAt: date, lastSyncFrom: from },
+  });
+}
+
+// The other half of draining a backlog bigger than NETSUITE_ORDER_LIMIT across
+// runs: how far into the current period's list a previous capped-but-clean run
+// got. 0 for a period that hasn't been capped yet (or ever).
+export async function getSyncListOffset(shop) {
+  const settings = await prisma.netsuiteAppSettings.findUnique({
+    where: { shop },
+    select: { syncListOffset: true },
+  });
+  return settings?.syncListOffset ?? 0;
+}
+
+// Moves the list cursor forward WITHOUT touching the watermark — the run that
+// calls this got capped again, so this period is still not fully drained, and
+// advancing the watermark here would let a later run believe it was. Only the
+// position within the (unchanged) day-granular query moves.
+export async function setSyncListOffset(shop, offset) {
+  await prisma.netsuiteAppSettings.upsert({
+    where: { shop },
+    update: { syncListOffset: offset },
+    create: { shop, syncListOffset: offset },
   });
 }
 

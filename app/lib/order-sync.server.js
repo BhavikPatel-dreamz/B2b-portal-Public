@@ -12,10 +12,12 @@ import {
   acquireSyncLock,
   bumpSyncDone,
   getLastSyncedAt,
+  getSyncListOffset,
   isSyncStopRequested,
   isSyncStoppedError,
   releaseSyncLock,
   setLastSyncedAt,
+  setSyncListOffset,
   setSyncTotal,
 } from "./netsuite-oauth.server.js";
 
@@ -682,6 +684,64 @@ async function saveSyncLogRows(run) {
       message: run.stoppedEarly,
       detail: JSON.stringify({ reason: run.stoppedEarly }),
     });
+  } else if (!rows.length) {
+    // A run that finished cleanly and simply had nothing to do — a narrow window
+    // ("last 1 hour") with no orders modified in it, most often. Without a row
+    // here the table looks EXACTLY the same after this run as it did after one
+    // that never ran at all, and there is no way from the page alone to tell
+    // "nothing happened" from "nothing to do" — which is precisely the question
+    // someone is asking when they picked a short window and the table stayed
+    // empty. outsideWindow, when this was a windowed run, is the difference
+    // between "0 orders exist in this window" (outsideWindow: 0, nothing to see)
+    // and "N orders exist nearby but none fall inside this exact window" (a
+    // real count, proof the window is doing its job rather than matching
+    // nothing because something upstream is broken).
+    // Targeted mode (NETSUITE_ORDER_IDS or a manual re-sync) resolves a hand-picked
+    // id list and ignores the window entirely (see fetchNetsuiteOrders), so it has
+    // to be checked before run.window here — otherwise a targeted run that also
+    // carried a dropdown window would blame the window for zero matches, when the
+    // window was never looked at.
+    const scope = run.targeted?.length
+      ? `${run.targeted.length} targeted order(s)`
+      : run.window
+        ? `${run.window.label} (${run.window.from.toISOString()} → ${run.window.to.toISOString()})`
+        : run.since
+          ? `orders modified since ${run.since}`
+          : "this run's scope";
+    const outside = run.outsideWindow
+      ? ` — ${run.outsideWindow} order(s) nearby were modified outside it`
+      : "";
+    rows.push({
+      ...base,
+      action: "run",
+      status: "skipped",
+      message: `No matching orders for ${scope}${outside}.`,
+      detail: JSON.stringify({
+        reason: "no matching orders",
+        window: run.window ? { from: run.window.from.toISOString(), to: run.window.to.toISOString(), label: run.window.label } : null,
+        outsideWindow: run.outsideWindow || 0,
+        since: run.since || null,
+        targeted: run.targeted || [],
+      }),
+    });
+  } else if (run.stoppedEarly) {
+    // The run DID find and process orders, but stoppedEarly is also set here for
+    // a reason that isn't about any one of them — most often NETSUITE_ORDER_LIMIT
+    // capping the run, which is exactly the situation that makes a window pick
+    // ("last 1 hour" vs "last 3 hours") look like it did nothing: every window
+    // wide enough to contain more than the limit reports the same capped count,
+    // and until now nothing said why — this reason lived only in the server's
+    // own file log (storage/logs), never in the table anyone actually looks at.
+    // A second row, not a replacement for the per-order ones: those are still
+    // the record of what happened to each order, this is the record of what
+    // happened to the RUN.
+    rows.push({
+      ...base,
+      action: "run",
+      status: "skipped",
+      message: run.stoppedEarly,
+      detail: JSON.stringify({ reason: run.stoppedEarly }),
+    });
   }
   if (!rows.length) return 0;
 
@@ -1059,7 +1119,11 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // `since` still stands for "the oldest modification time this run looked at", so
   // the log lines below read the same either way.
   const since = window ? window.from : await getLastSyncedAt(shop);
-  const feed = await fetchExternalOrders(shop, window ? { window } : { since });
+  // Where a previous scheduled run's NETSUITE_ORDER_LIMIT cap left off within
+  // this watermark period — see setSyncListOffset. Meaningless for a windowed
+  // or targeted run (neither has a "period" to resume), so neither asks.
+  const startOffset = window || targeted.length ? 0 : await getSyncListOffset(shop);
+  const feed = await fetchExternalOrders(shop, window ? { window } : { since, startOffset });
   const records = Array.isArray(feed?.items) ? feed.items : [];
 
   // Stop sync, pressed while the fetch was in flight. Fetching is the longest
@@ -1175,8 +1239,19 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   const deadline = runStartedAt.getTime() + maxRunMs();
   // A capped fetch means the same thing to the watermark as running out of time:
   // orders inside this window were never looked at, so it must not move past them.
+  //
+  // Worded differently for the two cases, because they behave differently now.
+  // A SCHEDULED run's list-offset cursor advances past whatever it did process
+  // (see setSyncListOffset below) — the next tick continues further into this
+  // same backlog on its own, no action needed. A WINDOWED run has no such
+  // cursor — it is a one-time question about one stretch of time, and pressing
+  // Sync now again just re-asks the same question and gets capped at the same
+  // place, so raising the limit or narrowing the window are the only ways
+  // forward for it.
   const capped = feed?.capped
-    ? `NETSUITE_ORDER_LIMIT=${feed.capped.limit} capped this run — ${feed.capped.skipped} of ${feed.capped.matched} matching order(s) were not fetched. Raise the limit or narrow the window; the sync cannot get past them.`
+    ? window
+      ? `NETSUITE_ORDER_LIMIT=${feed.capped.limit} capped this run — ${feed.capped.skipped} of ${feed.capped.matched} matching order(s) were not fetched. A windowed run does not continue automatically: raise the limit or narrow the window to reach the rest.`
+      : `NETSUITE_ORDER_LIMIT=${feed.capped.limit} capped this run — ${feed.capped.skipped} of ${feed.capped.matched} matching order(s) not yet reached. The next scheduled run continues automatically from here; raise the limit to cover more per run.`
     : null;
   const stoppedEarly =
     (await processOrderRecords({ admin, shop, records, currencyCode, caches, deadline, results })) || capped;
@@ -1200,23 +1275,44 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // A failure that is NOT quarantined is what parks the watermark.
   const blocking = failures.length - quarantined.size;
 
-  // Advance the watermark only on a fully clean run. If anything failed (a
-  // NetSuite fetch error or a Shopify create/update error), we leave it where
-  // it was so the next run re-pulls the same window and retries — the sync is
-  // idempotent, so re-processing succeeded orders is harmless. A run that stopped
-  // at its time budget is in the same position: orders in the window were never
-  // looked at, and moving the watermark past them would skip them for good. Demo
-  // mode never advances the watermark (there's no real modified-date to track),
-  // and neither does a targeted run — it only looked at a hand-picked set of
+  // Advance the watermark only on a fully clean run that ALSO reached the end
+  // of this period's candidate list. If anything failed (a NetSuite fetch
+  // error or a Shopify create/update error), we leave it where it was so the
+  // next run re-pulls the same window and retries — the sync is idempotent, so
+  // re-processing succeeded orders is harmless. A run that stopped at its time
+  // budget is in the same position: orders in the window were never looked at,
+  // and moving the watermark past them would skip them for good. Demo mode
+  // never advances the watermark (there's no real modified-date to track), and
+  // neither does a targeted run — it only looked at a hand-picked set of
   // orders, so moving the watermark would permanently skip everything else
   // modified in the meantime.
   // …and neither does a windowed run: it was asked about one stretch of
   // modification time, so moving the watermark to now would skip everything the
   // scheduled run still owes from before it.
-  if (process.env.NETSUITE_USE_DEMO === "false" && blocking === 0 && !stoppedEarly && !targeted.length && !window) {
-    // `since` rides along so the schedule card can say what this run covered,
-    // not only when it ran.
-    await setLastSyncedAt(shop, runStartedAt, since);
+  if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length && !window) {
+    if (blocking === 0 && !stoppedEarly) {
+      // Fully clean AND the day-granular candidate list for this period was
+      // exhausted (not capped) — this period is completely drained.
+      // `since` rides along so the schedule card can say what this run
+      // covered, not only when it ran. setLastSyncedAt also resets the
+      // list-offset cursor, so the fresh period that starts next lists from
+      // the top rather than resuming a position that no longer means anything.
+      await setLastSyncedAt(shop, runStartedAt, since);
+    } else if (blocking === 0 && feed?.capped) {
+      // Capped by NETSUITE_ORDER_LIMIT, but everything this run DID process
+      // succeeded — safe to walk the list cursor forward past it, so the NEXT
+      // run resumes further into this SAME period instead of the cap landing
+      // on the exact same first N candidates every time, forever, which is
+      // the bug this whole mechanism exists to fix: a backlog bigger than the
+      // limit now drains across successive runs instead of never finishing.
+      // The watermark itself stays put on purpose — this period is not done,
+      // and moving it would let a later run believe it was.
+      await setSyncListOffset(shop, startOffset + feed.capped.fetched);
+    }
+    // Any other case — a genuine failure blocked progress, capped or not —
+    // leaves both the watermark and the list-offset exactly where they were,
+    // so the same starting point (and so the same failed orders) comes up
+    // again next run. This is the existing retry behavior, unchanged.
   }
   const run = {
     shop,
