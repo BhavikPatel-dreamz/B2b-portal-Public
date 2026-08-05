@@ -470,6 +470,25 @@ async function resolveOrderId(shop, raw) {
   return { id: null };
 }
 
+// For a raw value the CALLER already knows is a NetSuite internal id — a re-sync
+// of a log row is asking about the exact order it recorded before, not typing a
+// guess — so there is no "SO number or internal id?" ambiguity to resolve and no
+// reason to pay for resolveOrderId's two tranId search queries (plus the 400ms
+// courtesy sleep between them) before it falls back to this same direct lookup.
+// Only if this specific id no longer resolves (the order was deleted in NetSuite
+// since we last saw it) does it fall back to the full ambiguity-handling search,
+// on the offhand chance the identifier still means something as a tranId.
+async function resolveKnownInternalId(shop, raw) {
+  try {
+    await nsGet(shop, `/salesorder/${raw}`);
+    return { id: raw, via: `internalId ${raw} (known)` };
+  } catch (err) {
+    if (err?.syncStopped) throw err;
+    console.warn(`[netsuite] known internal id ${raw} no longer resolves, falling back to a tranId search:`, err?.message);
+    return resolveOrderId(shop, raw);
+  }
+}
+
 // Fetches sales orders from NetSuite. The list endpoint returns { items:
 // [{ id, links }], hasMore, ... } with only ids, so we page through it and then
 // expand each id into the full record. `since` (the sync watermark) drives the
@@ -478,7 +497,7 @@ async function resolveOrderId(shop, raw) {
 // modification time, asked for from the log page's "Sync now" control. It replaces
 // the watermark window rather than narrowing it, and it is re-applied exactly after
 // the records are expanded — see inWindow.
-export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
+export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInternalIds } = {}) {
   const items = [];
   const errors = [];
   let refs;
@@ -515,7 +534,9 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window } = {}) {
       }
       let resolved;
       try {
-        resolved = await resolveOrderId(shop, raw);
+        resolved = knownInternalIds?.has(raw)
+          ? await resolveKnownInternalId(shop, raw)
+          : await resolveOrderId(shop, raw);
       } catch (err) {
         if (!err?.syncStopped) throw err;
         stopped = true;

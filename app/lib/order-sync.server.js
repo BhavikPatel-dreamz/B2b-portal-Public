@@ -511,7 +511,7 @@ function ordersToExcel(orders) {
 // swallowed with a warning.
 const LOG_DIR = "storage/logs";
 
-// The run mode a manual re-sync logs under (see resyncOrders). It reads as a
+// The run mode a manual re-sync logs under (see startResync). It reads as a
 // normal live run to saveSyncLogRows — only "export…" modes are dry runs — but the
 // file log words a few lines differently for it.
 const MANUAL_MODE = "manual re-sync";
@@ -824,7 +824,7 @@ function maxRunMs() {
 
 // The per-order sync itself, over whatever set of NetSuite records it was handed.
 // Shared by the scheduled run and by a manual re-sync of hand-picked orders
-// (resyncOrders), so both take exactly the same path per order.
+// (runResync), so both take exactly the same path per order.
 //
 // `results` is appended to in place — the caller has usually already put the
 // fetch failures in it, and the stopped-early message counts them as work done.
@@ -913,112 +913,142 @@ function summarise(results) {
 // orders it was asked about, so advancing it would permanently skip everything
 // else modified in the meantime. SYNC_ORDER_EXPORT is ignored too: a re-sync is
 // an explicit "write this order to Shopify now", not a preview.
-export async function resyncOrders(shop, ids) {
+//
+// Started, NOT awaited — same trick as startCronJobs, and for the same reason:
+// this used to hold the browser's request open for the whole re-sync (a fetch
+// from NetSuite plus a second of rate-limit sleep per order), and the log
+// page's syncRunning — the thing that shows progress and the Stop button — is
+// read from the LOADER. The loader only learns a re-sync is happening once this
+// request returns, so while it stayed open for the full run, Sync selected and
+// the per-row Sync button both looked, from the page's side, like nothing was
+// running at all: no progress, no way to stop. Returning as soon as the lock is
+// held fixes that the same way it already worked for Sync now.
+// `knownInternalIds`, if given, is the subset of `ids` the caller already knows
+// to be NetSuite internal ids rather than SO numbers a human typed — a re-sync
+// row's own externalId, for instance. It buys those a direct lookup instead of
+// resolveOrderId's tranId-search-first ambiguity handling — see
+// resolveKnownInternalId in netsuite.server.js for why that matters for how long
+// a re-sync of one or two known rows takes.
+export async function startResync(shop, ids, { knownInternalIds } = {}) {
   const requested = [...new Set((ids || []).map((v) => String(v).trim()).filter(Boolean))];
   if (!requested.length) {
-    return { shop, requested, summary: { total: 0, ok: 0, failed: 0 }, results: [] };
+    return { started: false, requested, reason: "nothing to sync" };
   }
 
   const runStartedAt = new Date();
   const lock = await acquireSyncLock(shop, runStartedAt);
   if (!lock.acquired) {
-    const heldSince = lock.heldSince?.toISOString() || "unknown";
-    console.warn(`[order-sync] ${shop}: a sync started at ${heldSince} is still running — not re-syncing ${requested.join(", ")}.`);
-    return {
-      shop,
-      requested,
-      skipped: true,
-      reason: `another sync run (started ${heldSince}) is still in progress`,
-    };
+    return { started: false, requested, heldSince: lock.heldSince ?? null };
   }
-  try {
-    const feed = await fetchExternalOrders(shop, { ids: requested });
-    const records = Array.isArray(feed?.items) ? feed.items : [];
-    // Orders that could not be fetched (or resolved to a sales order at all) are
-    // failures of this re-sync, not silent no-ops.
-    const results = (feed?.errors || []).map(({ id, error }) => ({
-      externalId: String(id),
-      action: "fetch",
-      ok: false,
-      error: `NetSuite fetch failed: ${error}`,
-    }));
 
-    const { admin } = await unauthenticated.admin(shop);
-    const currencyCode = await getShopCurrency(admin);
-    const caches = { company: new Map(), variant: new Map() };
-    // Stopped while the ids were still being resolved, or straight after. A
-    // re-sync moves no watermark, so unlike the scheduled run there is nothing to
-    // protect here — it simply does none of the orders rather than an arbitrary
-    // prefix of the ones that were ticked.
-    //
-    // Checked BEFORE setSyncTotal below, same as runOrderSync: fetchNetsuiteOrders
-    // already left "fetching" progress behind (how many of the requested ids it
-    // got through), and a stopped run should keep reporting that rather than
-    // being overwritten with a "syncing" total that never moves off 0.
-    const stopped = feed?.stopped || (await isSyncStopRequested(shop));
-    let stoppedEarly;
-    if (stopped) {
-      stoppedEarly = `stopped by hand before any of the ${records.length} re-synced order(s) were written`;
-      console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
-    } else {
-      // A hand-picked re-sync holds the same lock and shows up in the same place
-      // on the page, so it reports progress the same way a scheduled run does.
-      await setSyncTotal(shop, records.length);
-      stoppedEarly = await processOrderRecords({
-        admin,
-        shop,
-        records,
-        currencyCode,
-        caches,
-        deadline: runStartedAt.getTime() + maxRunMs(),
-        results,
-      });
-    }
-
-    const summary = summarise(results);
-
-    // The extra work runs after a re-sync too, so this path doesn't quietly do
-    // less than the others. The cron and Sync now reach it through CRON_JOBS; a
-    // re-sync never touches that list — it is deliberately narrowed to the orders
-    // that were ticked — so the one job that is about the SHOP rather than about
-    // this run's orders is called here directly.
-    //
-    // Best effort, because by this point the orders are already in Shopify:
-    // failing to do the extra work is not a reason to report the re-sync as
-    // broken. It is reported instead.
-    let extra;
+  const promise = (async () => {
     try {
-      extra = await extraFunction(shop);
+      return await runResync(shop, requested, runStartedAt, knownInternalIds);
     } catch (err) {
-      extra = { failed: true, error: err?.message || String(err) };
-      console.warn(`[order-sync] ${shop}: extraFunction failed after the re-sync: ${extra.error}`);
+      // Died before it produced a summary — a NetSuite auth failure, a Shopify
+      // connection error. There is no request left to report this to, so it is
+      // logged the way a crashed cron job is, leaving a trace in the table
+      // instead of only in a console nobody is watching.
+      await logSyncCrash(shop, runStartedAt, err);
+      throw err;
+    } finally {
+      await releaseSyncLock(shop, lock.token);
     }
+  })();
+  // Nothing may reject out of here unobserved — see startCronJobs for why.
+  promise.catch((err) => {
+    console.error(`[order-sync] ${shop}: re-sync failed outside its own handling: ${err?.message || err}`);
+  });
 
-    const run = {
+  return { started: true, requested, promise };
+}
+
+// The actual work of a re-sync, once startResync is holding the lock.
+async function runResync(shop, requested, runStartedAt, knownInternalIds) {
+  const feed = await fetchExternalOrders(shop, { ids: requested, knownInternalIds });
+  const records = Array.isArray(feed?.items) ? feed.items : [];
+  // Orders that could not be fetched (or resolved to a sales order at all) are
+  // failures of this re-sync, not silent no-ops.
+  const results = (feed?.errors || []).map(({ id, error }) => ({
+    externalId: String(id),
+    action: "fetch",
+    ok: false,
+    error: `NetSuite fetch failed: ${error}`,
+  }));
+
+  const { admin } = await unauthenticated.admin(shop);
+  const currencyCode = await getShopCurrency(admin);
+  const caches = { company: new Map(), variant: new Map() };
+  // Stopped while the ids were still being resolved, or straight after. A
+  // re-sync moves no watermark, so unlike the scheduled run there is nothing to
+  // protect here — it simply does none of the orders rather than an arbitrary
+  // prefix of the ones that were ticked.
+  //
+  // Checked BEFORE setSyncTotal below, same as runOrderSync: fetchNetsuiteOrders
+  // already left "fetching" progress behind (how many of the requested ids it
+  // got through), and a stopped run should keep reporting that rather than
+  // being overwritten with a "syncing" total that never moves off 0.
+  const stopped = feed?.stopped || (await isSyncStopRequested(shop));
+  let stoppedEarly;
+  if (stopped) {
+    stoppedEarly = `stopped by hand before any of the ${records.length} re-synced order(s) were written`;
+    console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
+  } else {
+    // A hand-picked re-sync holds the same lock and shows up in the same place
+    // on the page, so it reports progress the same way a scheduled run does.
+    await setSyncTotal(shop, records.length);
+    stoppedEarly = await processOrderRecords({
+      admin,
       shop,
-      mode: MANUAL_MODE,
-      startedAt: runStartedAt.toISOString(),
-      finishedAt: new Date().toISOString(),
-      targeted: requested,
-      summary,
+      records,
+      currencyCode,
+      caches,
+      deadline: runStartedAt.getTime() + maxRunMs(),
       results,
-      stoppedEarly,
-      extra,
-    };
-    const logFile = writeSyncLog(run);
-    await saveSyncLogRows(run);
-    return {
-      shop,
-      requested,
-      summary,
-      results,
-      logFile,
-      extra,
-      ...(stoppedEarly ? { stoppedEarly } : {}),
-    };
-  } finally {
-    await releaseSyncLock(shop, lock.token);
+    });
   }
+
+  const summary = summarise(results);
+
+  // The extra work runs after a re-sync too, so this path doesn't quietly do
+  // less than the others. The cron and Sync now reach it through CRON_JOBS; a
+  // re-sync never touches that list — it is deliberately narrowed to the orders
+  // that were ticked — so the one job that is about the SHOP rather than about
+  // this run's orders is called here directly.
+  //
+  // Best effort, because by this point the orders are already in Shopify:
+  // failing to do the extra work is not a reason to report the re-sync as
+  // broken. It is reported instead.
+  let extra;
+  try {
+    extra = await extraFunction(shop);
+  } catch (err) {
+    extra = { failed: true, error: err?.message || String(err) };
+    console.warn(`[order-sync] ${shop}: extraFunction failed after the re-sync: ${extra.error}`);
+  }
+
+  const run = {
+    shop,
+    mode: MANUAL_MODE,
+    startedAt: runStartedAt.toISOString(),
+    finishedAt: new Date().toISOString(),
+    targeted: requested,
+    summary,
+    results,
+    stoppedEarly,
+    extra,
+  };
+  const logFile = writeSyncLog(run);
+  await saveSyncLogRows(run);
+  return {
+    shop,
+    requested,
+    summary,
+    results,
+    logFile,
+    extra,
+    ...(stoppedEarly ? { stoppedEarly } : {}),
+  };
 }
 
 async function runOrderSync(shop, runStartedAt, { window } = {}) {

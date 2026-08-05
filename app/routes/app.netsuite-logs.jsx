@@ -565,13 +565,26 @@ export default function OrderSyncLogs() {
 
   // "It finished" is the edge from running to not-running, which only this page
   // can see — the run itself ended in a background task with nobody listening.
+  //
+  // schedule.progress at this exact render is the run's FINAL count: the same
+  // loader response that reports syncRunning: false also carries the last
+  // totalOrders/doneOrders the run wrote before releasing the lock (release
+  // clears the lock, not the counters — see releaseSyncLock), so this is not a
+  // stale read. Named with real numbers rather than "up to date" for the same
+  // reason the toast started with a count: "Sync finished" alone doesn't say
+  // whether all of it made it, and a run stopped by hand or cut off by the time
+  // budget finishes with done < total.
   const wasRunning = useRef(false);
   useEffect(() => {
     if (wasRunning.current && !syncRunning) {
-      shopify.toast.show("Sync finished — the table below is up to date.");
+      const p = schedule.progress;
+      const message = p
+        ? `Sync finished — ${p.done} of ${p.total} order${p.total === 1 ? "" : "s"} ${progressVerb(p.phase)}${p.done < p.total ? " (the rest were left for the next run)" : ""}.`
+        : "Sync finished — the table below is up to date.";
+      shopify.toast.show(message, p && p.done < p.total ? { isError: true } : undefined);
     }
     wasRunning.current = syncRunning;
-  }, [syncRunning, shopify]);
+  }, [syncRunning, schedule.progress, shopify]);
 
   const openDetail = (row) => {
     setSelected(row);
