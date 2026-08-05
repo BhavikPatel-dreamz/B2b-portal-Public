@@ -6864,6 +6864,8 @@ export async function getAdvancedCompanyOrders(
       };
       financialStatus?: string;
       fulfillmentStatus?: string;
+      sourceType?: string;
+      source?: string;
       query?: string;
       sortKey?: string;
       reverse?: boolean;
@@ -6879,7 +6881,7 @@ export async function getAdvancedCompanyOrders(
     };
 
     const cleanCompanyId = extractId(companyId);
-    const queryParts: string[] = [`company_id:${cleanCompanyId}`];
+    const queryParts: string[] = [];
 
     // Track which filters need post-processing
     let needsLocationPostFilter = false;
@@ -6908,8 +6910,20 @@ export async function getAdvancedCompanyOrders(
       console.log(`📍 Will post-filter by location: ${requestedLocationId}`);
     }
 
-    // 2. Customer Filter - Support both single and multiple
-    if (filters.customerId) {
+    // 2. Company & Customer Query Building
+    if (cleanCompanyId && filters.customerId) {
+      if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
+        const customerQueries = filters.customerId
+          .map((id) => `customer_id:${extractId(id)}`)
+          .join(" OR ");
+        queryParts.push(`(company_id:${cleanCompanyId} OR (${customerQueries}))`);
+      } else if (typeof filters.customerId === "string") {
+        const cleanCustomerId = extractId(filters.customerId);
+        queryParts.push(`(company_id:${cleanCompanyId} OR customer_id:${cleanCustomerId})`);
+      }
+    } else if (cleanCompanyId) {
+      queryParts.push(`company_id:${cleanCompanyId}`);
+    } else if (filters.customerId) {
       if (Array.isArray(filters.customerId) && filters.customerId.length > 0) {
         const customerQueries = filters.customerId
           .map((id) => `customer_id:${extractId(id)}`)
@@ -7351,8 +7365,8 @@ export async function getAdvancedCompanyOrders(
         const orderLocationId = extractId(order?.locationId || "");
 
         if (!orderLocationId) {
-          console.warn(`⚠️ Order ${order.name} has no locationId, excluding`);
-          return false;
+          console.log(`ℹ️ Order ${order.name} has no explicit locationId, keeping for company view`);
+          return true;
         }
 
         const isAllowed = normalizedAllowedIds.includes(orderLocationId);
