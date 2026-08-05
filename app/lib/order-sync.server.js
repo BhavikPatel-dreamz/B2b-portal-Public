@@ -7,12 +7,15 @@ import demoFeed from "../data/demo-orders.json";
 import { extraFunction } from "./extra-function.server.js";
 import { fetchNetsuiteOrders, targetedOrderIds, INVOICE_PAID_IN_FULL } from "./netsuite.server.js";
 import { orderAttemptLimit, quarantinedOrders } from "./order-sync-log.server.js";
-import { windowLabel } from "./sync-windows.js";
+import { windowLabel, windowRange } from "./sync-windows.js";
 import {
   acquireSyncLock,
+  bumpSyncDone,
   getLastSyncedAt,
+  isSyncStopRequested,
   releaseSyncLock,
   setLastSyncedAt,
+  setSyncTotal,
 } from "./netsuite-oauth.server.js";
 
 // ---------------------------------------------------------------------------
@@ -27,12 +30,22 @@ export async function fetchExternalOrders(shop, opts = {}) {
     // opts.window is ignored here on purpose: the demo records carry no
     // lastModifiedDate, so every window would match none of them and a windowed
     // run in demo mode would look broken rather than like a demo.
-    // A targeted call (opts.ids — a manual re-sync) has to narrow the demo feed
-    // the same way it narrows a live fetch, or re-syncing one order would run the
-    // whole feed. Both identifiers resolveOrderId() accepts are matched: the
-    // internal id ("1504") and the document number ("SO1504", or bare "1504").
-    const ids = (opts.ids || []).map((v) => String(v).trim()).filter(Boolean);
+    // A targeted call has to narrow the demo feed the same way it narrows a live
+    // fetch, or re-syncing one order would run the whole feed. Both identifiers
+    // resolveOrderId() accepts are matched: the internal id ("1504") and the
+    // document number ("SO1504", or bare "1504").
+    //
+    // Both sources of a target are honoured, in the same precedence
+    // fetchNetsuiteOrders uses: an explicit list (opts.ids — a manual re-sync)
+    // wins, and NETSUITE_ORDER_IDS applies to every other run. That env var used
+    // to be read only on the live path, so in demo mode it did nothing at all:
+    // the banner on the log page said every run syncs only those orders while
+    // the run happily processed the whole demo feed.
+    const requested = (opts.ids || []).map((v) => String(v).trim()).filter(Boolean);
+    const ids = requested.length ? requested : targetedOrderIds();
     if (!ids.length) return demoFeed;
+    const source = requested.length ? "requested orders" : "NETSUITE_ORDER_IDS";
+    console.log(`[order-sync] demo feed — ${source}, syncing only: ${ids.join(", ")}`);
     const key = (v) => String(v).trim().toUpperCase().replace(/^SO/, "");
     const wanted = new Set(ids.map(key));
     const items = (demoFeed.items || []).filter(
@@ -43,7 +56,7 @@ export async function fetchExternalOrders(shop, opts = {}) {
       items,
       errors: ids
         .filter((raw) => !found.has(key(raw)))
-        .map((raw) => ({ id: raw, error: `requested orders: "${raw}" is not in the demo feed` })),
+        .map((raw) => ({ id: raw, error: `${source}: "${raw}" is not in the demo feed` })),
     };
   }
   return fetchNetsuiteOrders(shop, opts);
@@ -119,9 +132,13 @@ function mapNetsuiteOrder(rec) {
     shipComplete: rec.shipComplete ?? null,
     note: rec.memo || null,
     currency: currencyCode(rec?.currency),
+    // linkedCustomerEmail is the customer record's address, attached by
+    // fetchNetsuiteOrders only for orders whose own Email field is blank — some
+    // sales order forms never fill it. Without it those orders map to a null
+    // email, which fails a B2B order outright (see lookupCompanyLocation).
     customer: rec?.entity
       ? {
-        email: process.env.TEST_EMAIL || rec.email || null,
+        email: process.env.TEST_EMAIL || rec.email || rec.linkedCustomerEmail || null,
         ...customerName,
       }
       : null,
@@ -651,6 +668,20 @@ async function saveSyncLogRows(run) {
       message: r.error || r.reason || r.warning || null,
       detail: JSON.stringify(r),
     }));
+  // A run that stopped before it reached a single order has no per-order rows, so
+  // without this it would leave nothing at all in the table — the one place
+  // anyone looks after pressing Stop sync, and the last place that should stay
+  // silent about it. Same shape as the crash row: one "run" row, carrying the
+  // reason.
+  if (!rows.length && run.stoppedEarly) {
+    rows.push({
+      ...base,
+      action: "run",
+      status: "skipped",
+      message: run.stoppedEarly,
+      detail: JSON.stringify({ reason: run.stoppedEarly }),
+    });
+  }
   if (!rows.length) return 0;
 
   try {
@@ -773,8 +804,10 @@ export function buildSyncWindow(hours) {
   if (!Number.isFinite(n) || n <= 0) {
     throw new Error(`invalid sync window: ${hours}`);
   }
-  const to = new Date();
-  return { from: new Date(to.getTime() - n * 60 * 60 * 1000), to, hours: n, label: windowLabel(n) };
+  // windowRange, not the arithmetic written out again: the log page shows the
+  // same pair under the dropdown before the button is pressed, and a preview
+  // that drifted from the run it previews would be worse than no preview.
+  return { ...windowRange(n), hours: n, label: windowLabel(n) };
 }
 
 // How long a single run may spend processing orders. Cron intervals are short and
@@ -807,6 +840,17 @@ async function processOrderRecords({ admin, shop, records, currencyCode, caches,
       console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
       return stoppedEarly;
     }
+    // Stop sync, pressed on the log page. Checked in the same place and for the
+    // same reason as the budget above: an order is created, tagged and linked to
+    // its company across several calls, so the only safe place to stop is
+    // between two of them. What is already done stays done, the watermark is
+    // left where it was (a stopped-early run never advances it), and the next
+    // run picks the rest up.
+    if (await isSyncStopRequested(shop)) {
+      const stoppedEarly = `stopped by hand after ${results.length} of ${records.length} order(s) — the rest are left for the next run`;
+      console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
+      return stoppedEarly;
+    }
     try {
       let outcome;
       if (action === "delete") {
@@ -830,6 +874,10 @@ async function processOrderRecords({ admin, shop, records, currencyCode, caches,
     } catch (err) {
       results.push({ externalId, reference: entry.reference, action, ok: false, error: err?.message || String(err) });
     }
+    // Counted here, outside the try, because "done" means "this run is finished
+    // with this order" — a failed one is as done as a successful one, and a
+    // progress count that stalled on failures would read as a hung sync.
+    await bumpSyncDone(shop);
   }
   return null;
 }
@@ -888,6 +936,9 @@ export async function resyncOrders(shop, ids) {
     const { admin } = await unauthenticated.admin(shop);
     const currencyCode = await getShopCurrency(admin);
     const caches = { company: new Map(), variant: new Map() };
+    // A hand-picked re-sync holds the same lock and shows up in the same place
+    // on the page, so it reports progress the same way a scheduled run does.
+    await setSyncTotal(shop, records.length);
     const stoppedEarly = await processOrderRecords({
       admin,
       shop,
@@ -955,6 +1006,38 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   const feed = await fetchExternalOrders(shop, window ? { window } : { since });
   const records = Array.isArray(feed?.items) ? feed.items : [];
 
+  // Stop sync, pressed while the fetch was in flight. Fetching is the longest
+  // stretch of a big run — NetSuite is paged and then each order is expanded
+  // with a second of rate-limit sleep between — and it has no safe interruption
+  // point of its own, so the request is honoured at the first one after it:
+  // before anything is written to Shopify, exported, or logged as synced. Note
+  // this is checked BEFORE the export branch too, so a stopped dry run doesn't
+  // leave a set of export files behind describing work that was called off.
+  if (await isSyncStopRequested(shop)) {
+    const stoppedEarly = `stopped by hand before any of the ${records.length} fetched order(s) were synced`;
+    console.warn(`[order-sync] ${shop}: ${stoppedEarly}`);
+    const run = {
+      shop,
+      mode: window ? `window sync (${window.label})` : undefined,
+      startedAt: runStartedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      since: since?.toISOString() || null,
+      window,
+      targeted,
+      summary: { total: 0, ok: 0, failed: 0 },
+      results: [],
+      stoppedEarly,
+    };
+    const logFile = writeSyncLog(run);
+    await saveSyncLogRows(run);
+    return { shop, stopped: true, stoppedEarly, summary: run.summary, results: [], logFile };
+  }
+
+  // What this run has to get through. Set before any of it is done, so the page
+  // can show "0 of 50" rather than nothing at all — the log rows do not arrive
+  // until the run ends, and on a 50-order run that is minutes of silence.
+  await setSyncTotal(shop, records.length);
+
   if (process.env.SYNC_ORDER_EXPORT === "true") {
     const exportDir = path.resolve("storage/exports");
     fs.mkdirSync(exportDir, { recursive: true });
@@ -990,6 +1073,8 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
     if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length && !window) {
       await setLastSyncedAt(shop, runStartedAt, since);
     }
+    // A dry run handled every record it fetched, in one step — see setSyncTotal.
+    await setSyncTotal(shop, mapped.length, mapped.length);
     const exportRun = {
       shop,
       mode: "export (dry run — nothing written to Shopify)",
@@ -2000,6 +2085,31 @@ function isoDateTime(v) {
 }
 
 async function createOrder(admin, entry, currencyCode, caches) {
+  // A create needs an email, and it is worth failing over rather than working
+  // around. Shopify will happily accept an order with no customer at all, but
+  // that order belongs to nobody: the buyer can't see it in their account, and
+  // nothing afterwards can attach it to one. On a company order it is fatal
+  // anyway (see lookupCompanyLocation) — this check only makes the same
+  // requirement explicit for an order with no company name, which would
+  // otherwise be created silently and look like a success in the log.
+  //
+  // Two sources have already been tried by this point: the sales order's own
+  // Email field and, when that is blank, the customer record's
+  // (linkedCustomerEmail — see fetchCustomerEmails in netsuite.server.js). So
+  // reaching here means NetSuite holds no address for this buyer anywhere, and
+  // the fix is in NetSuite, not here. The message says exactly that, because
+  // "no customer email" alone reads like a bug in the sync.
+  //
+  // Only creates are affected. An order already in Shopify takes the
+  // tracking-only update path and never comes through here.
+  if (!entry.customer?.email) {
+    return {
+      ok: false,
+      action: "create",
+      error: "no customer email: the NetSuite order's Email field is blank and so is its customer record — an order cannot be created without one",
+    };
+  }
+
   // An order naming a company is a B2B order and MUST carry its company
   // location, so an unresolvable company blocks the create instead of quietly
   // producing an order the buyer's company can't see. The company, its contact

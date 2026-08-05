@@ -4,10 +4,10 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server.js";
 import { cronIntervalMinutes, crontabLine, intervalLabel, nextCronRunAt } from "../lib/cron-schedule.js";
-import { getLastSyncWindow, getSyncRunningSince } from "../lib/netsuite-oauth.server.js";
+import { getLastSyncWindow, getSyncRunState } from "../lib/netsuite-oauth.server.js";
 import { plannedOrdersWindow, targetedOrderIds } from "../lib/netsuite.server.js";
 import { RETRY_STATUSES, retryableRowIds } from "../lib/order-sync-log.server.js";
-import { SYNC_WINDOWS } from "../lib/sync-windows.js";
+import { DEFAULT_SYNC_WINDOW, SYNC_WINDOWS, windowRange } from "../lib/sync-windows.js";
 import { isTestStore } from "../lib/test-stores.server.js";
 import { authenticate } from "../shopify.server";
 
@@ -24,8 +24,13 @@ const PER_PAGE = 25;
 const STATUSES = ["failed", "success", "skipped"];
 const RESYNC_URL = "/api/orders-resync";
 const SYNC_NOW_URL = "/api/orders-sync-now";
+const SYNC_STOP_URL = "/api/orders-sync-stop";
 // How often the page re-asks the loader while a background sync is running.
 const POLL_MS = 5000;
+// How often the "will cover" preview under the dropdown is recomputed. It is
+// relative to now, so on a page left open it would otherwise describe a window
+// that ended half an hour ago.
+const PREVIEW_TICK_MS = 30000;
 
 // The date filters are date-only (that's what s-date-field gives), so "to" has to
 // cover the whole day or a same-day from/to would match nothing.
@@ -124,10 +129,11 @@ export const loader = async ({ request }) => {
   // covered, and which one the next will. The "next" window is not guessed here —
   // plannedOrdersWindow is the same code that builds the real query, asked what it
   // would produce at the next cron tick, so the card cannot drift from the run.
-  const [lastWindow, runningSince] = await Promise.all([
+  const [lastWindow, runState] = await Promise.all([
     getLastSyncWindow(session.shop),
-    getSyncRunningSince(session.shop),
+    getSyncRunState(session.shop),
   ]);
+  const { runningSince, stopRequestedAt, totalOrders, doneOrders } = runState;
   const everyMinutes = cronIntervalMinutes(process.env.CRON_INTERVAL_MINUTES);
   const nextRunAt = nextCronRunAt(everyMinutes);
   const nextWindow = plannedOrdersWindow(lastWindow.to, nextRunAt);
@@ -151,6 +157,15 @@ export const loader = async ({ request }) => {
     // The sync runs in the background, so this is how the page knows one is still
     // going — it polls the loader until this goes null.
     runningSince: runningSince?.toISOString() || null,
+    // Set once Stop sync has been pressed and the run has not noticed yet. The
+    // gap is real — the run only checks between orders — and the button has to
+    // say so, or the press looks like it did nothing and gets pressed again.
+    stopRequestedAt: stopRequestedAt?.toISOString() || null,
+    // How many orders the run has to do and how many it has finished. While a
+    // run is going this is the only thing on the page that moves — its log rows
+    // are all written at the end — and afterwards it is what the last run got
+    // through. Null before any run has reported a total.
+    progress: totalOrders === null ? null : { total: totalOrders, done: doneOrders ?? 0 },
     last: {
       from: lastWindow.from?.toISOString() || null,
       to: lastWindow.to?.toISOString() || null,
@@ -159,6 +174,15 @@ export const loader = async ({ request }) => {
       from: nextWindow.from.toISOString(),
       to: nextWindow.to.toISOString(),
     },
+    // The two settings that make the range dropdown a lie, as plain booleans —
+    // NOT behind showDiagnostics, unlike the banners further down that name the
+    // env vars. Which setting did it is app-internals; that the range you just
+    // picked is being ignored is what the person pressing the button needs, on
+    // any store. Without this the page looks broken in exactly the way it was
+    // reported: pick "Last 1 hour", press Sync now, and nothing that has to do
+    // with the last hour happens.
+    targeted: targetedOrderIds().length > 0,
+    dryRun: process.env.SYNC_ORDER_EXPORT === "true",
     showDiagnostics,
     ...(showDiagnostics
       ? {
@@ -365,15 +389,20 @@ export default function OrderSyncLogs() {
   const [selectedIds, setSelectedIds] = useState([]);
   const syncFetcher = useFetcher();
   const runFetcher = useFetcher();
+  const stopFetcher = useFetcher();
   // The chosen range is state, not a URL param: it says what the next Sync now
   // will pull from NetSuite, which is not something a filtered view of the table
   // should carry around or a bookmark should replay.
-  const [syncWindow, setSyncWindow] = useState("");
+  const [syncWindow, setSyncWindow] = useState(DEFAULT_SYNC_WINDOW);
   const running = runFetcher.state !== "idle";
   // A background run is in progress — either one this page just started, or one
   // the cron started while the page was open. Both look the same to the loader,
   // which is what makes it a reliable signal.
   const syncRunning = Boolean(schedule.runningSince);
+  // A stop has been asked for and the run hasn't reached its next order boundary
+  // yet. The fetcher's own state covers only the request that carries the ask;
+  // the wait that follows is the loader's to report, and it is the longer half.
+  const stopping = stopFetcher.state !== "idle" || Boolean(schedule.stopRequestedAt);
   // One sync at a time per shop is enforced by the run lock anyway (the second
   // one is refused, not queued); disabling here is so that refusal isn't the
   // first thing the page teaches anyone.
@@ -433,6 +462,35 @@ export default function OrderSyncLogs() {
     runFetcher.submit({ window: syncWindow }, { method: "POST", action: SYNC_NOW_URL });
   }, [runFetcher, syncWindow]);
 
+  // The exact stretch the chosen range means, as the two instants the run will
+  // really use — windowRange is the same function buildSyncWindow calls, so the
+  // preview and the run cannot describe different windows.
+  //
+  // Computed after mount rather than in the loader, and on a tick rather than
+  // once: it is relative to "now", so a server-rendered value would disagree
+  // with the browser's clock (React reports that as a hydration mismatch) and
+  // would go stale on a page left open.
+  const [preview, setPreview] = useState(null);
+  useEffect(() => {
+    const choice = SYNC_WINDOWS.find((w) => w.value === syncWindow);
+    if (!choice) return undefined;
+    const compute = () => {
+      const { from, to } = windowRange(choice.hours);
+      setPreview({ from: from.toISOString(), to: to.toISOString() });
+    };
+    compute();
+    const timer = setInterval(compute, PREVIEW_TICK_MS);
+    return () => clearInterval(timer);
+  }, [syncWindow]);
+
+  // Asks the run in progress to stop — whichever process is holding it, this
+  // page's Sync now or the cron's own tick. It is a request, not a kill (see
+  // /api/orders-sync-stop), so the page goes on polling the lock and the run
+  // disappears from the card when it really ends.
+  const stopSync = useCallback(() => {
+    stopFetcher.submit({}, { method: "POST", action: SYNC_STOP_URL });
+  }, [stopFetcher]);
+
   useEffect(() => {
     const result = syncFetcher.data;
     if (!result) return;
@@ -450,6 +508,13 @@ export default function OrderSyncLogs() {
     if (result.ok) shopify.toast.show(result.message, result.failed ? { isError: true } : undefined);
     else shopify.toast.show(result.error, { isError: true });
   }, [runFetcher.data, shopify]);
+
+  useEffect(() => {
+    const result = stopFetcher.data;
+    if (!result) return;
+    if (result.ok) shopify.toast.show(result.message);
+    else shopify.toast.show(result.error, { isError: true });
+  }, [stopFetcher.data, shopify]);
 
   // While a run is going, re-ask the loader every few seconds: the run writes its
   // rows as it goes, so the table fills in rather than sitting still, and the
@@ -489,6 +554,17 @@ export default function OrderSyncLogs() {
           it — which is the same thing the scheduled run asks for, just with the
           window named by hand instead of taken from the watermark. */}
       <s-section heading="Sync from NetSuite">
+        {/* Export mode changes what the button DOES, not just what it reads, so
+            it is called out at the control rather than only in the Schedule card
+            below the fold. */}
+        {schedule.dryRun && (
+          <s-banner tone="warning">
+            Export mode is on, so Sync now is a <s-text type="strong">dry run</s-text>: orders are
+            written to storage/exports and <s-text type="strong">nothing reaches Shopify</s-text>.
+            The run still appears in the log below, which is why it can look like a sync that did
+            nothing.
+          </s-banner>
+        )}
         <s-stack direction="inline" gap="base" alignItems="center">
           <s-select
             ref={windowRef}
@@ -512,20 +588,61 @@ export default function OrderSyncLogs() {
           >
             Sync now
           </s-button>
+          {/* Offered only while something is actually running — there is nothing
+              to stop otherwise, and the route refuses it anyway rather than
+              arming a flag the next run would pick up. It stops whichever run
+              holds the lock, including one the cron started while this page was
+              open. */}
+          {syncRunning && (
+            <s-button
+              variant="secondary"
+              tone="critical"
+              onClick={stopSync}
+              {...(stopping ? { disabled: true, loading: true } : {})}
+            >
+              {stopping ? "Stopping…" : "Stop sync"}
+            </s-button>
+          )}
           {/* The run itself is detached from this page, so what it is doing has to
               be shown rather than implied by a spinner on a request that already
               returned. */}
           {syncRunning ? (
-            <s-text>
-              Sync running since {formatRunAt(schedule.runningSince)} — this page refreshes itself
-              while it works, and rows appear as orders are processed.
-            </s-text>
+            <s-stack direction="block" gap="small-500">
+              {/* The count, first and on its own line: it is the only thing that
+                  moves while a run works. The log rows below are written in one
+                  batch when the run ENDS, so without this the page can say
+                  nothing between "started" and "finished" — which on a 50-order
+                  run is several minutes of a spinner that cannot tell you
+                  whether it is nearly done. */}
+              {schedule.progress && (
+                <s-text type="strong">
+                  {schedule.progress.done} of {schedule.progress.total} order
+                  {schedule.progress.total === 1 ? "" : "s"} synced
+                </s-text>
+              )}
+              <s-text>
+                Sync running since {formatRunAt(schedule.runningSince)} — this page refreshes itself
+                while it works. The rows below arrive together when it finishes.
+                {stopping
+                  ? " Stop requested: it finishes the order it is on, then stops and leaves the rest for the next run."
+                  : ""}
+              </s-text>
+            </s-stack>
           ) : (
-          <s-text tone="neutral">
-            {syncWindow
-              ? "Syncs the NetSuite orders modified in that window. The scheduled run's watermark is left alone, so nothing older is skipped."
-              : "Runs exactly what the next scheduled sync would run — everything modified since the last successful one."}
-          </s-text>
+          <s-stack direction="block" gap="small-500">
+            {/* The range as the two moments it really means, in the same UTC
+                format as the table's Run time — so what the button will ask for
+                can be read against what past runs covered, without translating
+                "last 6 hours" in your head. Absent while a targeted list
+                overrides the range, because then it is not what will run. */}
+            {preview && !schedule.targeted && (
+              <s-text>Will cover {windowText(preview.from, preview.to)}</s-text>
+            )}
+            <s-text tone="neutral">
+              Syncs the NetSuite orders modified in that window. The scheduled run&apos;s watermark
+              is left alone, so nothing older is skipped.
+            </s-text>
+          </s-stack>
           )}
         </s-stack>
       </s-section>
@@ -545,6 +662,20 @@ export default function OrderSyncLogs() {
               ? windowText(schedule.last.from, schedule.last.to)
               : "No successful scheduled run yet — the first will start from the initial lookback window."}
           </ScheduleRow>
+          {/* The same two numbers after the fact. "Covered" above is the stretch
+              of time the last run asked about; this is how many orders that
+              turned out to be and how many it got through — which are different
+              questions, and the second is the one asked after a run that was
+              stopped or ran out of its time budget. */}
+          {schedule.progress && !syncRunning && (
+            <ScheduleRow label="Last run synced">
+              {schedule.progress.done} of {schedule.progress.total} order
+              {schedule.progress.total === 1 ? "" : "s"}
+              {schedule.progress.done < schedule.progress.total
+                ? " — the rest were left for the next run"
+                : ""}
+            </ScheduleRow>
+          )}
           <ScheduleRow label="Next run">{formatRunAt(schedule.nextRunAt)}</ScheduleRow>
           <ScheduleRow label="Next run covers">
             {windowText(schedule.next.from, schedule.next.to)}
@@ -577,9 +708,10 @@ export default function OrderSyncLogs() {
               {schedule.targetedIds?.length > 0 && (
                 <s-banner tone="warning">
                   NETSUITE_ORDER_IDS is set to{" "}
-                  <s-text type="strong">{schedule.targetedIds.join(", ")}</s-text>, so every run
-                  syncs only those orders, ignores the window above, and never advances the
-                  watermark. Clear it to go back to the normal incremental sync.
+                  <s-text type="strong">{schedule.targetedIds.join(", ")}</s-text>, so every run —
+                  scheduled or from Sync now, live account or demo feed — syncs only those orders,
+                  ignores the window above and the range picked for Sync now, and never advances
+                  the watermark. Clear it to go back to the normal incremental sync.
                 </s-banner>
               )}
               {schedule.override && (

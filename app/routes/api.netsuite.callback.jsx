@@ -13,6 +13,17 @@ export const loader = async ({ request }) => {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
 
+  // NetSuite reports a rejected authorization here rather than on the token
+  // exchange — but only for problems it finds after the user is authenticated.
+  // A wrong redirect_uri never reaches this route at all: NetSuite has nowhere
+  // to send the failure, so it stays on its own login page saying the login
+  // attempt was not successful. See redirectUri in netsuite-oauth.server.js.
+  const oauthError = url.searchParams.get("error");
+  if (oauthError) {
+    const detail = url.searchParams.get("error_description") || "";
+    return text(`NetSuite connect failed: ${oauthError} ${detail}`.trim(), 400);
+  }
+
   const shop = state && verifyState(state);
   if (!code || !shop) {
     return text("NetSuite connect failed: missing or invalid state/code.", 400);
