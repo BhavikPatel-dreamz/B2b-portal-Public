@@ -510,13 +510,19 @@ async function resolveKnownInternalId(shop, raw) {
 // modification time, asked for from the log page's "Sync now" control. It replaces
 // the watermark window rather than narrowing it, and it is re-applied exactly after
 // the records are expanded — see inWindow.
-export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInternalIds, startOffset } = {}) {
+export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInternalIds, startOffset, doneOffset = 0 } = {}) {
   const items = [];
   const errors = [];
   let refs;
   // Set when NETSUITE_ORDER_LIMIT left matching orders unfetched — see the note
   // where it's assigned.
   let capped = null;
+  // How many matching orders exist in total, independent of this call's own
+  // NETSUITE_ORDER_LIMIT slice — known once the list endpoint's first page
+  // comes back. Hoisted out of the listing branch below so the "fetching"
+  // progress bar can report against the true total instead of just this
+  // batch's count (see the setSyncTotal call further down).
+  let totalResults = null;
   // Set when Stop sync cut the fetch short. Reported back so the caller stops
   // rather than syncing the partial set it happens to have: an interrupted fetch
   // is not "these are the orders that changed", and a run that treated it as one
@@ -535,7 +541,7 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     console.log(`[netsuite] ${source} — syncing only: ${targeted.join(", ")}`);
     // "fetching" phase progress for a targeted list: one identifier resolved is
     // one done, whether or not it turned out to match an order.
-    await setSyncTotal(shop, targeted.length, 0, "fetching");
+    await setSyncTotal(shop, targeted.length, doneOffset, "fetching");
     refs = [];
     for (const raw of targeted) {
       // Resolving costs a lookup and a pause per identifier, so a long targeted
@@ -614,7 +620,6 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     const listStartOffset = Math.floor((startOffset || 0) / pageSize) * pageSize;
     const leadingOverlap = (startOffset || 0) - listStartOffset;
     let offset = listStartOffset;
-    let totalResults = null;
     for (;;) {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
       if (q) params.set("q", q);
@@ -704,7 +709,19 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
   // windowed listing): same phase, moving from "how many identifiers" to "how
   // many records to expand". Skipped once already stopped — the run is ending,
   // there is nothing left to report progress on.
-  if (!stopped) await setSyncTotal(shop, refs.length, 0, "fetching");
+  //
+  // Reports against totalResults (the true count matching the query), not
+  // just refs.length (this call's own NETSUITE_ORDER_LIMIT slice), whenever
+  // it's known and bigger — otherwise a capped run's bar reads "50 of 50" and
+  // looks finished right as a caller that keeps fetching further batches
+  // (see runOrderSync) is only just getting started. doneOffset carries
+  // forward how much of that same total earlier batches already covered, so
+  // the bar climbs continuously across batches instead of resetting to 0 each
+  // time a caller starts a new one.
+  if (!stopped) {
+    const fetchTotal = totalResults != null && totalResults > refs.length ? totalResults : refs.length;
+    await setSyncTotal(shop, fetchTotal, doneOffset, "fetching");
+  }
 
   // Expand each listed id into the full record, keeping the ones that really
   // fall in the window. The walk itself is scanOrders (below) so it can be

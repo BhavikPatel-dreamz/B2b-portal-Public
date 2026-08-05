@@ -1186,8 +1186,17 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   } else {
     startOffset = await getSyncListOffset(shop);
   }
-  const feed = await fetchExternalOrders(shop, window ? { window, startOffset } : { since, startOffset });
-  const records = Array.isArray(feed?.items) ? feed.items : [];
+  let feed = await fetchExternalOrders(shop, window ? { window, startOffset } : { since, startOffset });
+  let records = Array.isArray(feed?.items) ? feed.items : [];
+  // The true size of this run's backlog, independent of any one batch's
+  // NETSUITE_ORDER_LIMIT slice — known from this first fetch's capped.matched
+  // (NetSuite's own count of everything the query matches) when capped, else
+  // this first batch already is the whole thing. Fixed for the life of the
+  // run so the "syncing" progress bar (setSyncTotal below, and inside the
+  // backlog-draining loop further down) reads one continuous count across
+  // however many internal batches this run ends up draining, instead of
+  // resetting per batch.
+  const grandTotal = feed?.capped ? feed.capped.matched : records.length;
 
   // Stop sync, pressed while the fetch was in flight. Fetching is the longest
   // stretch of a big run — NetSuite is paged and then each order is expanded
@@ -1226,7 +1235,9 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // What this run has to get through. Set before any of it is done, so the page
   // can show "0 of 50" rather than nothing at all — the log rows do not arrive
   // until the run ends, and on a 50-order run that is minutes of silence.
-  await setSyncTotal(shop, records.length);
+  // grandTotal, not records.length: on a capped run this is the whole backlog
+  // the loop below intends to drain, not just this first batch's slice.
+  await setSyncTotal(shop, grandTotal);
 
   if (process.env.SYNC_ORDER_EXPORT === "true") {
     const exportDir = path.resolve("storage/exports");
@@ -1311,13 +1322,81 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // Sync now again just re-asks the same question and gets capped at the same
   // place, so raising the limit or narrowing the window are the only ways
   // forward for it.
-  const capped = feed?.capped
-    ? window
-      ? `NETSUITE_ORDER_LIMIT=${feed.capped.limit} capped this run — ${feed.capped.skipped} of ${feed.capped.matched} matching order(s) were not fetched. A windowed run does not continue automatically: raise the limit or narrow the window to reach the rest.`
-      : `NETSUITE_ORDER_LIMIT=${feed.capped.limit} capped this run — ${feed.capped.skipped} of ${feed.capped.matched} matching order(s) not yet reached. The next scheduled run continues automatically from here; raise the limit to cover more per run.`
-    : null;
-  const stoppedEarly =
-    (await processOrderRecords({ admin, shop, records, currencyCode, caches, deadline, results })) || capped;
+  const cappedMessage = (f) =>
+    f?.capped
+      ? window
+        ? `NETSUITE_ORDER_LIMIT=${f.capped.limit} capped this run — ${f.capped.skipped} of ${f.capped.matched} matching order(s) were not fetched. A windowed run does not continue automatically: raise the limit or narrow the window to reach the rest.`
+        : `NETSUITE_ORDER_LIMIT=${f.capped.limit} capped this run — ${f.capped.skipped} of ${f.capped.matched} matching order(s) not yet reached. The next scheduled run continues automatically from here; raise the limit to cover more per run.`
+      : null;
+
+  // A capped batch means more backlog is waiting past what was just fetched.
+  // Rather than end the run here and leave the rest for the next cron tick or
+  // another "Sync Now" press, keep fetching and processing further batches in
+  // place — bounded by the same deadline every other stop condition in this
+  // run already respects — so one call drains as much backlog as it has time
+  // for. `feed`/`records`/`startOffset` are reassigned each pass so the
+  // bookkeeping below (watermark, list-offset/window-resume, the log row)
+  // only ever sees the LAST batch's fetch outcome and the FINAL offset —
+  // exactly the shape it already expects from a single-pass run.
+  let capped = cappedMessage(feed);
+  let stoppedEarly;
+  // Cumulative counts against grandTotal, so the progress bar reads one
+  // continuous climb across however many internal batches this run ends up
+  // draining instead of resetting to 0 each time. fetchedSoFar starts at this
+  // first batch's own count — its fetch already happened above and already
+  // counted that many against grandTotal (fetchNetsuiteOrders' own fetching-
+  // phase setSyncTotal call, doneOffset 0 by default for the very first one).
+  let fetchedSoFar = records.length;
+  let syncedSoFar = 0;
+  for (;;) {
+    // The batch's own stop reason, not `capped` folded in yet — "capped" alone
+    // is not a reason to stop THIS loop, it's the reason to fetch another
+    // batch. Only a real stop (deadline hit mid-order, or hand-stopped) ends
+    // the loop here; a capped-but-otherwise-clean batch falls through below to
+    // fetch the next one.
+    const batchStopped = await processOrderRecords({ admin, shop, records, currencyCode, caches, deadline, results });
+    stoppedEarly = batchStopped || capped;
+    if (batchStopped) break;
+    if (!feed?.capped) break; // nothing left in the backlog — fully drained
+
+    if (Date.now() >= deadline) {
+      stoppedEarly = `ran out of time (SYNC_MAX_RUN_MS) partway through the backlog — ${feed.capped.skipped} order(s) still not looked at; the next run continues from here`;
+      break;
+    }
+
+    syncedSoFar += records.length;
+    startOffset = window ? startOffset + (feed.scanned ?? 0) : startOffset + feed.capped.fetched;
+    feed = await fetchExternalOrders(
+      shop,
+      window ? { window, startOffset, doneOffset: fetchedSoFar } : { since, startOffset, doneOffset: fetchedSoFar },
+    );
+    records = Array.isArray(feed?.items) ? feed.items : [];
+    fetchedSoFar += records.length;
+    // Same phase transition the first batch gets at the top of this function
+    // — grandTotal/syncedSoFar (not records.length/0) so the bar keeps
+    // climbing across batches instead of resetting each time.
+    await setSyncTotal(shop, grandTotal, syncedSoFar);
+
+    if (feed?.stopped || (await isSyncStopRequested(shop))) {
+      stoppedEarly = feed?.stopped
+        ? `stopped by hand mid-backlog while fetching the next batch — ${results.length} order(s) from earlier batches were already synced`
+        : `stopped by hand mid-backlog before the next batch was fetched — ${results.length} order(s) from earlier batches were already synced`;
+      break;
+    }
+    // Capped promises more matches exist past what was covered so far, so a
+    // capped batch that came back with nothing new to show for it should not
+    // happen — this guards against looping forever advancing the offset by
+    // zero if it somehow does.
+    if (!records.length && feed?.capped) break;
+
+    results.push(...(feed?.errors || []).map(({ id, error }) => ({
+      externalId: String(id),
+      action: "fetch",
+      ok: false,
+      error: `NetSuite fetch failed: ${error}`,
+    })));
+    capped = cappedMessage(feed);
+  }
 
   const summary = summarise(results);
 
