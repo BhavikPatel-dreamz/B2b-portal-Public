@@ -7033,12 +7033,40 @@ export async function getAdvancedCompanyOrders(
             node {
               id
               name
+              poNumber
               createdAt
               updatedAt
               processedAt
               cancelledAt
               displayFinancialStatus
               displayFulfillmentStatus
+              fulfillments(first: 10) {
+                id
+                status
+                displayStatus
+                createdAt
+                updatedAt
+                trackingInfo(first: 10) {
+                  company
+                  number
+                  url
+                }
+              }
+              paymentTerms {
+                name
+                paymentSchedules(first: 5) {
+                  edges {
+                    node {
+                      amount {
+                        amount
+                        currencyCode
+                      }
+                      dueAt
+                      completedAt
+                    }
+                  }
+                }
+              }
               totalPriceSet {
                 shopMoney {
                   amount
@@ -7146,6 +7174,10 @@ export async function getAdvancedCompanyOrders(
                       id
                       title
                       sku
+                      image {
+                        url
+                        altText
+                      }
                     }
                   }
                 }
@@ -7226,19 +7258,61 @@ export async function getAdvancedCompanyOrders(
           order.shippingAddress?.company
         ) {
           locationName =
-            order.billingAddress?.company || order.shippingAddress?.company;
+            order.billingAddress?.company || order.shippingAddress?.company || "Company Order";
         }
 
-        const source =
+        const rawSource =
           (order as any).customAttributes?.find(
             (attr: any) => attr.key === "_source",
           )?.value || null;
+
+        const tags = ((order as any).tags || []).map((t: string) => t.toLowerCase());
+
+        let sourceType: "NORMAL" | "QUICK_ORDER" | "SALES_PORTAL" | "NETSUITE" = "NORMAL";
+        const sourceLower = (rawSource || "").toLowerCase();
+
+        if (sourceLower.includes("quick") || tags.includes("quick order") || tags.includes("quickorder")) {
+          sourceType = "QUICK_ORDER";
+        } else if (sourceLower.includes("sales") || tags.includes("sales portal") || tags.includes("salesportal")) {
+          sourceType = "SALES_PORTAL";
+        } else if (sourceLower.includes("netsuite") || tags.includes("netsuite") || tags.includes("netsuite-sync")) {
+          sourceType = "NETSUITE";
+        }
+
+        // Map fulfillments and tracking info
+        const fulfillmentsList = (order as any).fulfillments || [];
+        const trackingInformation = fulfillmentsList.flatMap((f: any) => {
+          const infoList = f.trackingInfo || [];
+          if (infoList.length === 0) {
+            return [{
+              fulfillmentId: f.id,
+              status: f.displayStatus || f.status,
+              createdAt: f.createdAt,
+              company: null,
+              number: null,
+              url: null,
+            }];
+          }
+          return infoList.map((info: any) => ({
+            fulfillmentId: f.id,
+            status: f.displayStatus || f.status,
+            createdAt: f.createdAt,
+            company: info.company || null,
+            number: info.number || null,
+            url: info.url || null,
+          }));
+        });
 
         return {
           ...order,
           locationId,
           locationName,
-          source,
+          source: rawSource || sourceType.toLowerCase(),
+          sourceType,
+          poNumber: (order as any).poNumber || null,
+          paymentTerms: (order as any).paymentTerms || null,
+          fulfillments: fulfillmentsList,
+          trackingInformation,
           companyLocation: {
             id: locationId,
             name: locationName,
@@ -7274,7 +7348,7 @@ export async function getAdvancedCompanyOrders(
       );
 
       processedOrders = processedOrders.filter((order: OrderNode) => {
-        const orderLocationId = extractId(order?.locationId);
+        const orderLocationId = extractId(order?.locationId || "");
 
         if (!orderLocationId) {
           console.warn(`⚠️ Order ${order.name} has no locationId, excluding`);

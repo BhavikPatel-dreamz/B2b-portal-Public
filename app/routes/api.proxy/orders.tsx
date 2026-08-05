@@ -26,6 +26,8 @@ interface OrderRequestFilters {
   fulfillmentStatus?: string;
   locationId?: string;
   customerId?: string;
+  sourceType?: "NORMAL" | "QUICK_ORDER" | "SALES_PORTAL" | "NETSUITE";
+  source?: string;
   sortKey?:
     | "CREATED_AT"
     | "UPDATED_AT"
@@ -263,17 +265,84 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
+  // ── STEP 5.5: Post-filter by sourceType / source if specified ───────
+  let finalOrders = allOrders;
+  if (filters?.sourceType) {
+    const targetType = filters.sourceType.toUpperCase();
+    finalOrders = finalOrders.filter(
+      (o: any) => (o.sourceType || "NORMAL").toUpperCase() === targetType,
+    );
+  } else if (filters?.source) {
+    const targetSource = filters.source.toLowerCase();
+    finalOrders = finalOrders.filter(
+      (o: any) => (o.source || "").toLowerCase() === targetSource,
+    );
+  }
+
   // ── STEP 6: Paginate ────────────────────────────────────
   const page       = pagination?.page  || 1;
   const limit      = pagination?.limit || 20;
   const startIndex = (page - 1) * limit;
-  const totalCount = allOrders.length;
+  const totalCount = finalOrders.length;
   const totalPages = Math.ceil(totalCount / limit);
 
-  const paginatedOrders = allOrders.slice(startIndex, startIndex + limit);
+  const paginatedOrders = finalOrders.slice(startIndex, startIndex + limit);
+
+  // ── STEP 7: Enrich with B2B Portal DB records ────────────
+  const shopifyOrderIds = paginatedOrders
+    .map((o: any) => o.id)
+    .filter(Boolean);
+
+  const dbOrders =
+    shopifyOrderIds.length > 0
+      ? await prisma.b2BOrder.findMany({
+          where: {
+            shopifyOrderId: { in: shopifyOrderIds },
+          },
+          select: {
+            shopifyOrderId: true,
+            creditUsed: true,
+            userCreditUsed: true,
+            paidAmount: true,
+            remainingBalance: true,
+            paymentStatus: true,
+            orderStatus: true,
+            source: true,
+            poNumber: true,
+          },
+        })
+      : [];
+
+  const dbOrdersMap = new Map(
+    dbOrders.map((dbo) => [dbo.shopifyOrderId, dbo]),
+  );
+
+  const enrichedOrders = paginatedOrders.map((order: any) => {
+    const dbMatch = dbOrdersMap.get(order.id);
+    const sourceType =
+      order.sourceType ||
+      (dbMatch?.source ? dbMatch.source.toUpperCase() : "NORMAL");
+
+    return {
+      ...order,
+      sourceType,
+      source: order.source || dbMatch?.source || sourceType.toLowerCase(),
+      poNumber: order.poNumber || dbMatch?.poNumber || null,
+      b2bCreditInfo: dbMatch
+        ? {
+            creditUsed: dbMatch.creditUsed.toNumber(),
+            userCreditUsed: dbMatch.userCreditUsed.toNumber(),
+            paidAmount: dbMatch.paidAmount.toNumber(),
+            remainingBalance: dbMatch.remainingBalance.toNumber(),
+            paymentStatus: dbMatch.paymentStatus,
+            orderStatus: dbMatch.orderStatus,
+          }
+        : null,
+    };
+  });
 
   const responseData = {
-    orders: paginatedOrders,
+    orders: enrichedOrders,
     totalCount,
     accessLevel,
     allowedLocationIds: allowedLocationIds?.length || "all",
