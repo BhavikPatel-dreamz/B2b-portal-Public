@@ -6,7 +6,7 @@ import { targetedOrderIds } from "../netsuite/client.server.js";
 import { quarantinedOrders } from "./log.server.js";
 import { parseCustomRange, rangeLabel, windowLabel, windowRange } from "./windows.js";
 import { DEFAULT_TIME_ZONE } from "../timezone/index.js";
-import { acquireSyncLock, bumpSyncDone, getLastSyncedAt, isSyncStopRequested, isSyncStoppedError, releaseSyncLock, setLastSyncedAt, setSyncTotal } from "../netsuite/oauth.server.js";
+import { acquireSyncLock, advanceWatermarkToWindow, bumpSyncDone, getLastSyncedAt, isSyncStopRequested, isSyncStoppedError, releaseSyncLock, setLastSyncedAt, setSyncTotal } from "../netsuite/oauth.server.js";
 
 // ---------------------------------------------------------------------------
 // NetSuite feed
@@ -576,16 +576,23 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
   // neither does a targeted run — it only looked at a hand-picked set of
   // orders, so moving the watermark would permanently skip everything else
   // modified in the meantime.
-  // …and neither does a windowed run: it was asked about one stretch of
-  // modification time, so moving the watermark to now would skip everything the
-  // scheduled run still owes from before it.
+  // A windowed run (Sync now) advances it too, but to the END OF ITS WINDOW
+  // rather than to now — see advanceWatermarkToWindow, which also refuses to move
+  // it backwards. It used to leave the watermark alone entirely, on the grounds
+  // that a hand-picked window says nothing about the stretch before it. That is
+  // still true, and it is the cost of this: whatever the schedule owed from
+  // before the window is now behind the watermark unread. The reason it is worth
+  // paying is the state it replaces — a shop whose scheduled runs have never
+  // finished cleanly has no watermark at all, so every run re-reads the whole
+  // NETSUITE_INITIAL_SYNC_DAYS lookback (50 days on this account) no matter how
+  // many hand-run syncs have succeeded in the meantime.
   // Cursor bookkeeping below is best-effort, same reasoning as quarantinedOrders
   // above: results are already final, so a write failure here must move on to
   // saveSyncLogRows rather than take the run's log rows down with it. Worst case
   // a cursor doesn't advance and the next run re-covers the same ground —
   // annoying, not data loss.
   try {
-    if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length && !window) {
+    if (process.env.NETSUITE_USE_DEMO === "false" && !targeted.length) {
       if (blocking === 0 && !stoppedEarly) {
         // Fully clean AND the day-granular candidate list for this period was
         // exhausted (not capped) — this period is completely drained.
@@ -593,7 +600,8 @@ async function runOrderSync(shop, runStartedAt, { window } = {}) {
         // covered, not only when it ran. setLastSyncedAt also resets the
         // list-offset cursor, so the fresh period that starts next lists from
         // the top rather than resuming a position that no longer means anything.
-        await setLastSyncedAt(shop, runStartedAt, since);
+        if (window) await advanceWatermarkToWindow(shop, window);
+        else await setLastSyncedAt(shop, runStartedAt, since);
       }
       // Capped, or a genuine failure blocked progress: the watermark stays
       // exactly where it was, so the next run asks the same question and the

@@ -73,10 +73,10 @@ describe("SYNC_WINDOWS", () => {
     assert.equal(new Set(values).size, values.length);
   });
 
-  // Every entry is a real window, so nothing started from the page can advance
-  // the watermark. The windowless "Current (since last sync)" entry used to sit
-  // here and was the one exception; putting it back would quietly hand the page
-  // the cron's job again.
+  // Every entry is a real window, so a run started from the page can only ever
+  // move the watermark as far as the window it was given (see
+  // advanceWatermarkToWindow). The windowless "Current (since last sync)" entry
+  // used to sit here; putting it back would hand the page an unbounded run.
   it("offers no windowless option", () => {
     assert.equal(SYNC_WINDOWS.find((w) => w.value === ""), undefined);
     assert.ok(SYNC_WINDOWS.every((w) => w.hours > 0), "every range must span real time");

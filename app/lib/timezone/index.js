@@ -109,6 +109,15 @@ function createDateView(instant, timeZone) {
           return `${parts.year}-${pad(parts.month)}-${pad(parts.day)} ${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)}.${String(parts.millisecond).padStart(3, "0")}`;
         case "YYYY-MM-DD HH:mm:ss z":
           return `${parts.year}-${pad(parts.month)}-${pad(parts.day)} ${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)} ${getZoneName(date, timeZone)}`;
+        // How a timestamp is READ on the log page — no leading zeros on the date,
+        // a 12-hour clock, no seconds. Built from the same parts as the sortable
+        // spelling above rather than from toLocaleString, so it renders the same
+        // during SSR and after hydration.
+        case "M/D/YYYY h:mm A z": {
+          const hour12 = parts.hour % 12 === 0 ? 12 : parts.hour % 12;
+          const meridiem = parts.hour < 12 ? "AM" : "PM";
+          return `${parts.month}/${parts.day}/${parts.year} ${hour12}:${pad(parts.minute)} ${meridiem} ${getZoneName(date, timeZone)}`;
+        }
         case "z":
           return getZoneName(date, timeZone);
         default:
@@ -303,6 +312,14 @@ export function zonedParts(instant, timeZone = DEFAULT_TIME_ZONE) {
 // head. `z` is the abbreviation (IST, GMT, EDT…) that advancedFormat adds.
 export function formatInZone(instant, timeZone = DEFAULT_TIME_ZONE) {
   return utcToLocal(instant, timeZone)?.format("YYYY-MM-DD HH:mm:ss z") ?? "";
+}
+
+// The same instant in the shape the log page shows it: M/D/YYYY h:mm AM/PM, with
+// the zone still named. Separate from formatInZone rather than replacing it —
+// that one is sortable and keeps its seconds, which is what the raw values in the
+// detail modal and any machine-read line want.
+export function formatDisplayInZone(instant, timeZone = DEFAULT_TIME_ZONE) {
+  return utcToLocal(instant, timeZone)?.format("M/D/YYYY h:mm A z") ?? "";
 }
 
 export function zoneAbbreviation(instant, timeZone = DEFAULT_TIME_ZONE) {

@@ -9,12 +9,14 @@ import { DEFAULT_TIME_ZONE, zonedDateString, zonedDayEnd, zonedDayStart } from "
 // `value` is what the form field carries; `hours` is how far back the window
 // reaches from the moment Sync now is pressed.
 //
-// Every entry here is a WINDOW, so every run started from the page leaves the
-// watermark alone. There used to be a "Current (since last sync)" entry with no
-// window — the scheduled run fired by hand, and the only option that advanced
-// the watermark. It is gone deliberately: advancing the watermark is now the
-// cron's alone, so nothing pressed on the page can move where the schedule
-// picks up from. The first entry is what the dropdown starts on.
+// Every entry here is a WINDOW: a run started from the page reads exactly the
+// stretch named, never "everything since the last sync". A clean windowed run
+// does now move the watermark, but only to the END of the window it was given —
+// see advanceWatermarkToWindow — which is why there is still no windowless entry
+// here. One would be the scheduled run fired by hand, with the whole outstanding
+// backlog behind it and no bound on what it reads.
+//
+// The first entry is what the dropdown starts on.
 
 export const SYNC_WINDOWS = [
   { value: "1", hours: 1, label: "Last 1 hour" },

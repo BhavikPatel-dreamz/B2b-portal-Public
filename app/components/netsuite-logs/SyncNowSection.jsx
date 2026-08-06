@@ -154,6 +154,18 @@ export function SyncNowSection({
           </s-stack>
         ) : (
           <s-stack direction="block" gap="small-500">
+            {/* The gap between the press and the first loader response that says
+                `runningSince`: the button is spinning, the run is being started on
+                the server, and without this the only thing the page says about it
+                is a spinner — which is exactly when it gets pressed again. Held by
+                the fetcher's own state, so it ends when the page has the real
+                progress line above to show instead. */}
+            {running && (
+              <s-text type="strong">
+                Starting the sync… it runs in the background, so this section will switch to its
+                live progress in a moment. You can leave this page open.
+              </s-text>
+            )}
             {/* Why the button is refusing, at the button. A range that is
                 backwards, half-typed or wider than the scan can serve is the one
                 thing here that stops a press from doing anything, so saying so is
@@ -167,9 +179,16 @@ export function SyncNowSection({
             {preview && !schedule.targeted && (
               <s-text>Will cover {windowText(preview.from, preview.to, schedule.timeZone)}</s-text>
             )}
+            {/* What the press costs beyond the orders it syncs: a clean run moves
+                the schedule on to the end of this window, so anything the
+                schedule still owed from BEFORE it is stepped over rather than
+                queued. Said here, at the button, because it is the one effect of
+                Sync now that outlives the run itself. */}
             <s-text tone="neutral">
-              Syncs the NetSuite orders modified in that window. The scheduled run&apos;s watermark
-              is left alone, so nothing older is skipped.
+              Syncs the NetSuite orders modified in that window. A run that finishes without
+              failures also moves the schedule on to the end of that window — so the next
+              scheduled run picks up from there, and anything modified before the window that
+              had not been synced yet is skipped.
               {isCustomRange ? ` A custom range covers at most ${MAX_CUSTOM_RANGE_DAYS} days.` : ""}
             </s-text>
           </s-stack>

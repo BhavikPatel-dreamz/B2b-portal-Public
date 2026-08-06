@@ -78,10 +78,14 @@ export function ScheduleSection({ schedule, syncRunning }) {
             ? " (set by SYNC_TIMEZONE)"
             : " (this store's timezone — set SYNC_TIMEZONE to override)"}
         </LabelledRow>
+        {/* The watermark, read as the window it came from. Set by any run that
+            finished without failures — the cron's, or a Sync now, which leaves it
+            at the end of the window it was given — so this is "where the schedule
+            picks up from", not only "what the cron last did". */}
         <LabelledRow label="Last run covered">
           {schedule.last.to
             ? windowText(schedule.last.from, schedule.last.to, schedule.timeZone)
-            : "No successful scheduled run yet — the first will start from the initial lookback window."}
+            : "No sync has finished cleanly yet — the next run starts from the initial lookback window."}
         </LabelledRow>
         {/* The same two numbers after the fact. "Covered" above is the stretch of
             time the last run asked about; this is how many orders that turned out

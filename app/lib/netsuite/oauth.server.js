@@ -239,6 +239,38 @@ export async function setLastSyncedAt(shop, date, from = null) {
   });
 }
 
+// The same move, made by a WINDOWED run (Sync now) that finished cleanly: the
+// watermark goes to the END of the window that was just covered, not to the run's
+// start time — a run asked about 1pm→2pm proves nothing about 2pm→now.
+//
+// Only ever forwards. Syncing an old custom range by hand is a normal thing to
+// do, and letting it drag the watermark backwards would have the next scheduled
+// run re-read everything since. The comparison is written into the UPDATE rather
+// than done in JS so a cron run finishing at the same moment can't lose to a
+// read-then-write race.
+//
+// The trade-off this accepts: the stretch between the old watermark and the
+// window's start is now behind the watermark without ever having been read, so a
+// hand-run window is also a decision to skip whatever the schedule still owed
+// before it. That is the point — it is what stops a shop whose scheduled runs
+// have never succeeded from re-reading the whole initial lookback forever.
+export async function advanceWatermarkToWindow(shop, { from, to }) {
+  await prisma.netsuiteAppSettings.upsert({
+    where: { shop },
+    update: {},
+    create: { shop },
+  });
+  await prisma.netsuiteAppSettings.updateMany({
+    where: {
+      shop,
+      OR: [{ lastSyncedAt: null }, { lastSyncedAt: { lt: to } }],
+    },
+    // syncListOffset clears for the same reason it does above: the period that
+    // cursor belonged to is behind the watermark now.
+    data: { lastSyncedAt: to, lastSyncFrom: from ?? null, syncListOffset: null },
+  });
+}
+
 // The other half of draining a backlog bigger than one list call across
 // runs: how far into the current period's list a previous capped-but-clean run
 // got. 0 for a period that hasn't been capped yet (or ever).

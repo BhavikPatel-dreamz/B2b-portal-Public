@@ -1,7 +1,7 @@
 // Formatting and labelling for the order-sync log page. Shared, not .server:
 // all of this ships to the browser with the page.
 
-import { DEFAULT_TIME_ZONE, formatInZone } from "../timezone/index.js";
+import { DEFAULT_TIME_ZONE, formatDisplayInZone } from "../timezone/index.js";
 
 // Every timestamp on this page, rendered in the zone the SYNC thinks in — not the
 // viewer's and not the server's.
@@ -16,8 +16,13 @@ import { DEFAULT_TIME_ZONE, formatInZone } from "../timezone/index.js";
 //
 // The zone is named in the output (IST, EDT, UTC…) because a bare timestamp with
 // no zone is exactly what makes "why is this an hour out" unanswerable.
+//
+// Written M/D/YYYY h:mm AM/PM — the way the dates on this page are read out loud
+// and the way they are spelled on NetSuite's own screens. The seconds are dropped
+// with it; the exact instant is still one click away in the detail modal, which
+// prints the raw ISO next to the rendered one.
 export function formatRunAt(iso, timeZone = DEFAULT_TIME_ZONE) {
-  return formatInZone(iso, timeZone);
+  return formatDisplayInZone(iso, timeZone);
 }
 
 // A window as "<from> → <to>", in the same format as the table's Run time so the

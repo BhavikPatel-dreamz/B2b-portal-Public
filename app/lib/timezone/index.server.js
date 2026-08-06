@@ -9,8 +9,8 @@ import { DEFAULT_TIME_ZONE, isValidTimeZone, resolveTimeZone } from "./index.js"
 //
 // The env var wins because the zone that decides what a run FETCHES is really the
 // NetSuite account's, and that is not necessarily the Shopify store's. NetSuite
-// evaluates the bare date literals in the order query against its own account
-// timezone (see nsQueryDate), so on a store in one zone reading a NetSuite account
+// evaluates the date literals in the order query against its own account
+// timezone (see nsQueryDateTime), so on a store in one zone reading a NetSuite account
 // configured in another, the store's zone is the wrong answer and SYNC_TIMEZONE is
 // how you say which one to use. Where they agree — the common case — leaving it
 // blank and letting the shop's zone through is right and needs no configuration.
