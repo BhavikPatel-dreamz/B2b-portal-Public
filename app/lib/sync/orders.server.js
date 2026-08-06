@@ -25,6 +25,8 @@ import { buildOrderInput, createOrder } from "./shopify/create.server.js";
 import { resolveShopifyOrder } from "./shopify/match.server.js";
 import { deleteOrder, syncTracking } from "./shopify/tracking.server.js";
 
+export { logSyncCrash } from "./run-log.server.js";
+
 // ---------------------------------------------------------------------------
 // Main entry — called by the scheduled run
 // ---------------------------------------------------------------------------

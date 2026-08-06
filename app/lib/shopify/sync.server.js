@@ -45,7 +45,7 @@ export async function syncShopifyToApp(shop) {
   // freshly-synced companies/credit show up without waiting for the TTL.
   try {
     const { clearAdminCompaniesCache } = await import(
-      "../routes/app.companies.tsx"
+      "../../routes/app.companies.tsx"
     );
     clearAdminCompaniesCache(shop);
   } catch (err) {

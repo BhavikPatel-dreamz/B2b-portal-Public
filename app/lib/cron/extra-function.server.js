@@ -36,7 +36,7 @@
 // the whole Shopify app config; that keeps it usable from a plain script or a
 // test with no environment set up.
 export async function adminFor(shop) {
-  const { unauthenticated } = await import("../shopify.server.js");
+  const { unauthenticated } = await import("../../shopify.server.js");
   const { admin } = await unauthenticated.admin(shop);
   return admin;
 }
@@ -59,6 +59,6 @@ export async function adminFor(shop) {
 export async function extraFunction(shop = null) {
   if (!shop) return { skipped: true, reason: "no shop given" };
 
-  const { syncShopifyToApp } = await import("./shopify-sync.server.js");
+  const { syncShopifyToApp } = await import("../shopify/sync.server.js");
   return syncShopifyToApp(shop);
 }
