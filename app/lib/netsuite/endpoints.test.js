@@ -90,17 +90,17 @@ describe("record endpoints", () => {
     );
   });
 
-  // The filter the sync really sends (see ORDER_DATE_FORMATS): the single quotes
-  // and the colons inside an ISO literal have to reach NetSuite intact, and a
-  // quote that leaked through unencoded would end the query-string value early.
+  // The filter the sync really sends (see ORDER_DATE_FORMATS): the quotes and the
+  // colons inside an ISO literal have to reach NetSuite intact, and a quote that
+  // leaked through unencoded would end the query-string value early.
   it("encodes an ISO datetime filter without mangling its quotes or colons", () => {
     assert.equal(
       recordPath.salesOrderList({
         limit: 1000,
         offset: 0,
-        q: "lastModifiedDate ON_OR_AFTER '2026-08-05T23:53:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-06T00:54:00Z'",
+        q: 'lastModifiedDate ON_OR_AFTER "2026-08-05T23:53:00Z" AND lastModifiedDate ON_OR_BEFORE "2026-08-06T00:54:00Z"',
       }),
-      "/salesorder?limit=1000&offset=0&q=lastModifiedDate+ON_OR_AFTER+%272026-08-05T23%3A53%3A00Z%27+AND+lastModifiedDate+ON_OR_BEFORE+%272026-08-06T00%3A54%3A00Z%27",
+      "/salesorder?limit=1000&offset=0&q=lastModifiedDate+ON_OR_AFTER+%222026-08-05T23%3A53%3A00Z%22+AND+lastModifiedDate+ON_OR_BEFORE+%222026-08-06T00%3A54%3A00Z%22",
     );
   });
 

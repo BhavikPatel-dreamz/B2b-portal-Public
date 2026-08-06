@@ -21,11 +21,27 @@
 //   --offset N          where to start in the result set (default 0)
 //   --expand            after listing, fetch the full record for each id
 //   --curl-only         print the curl and stop, without calling anything
+//   --preference        print GET /preference/userPreference and stop
 //   --out <file>        write the JSON response to a file as well as stdout
 //
 // The q filter is built by the SAME function the real sync uses
 // (buildOrdersQuery in app/lib/netsuite/orders-query.server.js), so what this
 // prints is what a run would really send — this cannot drift from the sync.
+//
+// Unset, it sends the ISO literal the sync leads with. A 400 saying
+// `Parse of date/time … failed with date format` is the account refusing the
+// spelling, not the range — and so is the vaguer `Invalid search query. Provide a
+// valid search query.`, which is the whole expression failing to parse. Re-run
+// with NETSUITE_QUERY_DATE_FORMAT=iso|isoSingle|account|date to try the others,
+// and put the one that answers in .env so the sync skips the probe
+// (ORDER_DATE_FORMATS).
+//
+// --preference asks the account what it thinks its formats are. This script does
+// not feed that answer back into the query it builds (the sync does), so pin what
+// you want to try with NETSUITE_DATE_FORMAT / NETSUITE_TIME_FORMAT:
+//
+//   NETSUITE_QUERY_DATE_FORMAT=account NETSUITE_DATE_FORMAT="M/d/YYYY" \
+//     NETSUITE_TIME_FORMAT="h:mm a" node --env-file=.env scripts/netsuite-orders.mjs …
 // A standalone node CLI: it reads process.env and uses Buffer, neither of which
 // the eslint config grants outside the server-file filename pattern.
 /* eslint-env node */
@@ -45,7 +61,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith("--")) continue;
     const key = a.slice(2);
-    if (["expand", "curl-only", "help"].includes(key)) out[key] = true;
+    if (["expand", "curl-only", "preference", "help"].includes(key)) out[key] = true;
     else out[key] = argv[++i];
   }
   return out;
@@ -56,8 +72,27 @@ function die(message) {
   process.exit(1);
 }
 
-if (args.help || !args.from || !args.to) {
-  die("usage: node --env-file=.env scripts/netsuite-orders.mjs --from YYYY-MM-DD --to YYYY-MM-DD [--expand] [--curl-only]");
+if (args.help || (!args.preference && (!args.from || !args.to))) {
+  die("usage: node --env-file=.env scripts/netsuite-orders.mjs --from YYYY-MM-DD --to YYYY-MM-DD [--expand] [--curl-only]\n     or: node --env-file=.env scripts/netsuite-orders.mjs --preference");
+}
+
+const prisma = new PrismaClient();
+
+// What the account says about its own formats, and nothing else. Its own mode
+// because it takes no range: it is the question you ask FIRST when a filter is
+// being refused, and needing to invent a --from/--to to get at it would be
+// asking for the thing that is broken in order to see why.
+if (args.preference) {
+  try {
+    const url = recordUrl(recordPath.userPreference());
+    console.log(`\n  GET ${url}\n`);
+    console.log(JSON.stringify(await callNetsuite(url, await accessToken(await resolveShop())), null, 2));
+  } catch (err) {
+    die(err?.message || String(err));
+  } finally {
+    await prisma.$disconnect();
+  }
+  process.exit(0);
 }
 
 // The zone the two dates are read in. The app resolves this per shop (env
@@ -94,8 +129,6 @@ curl -sS -X GET \\
 `);
 
 if (args["curl-only"]) process.exit(0);
-
-const prisma = new PrismaClient();
 
 try {
   const token = await accessToken(await resolveShop());

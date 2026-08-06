@@ -42,45 +42,101 @@ function shiftDays(d, days) {
 //     "dateFormat": "M/d/YYYY",
 //     "timeFormat": "h:mm a" }
 //
-// So the spelling is not hard-coded. These are the shapes, in the order they are
-// tried, for the preference above:
+// …when the endpoint exists. On the account this was built against it does not —
+// `GET /preference/userPreference` answers 404 "Record type 'preference' does not
+// exist" — so the shapes below are still tried in order rather than derived, and
+// the preference, where it can be read, only decides which one is tried FIRST.
 //
-//   iso      '2026-08-05T23:53:00Z'   ISO 8601, in UTC
-//   account  "8/5/2026 7:53 pm"       dateFormat + timeFormat, in the account's zone
-//   date     "8/5/2026"               dateFormat alone — day-granular, always parses
+// These are the shapes, in the order they are tried:
 //
-// ISO leads because it is the only one that does not depend on the preference at
-// all: it carries its own zone in the trailing Z, so the instant it names is the
-// instant that was asked for whatever the account is set to, and it still works
-// on the run where the preference could not be read.
+//   account    "8/5/2026 7:53 pm"       dateFormat + timeFormat, in the account's zone
+//   account24  "8/5/2026 19:53"         the same date, on a 24-hour clock
+//   iso        "2026-08-05T23:53:00Z"   ISO 8601, in UTC
+//   isoSingle  '2026-08-05T23:53:00Z'   the same, single-quoted
+//   date       "8/5/2026"               dateFormat alone — day-granular, always parses
 //
-// `account` is the fallback with the real answer behind it — the same instant
-// written the way that account writes dates, in the zone it compares them in.
-// Before the preference endpoint it was a guess between a 24- and a 12-hour
-// clock, which is what the 400 that started all this was:
+// The order is measured, not assumed. Against account 5895946, for a range of
+// 2026-08-05 → 2026-08-06:
+//
+//   account    "8/5/2026 12:00 am"    -> 100 orders
+//   account24  "8/5/2026 00:00"       -> 400 Unparseable date: "8/5/2026 00:00"
+//   iso        "2026-08-05T04:00:00Z" -> 400 Unparseable date: "2026-08-05T04:00:00Z"
+//   isoSingle  '2026-08-05T04:00:00Z' -> 400 Invalid search query. Provide a valid…
+//   date       "8/4/2026"             -> 152 orders (three days wide, hence 152)
+//
+// So `account` leads: a 12-hour clock is what this account's parser takes, and
+// the 24-hour one was the whole of the original bug —
 //
 //   Parse of date/time "8/5/2026 23:53" failed with date format "M/d/yy"
 //   in time zone America/Los_Angeles
 //
+// which names the DATE format in its complaint and says nothing about the time,
+// and so read for a while as though the year were the problem. It was not: the
+// same date with "12:00 am" after it parses, and with "00:00" after it does not.
+//
+// Two things the measurements settle that are worth keeping written down:
+//
+//   • a four-digit year is fine under a "M/d/yy" preference — "8/5/2026 12:00 am"
+//     and "8/5/26 12:00 am" both answer 100. Java parses `yy` greedily when it is
+//     the last numeric field, so it takes all four digits.
+//   • single quotes are a SYNTAX error, not a value one. The literal is refused
+//     before its contents are looked at, which is why isQueryRejected has to
+//     match a message with no date in it at all.
+//
+// ISO stays in the list below `account` because it is the only shape that does
+// not depend on the account's configuration — it carries its own zone in the
+// trailing Z — so an account that takes it needs no preference read at all. This
+// one does not take it.
+//
 // fetchNetsuiteOrders walks this list when NetSuite rejects a literal (see
-// isDateLiteralRejected) and remembers what worked, so an account pays for the
-// probe once per process. NETSUITE_QUERY_DATE_FORMAT pins the starting point and
-// skips it entirely.
-export const ORDER_DATE_FORMATS = ["iso", "account", "date"];
+// isQueryRejected) and remembers what worked, so an account pays for the probe
+// once per process. NETSUITE_QUERY_DATE_FORMAT pins the starting point and skips
+// it entirely.
+export const ORDER_DATE_FORMATS = ["account", "account24", "iso", "isoSingle", "date"];
 
 // What NetSuite's parser is configured to accept, once something has asked it.
 // Held here rather than passed down through every caller because it is one fact
 // about one account: the sync fetches it (fetchAccountPreference), and the
 // schedule card and the CLI script get the same answer without knowing that a
 // fetch ever happened.
-const DEFAULT_PREFERENCE = { dateFormat: "M/d/YYYY", timeFormat: "HH:mm", timeZone: null };
+// The assumption for an account that cannot be asked. "h:mm a" rather than the
+// 24-hour clock because that is what account 5895946 measurably takes and what
+// NetSuite pairs with a US date format by default — and because guessing wrong
+// here is not fatal: account24 is the next shape tried.
+const DEFAULT_PREFERENCE = { dateFormat: "M/d/YYYY", timeFormat: "h:mm a", timeZone: null };
 let preference = null;
 
-// The preference as it is known right now. Null until something reads it, which
-// is not a failure — it means the account-formatted spellings fall back to
-// DEFAULT_PREFERENCE, i.e. what this code assumed before the endpoint existed.
+// A preference set by hand, for the two cases the endpoint cannot serve: a
+// process that has no NetSuite token to ask with (scripts/netsuite-orders.mjs),
+// and an account whose reported preference turns out not to be the one its
+// search parser actually uses — which is not hypothetical, see the note on
+// `date` in ORDER_DATE_FORMATS.
+//
+//   NETSUITE_DATE_FORMAT="M/d/YYYY"  NETSUITE_TIME_FORMAT="h:mm a"
+//
+// Either can be set alone; whichever is unset keeps whatever the endpoint said,
+// or the default. Checked ahead of the fetched answer for the same reason
+// SYNC_TIMEZONE outranks the shop's own zone: an override that could be silently
+// overruled by a lookup is not an override.
+function envPreference() {
+  const dateFormat = String(process.env.NETSUITE_DATE_FORMAT || "").trim();
+  const timeFormat = String(process.env.NETSUITE_TIME_FORMAT || "").trim();
+  if (!dateFormat && !timeFormat) return null;
+  return { dateFormat: dateFormat || null, timeFormat: timeFormat || null };
+}
+
+// The preference as it is known right now. Null until something reads it or the
+// env names one, which is not a failure — it means the account-formatted
+// spellings fall back to DEFAULT_PREFERENCE, i.e. what this code assumed before
+// the endpoint existed.
 export function accountPreference() {
-  return preference;
+  const override = envPreference();
+  if (!override) return preference;
+  return {
+    ...(preference ?? DEFAULT_PREFERENCE),
+    ...(override.dateFormat ? { dateFormat: override.dateFormat } : {}),
+    ...(override.timeFormat ? { timeFormat: override.timeFormat } : {}),
+  };
 }
 
 // Takes the useful three fields out of the /preference/userPreference body, or
@@ -132,16 +188,23 @@ export function rememberOrderDateFormat(format) {
   return true;
 }
 
-// Whether a failed request is NetSuite objecting to how a date was WRITTEN, as
-// opposed to anything else a 400 can mean. Matched on the parser's own words,
-// which are the only part of the body that says so — the status code and
-// o:errorCode (INVALID_PARAMETER) are shared with every other bad q.
+// Whether a failed request is NetSuite objecting to how the filter was WRITTEN,
+// as opposed to anything else a 400 can mean. It objects in two quite different
+// voices, and a spelling has to be retried on both:
 //
-// Deliberately narrow: a false positive here re-sends the whole list call with a
-// wider filter for no reason, and a false negative just surfaces the error the
-// way it always did.
-export function isDateLiteralRejected(err) {
-  return /Parse of date\/time|Unparseable date/i.test(err?.message || String(err || ""));
+//   Parse of date/time "8/5/2026 23:53" failed with date format "M/d/yy"
+//     — the expression parsed, and the date inside it did not.
+//   Invalid search query. Provide a valid search query.
+//     — the expression itself did not parse, so nothing ever looked at the date.
+//
+// The second is the vaguer and the more dangerous to match, because a genuinely
+// malformed filter says exactly the same thing. That is survivable here: a
+// spelling that is not the problem is retried at most three times and the error
+// still comes out at the end (see the probe in fetchNetsuiteOrders, which skips
+// the walk entirely for a NETSUITE_ORDERS_QUERY override — the one filter this
+// app does not write and so cannot correct by rewriting).
+export function isQueryRejected(err) {
+  return /Parse of date\/time|Unparseable date|Invalid search query/i.test(err?.message || String(err || ""));
 }
 
 // Renders zoned calendar parts through one of NetSuite's format-preference
@@ -208,11 +271,15 @@ function nsQueryDateTime(d, timeZone = DEFAULT_TIME_ZONE, round = "floor", forma
   // shape tried. The milliseconds are dropped because the value is already
   // snapped to a minute and ".000" only makes the query harder to read against
   // NetSuite's own screens.
-  if (format === "iso") return snapped.toISOString().replace(/\.\d{3}Z$/, "Z");
+  if (format === "iso" || format === "isoSingle") return snapped.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-  const pref = preference ?? DEFAULT_PREFERENCE;
+  const pref = accountPreference() ?? DEFAULT_PREFERENCE;
+  // account24 is `account` with the clock overruled — the one spelling that
+  // exists to try the other half of the 12-vs-24-hour question when nothing can
+  // be read that answers it.
+  const timeFormat = format === "account24" ? "HH:mm" : pref.timeFormat;
   const p = zonedParts(snapped, literalZone(timeZone));
-  return `${renderPattern(pref.dateFormat, p)} ${renderPattern(pref.timeFormat, p)}`;
+  return `${renderPattern(pref.dateFormat, p)} ${renderPattern(timeFormat, p)}`;
 }
 
 // The same instant as a bare date, in the account's date format. What an account
@@ -220,7 +287,7 @@ function nsQueryDateTime(d, timeZone = DEFAULT_TIME_ZONE, round = "floor", forma
 // dateRangeQuery for the day of slack this shape needs at each end to stay a
 // superset of the window.
 function nsQueryDate(d, timeZone = DEFAULT_TIME_ZONE) {
-  return renderPattern((preference ?? DEFAULT_PREFERENCE).dateFormat, zonedParts(d, literalZone(timeZone)));
+  return renderPattern((accountPreference() ?? DEFAULT_PREFERENCE).dateFormat, zonedParts(d, literalZone(timeZone)));
 }
 
 // Whether a fetched record really falls inside an explicit window.
@@ -415,9 +482,10 @@ function dateRangeQuery({ from, to }, timeZone = DEFAULT_TIME_ZONE, format = ord
       nsQueryDateTime(from, timeZone, "floor", format),
       nsQueryDateTime(to, timeZone, "ceil", format),
     ];
-  // An ISO literal is single-quoted, the account-formatted ones double-quoted —
-  // each as NetSuite's own examples write that shape.
-  const qt = format === "iso" ? "'" : '"';
+  // Double quotes everywhere except the one spelling that exists to try the other
+  // quoting — see ORDER_DATE_FORMATS for why it is a spelling of its own rather
+  // than the default.
+  const qt = format === "isoSingle" ? "'" : '"';
   return `lastModifiedDate ON_OR_AFTER ${qt}${after}${qt} AND lastModifiedDate ON_OR_BEFORE ${qt}${before}${qt}`;
 }
 

@@ -10,7 +10,7 @@ import { toInstant } from "../timezone/index.js";
 import {
   accountPreference,
   buildOrdersQuery,
-  isDateLiteralRejected,
+  isQueryRejected,
   nextOrderDateFormat,
   orderDateFormat,
   readAccountPreference,
@@ -261,6 +261,10 @@ const LIST_LIMIT = 1000;
 const PREFERENCE_TTL_MS = 60 * 60 * 1000;
 const preferenceCache = new Map();
 
+// Named only so the warning below can say what the run will do instead, rather
+// than leaving "the defaults" to be looked up in another file.
+const DEFAULT_PREFERENCE_NOTE = 'dates as "M/d/YYYY" and times as "h:mm a"';
+
 async function loadAccountPreference(shop) {
   const hit = preferenceCache.get(shop);
   // Re-remembered on a cache hit too, not just on a fetch: the remembered value
@@ -273,6 +277,7 @@ async function loadAccountPreference(shop) {
   }
 
   let preference = null;
+  let unavailable = false;
   try {
     const body = await nsGet(shop, recordPath.userPreference());
     preference = readAccountPreference(body);
@@ -290,18 +295,25 @@ async function loadAccountPreference(shop) {
     // A stop is not this lookup failing, and swallowing it here would have the
     // run carry on into the list call it was stopped before making.
     if (err?.syncStopped) throw err;
+    unavailable = /Record type 'preference' does not exist|\b404\b/.test(err?.message || "");
     console.warn(
-      `[netsuite] ${shop}: could not read the account's date preferences (${err?.message || err}) — the ISO date literal does not need them, and the fallbacks will assume the defaults if it is refused.`,
+      `[netsuite] ${shop}: could not read the account's date preferences (${err?.message || err}) — the filter will fall back to assuming ${DEFAULT_PREFERENCE_NOTE}, and try the other shapes if that is refused.${unavailable ? " Not asking again this hour: this account does not serve that endpoint." : ""}`,
     );
   }
 
-  // Only a real answer is cached. A failed lookup retries on the next run rather
-  // than fixing the guess in place for an hour, and it must not overwrite an
-  // answer an earlier run already got.
-  if (preference) {
+  // A real answer is cached, and so is a definitive "there is nothing to ask" —
+  // this account answers the endpoint with
+  //
+  //   404 Record type 'preference' does not exist
+  //
+  // which will not become true an hour from now, and re-asking it every run is a
+  // failing request and a warning line per run forever. Any OTHER failure (a
+  // timeout, a 401 on a token that was mid-refresh) is left uncached so the next
+  // run tries again, and must not overwrite an answer an earlier run already got.
+  if (preference || unavailable) {
     preferenceCache.set(shop, { preference, expires: Date.now() + PREFERENCE_TTL_MS });
-    rememberAccountPreference(preference);
   }
+  if (preference) rememberAccountPreference(preference);
   return preference ?? accountPreference();
 }
 
@@ -537,10 +549,16 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     // silently; it is skipped loudly, and the next run asks the same question.
     const limit = LIST_LIMIT;
     refs = [];
-    // Retried, at most once per spelling, when NetSuite rejects the way a date
-    // was written rather than the query itself — see ORDER_DATE_FORMATS, which
-    // explains why the right spelling is the ACCOUNT's answer and not something
-    // this app can know in advance. Every other failure comes straight out.
+    // Retried, at most once per spelling, when NetSuite rejects the way the
+    // filter was written — see ORDER_DATE_FORMATS, which explains why the right
+    // spelling is the ACCOUNT's answer and not something this app can know in
+    // advance. Every other failure comes straight out.
+    //
+    // Not for a NETSUITE_ORDERS_QUERY override, which replaces the filter
+    // wholesale: rewriting the date literals cannot fix a query this app did not
+    // write, so all a walk would do there is send the same rejected string four
+    // times before surfacing the error it had on the first attempt.
+    const canReword = Boolean(window) || !process.env.NETSUITE_ORDERS_QUERY;
     for (;;) {
       try {
         const list = await nsGet(shop, recordPath.salesOrderList({ limit, offset: 0, q }));
@@ -555,13 +573,13 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
           stopped = true;
           break;
         }
-        const fallback = isDateLiteralRejected(err) ? nextOrderDateFormat(format) : null;
+        const fallback = canReword && isQueryRejected(err) ? nextOrderDateFormat(format) : null;
         // Out of spellings: the account has rejected every shape there is, so
         // this is no longer a guess that can be corrected and the error is the
         // real answer.
         if (!fallback) throw err;
         console.warn(
-          `[netsuite] this account will not parse the "${format}" date literal in a sales-order filter — retrying with "${fallback}". Set NETSUITE_QUERY_DATE_FORMAT=${fallback} to skip this probe on every run. NetSuite said: ${err.message}`,
+          `[netsuite] this account will not parse a sales-order filter written the "${format}" way — retrying with "${fallback}". Set NETSUITE_QUERY_DATE_FORMAT=${fallback} to skip this probe on every run. NetSuite said: ${err.message}`,
         );
         // Remembered before the retry, not after it: plannedOrdersWindow reads
         // the same setting for the schedule card, and a card still showing a

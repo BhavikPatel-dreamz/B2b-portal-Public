@@ -3,7 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import {
   accountPreference,
   buildOrdersQuery,
-  isDateLiteralRejected,
+  isQueryRejected,
   nextOrderDateFormat,
   orderDateFormat,
   plannedOrdersWindow,
@@ -193,7 +193,7 @@ describe("plannedOrdersWindow", () => {
     const w = plannedOrdersWindow(new Date("2026-08-04T03:00:00Z"), at);
     assert.equal(
       w.query,
-      "lastModifiedDate ON_OR_AFTER '2026-08-04T03:00:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-04T06:00:00Z'",
+      'lastModifiedDate ON_OR_AFTER "8/4/2026 3:00 am" AND lastModifiedDate ON_OR_BEFORE "8/4/2026 6:00 am"',
     );
   });
 
@@ -207,7 +207,7 @@ describe("plannedOrdersWindow", () => {
     process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS = "0";
     for (const sinceIso of ["2026-08-04T00:30:00Z", "2026-08-04T03:00:00Z", "2026-08-04T05:59:00Z"]) {
       const [, after, before] = plannedOrdersWindow(new Date(sinceIso), at).query.match(
-        /ON_OR_AFTER '([^']+)'.*ON_OR_BEFORE '([^']+)'/,
+        /ON_OR_AFTER "([^"]+)".*ON_OR_BEFORE "([^"]+)"/,
       );
       assert.notEqual(after, before, `same-instant watermark ${sinceIso} matches nothing`);
     }
@@ -232,29 +232,32 @@ describe("buildOrdersQuery for an explicit window", () => {
   it("names the window's own two instants", () => {
     assert.equal(
       buildOrdersQuery(null, window("2026-08-05T03:39:00Z", "2026-08-05T04:39:00Z")),
-      "lastModifiedDate ON_OR_AFTER '2026-08-05T03:39:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-05T04:39:00Z'",
+      'lastModifiedDate ON_OR_AFTER "8/5/2026 3:39 am" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 4:39 am"',
     );
   });
 
   // An ISO literal names the instant itself, so the configured zone changes
-  // nothing about it — that is the point of leading with this shape. The zone
-  // only decides which DAY a literal falls on for the account-formatted ones.
-  it("is unaffected by the configured zone", () => {
+  // nothing about it. The zone only decides which DAY a literal falls on for the
+  // account-formatted spellings, which is what the next test is about.
+  it("is unaffected by the configured zone when written as ISO", () => {
     const w = window("2026-08-05T03:39:00Z", "2026-08-05T04:39:00Z");
-    assert.equal(buildOrdersQuery(null, w, "America/New_York"), buildOrdersQuery(null, w, "UTC"));
+    assert.equal(
+      buildOrdersQuery(null, w, "America/New_York", "iso"),
+      buildOrdersQuery(null, w, "UTC", "iso"),
+    );
   });
 
   it("reads those instants in the configured zone when the account formats them itself", () => {
     assert.equal(
       buildOrdersQuery(null, window("2026-08-05T03:39:00Z", "2026-08-05T04:39:00Z"), "America/New_York", "account"),
-      'lastModifiedDate ON_OR_AFTER "8/4/2026 23:39" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 00:39"',
+      'lastModifiedDate ON_OR_AFTER "8/4/2026 11:39 pm" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 12:39 am"',
     );
   });
 
   it("still covers a window that spans days", () => {
     assert.equal(
       buildOrdersQuery(null, window("2026-08-03T04:00:00Z", "2026-08-05T04:00:00Z")),
-      "lastModifiedDate ON_OR_AFTER '2026-08-03T04:00:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-05T04:00:00Z'",
+      'lastModifiedDate ON_OR_AFTER "8/3/2026 4:00 am" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 4:00 am"',
     );
   });
 
@@ -264,8 +267,8 @@ describe("buildOrdersQuery for an explicit window", () => {
   // seconds, and an order modified in that sliver would never be returned at all.
   it("rounds the upper bound outward so no instant is excluded", () => {
     const q = buildOrdersQuery(null, window("2026-08-05T03:39:12Z", "2026-08-05T04:39:12Z"));
-    assert.match(q, /ON_OR_AFTER '2026-08-05T03:39:00Z'/, "lower bound floors");
-    assert.match(q, /ON_OR_BEFORE '2026-08-05T04:40:00Z'/, "upper bound ceils");
+    assert.match(q, /ON_OR_AFTER "8\/5\/2026 3:39 am"/, "lower bound floors");
+    assert.match(q, /ON_OR_BEFORE "8\/5\/2026 4:40 am"/, "upper bound ceils");
   });
 
   it("covers the last instant of a whole-day custom range", () => {
@@ -273,7 +276,7 @@ describe("buildOrdersQuery for an explicit window", () => {
     const q = buildOrdersQuery(null, window("2026-08-01T00:00:00.000Z", "2026-08-05T23:59:59.999Z"));
     assert.equal(
       q,
-      "lastModifiedDate ON_OR_AFTER '2026-08-01T00:00:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-06T00:00:00Z'",
+      'lastModifiedDate ON_OR_AFTER "8/1/2026 12:00 am" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 12:00 am"',
     );
   });
 });
@@ -299,35 +302,55 @@ describe("the date literal spelling", () => {
     timeFormat: "h:mm a",
   };
 
-  it("recognises NetSuite refusing the spelling, and nothing else", () => {
+  // NetSuite refuses a filter in two voices, and both have to send the run round
+  // the fallback loop — the date inside the expression failing to parse, and the
+  // expression itself failing to.
+  it("recognises both voices NetSuite refuses a filter in, and nothing else", () => {
     assert.equal(
-      isDateLiteralRejected(new Error('NetSuite GET /salesorder failed: 400 {"o:errorDetails":[{"detail":"Invalid search query. Search error occurred: Parse of date/time \\"8/5/2026 23:53\\" failed with date format \\"M/d/yy\\" in time zone America/Los_Angeles"}]}')),
+      isQueryRejected(new Error('NetSuite GET /salesorder failed: 400 {"o:errorDetails":[{"detail":"Invalid search query. Search error occurred: Parse of date/time \\"8/5/2026 23:53\\" failed with date format \\"M/d/yy\\" in time zone America/Los_Angeles"}]}')),
       true,
     );
-    // A different 400 must not send the run round the fallback loop.
+    // The whole-expression parse error, which is what a single-quoted literal
+    // gets and which says nothing at all about dates.
     assert.equal(
-      isDateLiteralRejected(new Error('NetSuite GET /salesorder failed: 400 {"detail":"Unknown field name \'createdFrom\' in the search query."}')),
+      isQueryRejected(new Error('NetSuite GET /salesorder failed: 400 {"o:errorDetails":[{"detail":"Invalid search query. Provide a valid search query.","o:errorQueryParam":"q","o:errorCode":"INVALID_PARAMETER"}]}')),
+      true,
+    );
+    // A different 400 must not send the run round the loop.
+    assert.equal(
+      isQueryRejected(new Error('NetSuite GET /salesorder failed: 400 {"detail":"Unknown field name \'createdFrom\' in the search query."}')),
       false,
     );
-    assert.equal(isDateLiteralRejected(new Error("NetSuite GET /salesorder failed: TimeoutError")), false);
+    assert.equal(isQueryRejected(new Error("NetSuite GET /salesorder failed: TimeoutError")), false);
   });
 
-  it("walks from the zone-independent spelling to the one every account takes", () => {
-    assert.equal(orderDateFormat(), "iso");
-    assert.equal(nextOrderDateFormat("iso"), "account");
-    assert.equal(nextOrderDateFormat("account"), "date");
+  it("walks from the measured-best spelling to the one every account takes", () => {
+    assert.equal(orderDateFormat(), "account");
+    assert.equal(nextOrderDateFormat("account"), "account24");
+    assert.equal(nextOrderDateFormat("account24"), "iso");
+    assert.equal(nextOrderDateFormat("iso"), "isoSingle");
+    assert.equal(nextOrderDateFormat("isoSingle"), "date");
     // Nothing left to try: the failure is then really NetSuite's answer.
     assert.equal(nextOrderDateFormat("date"), null);
   });
 
-  // The shape that is sent: ISO 8601 in UTC, single-quoted, seconds included and
+  // The two ISO spellings differ only in their quoting, which is the whole reason
+  // the second exists — the account rejected the single-quoted form outright.
+  it("writes the same instant single-quoted for the isoSingle spelling", () => {
+    assert.equal(
+      buildOrdersQuery(null, window, "UTC", "isoSingle"),
+      "lastModifiedDate ON_OR_AFTER '2026-08-05T03:39:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-05T04:39:00Z'",
+    );
+  });
+
+  // The shape that is sent: ISO 8601 in UTC, double-quoted, seconds included and
   // milliseconds dropped. Neither the configured zone nor the account preference
   // changes it, which is why it leads.
   it("writes an ISO literal in UTC whatever the sync or the account is set to", () => {
     rememberAccountPreference(readAccountPreference(EASTERN));
     assert.equal(
-      buildOrdersQuery(null, window, "America/Los_Angeles"),
-      "lastModifiedDate ON_OR_AFTER '2026-08-05T03:39:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-05T04:39:00Z'",
+      buildOrdersQuery(null, window, "America/Los_Angeles", "iso"),
+      'lastModifiedDate ON_OR_AFTER "2026-08-05T03:39:00Z" AND lastModifiedDate ON_OR_BEFORE "2026-08-05T04:39:00Z"',
     );
   });
 
@@ -401,11 +424,22 @@ describe("the date literal spelling", () => {
   // Nobody asked, or the lookup failed: the account-formatted shapes fall back to
   // what this code assumed before the endpoint existed, rather than refusing to
   // build a query at all.
-  it("assumes M/d/YYYY on a 24-hour clock when the preference is unknown", () => {
+  it("assumes M/d/YYYY on a 12-hour clock when the preference is unknown", () => {
     assert.equal(accountPreference(), null);
     assert.equal(
       buildOrdersQuery(null, window, "UTC", "account"),
-      'lastModifiedDate ON_OR_AFTER "8/5/2026 03:39" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 04:39"',
+      'lastModifiedDate ON_OR_AFTER "8/5/2026 3:39 am" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 4:39 am"',
+    );
+  });
+
+  // The other half of the 12-vs-24-hour question, for an account that takes the
+  // 24-hour clock and cannot be asked which it is. It overrules the preference's
+  // time format and nothing else — the date is still written the account's way.
+  it("overrules only the clock for the account24 spelling", () => {
+    rememberAccountPreference(readAccountPreference({ dateFormat: "d/M/yy", timeFormat: "h:mm a", timeZone: { id: "UTC" } }));
+    assert.equal(
+      buildOrdersQuery(null, window, "UTC", "account24"),
+      'lastModifiedDate ON_OR_AFTER "5/8/26 03:39" AND lastModifiedDate ON_OR_BEFORE "5/8/26 04:39"',
     );
   });
 
@@ -449,7 +483,7 @@ describe("the date literal spelling", () => {
 
   it("ignores an unusable NETSUITE_QUERY_DATE_FORMAT", () => {
     process.env.NETSUITE_QUERY_DATE_FORMAT = "M/d/yy";
-    assert.equal(orderDateFormat(), "iso");
+    assert.equal(orderDateFormat(), "account");
   });
 });
 
@@ -458,7 +492,7 @@ describe("buildOrdersQuery for a custom from/to range", () => {
     const { from, to } = parseCustomRange("2026-08-01", "2026-08-05");
     assert.equal(
       buildOrdersQuery(null, { from, to }),
-      "lastModifiedDate ON_OR_AFTER '2026-08-01T00:00:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-06T00:00:00Z'",
+      'lastModifiedDate ON_OR_AFTER "8/1/2026 12:00 am" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 12:00 am"',
     );
   });
 
@@ -466,7 +500,7 @@ describe("buildOrdersQuery for a custom from/to range", () => {
     const { from, to } = parseCustomRange("2026-08-05", "2026-08-05");
     assert.equal(
       buildOrdersQuery(null, { from, to }),
-      "lastModifiedDate ON_OR_AFTER '2026-08-05T00:00:00Z' AND lastModifiedDate ON_OR_BEFORE '2026-08-06T00:00:00Z'",
+      'lastModifiedDate ON_OR_AFTER "8/5/2026 12:00 am" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 12:00 am"',
     );
   });
 });
