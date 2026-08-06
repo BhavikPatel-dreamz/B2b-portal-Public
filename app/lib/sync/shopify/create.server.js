@@ -47,6 +47,13 @@ export function buildOrderInput(entry, currencyCode, company, variantIds) {
     lineItems: (entry.lineItems || []).map((li) => {
       const line = {
         quantity: li.quantity ?? 1,
+        // Every NetSuite sales-order line is a physical good that ships, so each
+        // line is marked as requiring shipping. Without it orderCreate defaults a
+        // line to requiresShipping:false — which is what left these orders showing
+        // "Shipping not required" against items that were in fact fulfilled and
+        // tracked. Set on the base line so it holds for both linked and custom
+        // lines (a linked line would otherwise inherit the variant's own flag).
+        requiresShipping: true,
         priceSet: {
           shopMoney: { amount: String(li.price ?? "0"), currencyCode },
         },
