@@ -73,7 +73,7 @@ export function SyncNowSection({
           {/* Last, after the presets, because it is the one that asks for more
               typing — and it is a different shape of answer: two fixed dates
               rather than a stretch back from now. */}
-          <s-option value={CUSTOM_SYNC_WINDOW}>Custom range…</s-option>
+          {/* <s-option value={CUSTOM_SYNC_WINDOW}>Custom range…</s-option> */}
         </s-select>
 
         {/* The two ends of a custom range, read as whole days in the sync's own
