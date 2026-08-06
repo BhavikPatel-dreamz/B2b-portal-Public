@@ -76,13 +76,6 @@ describe("record endpoints", () => {
     );
   });
 
-  it("always expands an item fulfillment, since its packages are the point", () => {
-    assert.equal(
-      recordUrl(recordPath.itemFulfillment("99")),
-      `${REST}/record/v1/itemfulfillment/99?expandSubResources=true`,
-    );
-  });
-
   it("builds the sales-order list with limit, offset and filter", () => {
     assert.equal(
       recordPath.salesOrderList({ limit: 10, offset: 20, q: 'lastModifiedDate ON_OR_AFTER "8/4/2026"' }),
@@ -158,10 +151,42 @@ describe("suiteql queries", () => {
     const q = suiteqlQuery.trackingForOrders(batch);
     // Tracking numbers are NOT on the itemfulfillment REST record — they live
     // in trackingnumbermap/trackingnumber, which is why this is SuiteQL.
-    assert.match(q, /JOIN trackingnumbermap m ON m\.transaction = f\.id/);
-    assert.match(q, /JOIN trackingnumber n ON n\.id = m\.trackingnumber/);
+    assert.match(q, /LEFT JOIN trackingnumbermap m ON m\.transaction = f\.id/);
+    assert.match(q, /LEFT JOIN trackingnumber n ON n\.id = m\.trackingnumber/);
     assert.match(q, /f\.type = 'ItemShip'/);
     assert.match(q, /WHERE tl\.createdfrom IN \(101,202\)/);
+  });
+
+  it("LEFT JOINs the tracking tables so shipped-but-untracked orders still answer", () => {
+    // An inner join here reported the ship date, status, carrier and weight of
+    // ONLY the fulfillments that happen to carry a tracking number — 1212 of
+    // this account's 17920 shipped orders. The other ~93% came back as if
+    // nothing had shipped at all. If either of these ever becomes a plain JOIN,
+    // that silent loss comes straight back.
+    const q = suiteqlQuery.trackingForOrders(batch);
+    assert.doesNotMatch(q, /(?<!LEFT )JOIN trackingnumbermap/);
+    assert.doesNotMatch(q, /(?<!LEFT )JOIN trackingnumber\b/);
+  });
+
+  it("pre-aggregates package weight instead of joining the package rows directly", () => {
+    // Weight is per fulfillment, but this query returns one row per fulfillment
+    // LINE x tracking number. Joining itemfulfillmentpackage in directly
+    // multiplies against those rows — fulfillment 3538 has 9 packages and 9
+    // tracking numbers, and a direct join reports 9x its real 153 lb.
+    const q = suiteqlQuery.trackingForOrders(batch);
+    assert.match(q, /LEFT JOIN \(SELECT itemfulfillment, SUM\(packageweight\) AS packageweight/);
+    assert.match(q, /GROUP BY itemfulfillment\) w ON w\.itemfulfillment = f\.id/);
+  });
+
+  it("renders the ship date as YYYY-MM-DD rather than the account's own format", () => {
+    // Raw, SuiteQL hands trandate back in the ACCOUNT's display format
+    // ("8/5/2026") — ambiguous between US and rest-of-world spelling, and not
+    // what anything downstream wants to store, sort or compare.
+    assert.match(suiteqlQuery.trackingForOrders(batch), /TO_CHAR\(f\.trandate, 'YYYY-MM-DD'\) AS shipdate/);
+  });
+
+  it("reads the carrier that actually shipped, off the fulfillment", () => {
+    assert.match(suiteqlQuery.trackingForOrders(batch), /BUILTIN\.DF\(f\.shipmethod\) AS shipmethod/);
   });
 
   it("refuses a non-numeric id rather than inlining it into SQL", () => {

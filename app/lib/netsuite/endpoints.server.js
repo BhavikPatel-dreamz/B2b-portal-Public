@@ -135,10 +135,6 @@ export const recordPath = {
   salesOrderByTranId: (tranId, limit = 5) =>
     `/salesorder?q=${encodeURIComponent(`tranId IS "${tranId}"`)}&limit=${limit}`,
 
-  // One item-fulfillment record, for its package weights. Always expanded —
-  // the packages are a sublist, and they are the only reason it is fetched.
-  itemFulfillment: (id) => `/itemfulfillment/${id}${EXPANDED}`,
-
   // How the integration user's account is configured — the only endpoint here
   // that reads a SETTING rather than a record:
   //
@@ -172,9 +168,14 @@ export const recordPath = {
 //     transactionline.createdfrom. There is no field on either record that
 //     names the other.
 //   • tracking — `/itemfulfillment?q=createdFrom IS <id>` is rejected outright
-//     ("Unknown field name 'createdFrom'"), and even with a fulfillment id in
-//     hand the tracking numbers are not on the REST record: it carries package
-//     weights only, and the numbers live in trackingnumbermap/trackingnumber.
+//     ("Unknown field name 'createdFrom'"), so the sales order -> fulfillment
+//     link has to be resolved through transactionline.createdfrom. The tracking
+//     numbers are not on the REST record either: they live in
+//     trackingnumbermap/trackingnumber. Package weight IS on the REST record,
+//     but only under a carrier-specific sublist name (packageUps, packageFedex
+//     or plain package, one per carrier, each with its own weight field) — the
+//     itemfulfillmentpackage table exposes all three uniformly, and in the same
+//     batched query rather than one GET per fulfillment.
 //   • customer emails — `/customer/<id>` would work, but costs one round trip
 //     and a rate-limit pause PER customer. One batched query answers a whole
 //     run, and a window normally holds several orders for the same few
@@ -218,18 +219,48 @@ export const suiteqlQuery = {
   customerEmails: (batch) =>
     `SELECT id, email FROM customer WHERE id IN (${idList(batch)}) AND email IS NOT NULL`,
 
-  // Tracking numbers, with the fulfillment that carries them and when it
-  // shipped. transactionline holds one row per fulfillment LINE, so the same
-  // tracking number repeats per line — DISTINCT plus the caller's Set collapse
-  // that. Most fulfillments legitimately have no tracking (2741 numbers across
-  // 1442 of this account's 25815 ItemShip records), so an order coming back
-  // without any is normal rather than a lookup failure.
+  // Everything the sync knows about an order's shipments: the fulfillments, the
+  // tracking numbers on them, when they shipped, the carrier service, and the
+  // package weight.
+  //
+  // The tracking tables are LEFT JOINed, not JOINed. An inner join here answered
+  // only for fulfillments that happen to carry a tracking number, which on this
+  // account is a small minority: 17920 sales orders have an ItemShip record and
+  // just 1212 of them have a TRACKED one. So an inner join threw away the ship
+  // date, status, carrier and weight of ~93% of shipped orders — not because
+  // NetSuite lacked them, but because the row had no tracking number to hang
+  // them off. Those fields are per-FULFILLMENT facts and are read as such.
+  //
+  // packageweight comes from itemfulfillmentpackage, pre-aggregated in a
+  // subquery. It has to be pre-aggregated: joining the package rows directly
+  // would multiply against the tracking rows (fulfillment 3538 has 9 packages
+  // and 9 tracking numbers, so a direct join reports 9x its real weight). The
+  // subquery is deliberately left unbounded — bounding it to this batch's
+  // fulfillments measured 3x slower on this account (2116ms vs 751ms), because
+  // the extra transactionline pass costs more than aggregating the package
+  // table outright.
+  //
+  // trandate is rendered as YYYY-MM-DD rather than returned raw: SuiteQL hands
+  // dates back in the ACCOUNT's display format ("8/5/2026"), which is ambiguous
+  // between US and rest-of-world spelling and is not what anything downstream
+  // wants to store or compare.
+  //
+  // transactionline holds one row per fulfillment LINE, so every fulfillment's
+  // details repeat per line — DISTINCT plus the caller's per-order grouping
+  // collapse that.
   trackingForOrders: (batch) =>
-    `SELECT DISTINCT tl.createdfrom AS orderid, n.trackingnumber,
-              f.id AS fulfillmentid, f.trandate AS shipdate, BUILTIN.DF(f.status) AS statuslabel
+    `SELECT DISTINCT tl.createdfrom AS orderid, f.id AS fulfillmentid,
+              n.trackingnumber,
+              TO_CHAR(f.trandate, 'YYYY-MM-DD') AS shipdate,
+              BUILTIN.DF(f.status) AS statuslabel,
+              BUILTIN.DF(f.shipmethod) AS shipmethod,
+              w.packageweight
          FROM transactionline tl
          JOIN transaction f ON f.id = tl.transaction AND f.type = 'ItemShip'
-         JOIN trackingnumbermap m ON m.transaction = f.id
-         JOIN trackingnumber n ON n.id = m.trackingnumber
+         LEFT JOIN trackingnumbermap m ON m.transaction = f.id
+         LEFT JOIN trackingnumber n ON n.id = m.trackingnumber
+         LEFT JOIN (SELECT itemfulfillment, SUM(packageweight) AS packageweight
+                      FROM itemfulfillmentpackage
+                     GROUP BY itemfulfillment) w ON w.itemfulfillment = f.id
         WHERE tl.createdfrom IN (${idList(batch)})`,
 };

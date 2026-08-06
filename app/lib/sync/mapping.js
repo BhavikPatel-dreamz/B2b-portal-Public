@@ -69,12 +69,23 @@ export function mapNetsuiteOrder(rec) {
     total: numOrNull(rec?.total),
     discountTotal: numOrNull(rec?.discountTotal),
     tracking: cleanTracking(rec?.linkedTrackingNumbers?.numbers),
-    // Ship date/status/weight only exist for a fulfillment that also carries a
-    // tracking number (see fetchTrackingForOrders) — null otherwise, same as
-    // `tracking` above.
+    // Ship date/status/weight/carrier are per-FULFILLMENT facts, so they are
+    // known for any order NetSuite has shipped — including the majority that
+    // carry no tracking number at all (see fetchTrackingForOrders). All null
+    // when the order has no fulfillment record yet.
     trackingShipDate: rec?.linkedTrackingNumbers?.shipDate || null,
     trackingStatus: rec?.linkedTrackingNumbers?.status || null,
     trackingPackageWeight: rec?.linkedTrackingNumbers?.packageWeight ?? null,
+    // The carrier service off the fulfillment ("FedEx Ground®"), which is the
+    // one that actually shipped. shipMethod above is the sales order's
+    // REQUESTED method and can differ; both are logged, and neither is sent to
+    // Shopify as a carrier name (see trackingInput).
+    trackingShipMethod: rec?.linkedTrackingNumbers?.shipMethod || null,
+    // Counts, for the sync log: how many fulfillments this order has, and how
+    // many tracking numbers came off them. Together they say WHY an order has
+    // no tracking — nothing shipped yet, or shipped without a number recorded.
+    trackingFulfillments: rec?.linkedTrackingNumbers?.fulfillments ?? 0,
+    trackingNumberCount: rec?.linkedTrackingNumbers?.tracked ?? 0,
     otherRefNum: rec.otherRefNum || null,
     // isCeligoOrder is what the sync branches on (see resolveShopifyOrder); the
     // id/name are informational.

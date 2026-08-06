@@ -17,7 +17,8 @@ export function ordersToCsv(orders) {
     "shippingAddress1", "shippingCity", "shippingZip", "shippingCountry", "shippingProvince",
     "billingAddress1", "billingCity", "billingZip", "billingCountry", "billingProvince",
     "shippingCost", "shipMethod", "subtotal", "taxTotal", "total", "discountTotal",
-    "tracking", "otherRefNum", "celigoStoreId", "celigoStoreName", "terms", "salesRep",
+    "tracking", "shippedDate", "shipmentStatus", "shippedVia", "packageWeight",
+    "otherRefNum", "celigoStoreId", "celigoStoreName", "terms", "salesRep",
     "lineItems", "question",
   ];
   const rows = orders.map((o) => [
@@ -28,7 +29,8 @@ export function ordersToCsv(orders) {
     o.shippingAddress?.address1, o.shippingAddress?.city, o.shippingAddress?.zip, o.shippingAddress?.countryCode, o.shippingAddress?.provinceCode,
     o.billingAddress?.address1, o.billingAddress?.city, o.billingAddress?.zip, o.billingAddress?.countryCode, o.billingAddress?.provinceCode,
     o.shippingCost, o.shipMethod, o.subtotal, o.taxTotal, o.total, o.discountTotal,
-    o.tracking, o.otherRefNum, o.celigoStoreId, o.celigoStoreName, o.terms, o.salesRep,
+    o.tracking, o.trackingShipDate, o.trackingStatus, o.trackingShipMethod, o.trackingPackageWeight,
+    o.otherRefNum, o.celigoStoreId, o.celigoStoreName, o.terms, o.salesRep,
     (o.lineItems || []).map((li) => `${li.title} x${li.quantity} @${li.price}`).join(" | "),
     "",
   ].map(escapeCsvField));
@@ -71,6 +73,10 @@ export function ordersToExcel(orders) {
     total: o.total,
     discountTotal: o.discountTotal,
     tracking: o.tracking,
+    shippedDate: o.trackingShipDate,
+    shipmentStatus: o.trackingStatus,
+    shippedVia: o.trackingShipMethod,
+    packageWeight: o.trackingPackageWeight,
     otherRefNum: o.otherRefNum,
     celigoStoreId: o.celigoStoreId,
     celigoStoreName: o.celigoStoreName,

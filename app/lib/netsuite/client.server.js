@@ -736,11 +736,11 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     }
   }
 
-  // Tracking is best-effort: a failure here leaves linkedTrackingNumbers unset
-  // and syncTracking simply reports "no tracking numbers", so it must never take
-  // the whole run down.
+  // Shipment detail is best-effort: a failure here leaves linkedTrackingNumbers
+  // unset and syncTracking reports the order as having no fulfillment record,
+  // so it must never take the whole run down.
   if (items.length > 0) {
-    console.log(`[netsuite] fetching tracking for ${items.length} order(s)…`);
+    console.log(`[netsuite] fetching shipment detail for ${items.length} order(s)…`);
     try {
       const trackingMap = await fetchTrackingForOrders(shop, items.map((i) => i.id));
       for (const item of items) {
@@ -748,10 +748,19 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
           item.linkedTrackingNumbers = trackingMap[item.id];
         }
       }
-      const withTracking = items.filter((i) => i.linkedTrackingNumbers).length;
-      console.log(`[netsuite] tracking found for ${withTracking}/${items.length} order(s).`);
+      // Shipped and tracked are counted apart because they diverge sharply on
+      // this account, and a single "tracking found for N orders" number hid
+      // that: most shipped orders carry no tracking number, which is normal
+      // and not something the next reader should have to rediscover.
+      const shipped = items.filter((i) => i.linkedTrackingNumbers);
+      const tracked = shipped.filter((i) => i.linkedTrackingNumbers.tracked > 0);
+      const weighed = shipped.filter((i) => i.linkedTrackingNumbers.packageWeight != null);
+      console.log(
+        `[netsuite] shipments: ${shipped.length}/${items.length} order(s) have a fulfillment, `
+        + `${tracked.length} carry tracking numbers, ${weighed.length} have a package weight.`,
+      );
     } catch (err) {
-      console.warn("[netsuite] tracking lookup failed:", err?.message);
+      console.warn("[netsuite] shipment lookup failed:", err?.message);
     }
   }
 
@@ -842,36 +851,47 @@ async function fetchCustomerEmails(shop, customerIds) {
   return map;
 }
 
-// Fetches tracking numbers, ship date, shipment status and package weight for
-// each sales order via its ItemFulfillment records. Returns a map of
-// { orderId: { numbers: "TRACK1, TRACK2", shipDate, status, packageWeight } }.
+// Fetches the shipment facts for each sales order from its ItemFulfillment
+// records: tracking numbers, ship date, shipment status, carrier service and
+// package weight. Returns a map of
+// { orderId: { numbers, shipDate, status, shipMethod, packageWeight,
+//              fulfillments, tracked } }.
 //
-// This has to go through SuiteQL, in one batched query, because both halves of
-// the REST route are dead ends on this account:
+// This goes through SuiteQL, in one batched query, because the REST route is a
+// dead end in both directions:
 //
 //   1. `/itemfulfillment?q=createdFrom IS <id>` is rejected outright —
 //      "Unknown field name 'createdFrom' in the search query. The field does
 //      not exist on this record type." So the SO -> fulfillment link has to be
 //      resolved through transactionline.createdfrom instead. This is what made
-//      the previous implementation return nothing for every order, on every
-//      run, while burning one failing request per order.
-//   2. Even with a fulfillment id in hand, the tracking numbers are not on the
-//      REST record: linkedTrackingNumbers is absent and the `package` sublist
-//      carries weight only. They live in trackingnumbermap/trackingnumber.
-//      (Weight, conversely, is NOT reachable through SuiteQL — see
-//      fetchFulfillmentPackageWeights below, which pays for it with one REST
-//      call per fulfillment instead.)
+//      an earlier implementation return nothing for every order, on every run,
+//      while burning one failing request per order.
+//   2. The tracking numbers are not on the REST record at all — they live in
+//      trackingnumbermap/trackingnumber.
 //
-// Verified against the account: 2741 tracking numbers across 1442 of the 25815
-// ItemShip records, so most fulfillments legitimately have none — an order
-// coming back without tracking is normal, not a lookup failure. Ship date and
-// shipment status ride along on the same join, so they are only known for
-// fulfillments that also carry a tracking number — the same scope this
-// function has always had.
+// Package weight used to be read back through REST, one GET per fulfillment,
+// off `record.package.items`. That found a weight on 0 of 20 sampled
+// fulfillments, because the package sublist is named for the CARRIER, not
+// uniformly: a UPS shipment carries `packageUps` with `packageWeightUps`, a
+// FedEx one `packageFedex` with `packageWeightFedEx`, and only a
+// carrier-less shipment has the plain `package`/`packageWeight` the code was
+// looking for. So every run paid a request plus a 300ms pause per fulfillment
+// to come back with null every time. The itemfulfillmentpackage table exposes
+// all three uniformly and rides along on this query for free — verified equal
+// to the REST sublist sum on every fulfillment checked (e.g. 3538: 9 UPS
+// packages x 17 = 153, matching the record's own shipmentWeightUps).
 //
-// transactionline holds one row per fulfillment LINE, so the same tracking
-// number (and fulfillment id, ship date, status) repeats per line; DISTINCT
-// plus the per-order Sets below collapse that.
+// Ship date, status, carrier and weight are per-FULFILLMENT facts, so they are
+// read from fulfillments whether or not a tracking number happens to hang off
+// them (see the LEFT JOIN note on the query). Tracking numbers themselves stay
+// genuinely sparse — 2756 numbers across 1454 of this account's 25978 ItemShip
+// records — so an order coming back with a ship date and no tracking is the
+// normal case, not a lookup failure.
+//
+// transactionline holds one row per fulfillment LINE, so every fulfillment's
+// details repeat per line and per tracking number; DISTINCT plus the per-order
+// grouping below collapse that. Weight in particular must be counted ONCE per
+// fulfillment, not once per row.
 async function fetchTrackingForOrders(shop, orderIds) {
   const ids = orderIds.map((id) => String(id)).filter((id) => /^\d+$/.test(id));
   if (!ids.length) return {};
@@ -881,92 +901,71 @@ async function fetchTrackingForOrders(shop, orderIds) {
     rows.push(...await nsSuiteQl(shop, suiteqlQuery.trackingForOrders(batch)));
   }
 
-  // Grouped per order: tracking numbers and statuses collapse duplicates the
-  // same way the plain-string version always did; fulfillment ids are kept as
-  // a Set so the weight lookup below asks NetSuite for each fulfillment record
-  // once, never once per tracking-number row; ship date keeps the latest one
+  // Grouped per order. Tracking numbers, statuses and carriers collapse
+  // duplicates through Sets; weights are keyed by fulfillment id so a
+  // fulfillment repeated across rows is added once; ship date keeps the latest
   // seen, since a re-shipped order's most recent fulfillment is the one worth
   // showing.
   const grouped = {};
   for (const r of rows) {
     const orderId = String(r.orderid);
     const entry = (grouped[orderId] ||= {
-      numbers: new Set(), statuses: new Set(), fulfillmentIds: new Set(), shipDate: null,
+      numbers: new Set(), statuses: new Set(), shipMethods: new Set(),
+      fulfillmentIds: new Set(), weightByFulfillment: new Map(), shipDate: null,
     });
     const tn = String(r.trackingnumber ?? "").trim();
     if (tn) entry.numbers.add(tn);
-    const status = String(r.statuslabel ?? "").trim();
+    const status = cleanShipmentStatus(r.statuslabel);
     if (status) entry.statuses.add(status);
-    if (r.fulfillmentid != null) entry.fulfillmentIds.add(String(r.fulfillmentid));
-    const shipDate = r.shipdate ?? null;
-    if (shipDate) {
-      const parsed = Date.parse(shipDate);
-      const current = entry.shipDate ? Date.parse(entry.shipDate) : NaN;
-      // A date that fails to parse is still kept (better than dropping a real
-      // ship date over a format this couldn't read) — it just can't outrank
-      // whatever is already there, so the LAST one read wins in that case.
-      if (!entry.shipDate || !Number.isFinite(current) || (Number.isFinite(parsed) && parsed > current)) {
-        entry.shipDate = shipDate;
-      }
+    const shipMethod = String(r.shipmethod ?? "").trim();
+    if (shipMethod) entry.shipMethods.add(shipMethod);
+    if (r.fulfillmentid != null) {
+      const fid = String(r.fulfillmentid);
+      entry.fulfillmentIds.add(fid);
+      const weight = Number(r.packageweight);
+      if (Number.isFinite(weight)) entry.weightByFulfillment.set(fid, weight);
     }
+    // Already YYYY-MM-DD (the query renders it), so a plain string compare
+    // orders these correctly and needs no date parsing to do it.
+    const shipDate = String(r.shipdate ?? "").trim();
+    if (shipDate && (!entry.shipDate || shipDate > entry.shipDate)) entry.shipDate = shipDate;
   }
-
-  const weightByFulfillment = await fetchFulfillmentPackageWeights(
-    shop,
-    [...new Set(Object.values(grouped).flatMap((g) => [...g.fulfillmentIds]))],
-  );
 
   return Object.fromEntries(
     Object.entries(grouped).map(([orderId, g]) => {
-      const fids = [...g.fulfillmentIds];
-      const known = fids.filter((fid) => weightByFulfillment[fid] != null);
+      const weights = [...g.weightByFulfillment.values()];
       return [orderId, {
         numbers: [...g.numbers].join(", "),
         status: [...g.statuses].join(", ") || null,
+        shipMethod: [...g.shipMethods].join(", ") || null,
         shipDate: g.shipDate,
-        packageWeight: known.length ? known.reduce((sum, fid) => sum + weightByFulfillment[fid], 0) : null,
+        // Rounded because summing decimal weights in binary floating point
+        // produces artefacts: four FedEx packages on SO 295937 add up to
+        // 72.17000000000004, and this value is written verbatim into a Shopify
+        // custom attribute and a log line. Two places is past the precision
+        // NetSuite records a package weight to.
+        packageWeight: weights.length ? round2(weights.reduce((sum, w) => sum + w, 0)) : null,
+        // Log-only, and the difference between "NetSuite has no tracking for
+        // this shipment" and "the lookup found no shipment at all" — which the
+        // sync log could not previously tell apart.
+        fulfillments: g.fulfillmentIds.size,
+        tracked: g.numbers.size,
       }];
     }),
   );
 }
 
-// Package weight lives only on the ItemFulfillment REST record's `package`
-// sublist (see the comment above fetchTrackingForOrders) — SuiteQL has no path
-// to it, so each unique fulfillment costs one more GET here. Bounded by this
-// batch's own fulfillment ids, not the account's full fulfillment history.
-//
-// The sublist's weight field name is unverified against this account (nothing
-// in the codebase names it, and there's no test fixture to check against), so
-// it's read defensively and the first package payload is dumped once — the
-// same way fetchNetsuiteOrders dumps its first sample order record — so a
-// wrong guess shows up as a visible log line instead of a run that just quietly
-// reports no weight forever.
-//
-// Best-effort like the rest of this function's callers: one fulfillment's GET
-// failing is logged and skipped, not raised, and a stop request ends the loop
-// early rather than being ridden out.
-async function fetchFulfillmentPackageWeights(shop, fulfillmentIds) {
-  const map = {};
-  let dumpedSample = false;
-  for (const id of fulfillmentIds) {
-    let full;
-    try {
-      full = await nsGet(shop, recordPath.itemFulfillment(id));
-    } catch (err) {
-      if (err?.syncStopped) break;
-      console.warn(`[netsuite] package weight lookup for fulfillment ${id} failed:`, err?.message);
-      continue;
-    }
-    const packages = full?.package?.items || [];
-    if (!dumpedSample && packages.length) {
-      console.log(`[netsuite] sample package sublist (fulfillment ${id}):`, JSON.stringify(packages));
-      dumpedSample = true;
-    }
-    const weights = packages
-      .map((p) => Number(p?.packageWeight ?? p?.weight))
-      .filter((w) => Number.isFinite(w));
-    if (weights.length) map[id] = weights.reduce((sum, w) => sum + w, 0);
-    if (!(await sleep(shop, 300))) break;
-  }
-  return map;
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// NetSuite labels an item fulfillment's status "Item Fulfillment : Shipped".
+// The record type is already known from context everywhere this is shown — on a
+// Shopify custom attribute and in the sync log next to the tracking number — so
+// only the state itself is kept.
+function cleanShipmentStatus(label) {
+  const text = String(label ?? "").trim();
+  if (!text) return null;
+  const colon = text.lastIndexOf(":");
+  return (colon === -1 ? text : text.slice(colon + 1).trim()) || null;
 }

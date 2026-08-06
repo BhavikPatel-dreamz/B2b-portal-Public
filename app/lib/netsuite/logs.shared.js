@@ -82,9 +82,18 @@ export function detailPairs(row, timeZone = DEFAULT_TIME_ZONE) {
     ["Line items", detail.lines],
     ["Payment", (detail.transactions || []).join(" | ")],
     ["Tracking", detail.tracking],
-    ["Ship method (carrier)", detail.shipMethod],
+    // The NetSuite shipment behind the row. The counts come first because they
+    // are what explain an empty Tracking field: "2 fulfillments, 0 tracking
+    // numbers" is a shipment NetSuite recorded without a number, which is the
+    // common case here and reads nothing like "nothing shipped".
+    ["NetSuite fulfillments", detail.netsuiteFulfillments],
+    ["NetSuite tracking numbers", detail.netsuiteTrackingNumbers],
     ["Shipped date", detail.shipmentDate],
     ["Shipment status", detail.shipmentStatus],
+    // Two carriers, when they differ: what the sales order asked for, and what
+    // the fulfillment actually shipped by.
+    ["Shipped via (carrier)", detail.shippedVia],
+    ["Requested ship method", detail.shipMethod === detail.shippedVia ? null : detail.shipMethod],
     ["Package weight", detail.packageWeight],
     ["Deleted id", detail.deletedId],
     // Set on an order that has failed every run for long enough to be let go of

@@ -22,30 +22,45 @@ import { findOrderIdByExternalId } from "./common.server.js";
 // (3) is also the fallback when the fulfillment write is rejected, e.g. because
 // the app hasn't been granted the *_fulfillment_orders scopes yet.
 export async function syncTracking(admin, entry, orderId, via) {
-  const base = {
-    action: "tracking", id: orderId, matchedBy: via, netsuiteId: entry.externalId,
-    // Log-only from here down: shipMethod is never sent to Shopify (see
+  const numbers = trackingNumbers(entry.tracking);
+  // What NetSuite's shipment side of this order looks like, as the sync log
+  // sees it. Named for NetSuite rather than plainly (`fulfillments`) because
+  // the success paths below return the SHOPIFY fulfillments they wrote under
+  // that key, and one silently overwriting the other is exactly the kind of
+  // log that reads fine and says the wrong thing.
+  const shipment = {
+    // Log-only from here down: neither ship method is sent to Shopify (see
     // trackingInput for why carrier text isn't handed to trackingInfo.company),
     // and ship date/status/weight have no native Shopify fulfillment field to
     // land on either — they're written as custom attributes below instead, and
     // ride along here just so the sync log shows them next to the tracking
     // numbers they describe.
+    //
+    // Two ship methods, because they answer different questions: the sales
+    // order's is what the customer ASKED for, the fulfillment's is what
+    // actually carried the goods, and they do not always agree.
     shipMethod: entry.shipMethod || null,
+    shippedVia: entry.trackingShipMethod || null,
     shipmentDate: entry.trackingShipDate || null,
     shipmentStatus: entry.trackingStatus || null,
     packageWeight: entry.trackingPackageWeight ?? null,
+    netsuiteFulfillments: entry.trackingFulfillments || 0,
+    netsuiteTrackingNumbers: numbers.length,
   };
-  const numbers = trackingNumbers(entry.tracking);
+  const base = {
+    action: "tracking", id: orderId, matchedBy: via, netsuiteId: entry.externalId,
+    ...shipment,
+  };
 
   // An order can need work with no tracking at all: NetSuite reports it as
   // shipped while Shopify still shows it unfulfilled. That is the common case
   // here, not an edge case — this account records tracking numbers on only
-  // 1442 of its 25815 fulfillments. Bail out only when there is neither
+  // 1454 of its 25978 fulfillments. Bail out only when there is neither
   // tracking to write nor a fulfillment state to correct.
   const shipped = entry.fulfillmentStatus === "FULFILLED"
     || entry.fulfillmentStatus === "PARTIALLY_FULFILLED";
   if (!numbers.length && !shipped) {
-    return { ...base, ok: true, skipped: true, reason: "no tracking numbers, and nothing shipped in NetSuite" };
+    return { ...base, ok: true, skipped: true, reason: noTrackingReason(entry) };
   }
 
   const ctx = await fetchTrackingContext(admin, orderId);
@@ -62,15 +77,16 @@ export async function syncTracking(admin, entry, orderId, via) {
   const detailPairs = [
     ["netsuite_shipped_date", entry.trackingShipDate],
     ["netsuite_shipment_status", entry.trackingStatus],
+    ["netsuite_shipped_via", entry.trackingShipMethod],
     ["netsuite_package_weight", entry.trackingPackageWeight != null ? String(entry.trackingPackageWeight) : null],
   ].filter(([, v]) => v != null && v !== "");
   if (detailPairs.length && attributesDiffer(ctx.customAttributes, detailPairs)) {
     try {
       const result = await writeCustomAttributePairs(admin, orderId, ctx.customAttributes, detailPairs);
       if (result.ok) ctx.customAttributes = result.customAttributes;
-      else console.warn(`[order-sync] ${entry.externalId}: writing ship date/status/weight attributes failed: ${result.error}`);
+      else console.warn(`[order-sync] ${entry.externalId}: writing shipment detail attributes failed: ${result.error}`);
     } catch (err) {
-      console.warn(`[order-sync] ${entry.externalId}: writing ship date/status/weight attributes failed: ${err?.message || String(err)}`);
+      console.warn(`[order-sync] ${entry.externalId}: writing shipment detail attributes failed: ${err?.message || String(err)}`);
     }
   }
 
@@ -79,7 +95,7 @@ export async function syncTracking(admin, entry, orderId, via) {
     if (fulfillments.length) {
       // Already fulfilled in Shopify and NetSuite has no numbers to add.
       if (!numbers.length) {
-        return { ...base, ok: true, skipped: true, name: ctx.name, reason: "already fulfilled in Shopify; no tracking numbers in NetSuite" };
+        return { ...base, ok: true, skipped: true, name: ctx.name, reason: `already fulfilled in Shopify (${fulfillments.length}); ${noTrackingReason(entry)}` };
       }
       const updated = [];
       const buckets = distribute(numbers, fulfillments.length);
@@ -126,7 +142,7 @@ export async function syncTracking(admin, entry, orderId, via) {
     // Nothing shipped in Shopify, no open fulfillment order to fulfil, and no
     // tracking to fall back on writing.
     if (!numbers.length) {
-      return { ...base, ok: true, skipped: true, name: ctx.name, reason: "no open fulfillment order to fulfil, and no tracking numbers" };
+      return { ...base, ok: true, skipped: true, name: ctx.name, reason: `no open fulfillment order to fulfil; ${noTrackingReason(entry)}` };
     }
   } catch (err) {
     const message = err?.message || String(err);
@@ -151,6 +167,21 @@ export async function syncTracking(admin, entry, orderId, via) {
     tracking: numbers.join(", "),
     reason: "no fulfillment or open fulfillment order on the Shopify order",
   };
+}
+
+// Why an order came out of NetSuite with no tracking. The three cases look
+// identical in the log ("no tracking numbers") but mean entirely different
+// things — nothing has shipped, something shipped without a number recorded, or
+// the shipment lookup itself found nothing — and only the middle one is normal
+// on this account. Worth the sentence: this is the reason someone opens the log
+// row at all.
+function noTrackingReason(entry) {
+  const shipments = entry.trackingFulfillments || 0;
+  if (!shipments) {
+    return `nothing shipped in NetSuite (no item fulfillment record) and NetSuite reports ${entry.fulfillmentStatus || "no fulfillment status"}`;
+  }
+  const when = entry.trackingShipDate ? ` on ${entry.trackingShipDate}` : "";
+  return `${shipments} NetSuite fulfillment(s)${when} carry no tracking number, and NetSuite reports ${entry.fulfillmentStatus || "no fulfillment status"}`;
 }
 
 // Splits the NetSuite tracking numbers across N targets: one number per target
@@ -361,12 +392,25 @@ export async function deleteOrder(admin, entry) {
 // is recorded because the order money is created in the SHOP currency (see the
 // note in createOrder); netsuite_tracking surfaces the tracking number(s) on
 // the order without changing its fulfillment state.
+//
+// The netsuite_shipped_* / netsuite_package_weight pairs are duplicated from
+// syncTracking's detailPairs on purpose. The two paths never both run for one
+// order — createOrder handles the orders that have no Shopify order yet,
+// syncTracking the ones that do (see processOrderRecords) — so without them
+// here, an order CREATED by the sync would show its shipment detail only after
+// a later run happened to re-match it, and never at all if it never changed
+// again. Keep the key names identical to detailPairs: a created order and a
+// matched one have to describe the same shipment the same way.
 export function buildCustomAttributes(entry) {
   const pairs = [
     ["netsuite_id", entry.externalId],
     ["netsuite_ref", entry.reference],
     ["netsuite_currency", entry.currency],
     ["netsuite_tracking", entry.tracking],
+    ["netsuite_shipped_date", entry.trackingShipDate],
+    ["netsuite_shipment_status", entry.trackingStatus],
+    ["netsuite_shipped_via", entry.trackingShipMethod],
+    ["netsuite_package_weight", entry.trackingPackageWeight != null ? String(entry.trackingPackageWeight) : null],
     ["netsuite_status", entry.statusName],
     ["netsuite_order_status", entry.orderStatus],
     ["netsuite_financial_status", entry.financialStatus],

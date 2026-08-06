@@ -49,6 +49,27 @@ function syncLogOrderLines(r) {
   if (r.lines) lines.push(`         items: ${r.lines}`);
   if (r.transactions?.length) lines.push(`         payment: ${r.transactions.join(" | ")}`);
   if (r.tracking) lines.push(`         tracking: ${r.tracking}`);
+  // The shipment NetSuite reported, whether or not it carried a tracking
+  // number. Without this line a skipped tracking row said only "no tracking
+  // numbers", which reads as "nothing shipped" — and on this account the
+  // opposite is usually true: the goods shipped, the number just wasn't
+  // recorded. Only printed for rows that looked at a shipment at all.
+  if (r.netsuiteFulfillments) {
+    const parts = [
+      `${r.netsuiteFulfillments} fulfillment(s)`,
+      `${r.netsuiteTrackingNumbers || 0} tracking number(s)`,
+      r.shipmentDate && `shipped ${r.shipmentDate}`,
+      r.shipmentStatus,
+      r.shippedVia && `via ${r.shippedVia}`,
+      r.packageWeight != null && `${r.packageWeight} lb`,
+    ].filter(Boolean);
+    lines.push(`         shipment: ${parts.join(" | ")}`);
+    // The requested method, only when it disagrees with what actually carried
+    // the goods — printing both every time would bury the case that matters.
+    if (r.shipMethod && r.shipMethod !== r.shippedVia) {
+      lines.push(`         requested method: ${r.shipMethod}`);
+    }
+  }
   if (r.deletedId) lines.push(`         deleted: ${r.deletedId}`);
   if (r.reason) lines.push(`         reason: ${r.reason}`);
   if (r.warning) lines.push(`         warning: ${r.warning}`);
