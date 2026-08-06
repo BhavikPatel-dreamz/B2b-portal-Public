@@ -7,7 +7,14 @@ import {
 } from "./oauth.server.js";
 import { recordPath, recordUrl, suiteqlQuery, suiteqlUrl } from "./endpoints.server.js";
 import { toInstant } from "../timezone/index.js";
-import { buildOrdersQuery, scanOrders } from "./orders-query.server.js";
+import {
+  buildOrdersQuery,
+  isDateLiteralRejected,
+  nextOrderDateFormat,
+  orderDateFormat,
+  rememberOrderDateFormat,
+  scanOrders,
+} from "./orders-query.server.js";
 // Re-exported so the query builder stays reachable from the client module
 // that callers already import — see orders-query.server.js for why they live
 // apart.
@@ -326,9 +333,9 @@ async function resolveKnownInternalId(shop, raw) {
 //
 // Note that a range and the watermark are NOT interchangeable, which is why they
 // are separate arguments rather than one normalised pair: a range is re-applied
-// exactly after the records are expanded (see inWindow, and nsQueryDate for why
-// the query itself is only day-granular), and a run given a range never advances
-// the watermark. The watermark path does neither.
+// exactly after the records are expanded (see inWindow, and ORDER_DATE_FORMATS
+// for the accounts whose filter can only name whole days), and a run given a
+// range never advances the watermark. The watermark path does neither.
 export function fetchSalesOrders(shop, { from, to, since, ids, knownInternalIds } = {}) {
   let window = null;
   if (from || to) {
@@ -432,10 +439,12 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     const seen = new Set();
     refs = refs.filter((r) => !seen.has(r.id) && seen.add(r.id));
   } else {
-    // The zone that decides which DAYS this query names — see nsQueryDate. It is
+    // The zone the emitted literals are written in — see nsQueryDateTime. It is
     // resolved here rather than passed in because this is the only place in the
     // fetch that needs it, and because the answer is per-shop and cached.
-    const q = buildOrdersQuery(since, window, await getSyncTimeZone(shop));
+    const timeZone = await getSyncTimeZone(shop);
+    let format = orderDateFormat();
+    let q = buildOrdersQuery(since, window, timeZone, format);
     // ONE list call, no paging. The filter decides what comes back and the run
     // syncs that — there is no offset walk, no resume session and no backlog to
     // drain across runs.
@@ -449,16 +458,40 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     // silently; it is skipped loudly, and the next run asks the same question.
     const limit = LIST_LIMIT;
     refs = [];
-    try {
-      const list = await nsGet(shop, recordPath.salesOrderList({ limit, offset: 0, q }));
-      refs = Array.isArray(list?.items) ? list.items : [];
-      totalResults = list?.totalResults ?? null;
-    } catch (err) {
-      // A call abandoned because of a stop is not a listing failure — the run is
-      // over either way, and raising here would report it as NetSuite being
-      // unreachable.
-      if (!err?.syncStopped) throw err;
-      stopped = true;
+    // Retried, at most once per spelling, when NetSuite rejects the way a date
+    // was written rather than the query itself — see ORDER_DATE_FORMATS, which
+    // explains why the right spelling is the ACCOUNT's answer and not something
+    // this app can know in advance. Every other failure comes straight out.
+    for (;;) {
+      try {
+        const list = await nsGet(shop, recordPath.salesOrderList({ limit, offset: 0, q }));
+        refs = Array.isArray(list?.items) ? list.items : [];
+        totalResults = list?.totalResults ?? null;
+        break;
+      } catch (err) {
+        // A call abandoned because of a stop is not a listing failure — the run
+        // is over either way, and raising here would report it as NetSuite being
+        // unreachable.
+        if (err?.syncStopped) {
+          stopped = true;
+          break;
+        }
+        const fallback = isDateLiteralRejected(err) ? nextOrderDateFormat(format) : null;
+        // Out of spellings: the account has rejected every shape there is, so
+        // this is no longer a guess that can be corrected and the error is the
+        // real answer.
+        if (!fallback) throw err;
+        console.warn(
+          `[netsuite] this account will not parse the "${format}" date literal in a sales-order filter — retrying with "${fallback}". Set NETSUITE_QUERY_DATE_FORMAT=${fallback} to skip this probe on every run. NetSuite said: ${err.message}`,
+        );
+        // Remembered before the retry, not after it: plannedOrdersWindow reads
+        // the same setting for the schedule card, and a card still showing a
+        // query this account has just refused is worse than one showing a
+        // spelling that turns out to need one more step.
+        rememberOrderDateFormat(fallback);
+        format = fallback;
+        q = buildOrdersQuery(since, window, timeZone, format);
+      }
     }
 
     console.log(

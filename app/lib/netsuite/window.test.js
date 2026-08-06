@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { buildOrdersQuery, plannedOrdersWindow, scanOrders } from "./orders-query.server.js";
+import {
+  buildOrdersQuery,
+  isDateLiteralRejected,
+  nextOrderDateFormat,
+  orderDateFormat,
+  plannedOrdersWindow,
+  rememberOrderDateFormat,
+  scanOrders,
+} from "./orders-query.server.js";
 import { parseCustomRange } from "../sync/windows.js";
 
 // The window scan: which of a day's listed orders a windowed run keeps, and when
@@ -256,6 +264,106 @@ describe("buildOrdersQuery for an explicit window", () => {
       q,
       'lastModifiedDate ON_OR_AFTER "8/1/2026 00:00" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 00:00"',
     );
+  });
+});
+
+// The account decides how a date literal may be spelled, and it says so by
+// refusing the query. This is the walk from the narrowest spelling to the one it
+// will actually parse — the failure that started it was:
+//
+//   Parse of date/time "8/5/2026 23:53" failed with date format "M/d/yy"
+describe("the date literal spelling", () => {
+  afterEach(() => {
+    rememberOrderDateFormat(null);
+    delete process.env.NETSUITE_QUERY_DATE_FORMAT;
+  });
+
+  const window = { from: new Date("2026-08-05T03:39:00Z"), to: new Date("2026-08-05T04:39:00Z") };
+
+  it("recognises NetSuite refusing the spelling, and nothing else", () => {
+    assert.equal(
+      isDateLiteralRejected(new Error('NetSuite GET /salesorder failed: 400 {"o:errorDetails":[{"detail":"Invalid search query. Search error occurred: Parse of date/time \\"8/5/2026 23:53\\" failed with date format \\"M/d/yy\\" in time zone America/Los_Angeles"}]}')),
+      true,
+    );
+    // A different 400 must not send the run round the fallback loop.
+    assert.equal(
+      isDateLiteralRejected(new Error('NetSuite GET /salesorder failed: 400 {"detail":"Unknown field name \'createdFrom\' in the search query."}')),
+      false,
+    );
+    assert.equal(isDateLiteralRejected(new Error("NetSuite GET /salesorder failed: TimeoutError")), false);
+  });
+
+  it("walks from the narrowest spelling to the one every account takes", () => {
+    assert.equal(orderDateFormat(), "datetime");
+    assert.equal(nextOrderDateFormat("datetime"), "datetime12");
+    assert.equal(nextOrderDateFormat("datetime12"), "date");
+    // Nothing left to try: the failure is then really NetSuite's answer.
+    assert.equal(nextOrderDateFormat("date"), null);
+  });
+
+  it("writes the time on a 12-hour clock when that is what the account reads", () => {
+    assert.equal(
+      buildOrdersQuery(null, window, "UTC", "datetime12"),
+      'lastModifiedDate ON_OR_AFTER "8/5/2026 3:39 am" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 4:39 am"',
+    );
+  });
+
+  // Midnight and noon are 12 on a 12-hour clock, never 0 — "0:30 am" is as
+  // unparseable to such an account as "23:53" is.
+  it("writes midnight and noon as 12", () => {
+    const q = buildOrdersQuery(
+      null,
+      { from: new Date("2026-08-05T00:30:00Z"), to: new Date("2026-08-05T12:30:00Z") },
+      "UTC",
+      "datetime12",
+    );
+    assert.equal(
+      q,
+      'lastModifiedDate ON_OR_AFTER "8/5/2026 12:30 am" AND lastModifiedDate ON_OR_BEFORE "8/5/2026 12:30 pm"',
+    );
+  });
+
+  // The last resort, and the shape this account was measured on: whole days, with
+  // a day of slack at each end so the filter stays a superset of the window that
+  // inWindow then trims back. Without the upper day the named day's own records
+  // are excluded — NetSuite reads a bare date as that date at midnight.
+  it("falls back to whole days, widened at both ends", () => {
+    assert.equal(
+      buildOrdersQuery(null, window, "UTC", "date"),
+      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/6/2026"',
+    );
+  });
+
+  // The watermark path has no inWindow to reclaim a surplus, so it takes the
+  // upper day it needs to match anything at all and no lower margin beyond it.
+  it("takes no lower margin on the watermark path", () => {
+    delete process.env.NETSUITE_ORDERS_QUERY;
+    process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS = "0";
+    const w = plannedOrdersWindow(new Date("2026-08-04T03:00:00Z"), new Date("2026-08-04T06:00:00Z"), "UTC", "date");
+    assert.equal(
+      w.query,
+      'lastModifiedDate ON_OR_AFTER "8/4/2026" AND lastModifiedDate ON_OR_BEFORE "8/5/2026"',
+    );
+    delete process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS;
+  });
+
+  it("remembers a spelling for the rest of the process, and NETSUITE_QUERY_DATE_FORMAT pins one", () => {
+    process.env.NETSUITE_QUERY_DATE_FORMAT = "date";
+    assert.equal(orderDateFormat(), "date");
+    assert.match(buildOrdersQuery(null, window), /ON_OR_AFTER "8\/4\/2026" AND/);
+
+    // A probe that has settled on something outranks the env default.
+    assert.equal(rememberOrderDateFormat("datetime12"), true);
+    assert.equal(orderDateFormat(), "datetime12");
+
+    // A name that is not a spelling is refused rather than silently adopted.
+    assert.equal(rememberOrderDateFormat("iso8601"), false);
+    assert.equal(orderDateFormat(), "datetime12");
+  });
+
+  it("ignores an unusable NETSUITE_QUERY_DATE_FORMAT", () => {
+    process.env.NETSUITE_QUERY_DATE_FORMAT = "M/d/yy";
+    assert.equal(orderDateFormat(), "datetime");
   });
 });
 

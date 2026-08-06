@@ -14,10 +14,82 @@ import { DEFAULT_TIME_ZONE, zonedParts } from "../timezone/index.js";
 // reimplementing it and drifting from it.
 
 const MINUTE_MS = 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-// The same instant with its time of day, as NetSuite's 24-hour datetime literal:
-// M/D/YYYY HH:MM. This is what makes the filter mean the window that was asked
-// for instead of the whole day (or three) it falls in.
+function shiftDays(d, days) {
+  return new Date(d.getTime() + days * DAY_MS);
+}
+
+// ---------------------------------------------------------------------------
+// How a date literal has to be SPELLED for this account
+// ---------------------------------------------------------------------------
+// There is no one answer. NetSuite parses the literals in a q filter with the
+// account's own date/time format preference, so the same query is accepted by
+// one account and rejected by the next:
+//
+//   NetSuite GET /salesorder?...&q=lastModifiedDate+ON_OR_AFTER+"8/5/2026 23:53"…
+//     400 Search error occurred: Parse of date/time "8/5/2026 23:53" failed with
+//     date format "M/d/yy" in time zone America/Los_Angeles
+//
+// That is this account answering that its filter takes a DATE, not a datetime —
+// the trailing time is what it could not consume. Another account, with a
+// 12-hour time preference, would take a datetime but not the 24-hour clock.
+//
+// So the spelling is not hard-coded. These are the shapes worth trying, in the
+// order they are tried — narrowest (and cheapest to scan) first:
+//
+//   datetime     8/5/2026 23:53      the window's own instants, 24-hour clock
+//   datetime12   8/5/2026 11:53 pm   the same, for a 12-hour account
+//   date         8/5/2026            day-granular, which every account takes
+//
+// fetchNetsuiteOrders walks this list when NetSuite rejects a literal (see
+// isDateLiteralRejected) and remembers what worked, so an account pays for the
+// probe once per process. NETSUITE_QUERY_DATE_FORMAT pins the starting point and
+// skips it entirely.
+export const ORDER_DATE_FORMATS = ["datetime", "datetime12", "date"];
+
+let activeFormat = null;
+
+function envDateFormat() {
+  const raw = String(process.env.NETSUITE_QUERY_DATE_FORMAT || "").trim();
+  return ORDER_DATE_FORMATS.includes(raw) ? raw : null;
+}
+
+// The spelling this process is currently using: whatever a probe last settled
+// on, else whatever the env pins, else the narrowest one.
+export function orderDateFormat() {
+  return activeFormat ?? envDateFormat() ?? ORDER_DATE_FORMATS[0];
+}
+
+// The next shape to try after `format` was rejected, or null when the list is
+// exhausted and the failure is really NetSuite's answer rather than our spelling.
+export function nextOrderDateFormat(format = orderDateFormat()) {
+  return ORDER_DATE_FORMATS[ORDER_DATE_FORMATS.indexOf(format) + 1] ?? null;
+}
+
+// Remembers a spelling for the rest of the process. `null` forgets it again,
+// which is what the tests use to get back to the default.
+export function rememberOrderDateFormat(format) {
+  if (format !== null && !ORDER_DATE_FORMATS.includes(format)) return false;
+  activeFormat = format;
+  return true;
+}
+
+// Whether a failed request is NetSuite objecting to how a date was WRITTEN, as
+// opposed to anything else a 400 can mean. Matched on the parser's own words,
+// which are the only part of the body that says so — the status code and
+// o:errorCode (INVALID_PARAMETER) are shared with every other bad q.
+//
+// Deliberately narrow: a false positive here re-sends the whole list call with a
+// wider filter for no reason, and a false negative just surfaces the error the
+// way it always did.
+export function isDateLiteralRejected(err) {
+  return /Parse of date\/time|Unparseable date/i.test(err?.message || String(err || ""));
+}
+
+// The same instant with its time of day, as a NetSuite datetime literal. This is
+// what makes the filter mean the window that was asked for instead of the whole
+// day (or three) it falls in.
 //
 // The literal carries no seconds, so the instant is snapped to a whole minute
 // FIRST — and which way it snaps depends on which end of the range it is. `round`
@@ -26,14 +98,28 @@ const MINUTE_MS = 60 * 1000;
 // shave up to 59 seconds off the top of the window, and an order modified in
 // that sliver would simply never be returned — inWindow cannot recover a record
 // NetSuite did not send.
-function nsQueryDateTime(d, timeZone = DEFAULT_TIME_ZONE, round = "floor") {
+function nsQueryDateTime(d, timeZone = DEFAULT_TIME_ZONE, round = "floor", format = "datetime") {
   const ms = d.getTime();
   const snapped = new Date(
     round === "ceil" ? Math.ceil(ms / MINUTE_MS) * MINUTE_MS : Math.floor(ms / MINUTE_MS) * MINUTE_MS,
   );
   const p = zonedParts(snapped, timeZone);
   const pad = (n) => String(n).padStart(2, "0");
-  return `${p.month}/${p.day}/${p.year} ${pad(p.hour)}:${pad(p.minute)}`;
+  // 12-hour accounts write midnight and noon as 12, not 0 — "0:30 am" is as
+  // unparseable to them as "23:53" is.
+  const clock = format === "datetime12"
+    ? `${p.hour % 12 === 0 ? 12 : p.hour % 12}:${pad(p.minute)} ${p.hour < 12 ? "am" : "pm"}`
+    : `${pad(p.hour)}:${pad(p.minute)}`;
+  return `${p.month}/${p.day}/${p.year} ${clock}`;
+}
+
+// The same instant as a bare date: M/D/YYYY, no leading zeros. What an account
+// that will not take a time of day gets instead — see ORDER_DATE_FORMATS, and
+// dateRangeQuery for the day of slack this shape needs at each end to stay a
+// superset of the window.
+function nsQueryDate(d, timeZone = DEFAULT_TIME_ZONE) {
+  const p = zonedParts(d, timeZone);
+  return `${p.month}/${p.day}/${p.year}`;
 }
 
 // Whether a fetched record really falls inside an explicit window.
@@ -137,9 +223,10 @@ export async function scanOrders(refs, { window, keepLimit = Infinity, expand, s
 // Builds the `q` filter expression for the sales-order list call.
 // NETSUITE_ORDERS_QUERY, when set, is a raw q expression that overrides the
 // automatic incremental window (manual/backfill mode). Otherwise we filter on
-// lastModifiedDate between the watermark's DAY and today (see nsQueryDate for
-// why the day, not the timestamp), or an initial window on first run
-// (NETSUITE_INITIAL_SYNC_DAYS, default 2) when there's no watermark yet.
+// lastModifiedDate between the watermark and now — or the days they fall on, on
+// an account that will not take a time of day (see ORDER_DATE_FORMATS) — or an
+// initial window on first run (NETSUITE_INITIAL_SYNC_DAYS, default 2) when
+// there's no watermark yet.
 const DEFAULT_INITIAL_SYNC_DAYS = 2;
 
 function initialSyncDays() {
@@ -153,11 +240,12 @@ function initialSyncDays() {
 // values are allowed, so minutes are expressible: 0.5 = 30 min, 0.25 = 15 min.
 // Unset/0/invalid = no buffer, i.e. today's behaviour.
 //
-// Worth knowing before tuning this: the q filter is date-granular (see
-// nsQueryDate), so the buffer only changes the query when it pushes the
-// watermark back across a UTC midnight. With lastSyncedAt = 10:00 UTC, 2 hours
-// still lands on the same day and the emitted q is identical; 11 hours crosses
-// into the previous day and widens the window by a full day.
+// Worth knowing before tuning this on an account stuck on the `date` spelling
+// (see ORDER_DATE_FORMATS): there the q filter is day-granular, so the buffer
+// only changes the query when it pushes the watermark back across a midnight.
+// With lastSyncedAt = 10:00, 2 hours still lands on the same day and the emitted
+// q is identical; 11 hours crosses into the previous day and widens the window
+// by a full day. With a datetime spelling every value moves the lower bound.
 function beforeLastSyncMs() {
   const n = Number(process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS);
   return Number.isFinite(n) && n > 0 ? n * 60 * 60 * 1000 : 0;
@@ -165,6 +253,10 @@ function beforeLastSyncMs() {
 
 
 
+// The two ends of the filter. With a datetime spelling they are the window's own
+// instants and there is nothing more to say; everything below is about the
+// `date` spelling, which has to name whole days and therefore has to widen.
+//
 // NetSuite compares a bare date literal against that date at MIDNIGHT, so
 // ON_OR_BEFORE "8/4/2026" means "at or before 8/4 00:00" — the named day's own
 // records are EXCLUDED. Measured on this account:
@@ -204,8 +296,17 @@ function beforeLastSyncMs() {
 // the configured zone is the NetSuite account's — a wrong guess with no margin
 // silently drops orders at the edges of a window, and the margin costs only scan
 // time that inWindow reclaims.
-function dateRangeQuery({ from, to }, timeZone = DEFAULT_TIME_ZONE) {
-  return `lastModifiedDate ON_OR_AFTER "${nsQueryDateTime(from, timeZone, "floor")}" AND lastModifiedDate ON_OR_BEFORE "${nsQueryDateTime(to, timeZone, "ceil")}"`;
+function dateRangeQuery({ from, to }, timeZone = DEFAULT_TIME_ZONE, format = orderDateFormat(), lowerMarginDays = 0) {
+  const [after, before] = format === "date"
+    ? [
+      nsQueryDate(lowerMarginDays ? shiftDays(from, -lowerMarginDays) : from, timeZone),
+      nsQueryDate(shiftDays(to, 1), timeZone),
+    ]
+    : [
+      nsQueryDateTime(from, timeZone, "floor", format),
+      nsQueryDateTime(to, timeZone, "ceil", format),
+    ];
+  return `lastModifiedDate ON_OR_AFTER "${after}" AND lastModifiedDate ON_OR_BEFORE "${before}"`;
 }
 
 // The stretch of modification time a scheduled run covers: from the watermark
@@ -227,14 +328,25 @@ function watermarkWindow(since, now) {
 // `timeZone` names the days in the emitted filter. It defaults to UTC so the
 // tests — and any caller from before zones were configurable — get exactly the
 // string they got before.
-export function buildOrdersQuery(since, window, timeZone = DEFAULT_TIME_ZONE) {
+//
+// `format` is how the literals are spelled (see ORDER_DATE_FORMATS). Defaulted
+// to whatever this process has settled on, so a caller that does not care about
+// the probe — the schedule card, the CLI script — needs to know nothing about it.
+export function buildOrdersQuery(since, window, timeZone = DEFAULT_TIME_ZONE, format = orderDateFormat()) {
   // An explicit window is what an operator just asked for by name ("last 2
   // hours"), so the manual/backfill override does not get to silently replace
   // it — nor does the overlap buffer, which exists to protect the watermark and
   // has no watermark to protect here.
-  if (window) return dateRangeQuery(window, timeZone);
+  //
+  // The day of lower margin is the `date` spelling's alone: a day-granular
+  // filter is only a superset of the window if it is widened at both ends, and
+  // inWindow then trims the surplus back off. A datetime spelling names the
+  // window exactly and has nothing to widen. The watermark path takes no margin
+  // either way — it has no inWindow to reclaim the surplus, and
+  // NETSUITE_BEFORE_LAST_SYNC_HOURS is the knob that exists for widening it.
+  if (window) return dateRangeQuery(window, timeZone, format, format === "date" ? 1 : 0);
   if (process.env.NETSUITE_ORDERS_QUERY) return process.env.NETSUITE_ORDERS_QUERY;
-  return dateRangeQuery(watermarkWindow(since, new Date()), timeZone);
+  return dateRangeQuery(watermarkWindow(since, new Date()), timeZone, format);
 }
 
 // What a scheduled run starting at `at` would ask NetSuite for, given the
@@ -243,15 +355,17 @@ export function buildOrdersQuery(since, window, timeZone = DEFAULT_TIME_ZONE) {
 // will really build that query, so the two cannot drift apart.
 //
 // `query` is what NetSuite is actually sent, and it is worth showing next to
-// from/to: the q filter is date-granular (see nsQueryDate), so both ends round
-// out to whole days and a run always reads a little wider than its window.
-export function plannedOrdersWindow(since, at = new Date(), timeZone = DEFAULT_TIME_ZONE) {
+// from/to: how the literals are spelled is the account's decision, not this
+// app's (see ORDER_DATE_FORMATS), and on an account that has fallen back to the
+// `date` spelling both ends round out to whole days — so a run reads a good deal
+// wider than its window and the query is the only place that shows it.
+export function plannedOrdersWindow(since, at = new Date(), timeZone = DEFAULT_TIME_ZONE, format = orderDateFormat()) {
   const window = watermarkWindow(since, at);
   const override = process.env.NETSUITE_ORDERS_QUERY || null;
   return {
     from: window.from,
     to: window.to,
-    query: override || dateRangeQuery(window, timeZone),
+    query: override || dateRangeQuery(window, timeZone, format),
     // NETSUITE_ORDERS_QUERY replaces the window outright, so when it is set the
     // from/to above are not what the run will really read.
     override: Boolean(override),
