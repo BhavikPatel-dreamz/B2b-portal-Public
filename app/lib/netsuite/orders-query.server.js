@@ -35,18 +35,75 @@ function shiftDays(d, days) {
 // the trailing time is what it could not consume. Another account, with a
 // 12-hour time preference, would take a datetime but not the 24-hour clock.
 //
-// So the spelling is not hard-coded. These are the shapes worth trying, in the
-// order they are tried — narrowest (and cheapest to scan) first:
+// The account will say how, if it is asked: GET /preference/userPreference
+// answers with the three settings its parser uses.
 //
-//   datetime     8/5/2026 23:53      the window's own instants, 24-hour clock
-//   datetime12   8/5/2026 11:53 pm   the same, for a 12-hour account
-//   date         8/5/2026            day-granular, which every account takes
+//   { "timeZone": { "id": "America/New_York", "refName": "(GMT-05:00) …" },
+//     "dateFormat": "M/d/YYYY",
+//     "timeFormat": "h:mm a" }
+//
+// So the spelling is not hard-coded. These are the shapes, in the order they are
+// tried, for the preference above:
+//
+//   iso      '2026-08-05T23:53:00Z'   ISO 8601, in UTC
+//   account  "8/5/2026 7:53 pm"       dateFormat + timeFormat, in the account's zone
+//   date     "8/5/2026"               dateFormat alone — day-granular, always parses
+//
+// ISO leads because it is the only one that does not depend on the preference at
+// all: it carries its own zone in the trailing Z, so the instant it names is the
+// instant that was asked for whatever the account is set to, and it still works
+// on the run where the preference could not be read.
+//
+// `account` is the fallback with the real answer behind it — the same instant
+// written the way that account writes dates, in the zone it compares them in.
+// Before the preference endpoint it was a guess between a 24- and a 12-hour
+// clock, which is what the 400 that started all this was:
+//
+//   Parse of date/time "8/5/2026 23:53" failed with date format "M/d/yy"
+//   in time zone America/Los_Angeles
 //
 // fetchNetsuiteOrders walks this list when NetSuite rejects a literal (see
 // isDateLiteralRejected) and remembers what worked, so an account pays for the
 // probe once per process. NETSUITE_QUERY_DATE_FORMAT pins the starting point and
 // skips it entirely.
-export const ORDER_DATE_FORMATS = ["datetime", "datetime12", "date"];
+export const ORDER_DATE_FORMATS = ["iso", "account", "date"];
+
+// What NetSuite's parser is configured to accept, once something has asked it.
+// Held here rather than passed down through every caller because it is one fact
+// about one account: the sync fetches it (fetchAccountPreference), and the
+// schedule card and the CLI script get the same answer without knowing that a
+// fetch ever happened.
+const DEFAULT_PREFERENCE = { dateFormat: "M/d/YYYY", timeFormat: "HH:mm", timeZone: null };
+let preference = null;
+
+// The preference as it is known right now. Null until something reads it, which
+// is not a failure — it means the account-formatted spellings fall back to
+// DEFAULT_PREFERENCE, i.e. what this code assumed before the endpoint existed.
+export function accountPreference() {
+  return preference;
+}
+
+// Takes the useful three fields out of the /preference/userPreference body, or
+// null if it carries none of them. Pure, so the parsing is testable without an
+// account, and defensive: the fields are read one at a time and a body missing
+// any of them still yields the others.
+export function readAccountPreference(body) {
+  const dateFormat = typeof body?.dateFormat === "string" ? body.dateFormat.trim() : "";
+  const timeFormat = typeof body?.timeFormat === "string" ? body.timeFormat.trim() : "";
+  const timeZone = typeof body?.timeZone?.id === "string" ? body.timeZone.id.trim() : "";
+  if (!dateFormat && !timeFormat && !timeZone) return null;
+  return {
+    dateFormat: dateFormat || DEFAULT_PREFERENCE.dateFormat,
+    timeFormat: timeFormat || DEFAULT_PREFERENCE.timeFormat,
+    timeZone: timeZone || null,
+  };
+}
+
+// Remembers the account's preference for the rest of the process. `null` forgets
+// it, which is what the tests use to get back to the defaults.
+export function rememberAccountPreference(next) {
+  preference = next;
+}
 
 let activeFormat = null;
 
@@ -56,7 +113,7 @@ function envDateFormat() {
 }
 
 // The spelling this process is currently using: whatever a probe last settled
-// on, else whatever the env pins, else the narrowest one.
+// on, else whatever the env pins, else the zone-independent one.
 export function orderDateFormat() {
   return activeFormat ?? envDateFormat() ?? ORDER_DATE_FORMATS[0];
 }
@@ -87,50 +144,102 @@ export function isDateLiteralRejected(err) {
   return /Parse of date\/time|Unparseable date/i.test(err?.message || String(err || ""));
 }
 
+// Renders zoned calendar parts through one of NetSuite's format-preference
+// patterns. They are Java date patterns, and the account can be set to any of a
+// short list of them — "M/d/YYYY", "d/M/YYYY", "d.M.YYYY", "d-MMM-YYYY",
+// "YYYY-M-d" for dates; "h:mm a" or "HH:mm" for times — so this reads the
+// pattern rather than hard-coding the handful of shapes it produces.
+//
+// One pass over the string, so a token can never match inside what an earlier
+// token already produced (the "d" of a rendered "Wed", say). Anything that is
+// not a recognised token — the slashes, dots and dashes that separate them —
+// falls through untouched, which is what carries the separators over.
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const PATTERN_TOKEN = /y+|Y+|M+|d+|H+|h+|m+|s+|a/g;
+
+function renderPattern(pattern, p) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return pattern.replace(PATTERN_TOKEN, (token) => {
+    const wide = token.length >= 2;
+    switch (token[0]) {
+      // "yy" is the two-digit year and anything longer is the full one. NetSuite
+      // writes the four-digit case as either "yyyy" or "YYYY".
+      case "y": case "Y": return token.length === 2 ? pad(p.year % 100) : String(p.year);
+      case "M": return token.length >= 3 ? MONTHS_SHORT[p.month - 1] : wide ? pad(p.month) : String(p.month);
+      case "d": return wide ? pad(p.day) : String(p.day);
+      case "H": return wide ? pad(p.hour) : String(p.hour);
+      // Midnight and noon are 12 on a 12-hour clock, never 0 — "0:30 am" is as
+      // unparseable to such an account as "23:53" is to this one.
+      case "h": return wide ? pad(p.hour % 12 || 12) : String(p.hour % 12 || 12);
+      case "m": return wide ? pad(p.minute) : String(p.minute);
+      case "s": return wide ? pad(p.second) : String(p.second);
+      case "a": return p.hour < 12 ? "am" : "pm";
+      default: return token;
+    }
+  });
+}
+
+// The zone the account-formatted literals are written in: the account's own,
+// when the preference has been read, because that is the zone NetSuite compares
+// them in. `timeZone` — SYNC_TIMEZONE, or the Shopify store's — is the fallback
+// for a run that could not read it, which is the guess this replaced.
+function literalZone(timeZone) {
+  return preference?.timeZone || timeZone;
+}
+
 // The same instant with its time of day, as a NetSuite datetime literal. This is
 // what makes the filter mean the window that was asked for instead of the whole
 // day (or three) it falls in.
 //
-// The literal carries no seconds, so the instant is snapped to a whole minute
-// FIRST — and which way it snaps depends on which end of the range it is. `round`
-// is "floor" for the lower bound and "ceil" for the upper, so the emitted range
-// is always a superset of the real one, never a subset. Snapping both down would
-// shave up to 59 seconds off the top of the window, and an order modified in
-// that sliver would simply never be returned — inWindow cannot recover a record
-// NetSuite did not send.
-function nsQueryDateTime(d, timeZone = DEFAULT_TIME_ZONE, round = "floor", format = "datetime") {
+// None of these literals carry sub-minute precision, so the instant is snapped to
+// a whole minute FIRST — and which way it snaps depends on which end of the range
+// it is. `round` is "floor" for the lower bound and "ceil" for the upper, so the
+// emitted range is always a superset of the real one, never a subset. Snapping
+// both down would shave up to 59 seconds off the top of the window, and an order
+// modified in that sliver would simply never be returned — inWindow cannot
+// recover a record NetSuite did not send.
+function nsQueryDateTime(d, timeZone = DEFAULT_TIME_ZONE, round = "floor", format = "iso") {
   const ms = d.getTime();
   const snapped = new Date(
     round === "ceil" ? Math.ceil(ms / MINUTE_MS) * MINUTE_MS : Math.floor(ms / MINUTE_MS) * MINUTE_MS,
   );
-  const p = zonedParts(snapped, timeZone);
-  const pad = (n) => String(n).padStart(2, "0");
-  // 12-hour accounts write midnight and noon as 12, not 0 — "0:30 am" is as
-  // unparseable to them as "23:53" is.
-  const clock = format === "datetime12"
-    ? `${p.hour % 12 === 0 ? 12 : p.hour % 12}:${pad(p.minute)} ${p.hour < 12 ? "am" : "pm"}`
-    : `${pad(p.hour)}:${pad(p.minute)}`;
-  return `${p.month}/${p.day}/${p.year} ${clock}`;
+  // ISO names the instant itself, so it is written in UTC and neither the zone
+  // nor the preference enters into it — that is the whole reason it is the first
+  // shape tried. The milliseconds are dropped because the value is already
+  // snapped to a minute and ".000" only makes the query harder to read against
+  // NetSuite's own screens.
+  if (format === "iso") return snapped.toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  const pref = preference ?? DEFAULT_PREFERENCE;
+  const p = zonedParts(snapped, literalZone(timeZone));
+  return `${renderPattern(pref.dateFormat, p)} ${renderPattern(pref.timeFormat, p)}`;
 }
 
-// The same instant as a bare date: M/D/YYYY, no leading zeros. What an account
+// The same instant as a bare date, in the account's date format. What an account
 // that will not take a time of day gets instead — see ORDER_DATE_FORMATS, and
 // dateRangeQuery for the day of slack this shape needs at each end to stay a
 // superset of the window.
 function nsQueryDate(d, timeZone = DEFAULT_TIME_ZONE) {
-  const p = zonedParts(d, timeZone);
-  return `${p.month}/${p.day}/${p.year}`;
+  return renderPattern((preference ?? DEFAULT_PREFERENCE).dateFormat, zonedParts(d, literalZone(timeZone)));
 }
 
 // Whether a fetched record really falls inside an explicit window.
 //
 // The q filter names the window's own instants now (see nsQueryDateTime), so
-// NetSuite should already be returning only what was asked for. This stays as the
-// safety net, because the query is evaluated in the NETSUITE ACCOUNT's timezone
-// while the literals are written in SYNC_TIMEZONE — and nothing here can verify
-// those are the same. If they differ, the returned set is shifted by the offset
-// between them, and this is what trims the surplus back off. It also absorbs the
-// upward rounding of the upper bound to a whole minute.
+// NetSuite should already be returning only what was asked for. This stays as
+// the safety net, because how much of the window the filter really covers
+// depends on which spelling the account accepted (see ORDER_DATE_FORMATS):
+//
+//   • on `iso` there is nothing to correct for — the literal carries its own
+//     zone — beyond the upward rounding of the upper bound to a whole minute;
+//   • on the account-formatted shapes the query is evaluated in the NETSUITE
+//     ACCOUNT's timezone while the literals are written in SYNC_TIMEZONE, and
+//     nothing here can verify those are the same. If they differ, the returned
+//     set is shifted by the offset between them;
+//   • on `date` the filter can only name whole days, so it is wider than the
+//     window by a day at each end by construction.
+//
+// This is what trims all three back to exactly what was asked for.
 //
 // A record with no readable lastModifiedDate is KEPT rather than dropped: the
 // demo feed carries no dates at all, and judging a window by a field that isn't
@@ -245,7 +354,7 @@ function initialSyncDays() {
 // only changes the query when it pushes the watermark back across a midnight.
 // With lastSyncedAt = 10:00, 2 hours still lands on the same day and the emitted
 // q is identical; 11 hours crosses into the previous day and widens the window
-// by a full day. With a datetime spelling every value moves the lower bound.
+// by a full day. With any of the other spellings every value moves the lower bound.
 function beforeLastSyncMs() {
   const n = Number(process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS);
   return Number.isFinite(n) && n > 0 ? n * 60 * 60 * 1000 : 0;
@@ -253,9 +362,9 @@ function beforeLastSyncMs() {
 
 
 
-// The two ends of the filter. With a datetime spelling they are the window's own
-// instants and there is nothing more to say; everything below is about the
-// `date` spelling, which has to name whole days and therefore has to widen.
+// The two ends of the filter. With `iso` or either datetime spelling they are the
+// window's own instants and there is nothing more to say; everything below is
+// about `date`, which has to name whole days and therefore has to widen.
 //
 // NetSuite compares a bare date literal against that date at MIDNIGHT, so
 // ON_OR_BEFORE "8/4/2026" means "at or before 8/4 00:00" — the named day's own
@@ -306,7 +415,10 @@ function dateRangeQuery({ from, to }, timeZone = DEFAULT_TIME_ZONE, format = ord
       nsQueryDateTime(from, timeZone, "floor", format),
       nsQueryDateTime(to, timeZone, "ceil", format),
     ];
-  return `lastModifiedDate ON_OR_AFTER "${after}" AND lastModifiedDate ON_OR_BEFORE "${before}"`;
+  // An ISO literal is single-quoted, the account-formatted ones double-quoted —
+  // each as NetSuite's own examples write that shape.
+  const qt = format === "iso" ? "'" : '"';
+  return `lastModifiedDate ON_OR_AFTER ${qt}${after}${qt} AND lastModifiedDate ON_OR_BEFORE ${qt}${before}${qt}`;
 }
 
 // The stretch of modification time a scheduled run covers: from the watermark
@@ -325,7 +437,8 @@ function watermarkWindow(since, now) {
 // Exported for its tests: this is where the same-day window bug lived, and the
 // only way to see it without an account is to read the string it emits.
 //
-// `timeZone` names the days in the emitted filter. It defaults to UTC so the
+// `timeZone` names the days in the emitted filter, and is ignored entirely by the
+// `iso` spelling, which writes the instants in UTC. It defaults to UTC so the
 // tests — and any caller from before zones were configurable — get exactly the
 // string they got before.
 //
@@ -340,7 +453,7 @@ export function buildOrdersQuery(since, window, timeZone = DEFAULT_TIME_ZONE, fo
   //
   // The day of lower margin is the `date` spelling's alone: a day-granular
   // filter is only a superset of the window if it is widened at both ends, and
-  // inWindow then trims the surplus back off. A datetime spelling names the
+  // inWindow then trims the surplus back off. Every other spelling names the
   // window exactly and has nothing to widen. The watermark path takes no margin
   // either way — it has no inWindow to reclaim the surplus, and
   // NETSUITE_BEFORE_LAST_SYNC_HOURS is the knob that exists for widening it.

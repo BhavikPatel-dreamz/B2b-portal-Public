@@ -138,6 +138,23 @@ export const recordPath = {
   // One item-fulfillment record, for its package weights. Always expanded —
   // the packages are a sublist, and they are the only reason it is fetched.
   itemFulfillment: (id) => `/itemfulfillment/${id}${EXPANDED}`,
+
+  // How the integration user's account is configured — the only endpoint here
+  // that reads a SETTING rather than a record:
+  //
+  //   { "timeZone": { "id": "America/New_York", "refName": "(GMT-05:00) …" },
+  //     "dateFormat": "M/d/YYYY",
+  //     "timeFormat": "h:mm a" }
+  //
+  // Those three answer the question a sales-order filter cannot answer for
+  // itself: how a date literal in a `q` expression has to be written, and which
+  // zone it will be compared in. See ORDER_DATE_FORMATS.
+  //
+  // Singular and un-parameterised — it is the preference of whoever the OAuth
+  // token belongs to, which is the integration user the sync runs as, which is
+  // also who the q filter is parsed on behalf of. That identity is what makes
+  // it the right thing to ask.
+  userPreference: () => "/preference/userPreference",
 };
 
 // ---------------------------------------------------------------------------

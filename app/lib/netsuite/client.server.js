@@ -8,10 +8,13 @@ import {
 import { recordPath, recordUrl, suiteqlQuery, suiteqlUrl } from "./endpoints.server.js";
 import { toInstant } from "../timezone/index.js";
 import {
+  accountPreference,
   buildOrdersQuery,
   isDateLiteralRejected,
   nextOrderDateFormat,
   orderDateFormat,
+  readAccountPreference,
+  rememberAccountPreference,
   rememberOrderDateFormat,
   scanOrders,
 } from "./orders-query.server.js";
@@ -232,6 +235,77 @@ const LIST_LIMIT = 1000;
 
 
 // ---------------------------------------------------------------------------
+// How this account writes dates
+// ---------------------------------------------------------------------------
+// GET /preference/userPreference, which answers with the three settings
+// NetSuite's own parser uses on the `q` filter:
+//
+//   { "timeZone": { "id": "America/New_York", "refName": "(GMT-05:00) …" },
+//     "dateFormat": "M/d/YYYY",
+//     "timeFormat": "h:mm a" }
+//
+// Worth one request because those three were previously GUESSED — the sync wrote
+// its date literals in SYNC_TIMEZONE and hoped the account agreed, and picked
+// between a 24- and a 12-hour clock by watching which one came back with a 400.
+// See ORDER_DATE_FORMATS.
+//
+// Best-effort, like every other lookup that decorates a run rather than being it:
+// a failure leaves the preference unknown, and the ISO literal the filter leads
+// with needs no preference at all. So this can only make the fallbacks better
+// informed; it can never be the reason a run fails.
+//
+// Cached per shop for an hour. A format preference changes about as often as a
+// store's timezone does (see getSyncTimeZone, which caches for the same reason
+// and the same hour), and asking once per run for an answer that has not moved
+// since the account was set up is a request per run for nothing.
+const PREFERENCE_TTL_MS = 60 * 60 * 1000;
+const preferenceCache = new Map();
+
+async function loadAccountPreference(shop) {
+  const hit = preferenceCache.get(shop);
+  // Re-remembered on a cache hit too, not just on a fetch: the remembered value
+  // is process-wide (one NetSuite account per deployment) while this cache is
+  // per shop, so setting it at the start of every fetch is what keeps the two
+  // from disagreeing about which shop is currently syncing.
+  if (hit && hit.expires > Date.now()) {
+    rememberAccountPreference(hit.preference);
+    return hit.preference;
+  }
+
+  let preference = null;
+  try {
+    const body = await nsGet(shop, recordPath.userPreference());
+    preference = readAccountPreference(body);
+    if (preference) {
+      console.log(
+        `[netsuite] ${shop}: account writes dates as "${preference.dateFormat}", times as "${preference.timeFormat}", in ${preference.timeZone || "an unstated zone"}.`,
+      );
+    } else {
+      console.warn(
+        "[netsuite] /preference/userPreference carried no dateFormat, timeFormat or timeZone:",
+        JSON.stringify(body)?.slice(0, 500),
+      );
+    }
+  } catch (err) {
+    // A stop is not this lookup failing, and swallowing it here would have the
+    // run carry on into the list call it was stopped before making.
+    if (err?.syncStopped) throw err;
+    console.warn(
+      `[netsuite] ${shop}: could not read the account's date preferences (${err?.message || err}) — the ISO date literal does not need them, and the fallbacks will assume the defaults if it is refused.`,
+    );
+  }
+
+  // Only a real answer is cached. A failed lookup retries on the next run rather
+  // than fixing the guess in place for an hour, and it must not overwrite an
+  // answer an earlier run already got.
+  if (preference) {
+    preferenceCache.set(shop, { preference, expires: Date.now() + PREFERENCE_TTL_MS });
+    rememberAccountPreference(preference);
+  }
+  return preference ?? accountPreference();
+}
+
+// ---------------------------------------------------------------------------
 // Targeted mode (NETSUITE_ORDER_IDS)
 // ---------------------------------------------------------------------------
 // A comma-separated list of sales orders to sync, given as either a document
@@ -439,10 +513,15 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
     const seen = new Set();
     refs = refs.filter((r) => !seen.has(r.id) && seen.add(r.id));
   } else {
-    // The zone the emitted literals are written in — see nsQueryDateTime. It is
-    // resolved here rather than passed in because this is the only place in the
-    // fetch that needs it, and because the answer is per-shop and cached.
+    // The zone the emitted literals are written in — which the ISO spelling the
+    // filter normally uses does not need at all, but the account-formatted
+    // fallbacks do (see ORDER_DATE_FORMATS). Resolved here rather than passed in
+    // because this is the only place in the fetch that needs it, and because the
+    // answer is per-shop and cached. The account's OWN zone, when the preference
+    // below could be read, outranks it for those literals — it is the zone
+    // NetSuite compares them in.
     const timeZone = await getSyncTimeZone(shop);
+    await loadAccountPreference(shop);
     let format = orderDateFormat();
     let q = buildOrdersQuery(since, window, timeZone, format);
     // ONE list call, no paging. The filter decides what comes back and the run
