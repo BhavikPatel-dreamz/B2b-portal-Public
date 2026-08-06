@@ -1,4 +1,4 @@
-import { extTag } from "../mapping.js";
+import { extTag } from "../ext-tag.js";
 
 // ---------------------------------------------------------------------------
 // GraphQL helpers

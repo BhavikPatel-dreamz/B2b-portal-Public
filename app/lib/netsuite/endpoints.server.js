@@ -248,12 +248,27 @@ export const suiteqlQuery = {
   // transactionline holds one row per fulfillment LINE, so every fulfillment's
   // details repeat per line — DISTINCT plus the caller's per-order grouping
   // collapse that.
+  // Both carrier fields ride along on this query because both live on the same
+  // fulfillment record the tracking numbers hang off, and Shopify is shown one
+  // of them verbatim (see carrierName):
+  //
+  //   • shipmethod  — the service it went by, "FedEx Ground®" / "UPS® Ground
+  //     Customer Account". Set on 3136 of this account's 25978 fulfillments,
+  //     but on 1447 of the 1452 that actually carry a tracking number.
+  //   • shipcarrier — the coarser field, "UPS" / "FedEx/USPS/More" / empty. Set
+  //     on all 1452 tracked fulfillments, so it is the fallback for the handful
+  //     whose service is blank.
+  //
+  // The 20000-odd fulfillments with neither are the untracked ones: nothing to
+  // link a carrier to, and nothing lost by having none.
   trackingForOrders: (batch) =>
     `SELECT DISTINCT tl.createdfrom AS orderid, f.id AS fulfillmentid,
               n.trackingnumber,
               TO_CHAR(f.trandate, 'YYYY-MM-DD') AS shipdate,
               BUILTIN.DF(f.status) AS statuslabel,
               BUILTIN.DF(f.shipmethod) AS shipmethod,
+              f.shipmethod AS shipmethodid,
+              f.shipcarrier,
               w.packageweight
          FROM transactionline tl
          JOIN transaction f ON f.id = tl.transaction AND f.type = 'ItemShip'
@@ -263,4 +278,70 @@ export const suiteqlQuery = {
                       FROM itemfulfillmentpackage
                      GROUP BY itemfulfillment) w ON w.itemfulfillment = f.id
         WHERE tl.createdfrom IN (${idList(batch)})`,
+
+  // What each individual shipment actually contained, which is what makes the
+  // tracking numbers item-wise rather than a comma-joined string on the order:
+  // SO 300777 shipped in four fulfillments, and only this says that
+  // 875373500692 carried the 3x TSK4A and 875374098216 the single 721520LEC.
+  //
+  // Deliberately NOT folded into trackingForOrders above. That query already
+  // returns one row per fulfillment x tracking number; adding the item lines
+  // would multiply the two together (a 6-line, 9-number fulfillment goes from 9
+  // rows to 54) for data that repeats identically down every tracking number.
+  //
+  // No join back to the sales order is needed: a fulfillment's own lines each
+  // carry createdfrom pointing at the SO they were fulfilled from (verified on
+  // this account: 1105 of 1105 ItemShip lines in a recent month have it set), so
+  // this reads the lines directly and lets the caller group them.
+  //
+  // An item fulfillment is written in one of two shapes on this account, and
+  // both have to be read or almost every shipment comes back empty:
+  //
+  //   • mainline only (3821 of 4108 fulfillments in 2026) — a single row,
+  //     mainline = 'T', carrying the item and the shipped quantity NEGATED.
+  //   • mainline + detail lines (the other 287) — the same mainline row plus
+  //     one positive line per item, each mirrored by a negative line for the
+  //     inventory movement, plus a ShipItem line for the freight charge.
+  //
+  // So the filter keeps the mainline row and the positive detail lines, and the
+  // caller prefers the detail lines per fulfillment where it has them: they name
+  // every item, where the mainline row names only the first (checked across 2026
+  // — the mainline item is one of the detail items every single time, so
+  // preferring detail never loses an item).
+  //
+  // ABS() because the mainline quantity is negative and the detail quantity is
+  // positive, and both mean "this many shipped". ShipItem is excluded outright:
+  // the carrier's charge line ("FedEx Ground®") is a cost, not something that
+  // ships, and fulfilling it in Shopify would be fulfilling a line that is not
+  // there. SUM+GROUP BY collapses an item split across several lines of the same
+  // fulfillment into one quantity.
+  // The shipping methods a run's fulfillments went by, whole, so the tracking
+  // URL can be picked out of them.
+  //
+  // NetSuite ships no tracking URL of its own — checked on this account: the
+  // trackingnumber record is an id and a number, the fulfillment record has no
+  // URL field, and neither does the shipping item ("FedEx Ground®" has
+  // shippingCarrier and a service code and nothing linkable). NetSuite DOES link
+  // tracking numbers to carrier sites in its own UI when Shipping Label
+  // Integration is on, but it builds those links as it renders them; there is no
+  // column holding one. So the URL is a custom field somebody fills in on the
+  // shipping item, once per method.
+  //
+  // SELECT * rather than naming that field: a custom field's id is whatever the
+  // person who created it typed, and requiring a particular one would mean the
+  // whole feature hinging on a name matching. Every column comes back and the
+  // caller picks the one holding a URL (see pickTrackingUrlTemplate). It is also
+  // why no field name from the environment is ever spliced into this SQL.
+  shipItemsForTrackingUrl: (batch) =>
+    `SELECT * FROM shipitem WHERE id IN (${idList(batch)})`,
+
+  shipmentItemsForOrders: (batch) =>
+    `SELECT fl.createdfrom AS orderid, fl.transaction AS fulfillmentid, fl.mainline,
+              BUILTIN.DF(fl.item) AS item, SUM(ABS(fl.quantity)) AS quantity
+         FROM transactionline fl
+         JOIN transaction f ON f.id = fl.transaction AND f.type = 'ItemShip'
+        WHERE fl.createdfrom IN (${idList(batch)})
+          AND fl.itemtype <> 'ShipItem'
+          AND (fl.mainline = 'T' OR fl.quantity > 0)
+        GROUP BY fl.createdfrom, fl.transaction, fl.mainline, BUILTIN.DF(fl.item)`,
 };

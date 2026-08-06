@@ -1,8 +1,26 @@
 import { createFulfillmentStatus, skuKey } from "../mapping.js";
 import { resolveCompanyLocationId } from "./companies.server.js";
+import { fetchFulfillmentOrders, planShipmentFulfillments, writeShipmentFulfillments } from "./fulfill.server.js";
 import { orderName } from "./match.server.js";
 import { buildCustomAttributes, buildTags, gqlError } from "./tracking.server.js";
 import { resolveVariantsBySku } from "./variants.server.js";
+
+// Whether this order's shipments are detailed enough to be written as real
+// Shopify fulfillments — one per NetSuite item fulfillment, each with the lines
+// it carried and its own tracking number, carrier and link (see
+// planShipmentFulfillments). An order that has that leaves orderCreate WITHOUT a
+// fulfillment status, because the two cannot both be used: a flat
+// fulfillmentStatus closes every fulfillment order at create time, and a closed
+// fulfillment order can no longer be fulfilled — there would be nothing left to
+// hang the tracking on.
+//
+// SYNC_FULFILLMENT_CREATE=false turns this off in the same breath as it turns
+// off the fulfillment writes on the tracking path, and orders go back to the
+// flat status they were created with before.
+export function fulfilsByShipment(entry) {
+  if (process.env.SYNC_FULFILLMENT_CREATE === "false") return false;
+  return (entry.shipments || []).some((s) => s.items?.length && s.trackingNumbers?.length);
+}
 
 export function buildOrderInput(entry, currencyCode, company, variantIds) {
   // Resolved once and handed to buildTransactions below: read separately, the two
@@ -44,7 +62,11 @@ export function buildOrderInput(entry, currencyCode, company, variantIds) {
   // fulfillment state afterwards. FULFILLED/PARTIAL are sent; "unfulfilled"
   // has no enum member, so createFulfillmentStatus returns null and the field
   // is left off (which is what gives an unfulfilled order).
-  const fulfillmentStatus = createFulfillmentStatus(entry.fulfillmentStatus);
+  //
+  // Unless the order is about to be fulfilled shipment by shipment (see
+  // fulfilsByShipment) — those fulfillments ARE the fulfillment state, and they
+  // reach the same place with the tracking attached to the right items.
+  const fulfillmentStatus = fulfilsByShipment(entry) ? null : createFulfillmentStatus(entry.fulfillmentStatus);
   if (fulfillmentStatus) order.fulfillmentStatus = fulfillmentStatus;
   if (entry.note) order.note = entry.note;
   if (entry.shippingAddress) order.shippingAddress = entry.shippingAddress;
@@ -139,6 +161,41 @@ function isoDateTime(v) {
   if (!v) return null;
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Fulfils a just-created order shipment by shipment: one Shopify fulfillment per
+// NetSuite item fulfillment, carrying the lines that shipment contained and its
+// own tracking number, carrier and link. This is the whole point of leaving the
+// flat fulfillmentStatus off above — the order reaches the same fulfilled state,
+// but with the tracking against the items it actually covers.
+//
+// Best-effort by design. The order itself is already created and correct; a
+// failure here leaves it unfulfilled with its tracking still recorded in the
+// netsuite_tracking attribute, and the next run re-matches it and takes the
+// tracking path, which fulfils it the same way. Failing the create over this
+// would instead leave the run reporting an order it did in fact create.
+async function fulfilCreatedOrder(admin, entry, orderId) {
+  if (!fulfilsByShipment(entry)) return {};
+  try {
+    const fulfillmentOrders = await fetchFulfillmentOrders(admin, orderId);
+    const plan = planShipmentFulfillments(
+      (entry.shipments || []).filter((s) => s.items?.length),
+      fulfillmentOrders,
+      { fulfillRemainder: entry.fulfillmentStatus === "FULFILLED" },
+    );
+    if (!plan.plans.length) {
+      return { fulfillmentWarning: "NetSuite's shipment items matched no line on the created order; left unfulfilled for the tracking path to pick up" };
+    }
+    const { created, failed } = await writeShipmentFulfillments(admin, plan);
+    return {
+      fulfillments: created,
+      tracking: created.flatMap((c) => c.numbers).join(", ") || null,
+      shipmentsPlanned: `${plan.plans.length} of ${(entry.shipments || []).length} NetSuite shipment(s) fulfilled item-wise`,
+      ...(failed.length ? { fulfillmentWarning: failed.join("; ") } : {}),
+    };
+  } catch (err) {
+    return { fulfillmentWarning: `order created, but fulfilling it by shipment failed: ${err?.message || String(err)}` };
+  }
 }
 
 export async function createOrder(admin, entry, currencyCode, caches) {
@@ -253,6 +310,7 @@ export async function createOrder(admin, entry, currencyCode, caches) {
   }
   const o = payload.order;
   const purchasing = o.purchasingEntity;
+  const shipments = await fulfilCreatedOrder(admin, entry, o.id);
   // How many lines found their product and how many stayed as text, so an item
   // that isn't in Shopify is visible in the log instead of only in the order.
   const linked = order.lineItems.filter((li) => li.variantId).length;
@@ -264,7 +322,12 @@ export async function createOrder(admin, entry, currencyCode, caches) {
     name: o.name,
     poNumber: o.poNumber,
     financialStatus: o.displayFinancialStatus,
+    // What orderCreate itself returned. When the order was fulfilled shipment by
+    // shipment afterwards, the fulfillments below are the state that matters and
+    // this reads UNFULFILLED, which is what the order was for the second it took
+    // to write them.
     fulfillmentStatus: o.displayFulfillmentStatus,
+    ...shipments,
     customer: o.customer?.defaultEmailAddress?.emailAddress || null,
     shipping: o.totalShippingPriceSet?.shopMoney?.amount || null,
     tax: o.totalTaxSet?.shopMoney?.amount || null,

@@ -6,6 +6,7 @@ import {
   sleepUnlessStopped,
 } from "./oauth.server.js";
 import { recordPath, recordUrl, suiteqlQuery, suiteqlUrl } from "./endpoints.server.js";
+import { pickTrackingUrlTemplate } from "./shipitem.js";
 import { toInstant } from "../timezone/index.js";
 import {
   accountPreference,
@@ -906,12 +907,20 @@ async function fetchTrackingForOrders(shop, orderIds) {
   // fulfillment repeated across rows is added once; ship date keeps the latest
   // seen, since a re-shipped order's most recent fulfillment is the one worth
   // showing.
+  //
+  // shipmentById is the same rows kept APART instead of merged: one entry per
+  // NetSuite fulfillment, holding its own numbers, carrier, date and weight. It
+  // is what lets Shopify show shipment-by-shipment tracking (this number carried
+  // these items) rather than every number on every fulfillment. The merged
+  // fields above stay exactly as they were — the log, the custom attributes and
+  // the fallback paths all still read them.
   const grouped = {};
   for (const r of rows) {
     const orderId = String(r.orderid);
     const entry = (grouped[orderId] ||= {
       numbers: new Set(), statuses: new Set(), shipMethods: new Set(),
       fulfillmentIds: new Set(), weightByFulfillment: new Map(), shipDate: null,
+      shipmentById: new Map(),
     });
     const tn = String(r.trackingnumber ?? "").trim();
     if (tn) entry.numbers.add(tn);
@@ -924,12 +933,55 @@ async function fetchTrackingForOrders(shop, orderIds) {
       entry.fulfillmentIds.add(fid);
       const weight = Number(r.packageweight);
       if (Number.isFinite(weight)) entry.weightByFulfillment.set(fid, weight);
+      const shipment = entry.shipmentById.get(fid) || {
+        id: fid, numbers: new Set(), shipDate: null, status: null,
+        shipMethod: null, carrier: null, packageWeight: null,
+        // Two candidate item lists, resolved to one below: a fulfillment's
+        // detail lines name every item it carried, its mainline row only the
+        // first, and 93% of this account's fulfillments have nothing but the
+        // mainline row (see shipmentItemsForOrders).
+        items: [], mainlineItems: [],
+        // The shipping item id, kept only long enough to look its tracking URL
+        // up below; it is dropped before the shipment is returned.
+        shipMethodId: null, trackingUrlTemplate: null,
+      };
+      if (tn) shipment.numbers.add(tn);
+      shipment.shipDate ||= String(r.shipdate ?? "").trim() || null;
+      shipment.status ||= status;
+      shipment.shipMethod ||= shipMethod || null;
+      shipment.carrier ||= String(r.shipcarrier ?? "").trim() || null;
+      shipment.shipMethodId ||= r.shipmethodid != null ? String(r.shipmethodid) : null;
+      if (Number.isFinite(weight)) shipment.packageWeight = weight;
+      entry.shipmentById.set(fid, shipment);
     }
     // Already YYYY-MM-DD (the query renders it), so a plain string compare
     // orders these correctly and needs no date parsing to do it.
     const shipDate = String(r.shipdate ?? "").trim();
     if (shipDate && (!entry.shipDate || shipDate > entry.shipDate)) entry.shipDate = shipDate;
   }
+
+  // What each of those shipments contained. Best-effort on purpose: without it
+  // the shipments still carry their tracking numbers and carrier, and the
+  // fulfillment write falls back to splitting the order's lines the way it did
+  // before there was any item detail at all.
+  try {
+    const itemRows = [];
+    for (const batch of chunkIds(ids)) {
+      itemRows.push(...await nsSuiteQl(shop, suiteqlQuery.shipmentItemsForOrders(batch)));
+    }
+    for (const r of itemRows) {
+      const shipment = grouped[String(r.orderid)]?.shipmentById?.get(String(r.fulfillmentid));
+      const item = String(r.item ?? "").trim();
+      const quantity = Number(r.quantity);
+      if (!shipment || !item || !Number.isFinite(quantity) || quantity <= 0) continue;
+      if (String(r.mainline) === "T") shipment.mainlineItems.push({ item, quantity });
+      else shipment.items.push({ item, quantity });
+    }
+  } catch (err) {
+    console.warn("[netsuite] shipment item lookup failed:", err?.message);
+  }
+
+  await attachTrackingUrls(shop, grouped);
 
   return Object.fromEntries(
     Object.entries(grouped).map(([orderId, g]) => {
@@ -939,6 +991,25 @@ async function fetchTrackingForOrders(shop, orderIds) {
         status: [...g.statuses].join(", ") || null,
         shipMethod: [...g.shipMethods].join(", ") || null,
         shipDate: g.shipDate,
+        // Oldest shipment first, so the Shopify fulfillments the sync writes off
+        // these come out in the order the goods actually left the warehouse.
+        // Listed field by field rather than spread: shipMethodId and
+        // mainlineItems are working state (the shipping item to look a URL up
+        // by, the fallback item list) and have no business leaving this
+        // function.
+        shipments: [...g.shipmentById.values()]
+          .map((s) => ({
+            id: s.id,
+            numbers: [...s.numbers],
+            items: s.items.length ? s.items : s.mainlineItems,
+            shipDate: s.shipDate,
+            status: s.status,
+            shipMethod: s.shipMethod,
+            carrier: s.carrier,
+            trackingUrlTemplate: s.trackingUrlTemplate,
+            packageWeight: s.packageWeight,
+          }))
+          .sort((a, b) => (a.shipDate || "").localeCompare(b.shipDate || "") || Number(a.id) - Number(b.id)),
         // Rounded because summing decimal weights in binary floating point
         // produces artefacts: four FedEx packages on SO 295937 add up to
         // 72.17000000000004, and this value is written verbatim into a Shopify
@@ -957,6 +1028,61 @@ async function fetchTrackingForOrders(shop, orderIds) {
 
 function round2(n) {
   return Math.round(n * 100) / 100;
+}
+
+// Fills in each shipment's trackingUrlTemplate from its shipping method.
+//
+// NetSuite has no tracking URL of its own anywhere — not on the tracking number,
+// the fulfillment or the shipping item — so the link the customer clicks in
+// Shopify can only come from a custom field someone fills in on the shipping
+// method, once per method:
+//
+//   <any custom field> = https://www.fedex.com/fedextrack/?trknbr={number}
+//
+// Any custom field, on purpose: the whole shipping item record is read and the
+// URL is recognised by what it CONTAINS, not by the field being called something
+// in particular (see pickTrackingUrlTemplate). NETSUITE_TRACKING_URL_FIELD pins
+// an exact column when an account wants to be explicit about which one; an empty
+// value skips the lookup entirely.
+//
+// Best-effort: an account that has not filled anything in is the normal state,
+// not a fault. The shipments keep their numbers and carrier either way, and only
+// the link is missing.
+async function attachTrackingUrls(shop, grouped) {
+  const pinned = process.env.NETSUITE_TRACKING_URL_FIELD?.trim();
+  if (pinned === "") return;
+
+  const shipments = Object.values(grouped).flatMap((g) => [...g.shipmentById.values()]);
+  const ids = [...new Set(shipments.map((s) => s.shipMethodId).filter((id) => id && /^\d+$/.test(id)))];
+  if (!ids.length) return;
+
+  let templateById;
+  try {
+    const rows = [];
+    for (const batch of chunkIds(ids)) {
+      rows.push(...await nsSuiteQl(shop, suiteqlQuery.shipItemsForTrackingUrl(batch)));
+    }
+    templateById = new Map(
+      rows
+        .map((r) => [String(r.id), pickTrackingUrlTemplate(r, pinned)])
+        .filter(([, template]) => template),
+    );
+  } catch (err) {
+    console.warn(`[netsuite] shipping method lookup failed (${err?.message}); tracking numbers sync without a link.`);
+    return;
+  }
+
+  let filled = 0;
+  for (const shipment of shipments) {
+    const template = templateById.get(shipment.shipMethodId);
+    if (!template) continue;
+    shipment.trackingUrlTemplate = template;
+    filled++;
+  }
+  console.log(
+    `[netsuite] tracking URLs: ${templateById.size} of ${ids.length} shipping method(s) carry one, `
+    + `covering ${filled} of ${shipments.length} shipment(s).`,
+  );
 }
 
 // NetSuite labels an item fulfillment's status "Item Fulfillment : Shipped".

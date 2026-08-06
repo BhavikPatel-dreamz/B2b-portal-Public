@@ -82,6 +82,20 @@ export function detailPairs(row, timeZone = DEFAULT_TIME_ZONE) {
     ["Line items", detail.lines],
     ["Payment", (detail.transactions || []).join(" | ")],
     ["Tracking", detail.tracking],
+    // One line per Shopify fulfillment written for this order, in the shape the
+    // customer sees it: the carrier, its number and the items that shipment
+    // covered. This is what says the tracking went on item-wise rather than
+    // every number landing on every line.
+    ["Shipment fulfillments", (detail.fulfillments || [])
+      .map((f) => [
+        f.company,
+        (f.numbers || []).join(" ") || "no tracking number",
+        f.lines ? `${f.lines} item(s)` : null,
+        f.netsuiteFulfillment ? `NetSuite ${f.netsuiteFulfillment}` : null,
+        f.url,
+      ].filter(Boolean).join(" · "))
+      .join(" | ")],
+    ["Shipments matched", detail.shipmentsPlanned],
     // The NetSuite shipment behind the row. The counts come first because they
     // are what explain an empty Tracking field: "2 fulfillments, 0 tracking
     // numbers" is a shipment NetSuite recorded without a number, which is the
@@ -102,7 +116,12 @@ export function detailPairs(row, timeZone = DEFAULT_TIME_ZONE) {
     ["Consecutive failed runs", detail.attempts],
     ["Quarantined", detail.quarantined ? "yes — no longer holding the watermark back" : null],
     ["Reason", detail.reason],
+    ["Note", detail.note],
     ["Warning", detail.warning],
+    // The order was created and is correct; only the fulfillment writes that
+    // would have carried its tracking didn't happen. Kept apart from Error for
+    // that reason — the row is a success.
+    ["Fulfillment warning", detail.fulfillmentWarning],
     ["Error", detail.error],
   ].filter(([, v]) => v !== null && v !== undefined && v !== "");
 }

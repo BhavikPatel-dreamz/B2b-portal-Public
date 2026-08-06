@@ -189,10 +189,60 @@ describe("suiteql queries", () => {
     assert.match(suiteqlQuery.trackingForOrders(batch), /BUILTIN\.DF\(f\.shipmethod\) AS shipmethod/);
   });
 
+  it("reads the carrier field alongside the service, as the fallback for a blank service", () => {
+    // shipcarrier is "UPS", "FedEx/USPS/More" or empty on this account. It is
+    // what a shipment is shown as when its shipmethod is blank, which most of
+    // this account's fulfillments are (see carrierName).
+    assert.match(suiteqlQuery.trackingForOrders(batch), /f\.shipcarrier/);
+  });
+
+  it("reads the shipping methods whole, so the tracking URL can be found by value", () => {
+    // SELECT * rather than naming a custom field: the field's id is whatever the
+    // account typed, and requiring a particular name would hinge the feature on
+    // a spelling. It also means no field name from the environment is ever
+    // spliced into this SQL.
+    assert.equal(
+      suiteqlQuery.shipItemsForTrackingUrl(batch),
+      "SELECT * FROM shipitem WHERE id IN (101,202)",
+    );
+  });
+
+  it("reads each shipment's items in a query of their own", () => {
+    const q = suiteqlQuery.shipmentItemsForOrders(batch);
+    // Not folded into trackingForOrders: that returns one row per fulfillment x
+    // tracking number, and multiplying the item lines through it repeats every
+    // line down every number.
+    assert.match(q, /fl\.transaction AS fulfillmentid/);
+    assert.match(q, /BUILTIN\.DF\(fl\.item\) AS item, SUM\(ABS\(fl\.quantity\)\) AS quantity/);
+    assert.match(q, /WHERE fl\.createdfrom IN \(101,202\)/);
+    assert.match(q, /GROUP BY fl\.createdfrom, fl\.transaction, fl\.mainline, BUILTIN\.DF\(fl\.item\)/);
+  });
+
+  it("keeps the mainline row, which is all 93% of this account's fulfillments have", () => {
+    // 3821 of 4108 fulfillments in 2026 are a single mainline row and nothing
+    // else. Reading only the positive detail lines found items on the other 287
+    // and left every shipment on the rest empty — which silently turns the
+    // item-wise fulfillment write back into the flat one it replaced.
+    const q = suiteqlQuery.shipmentItemsForOrders(batch);
+    assert.match(q, /\(fl\.mainline = 'T' OR fl\.quantity > 0\)/);
+    assert.match(q, /fl\.mainline/);
+  });
+
+  it("drops the mirror rows and the carrier's own charge line from the shipment items", () => {
+    // NetSuite writes each shipped detail line twice, once positive and once
+    // negative for the inventory movement; without quantity > 0 every item would
+    // come back at net zero. ShipItem is the freight charge ("FedEx Ground®") —
+    // a cost, not something that ships, and it would otherwise be fulfilled as
+    // an item in Shopify.
+    const q = suiteqlQuery.shipmentItemsForOrders(batch);
+    assert.match(q, /fl\.quantity > 0/);
+    assert.match(q, /fl\.itemtype <> 'ShipItem'/);
+  });
+
   it("refuses a non-numeric id rather than inlining it into SQL", () => {
     // The ids go in as a bare IN list, so this is the guard that keeps a value
     // from anywhere else in the app out of the query text.
-    for (const build of [suiteqlQuery.invoicesForOrders, suiteqlQuery.customerEmails, suiteqlQuery.trackingForOrders]) {
+    for (const build of [suiteqlQuery.invoicesForOrders, suiteqlQuery.customerEmails, suiteqlQuery.trackingForOrders, suiteqlQuery.shipmentItemsForOrders]) {
       assert.throws(() => build(["101", "1) OR 1=1 --"]), /non-numeric/);
       assert.throws(() => build(["101", ""]), /non-numeric/);
       assert.throws(() => build(["101", "12a"]), /non-numeric/);

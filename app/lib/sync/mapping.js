@@ -1,4 +1,5 @@
 import { INVOICE_PAID_IN_FULL } from "../netsuite/client.server.js";
+import { extTag } from "./ext-tag.js";
 
 const DELETE_STATUSES = new Set(["C"]);
 
@@ -78,9 +79,33 @@ export function mapNetsuiteOrder(rec) {
     trackingPackageWeight: rec?.linkedTrackingNumbers?.packageWeight ?? null,
     // The carrier service off the fulfillment ("FedEx Ground®"), which is the
     // one that actually shipped. shipMethod above is the sales order's
-    // REQUESTED method and can differ; both are logged, and neither is sent to
-    // Shopify as a carrier name (see trackingInput).
+    // REQUESTED method and can differ, so both are logged. This one is also what
+    // the Shopify carrier and tracking link are resolved from, per shipment
+    // rather than per order (see carriers.js).
     trackingShipMethod: rec?.linkedTrackingNumbers?.shipMethod || null,
+    // The same shipments kept apart instead of merged: one entry per NetSuite
+    // item fulfillment, each with the items it carried and the tracking
+    // number(s) that carried them. This is what a Shopify fulfillment is written
+    // from (see planShipmentFulfillments) — the flattened fields above describe
+    // the order as a whole and cannot say which number covers which item.
+    //
+    // Item names are passed through as `sku` because that is what they are on
+    // this account, and it is how the order's own lines are matched to variants
+    // (see resolveVariantsBySku).
+    shipments: (rec?.linkedTrackingNumbers?.shipments || []).map((s) => ({
+      netsuiteId: s.id,
+      trackingNumbers: (s.numbers || []).filter(Boolean),
+      shipDate: s.shipDate || null,
+      status: s.status || null,
+      shipMethod: s.shipMethod || null,
+      carrier: s.carrier || null,
+      // The URL template off the shipping method's custom field in NetSuite —
+      // the only place a tracking link can come from, since NetSuite holds no
+      // tracking URL of its own (see attachTrackingUrls).
+      trackingUrlTemplate: s.trackingUrlTemplate || null,
+      packageWeight: s.packageWeight ?? null,
+      items: (s.items || []).map((i) => ({ sku: i.item, quantity: Number(i.quantity) || 0 })),
+    })),
     // Counts, for the sync log: how many fulfillments this order has, and how
     // many tracking numbers came off them. Together they say WHY an order has
     // no tracking — nothing shipped yet, or shipped without a number recorded.
@@ -289,13 +314,10 @@ export function companyNameKey(v) {
   return String(v ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-// Comparison key for a SKU. NetSuite item names arrive with the casing and inner
-// spacing a human typed ("TPU for AMS", "TPU FOR AMS GRAY 53102"), and a Shopify
-// SKU is not guaranteed to match either, so both sides are normalised before
-// they're compared.
-export function skuKey(v) {
-  return String(v ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-}
+// Re-exported from its own leaf module so fulfill.server.js can match shipment
+// items to Shopify lines without importing this file (and the NetSuite client
+// behind it). Every existing caller imports it from here and stays as it is.
+export { skuKey } from "./sku.js";
 
 // Extracts the id/code from a NetSuite value that may be a plain scalar or a
 // `{ id, refName }` reference object (country/state come back as references in
@@ -339,7 +361,7 @@ export function mapAddress(addr, customerName) {
   return Object.keys(out).length ? out : null;
 }
 
-// Every order we create is tagged with its NetSuite id so later runs can find
-// it again for update/delete without needing a local mapping table.
-export const extTag = (externalId) => `ext:${externalId}`;
+// Lives in ext-tag.js now, and is re-exported here because this is where every
+// caller has always read it from.
+export { extTag };
 
