@@ -406,11 +406,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
+  const authRequest = request.clone();
   const body = await request.json().catch(() => ({}));
 
   try {
     const { companyId, store, shop, userContext } =
-      await authenticateLocationManagementRequest(request, body);
+      await authenticateLocationManagementRequest(authRequest, body);
 
     requirePermission(
       userContext,
