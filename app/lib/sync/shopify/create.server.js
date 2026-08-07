@@ -53,6 +53,7 @@ export function buildOrderInput(entry, currencyCode, company, variantIds) {
         // "Shipping not required" against items that were in fact fulfilled and
         // tracked. Set on the base line so it holds for both linked and custom
         // lines (a linked line would otherwise inherit the variant's own flag).
+        // requiresShipping: li.item?.itemtype !== 'Service' && li.item?.itemtype !== 'Download'
         requiresShipping: true,
         priceSet: {
           shopMoney: { amount: String(li.price ?? "0"), currencyCode },

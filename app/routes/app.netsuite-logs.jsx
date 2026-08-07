@@ -299,7 +299,7 @@ export default function OrderSyncLogs() {
   }, [shopify]);
 
   return (
-    <s-page heading="Order sync logs">
+    <s-page heading="NetSuite order sync logs" subtitle="The history of what the sync has done and what it will do next.">
       <SyncNowSection
         schedule={schedule}
         syncWindow={syncWindow}
