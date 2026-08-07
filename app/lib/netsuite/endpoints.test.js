@@ -258,6 +258,33 @@ describe("suiteql queries", () => {
   it("accepts numeric ids given as numbers, not just strings", () => {
     assert.match(suiteqlQuery.customerEmails([101, 202]), /IN \(101,202\)/);
   });
+
+  it("finds orders by their FULFILLMENT's date, which is the half the SO filter cannot see", () => {
+    // The sales-order list call filters on the SO's own lastModifiedDate, and
+    // fulfilling an order does not move it. This query is the other half of
+    // discovery: it starts from the shipment and works back to the order.
+    const q = suiteqlQuery.orderIdsWithChangedFulfillments("2026-08-04 08:00:00", "2026-08-04 10:00:00");
+    assert.match(q, /f\.type = 'ItemShip'/);
+    // lastmodifieddate, not createddate — editing the tracking detail on an
+    // existing fulfillment is exactly the case that was being missed.
+    assert.match(q, /f\.lastmodifieddate >= TO_DATE\('2026-08-04 08:00:00', 'YYYY-MM-DD HH24:MI:SS'\)/);
+    assert.match(q, /f\.lastmodifieddate <= TO_DATE\('2026-08-04 10:00:00', 'YYYY-MM-DD HH24:MI:SS'\)/);
+    // The SO link is only reachable through transactionline — NetSuite rejects
+    // `/itemfulfillment?q=createdFrom IS <id>` outright.
+    assert.match(q, /JOIN transactionline fl ON fl\.transaction = f\.id/);
+    assert.match(q, /SELECT DISTINCT fl\.createdfrom AS orderid/);
+  });
+
+  it("refuses a malformed timestamp rather than inlining it into SQL", () => {
+    // idList's counterpart: the only query here that bounds on dates rather than
+    // ids still splices literals into the text, so the shape is re-checked next
+    // to the string being built.
+    const ok = "2026-08-04 08:00:00";
+    for (const bad of ["2026-08-04", "2026-8-4 08:00:00", "", null, undefined, "2026-08-04 08:00:00' OR '1'='1"]) {
+      assert.throws(() => suiteqlQuery.orderIdsWithChangedFulfillments(bad, ok), /malformed timestamp/);
+      assert.throws(() => suiteqlQuery.orderIdsWithChangedFulfillments(ok, bad), /malformed timestamp/);
+    }
+  });
 });
 
 describe("oauth", () => {

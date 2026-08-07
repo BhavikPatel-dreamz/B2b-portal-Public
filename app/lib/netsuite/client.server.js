@@ -17,7 +17,9 @@ import {
   readAccountPreference,
   rememberAccountPreference,
   rememberOrderDateFormat,
+  resolvedOrdersWindow,
   scanOrders,
+  suiteqlTimestamp,
 } from "./orders-query.server.js";
 // Re-exported so the query builder stays reachable from the client module
 // that callers already import — see orders-query.server.js for why they live
@@ -613,6 +615,38 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
         `[netsuite] ${totalResults} order(s) match this filter but NetSuite returns at most ${limit} per call — ${capped.skipped} were not listed. Narrow the range.`,
       );
     }
+
+    // Second discovery pass: orders whose SHIPMENT moved in this window, which
+    // the filter above cannot see (see fetchOrderIdsWithChangedFulfillments).
+    //
+    // Deliberately after `capped`. That compares totalResults against the number
+    // of orders the LIST CALL returned, so it has to be computed before anything
+    // else is added to refs — otherwise a run that found fulfillment ids would
+    // quietly stop reporting a truncated list call, which is the one thing
+    // standing between a partial run and a watermark advanced past orders nobody
+    // ever read.
+    //
+    // Best-effort, like the enrichment lookups further down: without it the sync
+    // is exactly as good as it was before this pass existed, so a SuiteQL failure
+    // is a warning and not the end of the run.
+    const fulfillmentWindow = stopped ? null : resolvedOrdersWindow(since, window);
+    if (fulfillmentWindow) {
+      try {
+        const listed = new Set(refs.map((r) => String(r.id)));
+        const extra = (await fetchOrderIdsWithChangedFulfillments(shop, fulfillmentWindow, timeZone))
+          .filter((id) => !listed.has(id));
+        // Flagged, not just appended: these orders fail the window check by
+        // definition — an unmoved sales-order timestamp is why they were missed —
+        // so scanOrders has to be told to keep them anyway.
+        refs = refs.concat(extra.map((id) => ({ id, viaFulfillment: true })));
+        console.log(
+          `[netsuite] discovery: ${listed.size} order(s) from the sales-order filter + ${extra.length} whose fulfillment changed = ${refs.length} to scan.`,
+        );
+      } catch (err) {
+        if (err?.syncStopped) stopped = true;
+        else console.warn("[netsuite] fulfillment discovery pass failed, continuing with the listed orders only:", err?.message);
+      }
+    }
   }
 
   if (!stopped) {
@@ -668,7 +702,7 @@ export async function fetchNetsuiteOrders(shop, { since, ids, window, knownInter
 
   if (window) {
     console.log(
-      `[netsuite] window ${window.from.toISOString()} → ${window.to.toISOString()}: scanned ${scanned} listed order(s), kept ${items.length}, ${outsideWindow} were modified outside it.`,
+      `[netsuite] window ${window.from.toISOString()} → ${window.to.toISOString()}: scanned ${scanned} candidate order(s), kept ${items.length}, ${outsideWindow} were modified outside it.`,
     );
   }
 
@@ -850,6 +884,38 @@ async function fetchCustomerEmails(shop, customerIds) {
     if (email) map[String(r.id)] = email;
   }
   return map;
+}
+
+// The second half of a run's discovery: which sales orders had a shipment
+// created or changed inside this window, whatever their own timestamps say.
+//
+// The sales-order list call cannot answer this. It filters on the SO's
+// lastModifiedDate, and fulfilling an order does not move it — the fulfillment is
+// its own record, and the sales order keeps the timestamp it already had while
+// its lines go to "Item Fulfilled". So an order shipped today but last edited
+// three weeks ago is invisible to every window a run can ask for, and its
+// tracking numbers sit in NetSuite until something unrelated touches the order.
+//
+// Returns internal ids as strings, digits-only. Anything else is dropped rather
+// than passed on: these ids go straight into recordPath.salesOrder(), and
+// SuiteQL hands numeric columns back as numbers or strings depending on the
+// column, so they are normalised in one place instead of at each use.
+async function fetchOrderIdsWithChangedFulfillments(shop, window, timeZone) {
+  const from = suiteqlTimestamp(window.from, timeZone);
+  const to = suiteqlTimestamp(window.to, timeZone);
+  const rows = await nsSuiteQl(shop, suiteqlQuery.orderIdsWithChangedFulfillments(from, to));
+  const ids = [];
+  const seen = new Set();
+  for (const row of rows) {
+    const id = String(row?.orderid ?? "").trim();
+    if (!/^\d+$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  console.log(
+    `[netsuite] fulfillments changed ${from} → ${to} (account time): ${rows.length} row(s) -> ${ids.length} sales order(s).`,
+  );
+  return ids;
 }
 
 // Fetches the shipment facts for each sales order from its ItemFulfillment

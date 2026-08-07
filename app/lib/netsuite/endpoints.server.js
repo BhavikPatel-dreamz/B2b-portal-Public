@@ -198,6 +198,25 @@ function idList(batch) {
   return ids.join(",");
 }
 
+// idList's counterpart for the one query below that bounds on dates rather than
+// on ids. Same reasoning: the value is spliced into SQL as a literal, so the
+// shape is re-checked HERE, next to the string being built, rather than trusted
+// from wherever it was rendered (suiteqlTimestamp, in orders-query.server.js).
+//
+// The mask is fixed and matches the TO_DATE mask in the query, so anything that
+// is not exactly YYYY-MM-DD HH:MM:SS is refused rather than sent — a half-formed
+// literal would otherwise come back as an opaque SuiteQL parse error, or, far
+// worse, close the quote and carry on.
+const TIMESTAMP_LITERAL = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+function tsLiteral(value) {
+  const text = String(value ?? "").trim();
+  if (!TIMESTAMP_LITERAL.test(text)) {
+    throw new Error(`NetSuite SuiteQL: refusing to build a query with a malformed timestamp literal: ${JSON.stringify(value)}`);
+  }
+  return text;
+}
+
 export const suiteqlQuery = {
   // Which invoices each sales order produced, and whether they were settled.
   // A Sales Order's own status says nothing about payment — it tracks shipping
@@ -334,6 +353,45 @@ export const suiteqlQuery = {
   // why no field name from the environment is ever spliced into this SQL.
   shipItemsForTrackingUrl: (batch) =>
     `SELECT * FROM shipitem WHERE id IN (${idList(batch)})`,
+
+  // Which sales orders had a shipment created or changed in this stretch of time.
+  //
+  // This is the ONLY query here that starts from something other than a batch of
+  // ids the caller already has — it exists to FIND ids, not to decorate them, and
+  // it is the second half of a run's discovery.
+  //
+  // The first half is the sales-order list call, which filters on the sales
+  // order's own lastModifiedDate. That field does not move when a warehouse
+  // fulfills the order: the fulfillment is a separate record, the SO's line-level
+  // status becomes "Item Fulfilled" and the SO's own timestamp stays where it
+  // was. Every query above reads fulfillment data for orders that filter ALREADY
+  // returned (`tl.createdfrom IN (<this run's ids>)`), so a shipment could never
+  // pull its own order into a run — the tracking numbers waited until something
+  // unrelated happened to touch the sales order.
+  //
+  // Keyed on the fulfillment's lastmodifieddate rather than its createddate,
+  // because editing the tracking detail on an existing fulfillment is exactly the
+  // case that was being missed. Creation sets both, so nothing is lost by it. The
+  // tracking numbers themselves (trackingnumbermap/trackingnumber) carry no date
+  // column of their own, which is why the fulfillment's is what this can key on.
+  //
+  // The sales-order link is fl.createdfrom, the same route shipmentItemsForOrders
+  // below takes, and for the same reason: `/itemfulfillment?q=createdFrom IS <id>`
+  // is rejected outright by NetSuite, so the link is only reachable through
+  // transactionline.
+  //
+  // Both bounds are inclusive, matching the ON_OR_AFTER/ON_OR_BEFORE pair the
+  // sales-order filter uses, so the two halves of discovery cover the same
+  // stretch. DISTINCT because a fulfillment has one row per line and they all
+  // name the same order.
+  orderIdsWithChangedFulfillments: (from, to) =>
+    `SELECT DISTINCT fl.createdfrom AS orderid
+       FROM transaction f
+       JOIN transactionline fl ON fl.transaction = f.id
+      WHERE f.type = 'ItemShip'
+        AND fl.createdfrom IS NOT NULL
+        AND f.lastmodifieddate >= TO_DATE('${tsLiteral(from)}', 'YYYY-MM-DD HH24:MI:SS')
+        AND f.lastmodifieddate <= TO_DATE('${tsLiteral(to)}', 'YYYY-MM-DD HH24:MI:SS')`,
 
   shipmentItemsForOrders: (batch) =>
     `SELECT fl.createdfrom AS orderid, fl.transaction AS fulfillmentid, fl.mainline,

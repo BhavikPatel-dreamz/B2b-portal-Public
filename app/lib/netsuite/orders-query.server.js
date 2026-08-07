@@ -290,6 +290,25 @@ function nsQueryDate(d, timeZone = DEFAULT_TIME_ZONE) {
   return renderPattern((accountPreference() ?? DEFAULT_PREFERENCE).dateFormat, zonedParts(d, literalZone(timeZone)));
 }
 
+// The same instant as a SuiteQL timestamp literal: "2026-08-05 19:53:00", to be
+// read by TO_DATE with an explicit YYYY-MM-DD HH24:MI:SS mask.
+//
+// Deliberately NOT one of the ORDER_DATE_FORMATS spellings above. Those exist
+// because the `q` filter on the REST list endpoint is parsed with the ACCOUNT's
+// display preference, and nothing can know which shape that is without asking.
+// SuiteQL has no such problem — the mask is named in the query itself — so there
+// is one spelling here and no probe to walk.
+//
+// The zone is still the account's, for the reason literalZone gives: SuiteQL
+// compares a bare timestamp against the account's own clock, so an instant
+// rendered in any other zone names a different moment than the one asked for.
+export function suiteqlTimestamp(d, timeZone = DEFAULT_TIME_ZONE) {
+  const p = zonedParts(d, literalZone(timeZone));
+  if (!p) throw new Error(`NetSuite SuiteQL: unreadable timestamp ${JSON.stringify(d)}`);
+  const pad = (n, width = 2) => String(n).padStart(width, "0");
+  return `${pad(p.year, 4)}-${pad(p.month)}-${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`;
+}
+
 // Whether a fetched record really falls inside an explicit window.
 //
 // The q filter names the window's own instants now (see nsQueryDateTime), so
@@ -319,6 +338,15 @@ function nsQueryDate(d, timeZone = DEFAULT_TIME_ZONE) {
 // and hide a real problem — every record in the window would report false and
 // every windowed run would look the same size regardless of which range was
 // picked, with nothing in the logs pointing at why.
+//
+// One class of record is never asked at all: a ref marked `viaFulfillment`, which
+// the caller found through an ITEM FULFILLMENT whose own date moved inside the
+// window. Creating a fulfillment, or editing the tracking detail on one, does not
+// touch the sales order it was created from — the line-level status becomes "Item
+// Fulfilled" and the SO's lastModifiedDate stays where it was. So those records
+// fail this check by definition, and an old timestamp on them is the symptom of
+// the thing being fixed rather than a reason to drop them. See
+// fetchOrderIdsWithChangedFulfillments, which is the only place the flag is set.
 function inWindow(rec, window) {
   const raw = rec?.lastModifiedDate;
   if (raw == null) return true;
@@ -381,7 +409,11 @@ export async function scanOrders(refs, { window, keepLimit = Infinity, expand, s
     scanned += 1;
     try {
       const full = await expand(ref.id);
-      if (window && !inWindow(full, window)) outsideWindow += 1;
+      // `viaFulfillment` refs skip the window check on purpose — see the note on
+      // inWindow. They were found BY a shipment that moved inside the window, and
+      // judging them by the sales order's own timestamp would throw away every
+      // one of them.
+      if (window && !ref.viaFulfillment && !inWindow(full, window)) outsideWindow += 1;
       else items.push(full);
     } catch (err) {
       if (err?.syncStopped) {
@@ -528,6 +560,30 @@ export function buildOrdersQuery(since, window, timeZone = DEFAULT_TIME_ZONE, fo
   if (window) return dateRangeQuery(window, timeZone, format, format === "date" ? 1 : 0);
   if (process.env.NETSUITE_ORDERS_QUERY) return process.env.NETSUITE_ORDERS_QUERY;
   return dateRangeQuery(watermarkWindow(since, new Date()), timeZone, format);
+}
+
+// The stretch of time a run really covers, as a pair of instants rather than as
+// the filter string buildOrdersQuery renders it into.
+//
+// buildOrdersQuery works the window out privately and then throws it away, which
+// is fine while the sales-order list call is the only thing that needs it. The
+// item-fulfillment pass (fetchOrderIdsWithChangedFulfillments) needs the SAME
+// stretch, keyed on a different record's date, so it has to be visible.
+//
+// The precedence is buildOrdersQuery's own, and has to stay that way — the two
+// answering differently would mean a run reading one range for sales orders and
+// another for fulfillments:
+//
+//   • an explicit window is what an operator asked for by name;
+//   • NETSUITE_ORDERS_QUERY replaces the window outright, and a raw q expression
+//     names no range this can read — hence null, and no fulfillment pass. That
+//     is the honest answer: the override's whole point is that this app does not
+//     know what it selects.
+//   • otherwise the watermark, less the overlap buffer.
+export function resolvedOrdersWindow(since, window, at = new Date()) {
+  if (window) return window;
+  if (process.env.NETSUITE_ORDERS_QUERY) return null;
+  return watermarkWindow(since, at);
 }
 
 // What a scheduled run starting at `at` would ask NetSuite for, given the

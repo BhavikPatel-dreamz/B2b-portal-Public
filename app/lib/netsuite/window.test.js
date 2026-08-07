@@ -1,3 +1,6 @@
+// This test sets process.env, and a .test.js file does not match the server-file
+// pattern that the eslint config gives the node environment to.
+/* eslint-env node */
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
@@ -10,7 +13,9 @@ import {
   readAccountPreference,
   rememberAccountPreference,
   rememberOrderDateFormat,
+  resolvedOrdersWindow,
   scanOrders,
+  suiteqlTimestamp,
 } from "./orders-query.server.js";
 import { parseCustomRange } from "../sync/windows.js";
 
@@ -127,6 +132,31 @@ describe("scanOrders with a window", () => {
     });
     // Five ids, five kept, none left behind — the caller must not report a cap.
     assert.equal(exactly.scanStoppedAt, null);
+  });
+});
+
+describe("scanOrders with a fulfillment-sourced ref", () => {
+  // The whole point of the fulfillment discovery pass. These orders were found
+  // BY a shipment that changed inside the window; their own lastModifiedDate is
+  // old, because creating or editing a fulfillment does not touch the sales
+  // order. Judging them by the window would throw away every one of them and
+  // leave the feature doing nothing at all.
+  it("keeps a record modified long before the window", async () => {
+    const scan = await scanOrders([{ id: "1", viaFulfillment: true }], {
+      window: WINDOW,
+      expand: async (id) => record(id, "2026-07-01T00:00:00Z"),
+    });
+    assert.deepEqual(scan.items.map((r) => r.id), ["1"]);
+    assert.equal(scan.outsideWindow, 0);
+  });
+
+  it("still applies the window to the refs that came from the sales-order filter", async () => {
+    const scan = await scanOrders([{ id: "1" }, { id: "2", viaFulfillment: true }], {
+      window: WINDOW,
+      expand: async (id) => record(id, "2026-07-01T00:00:00Z"),
+    });
+    assert.deepEqual(scan.items.map((r) => r.id), ["2"]);
+    assert.equal(scan.outsideWindow, 1);
   });
 });
 
@@ -502,5 +532,68 @@ describe("buildOrdersQuery for a custom from/to range", () => {
       buildOrdersQuery(null, { from, to }),
       'lastModifiedDate ON_OR_AFTER "8/5/2026 12:00 am" AND lastModifiedDate ON_OR_BEFORE "8/6/2026 12:00 am"',
     );
+  });
+});
+
+// The stretch of time the item-fulfillment discovery pass reads. It has to be
+// the same one buildOrdersQuery renders into the sales-order filter, or a run
+// would read one range for orders and another for shipments.
+describe("resolvedOrdersWindow", () => {
+  const ENV = ["NETSUITE_INITIAL_SYNC_DAYS", "NETSUITE_BEFORE_LAST_SYNC_HOURS", "NETSUITE_ORDERS_QUERY"];
+  const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
+  afterEach(() => {
+    for (const k of ENV) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  const AT = new Date("2026-08-04T10:00:00Z");
+
+  it("hands back an explicit window untouched", () => {
+    assert.deepEqual(resolvedOrdersWindow(null, WINDOW, AT), WINDOW);
+  });
+
+  it("takes the watermark less the overlap buffer, same as the filter", () => {
+    process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS = "2";
+    const since = new Date("2026-08-04T09:00:00Z");
+    const w = resolvedOrdersWindow(since, null, AT);
+    assert.equal(w.from.toISOString(), "2026-08-04T07:00:00.000Z");
+    assert.equal(w.to.toISOString(), AT.toISOString());
+  });
+
+  it("falls back to the initial lookback on a first run", () => {
+    process.env.NETSUITE_INITIAL_SYNC_DAYS = "2";
+    delete process.env.NETSUITE_BEFORE_LAST_SYNC_HOURS;
+    const w = resolvedOrdersWindow(null, null, AT);
+    assert.equal(w.from.toISOString(), "2026-08-02T10:00:00.000Z");
+  });
+
+  it("answers null under a NETSUITE_ORDERS_QUERY override", () => {
+    // The override replaces the window outright with a raw q expression, and
+    // nothing here can read a date range out of one. Null is the honest answer:
+    // no window, so no fulfillment pass, rather than a guessed range.
+    process.env.NETSUITE_ORDERS_QUERY = 'custbody_x IS "y"';
+    assert.equal(resolvedOrdersWindow(new Date("2026-08-04T09:00:00Z"), null, AT), null);
+    // An explicit window still wins over it, exactly as in buildOrdersQuery.
+    assert.deepEqual(resolvedOrdersWindow(null, WINDOW, AT), WINDOW);
+  });
+});
+
+describe("suiteqlTimestamp", () => {
+  afterEach(() => rememberAccountPreference(null));
+
+  it("writes the mask TO_DATE is given, zero-padded", () => {
+    assert.equal(suiteqlTimestamp(new Date("2026-08-04T07:05:09Z")), "2026-08-04 07:05:09");
+  });
+
+  it("writes it in the account's own zone, which is what SuiteQL compares against", () => {
+    rememberAccountPreference({ dateFormat: "M/d/YYYY", timeFormat: "h:mm a", timeZone: "America/New_York" });
+    // 23:53 UTC is 19:53 the same day in New York.
+    assert.equal(suiteqlTimestamp(new Date("2026-08-05T23:53:00Z")), "2026-08-05 19:53:00");
+  });
+
+  it("falls back to the zone it is passed when the account has not said", () => {
+    assert.equal(suiteqlTimestamp(new Date("2026-08-05T23:53:00Z"), "Asia/Kolkata"), "2026-08-06 05:23:00");
   });
 });
