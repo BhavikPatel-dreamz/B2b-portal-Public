@@ -104,6 +104,7 @@ export async function syncTracking(admin, entry, orderId, via) {
 
   const fulfillments = (ctx.fulfillments || []).filter((f) => f.status !== "CANCELLED");
   const allowCreate = process.env.SYNC_FULFILLMENT_CREATE !== "false";
+  const allowClear = process.env.SYNC_TRACKING_CLEAR === "true";
   // Set below, and read by the netsuite_tracking fallback after the block: why
   // the numbers ended up on the order itself rather than on a fulfillment. It
   // starts as the case that gets there without passing through the reasoning —
@@ -138,6 +139,12 @@ export async function syncTracking(admin, entry, orderId, via) {
       ? await updateExistingTracking(admin, entry, fulfillments, leftover, written?.unplacedShipments)
       : [];
 
+    // Tracking Shopify still carries that NetSuite no longer reports — a number
+    // a merchant deleted from a shipment after an earlier run wrote it. With
+    // SYNC_TRACKING_CLEAR on it is removed from Shopify to match NetSuite;
+    // otherwise it is only flagged (see resolveOrphanedTracking).
+    const orphan = await resolveOrphanedTracking(admin, entry, fulfillments, updated, numbers, allowClear);
+
     if (written && updated.length) {
       return {
         ...base,
@@ -147,11 +154,20 @@ export async function syncTracking(admin, entry, orderId, via) {
         via: `${written.log.via} + fulfillmentTrackingInfoUpdate`,
         fulfillments: [...(written.log.fulfillments || []), ...updated],
         tracking: numbers.join(", ") || null,
+        ...orphan,
       };
     }
-    if (written) return { ...base, ok: true, name: ctx.name, ...written.log };
+    if (written) return { ...base, ok: true, name: ctx.name, ...written.log, ...orphan };
     if (updated.length) {
-      return { ...base, ok: true, name: ctx.name, via: "fulfillmentTrackingInfoUpdate", fulfillments: updated, tracking: leftover.join(", ") };
+      return {
+        ...base,
+        ok: true,
+        name: ctx.name,
+        via: "fulfillmentTrackingInfoUpdate",
+        fulfillments: updated,
+        tracking: leftover.join(", "),
+        ...orphan,
+      };
     }
 
     // Fulfilled here, and everything NetSuite shipped is already on it.
@@ -165,6 +181,7 @@ export async function syncTracking(admin, entry, orderId, via) {
         reason: numbers.length
           ? "tracking already up to date"
           : `already fulfilled in Shopify (${fulfillments.length}); ${noTrackingReason(entry)}`,
+        ...orphan,
       };
     }
 
@@ -347,6 +364,86 @@ async function updateExistingTracking(admin, entry, fulfillments, numbers, shipm
     updated.push(await updateFulfillmentTracking(admin, f.id, bucket, from));
   }
   return updated;
+}
+
+// Tracking Shopify still shows that NetSuite no longer reports — a number a
+// merchant deleted from a shipment after an earlier run had already written it.
+//
+// With SYNC_TRACKING_CLEAR=true, those numbers are cleared from Shopify to match
+// NetSuite (the destructive path, opt-in only). Otherwise they are flagged as a
+// warning in the sync log and left on the customer's order.
+//
+// Read from the fulfillments this run did NOT touch: an updated fulfillment was
+// just rewritten to exactly what NetSuite reports, so anything dropped from it
+// (a second number removed while a first survives) is gone by intent, not
+// stranded. Only a fulfillment left alone can still be carrying a number
+// NetSuite has since let go of.
+async function resolveOrphanedTracking(admin, entry, fulfillments, updated, numbers, allowClear) {
+  const touched = new Set(updated.map((u) => u.id));
+  const netsuite = new Set(numbers);
+  const stale = [];
+
+  for (const f of fulfillments) {
+    if (touched.has(f.id)) continue;
+    const orphaned = (f.trackingInfo || [])
+      .map((t) => t?.number)
+      .filter(Boolean)
+      .filter((n) => !netsuite.has(n));
+    if (orphaned.length) {
+      stale.push({ fulfillmentId: f.id, numbers: orphaned });
+    }
+  }
+
+  if (!stale.length) return {};
+
+  const allOrphaned = stale.flatMap((s) => s.numbers);
+  const uniqueOrphaned = [...new Set(allOrphaned)];
+
+  if (!allowClear) {
+    const warning = `Shopify fulfillment(s) carry tracking number(s) NetSuite no longer reports: ${uniqueOrphaned.join(", ")}`;
+    console.warn(`[order-sync] ${entry.externalId}: ${warning}; left unchanged (set SYNC_TRACKING_CLEAR=true to auto-clear).`);
+    return { warning };
+  }
+
+  // Clear path: rewrite each stale fulfillment with an empty trackingInfo.
+  // fulfillmentTrackingInfoUpdate with an empty company/number is rejected, so
+  // the numbers are cleared by writing { company: null } — Shopify accepts it
+  // and renders the fulfillment with no tracking at all.
+  const cleared = [];
+  for (const { fulfillmentId, numbers: orphaned } of stale) {
+    try {
+      await clearFulfillmentTracking(admin, fulfillmentId);
+      cleared.push(...orphaned);
+    } catch (err) {
+      console.warn(`[order-sync] ${entry.externalId}: could not clear tracking from ${fulfillmentId}: ${err?.message || String(err)}`);
+    }
+  }
+
+  if (!cleared.length) {
+    return { warning: `failed to clear orphaned tracking: ${uniqueOrphaned.join(", ")}` };
+  }
+
+  const note = `cleared ${cleared.length} orphaned tracking number(s) from Shopify: ${[...new Set(cleared)].join(", ")}`;
+  console.log(`[order-sync] ${entry.externalId}: ${note}`);
+  return { note };
+}
+
+async function clearFulfillmentTracking(admin, fulfillmentId) {
+  const resp = await admin.graphql(
+    `#graphql
+    mutation FulfillmentTrackingUpdate($fulfillmentId: ID!, $trackingInfoInput: FulfillmentTrackingInput!) {
+      fulfillmentTrackingInfoUpdate(fulfillmentId: $fulfillmentId, trackingInfoInput: $trackingInfoInput, notifyCustomer: false) {
+        fulfillment { id trackingInfo { company number url } }
+        userErrors { field message }
+      }
+    }`,
+    { variables: { fulfillmentId, trackingInfoInput: { company: null }, notifyCustomer: false } },
+  );
+  const body = await resp.json();
+  const payload = body?.data?.fulfillmentTrackingInfoUpdate;
+  const errors = payload?.userErrors || [];
+  if (errors.length) throw new Error(gqlError(body, errors));
+  return payload.fulfillment;
 }
 
 // The tracking numbers to put on each of N Shopify fulfillments, and the
